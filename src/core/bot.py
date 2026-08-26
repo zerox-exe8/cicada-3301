@@ -205,48 +205,24 @@ class CicadaBot(commands.Bot):
 
         await super().close()
 
-    @tasks.loop(seconds=18)
+    @tasks.loop(seconds=60)
     async def _rotate_presence(self) -> None:
-        """Dynamic rotating activity presence loop."""
-        total_guilds = len(self.guilds)
-        total_users = sum(g.member_count or 0 for g in self.guilds)
-
-        activities = [
-            discord.Activity(
-                type=discord.ActivityType.watching,
-                name=f"◈ {Config.DEFAULT_PREFIX}help | 3301 Protocol",
-            ),
-            discord.Activity(
-                type=discord.ActivityType.listening,
-                name="◈ Cryptographic Frequencies // 3301",
-            ),
-            discord.Activity(
-                type=discord.ActivityType.watching,
-                name=f"◈ {total_guilds} Network Nodes | {total_users} Entities",
-            ),
-            discord.Activity(
-                type=discord.ActivityType.competing,
-                name="◈ Prime Sequences & Ciphers",
-            ),
-        ]
-
-        # Rotate to next activity
-        current_idx = getattr(self, "_activity_index", 0)
-        selected_activity = activities[current_idx % len(activities)]
-        self._activity_index = current_idx + 1
-
+        """Maintain persistent bot presence and DND status."""
         try:
             await self.change_presence(
                 status=discord.Status.dnd,
-                activity=selected_activity,
+                activity=discord.Activity(
+                    type=discord.ActivityType.listening,
+                    name=f"{Config.DEFAULT_PREFIX}help",
+                ),
             )
         except Exception:
             pass
 
-
     @_rotate_presence.before_loop
     async def _before_rotate_presence(self) -> None:
         await self.wait_until_ready()
+
 
     async def on_ready(self) -> None:
         """Fired when Discord client has finished caching guilds."""

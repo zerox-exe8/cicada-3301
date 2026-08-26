@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Premium License & Subscription Manager
+Cicada 3301 Discord Bot - Premium License & Subscription Manager
 Handles cryptographically secure license key generation, redemption, and in-memory zero-latency cache.
 """
 
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.database.base import BaseDatabase
 
-logger = logging.getLogger("Hertz.PremiumManager")
+logger = logging.getLogger("Cicada.PremiumManager")
 
 
 class PremiumManager:
@@ -230,7 +230,7 @@ class PremiumManager:
         """Generate a cryptographically secure, unique license key."""
         part1 = secrets.token_hex(2).upper()
         part2 = secrets.token_hex(2).upper()
-        key = f"HERTZ-PRO-{part1}-{part2}"
+        key = f"CICADA_3301-PRO-{part1}-{part2}"
 
         await self.db.execute(
             """
@@ -606,15 +606,15 @@ class PremiumManager:
                 guild_name = guild.name if guild else f"Server ID {g_id}"
                 days_left = max(1, (exp - db_now).days)
 
-                from src.utils.containers import HertzContainer
-                container = HertzContainer(accent_color=None)
+                from src.utils.containers import CicadaContainer
+                container = CicadaContainer(accent_color=None)
                 container.add_text(
-                    f"**Hertz Pro Subscription Expiring Soon**\n\n"
+                    f"**Cicada Pro Subscription Expiring Soon**\n\n"
                     f"> Your Pro subscription for **{guild_name}** will expire in **{days_left} day(s)** (<t:{int(exp.replace(tzinfo=datetime.timezone.utc).timestamp())}:R>).\n\n"
                     f"• **Renew Seamlessly:** Run `?buy` in your server to renew without any feature downtime!"
                 )
                 container.add_separator(divider=True)
-                container.add_text("-# Hertz Subscription Renewal Alert")
+                container.add_text("-# Cicada 3301 Subscription Renewal Alert")
 
                 await user.send(embed=container.build())
                 logger.info(f"Sent renewal reminder DM to user {user_id} for guild {g_id}.")

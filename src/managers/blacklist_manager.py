@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Blacklist Manager
+Cicada 3301 Discord Bot - Blacklist Manager
 Handles global blocking of malicious users and servers with in-memory caching.
 """
 
@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.database.base import BaseDatabase
 
-logger = logging.getLogger("Hertz.BlacklistManager")
+logger = logging.getLogger("Cicada.BlacklistManager")
 
 
 class BlacklistManager:

@@ -1,13 +1,13 @@
-# ⚡ Hertz Discord Bot — Comprehensive Technical Specification & AI System Context
+# ⚡ Cicada 3301 Discord Bot — Comprehensive Technical Specification & AI System Context
 
 > **Audience**: AI Coding Assistants (Claude / GPT), Lead System Architects, and Software Engineers.  
-> **Purpose**: This document provides the complete, authoritative, and up-to-date architectural blueprint, database schemas, code conventions, and feature catalog of the **Hertz** codebase.
+> **Purpose**: This document provides the complete, authoritative, and up-to-date architectural blueprint, database schemas, code conventions, and feature catalog of the **Cicada 3301** codebase.
 
 ---
 
 ## 1. 📋 System Overview & Identity
 
-- **Bot Name**: Hertz
+- **Bot Name**: Cicada 3301
 - **Primary Prefix**: `?` (Configurable per-guild via `?prefix set`)
 - **Default Rich Presence**: `?help • Developed by zerox.exe`
 - **Lead Architect / Developer**: `zerox.exe`
@@ -24,14 +24,14 @@
 ## 2. 🏛️ Core Architectural Pillars & Philosophy
 
 ### A. Hybrid 0ms In-Memory Caching (Zero-Lag Execution)
-Hertz strictly enforces a **Cache-First Architecture**:
+Cicada 3301 strictly enforces a **Cache-First Architecture**:
 1. **Startup Warm-Up**: Upon connection (`setup_hook` in `src/core/bot.py`), all critical state tables (`guild_prefixes`, `developer_ids`, `blacklists`, `system_state`, `guild_logs`, `guild_premium`, `user_premium`) are preloaded into memory dictionaries.
 2. **Instant Message Hot-Path Execution**: Message processing, prefix parsing, blacklist validation, maintenance guards, and premium entitlement checks resolve in memory at **`< 0.001ms`** without touching PostgreSQL.
 3. **Atomic Dual-Writes**: Any configuration update (e.g. `?prefix set`, `?grantpremium`, `?revokepremium`, payment fulfillment) atomically updates PostgreSQL first, then instantly updates the in-memory cache dictionary.
 
 ### B. Discord Components V2 UI (Type 17 Containers)
-Hertz completely rejects legacy, noisy Discord Embeds:
-- All command feedback, tabbed dashboards, checkout cards, and error notices are built using native **Discord Components V2 (Type 17 Containers)** via `HertzContainer` (`src/utils/containers.py`).
+Cicada 3301 completely rejects legacy, noisy Discord Embeds:
+- All command feedback, tabbed dashboards, checkout cards, and error notices are built using native **Discord Components V2 (Type 17 Containers)** via `CicadaContainer` (`src/utils/containers.py`).
 - Components include Text Displays (`type: 10`), Sections with Accessories (`type: 9`), Visual Separators (`type: 14`), and Action Rows (`type: 1`) for interactive buttons (`type: 2`, `style: 1` Blurple, `style: 2` Grey, `style: 3` Green, `style: 5` Link/URL).
 - Dispatched via `send_container_response()` and edited interactively via `edit_container_response()` with fallback direct channel `PATCH` handling.
 
@@ -190,19 +190,19 @@ Provides transparent dual-currency display (`$USD` & `₹INR`) with standard set
 
 ### E. Proactive Renewal Reminders
 - The hourly `expiry_sweeper` checks subscriptions expiring within **2–3 days (48–72 hours)**.
-- If no reminder was sent in the current billing cycle, sends a `HertzContainer` DM notice to the server owner prompting them to renew via `?buy`.
+- If no reminder was sent in the current billing cycle, sends a `CicadaContainer` DM notice to the server owner prompting them to renew via `?buy`.
 
 ---
 
 ## 5. 📂 Codebase Directory Map
 
 ```
-Hertz/
+Cicada 3301/
 ├── .env / .env.example / render.yaml / requirements.txt / README.md / PROJECT_CONTEXT.md
-├── assets/Hertz banner.jpeg
+├── assets/Cicada 3301 banner.jpeg
 │
 └── src/
-    ├── main.py                  # Bootstrap: logging setup, signal handling, runs HertzBot
+    ├── main.py                  # Bootstrap: logging setup, signal handling, runs CicadaBot
     │
     ├── core/
     │   ├── bot.py               # Custom commands.Bot with setup_hook and dynamic cog loader
@@ -224,7 +224,7 @@ Hertz/
     │   └── system_manager.py    # Global maintenance mode & global command toggles
     │
     ├── utils/
-    │   ├── containers.py        # HertzContainer (Type 17), send/edit container response
+    │   ├── containers.py        # CicadaContainer (Type 17), send/edit container response
     │   ├── decorators.py        # @require_guild_premium, @require_user_premium
     │   ├── emojis.py            # Dynamic custom Application Emoji resolver
     │   ├── embeds.py            # Legacy embed helpers
@@ -307,7 +307,7 @@ Hertz/
 ## 8. 🚨 Strict Code Rules for Collaborators & AI
 
 1. **Zero Standard Unicode Emojis**: Never use standard emojis (`🎁`, `⚡`, `💳`, etc.). Use custom Application Emojis from `self.bot.custom_emojis` or clean markdown formatting.
-2. **Components V2 Only**: Build user-facing cards with `HertzContainer` (`src.utils.containers`). Do not use old `discord.Embed`.
+2. **Components V2 Only**: Build user-facing cards with `CicadaContainer` (`src.utils.containers`). Do not use old `discord.Embed`.
 3. **Never Query DB in Message Hot-Paths**: Always use in-memory caches (`guild_mgr`, `premium_mgr`, `sys_mgr`, `blacklist_mgr`, `perm_mgr`).
 4. **Zero Dummy/Mock Data**: All features must integrate with real database tables and production APIs.
 5. **Clean Git Commit Policy**: Always stage and commit files cleanly with conventional commit prefixes (`feat:`, `fix:`, `refactor:`, `docs:`).

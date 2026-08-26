@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Tree Synchronization Command
+Cicada 3301 Discord Bot - Tree Synchronization Command
 Allows the bot owner to instantly sync slash commands to current or all guilds.
 """
 
@@ -10,7 +10,7 @@ from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.managers.permission_manager import is_developer
-from src.utils.containers import HertzContainer, send_container_response
+from src.utils.containers import CicadaContainer, send_container_response
 
 
 class Sync(commands.Cog):
@@ -38,7 +38,7 @@ class Sync(commands.Cog):
             synced = await self.bot.tree.sync(guild=ctx.guild)
             msg = f"Successfully synced `{len(synced)}` application slash commands instantly to **{ctx.guild.name}**."
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
             "**Slash Commands Synchronized**\n"
             f"> {msg}"

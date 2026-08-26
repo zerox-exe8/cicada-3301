@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Abstract Database Interface
+Cicada 3301 Discord Bot - Abstract Database Interface
 Defines standard CRUD contracts for database backends (SQLite, PostgreSQL, etc.).
 """
 

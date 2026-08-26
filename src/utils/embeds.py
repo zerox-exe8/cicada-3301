@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Components V2 Container Embed Utility
+Cicada 3301 Discord Bot - Components V2 Container Embed Utility
 Standardized builder for creating Discord Components V2 Container cards
 with consistent headers, native dark themes, and user footers.
 """
@@ -9,12 +9,12 @@ from __future__ import annotations
 from typing import Any
 import discord
 from src.core.config import Config
-from src.utils.containers import HertzContainer, send_container_response
+from src.utils.containers import CicadaContainer, send_container_response
 
 
-class HertzCard(HertzContainer):
+class CicadaCard(CicadaContainer):
     """
-    Standardized Discord Components V2 Container Card builder for Hertz.
+    Standardized Discord Components V2 Container Card builder for Cicada 3301.
     Provides easy factory methods for creating consistent cards across all modules.
     """
 
@@ -50,7 +50,7 @@ class HertzCard(HertzContainer):
         title: str | None = None,
         description: str | None = None,
         author: discord.User | discord.Member | None = None,
-    ) -> HertzCard:
+    ) -> CicadaCard:
         """Create a default native dark container card."""
         return cls(title=title, description=description, accent_color=None, author=author)
 
@@ -60,7 +60,7 @@ class HertzCard(HertzContainer):
         message: str,
         title: str = "Success",
         author: discord.User | discord.Member | None = None,
-    ) -> HertzCard:
+    ) -> CicadaCard:
         """Create a success container card."""
         return cls(
             title=f"✅ {title}",
@@ -75,7 +75,7 @@ class HertzCard(HertzContainer):
         message: str,
         title: str = "Error Occurred",
         author: discord.User | discord.Member | None = None,
-    ) -> HertzCard:
+    ) -> CicadaCard:
         """Create an error container card."""
         return cls(
             title=f"❌ {title}",
@@ -90,7 +90,7 @@ class HertzCard(HertzContainer):
         message: str,
         title: str = "Warning",
         author: discord.User | discord.Member | None = None,
-    ) -> HertzCard:
+    ) -> CicadaCard:
         """Create a warning container card."""
         return cls(
             title=f"⚠️ {title}",
@@ -105,7 +105,7 @@ class HertzCard(HertzContainer):
         message: str,
         title: str = "Information",
         author: discord.User | discord.Member | None = None,
-    ) -> HertzCard:
+    ) -> CicadaCard:
         """Create an informational container card."""
         return cls(
             title=f"ℹ️ {title}",

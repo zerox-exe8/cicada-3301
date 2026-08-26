@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hertz-discord-bot
+    name: cicada-3301-discord-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python src/main.py

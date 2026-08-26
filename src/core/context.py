@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Custom Command Context
+Cicada 3301 Discord Bot - Custom Command Context
 Extends commands.Context to add Components V2 container responses and interactive helpers.
 """
 
@@ -9,7 +9,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from src.utils.containers import HertzContainer, send_container_response
+from src.utils.containers import CicadaContainer, send_container_response
 from src.utils.views import ConfirmView
 
 
@@ -18,7 +18,7 @@ class CustomContext(commands.Context):
 
     async def send_container(
         self,
-        container: HertzContainer,
+        container: CicadaContainer,
         ephemeral: bool = False,
     ) -> Any:
         """Send a Components V2 Container card."""
@@ -34,7 +34,7 @@ class CustomContext(commands.Context):
         e_reg = getattr(self.bot, "custom_emojis", None)
         icon = e_reg.get("icons_correct", "✅") if e_reg else "✅"
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
             f"{icon} **{title}**\n"
             f"> {message}"
@@ -53,7 +53,7 @@ class CustomContext(commands.Context):
         e_reg = getattr(self.bot, "custom_emojis", None)
         icon = e_reg.get("icons_wrong", e_reg.get("icon_x", "❌")) if e_reg else "❌"
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
             f"{icon} **{title}**\n"
             f"> {message}"
@@ -72,7 +72,7 @@ class CustomContext(commands.Context):
         e_reg = getattr(self.bot, "custom_emojis", None)
         icon = e_reg.get("icons_warning", e_reg.get("icon_warning", "⚠️")) if e_reg else "⚠️"
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
             f"{icon} **{title}**\n"
             f"> {message}"

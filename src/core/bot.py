@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Core Bot Class
+Cicada 3301 Discord Bot - Core Bot Class
 Subclasses commands.AutoShardedBot for high scalability and lifecycle control.
 """
 
@@ -24,10 +24,10 @@ from src.managers.log_manager import LogManager
 from src.managers.premium_manager import PremiumManager
 from src.utils.emojis import EmojiRegistry
 
-logger = logging.getLogger("Hertz.Core")
+logger = logging.getLogger("Cicada.Core")
 
 
-async def get_prefix(bot: HertzBot, message: discord.Message) -> list[str] | str:
+async def get_prefix(bot: CicadaBot, message: discord.Message) -> list[str] | str:
     """
     Dynamic prefix resolver:
     - Bot Owner & Developers can use commands with NO prefix (e.g. 'ping', 'help') or normal prefixes.
@@ -43,8 +43,8 @@ async def get_prefix(bot: HertzBot, message: discord.Message) -> list[str] | str
     return commands.when_mentioned_or(guild_prefix)(bot, message)
 
 
-class HertzBot(commands.Bot):
-    """Production-grade custom Discord bot class for Hertz."""
+class CicadaBot(commands.Bot):
+    """Production-grade custom Discord bot class for Cicada 3301."""
 
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -127,9 +127,9 @@ class HertzBot(commands.Bot):
 
         # Check if message is purely mentioning the bot
         if self.user and message.content in [f"<@{self.user.id}>", f"<@!{self.user.id}>"]:
-            from src.utils.containers import HertzContainer, send_container_response
+            from src.utils.containers import CicadaContainer, send_container_response
             current_prefix = self.guild_mgr.get_prefix(message.guild.id if message.guild else None)
-            container = HertzContainer(accent_color=None)
+            container = CicadaContainer(accent_color=None)
             container.add_text(
                 f"**Hey, I'm {Config.BOT_NAME}**\n"
                 f"> Modular, high-performance Discord management system.\n\n"
@@ -192,7 +192,7 @@ class HertzBot(commands.Bot):
 
     async def close(self) -> None:
         """Gracefully release database pools, servers, and network sessions."""
-        logger.info("Shutting down Hertz Bot gracefully...")
+        logger.info("Shutting down Cicada 3301 Bot gracefully...")
 
         if hasattr(self, "server"):
             await self.server.stop()

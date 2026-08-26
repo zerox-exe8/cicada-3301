@@ -1,20 +1,20 @@
 """
-Hertz Discord Bot - Custom Exceptions
+Cicada 3301 Discord Bot - Custom Exceptions
 """
 
 from discord.ext import commands
 
 
-class HertzException(commands.CommandError):
-    """Base exception class for Hertz Bot."""
+class CicadaException(commands.CommandError):
+    """Base exception class for Cicada 3301 Bot."""
     pass
 
 
-class NotAuthorizedError(HertzException):
+class NotAuthorizedError(CicadaException):
     """Raised when user lacks high-level permission."""
     pass
 
 
-class DatabaseError(HertzException):
+class DatabaseError(CicadaException):
     """Raised when database query fails."""
     pass

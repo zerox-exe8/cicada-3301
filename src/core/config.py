@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Configuration Module
+Cicada 3301 Discord Bot - Configuration Module
 Loads and validates environment variables and provides theme colors and emojis.
 """
 
@@ -77,8 +77,8 @@ class Config:
     EMOJIS: ThemeEmojis = ThemeEmojis()
     
     # Bot Branding
-    BOT_NAME: str = "Hertz"
-    FOOTER_TEXT: str = "⚡ Hertz Core System"
+    BOT_NAME: str = "Cicada 3301"
+    FOOTER_TEXT: str = "⚡ Cicada 3301 Core System"
 
     @classmethod
     def validate(cls) -> None:

@@ -1,7 +1,7 @@
-# ⚡ Hertz — Next-Generation Discord Infrastructure
+# ⚡ Cicada 3301 — Next-Generation Discord Infrastructure
 
 <div align="center">
-  <img src="./assets/Hertz%20banner.jpeg" alt="Hertz Banner" width="100%" style="border-radius: 10px; margin-bottom: 20px;" />
+  <img src="./assets/Cicada 3301%20banner.jpeg" alt="Cicada 3301 Banner" width="100%" style="border-radius: 10px; margin-bottom: 20px;" />
 
   <h3>Enterprise Discord Management & Community Infrastructure</h3>
   <p>Engineered with Python 3.11+, Discord Components V2 Containers, 0ms In-Memory Caching, and Supabase PostgreSQL.</p>
@@ -19,9 +19,9 @@
 
 ## 📖 Overview
 
-**Hertz** is an enterprise-grade, high-concurrency Discord bot architecture engineered for performance, reliability, and clean aesthetics. 
+**Cicada 3301** is an enterprise-grade, high-concurrency Discord bot architecture engineered for performance, reliability, and clean aesthetics. 
 
-Unlike traditional bots constrained by legacy Discord embeds and sluggish database queries, Hertz operates with a **0ms In-Memory Caching Architecture** coupled with **Discord Components V2 (Type 17 Containers)**, delivering sub-millisecond execution speeds and clean, modern UI cards across Desktop, Web, and Mobile.
+Unlike traditional bots constrained by legacy Discord embeds and sluggish database queries, Cicada 3301 operates with a **0ms In-Memory Caching Architecture** coupled with **Discord Components V2 (Type 17 Containers)**, delivering sub-millisecond execution speeds and clean, modern UI cards across Desktop, Web, and Mobile.
 
 ---
 
@@ -35,7 +35,7 @@ Unlike traditional bots constrained by legacy Discord embeds and sluggish databa
                                   (Interaction/Message)
                                             ▼
                        ┌─────────────────────────────────────────┐
-                       │         Hertz Async Core Client         │
+                       │         Cicada 3301 Async Core Client         │
                        └──────────────┬───────────────────┬──────┘
                                       │                   │
                      (0ms Memory Read)│                   │(Atomic Write)
@@ -74,7 +74,7 @@ Unlike traditional bots constrained by legacy Discord embeds and sluggish databa
 ## 📂 Project Structure
 
 ```text
-Hertz/
+Cicada 3301/
 ├── .env                  # Secrets, Bot Token & Supabase Database URL
 ├── .env.example          # Environment configuration template
 ├── render.yaml           # 1-Click Render Cloud Deployment Blueprint
@@ -83,15 +83,15 @@ Hertz/
 ├── PROJECT_CONTEXT.md    # Exhaustive Technical Specification for AI & Developers
 │
 ├── assets/               # Branding assets & custom application emojis
-│   ├── Hertz banner.jpeg
-│   ├── Hertz logo.jpeg
+│   ├── Cicada 3301 banner.jpeg
+│   ├── Cicada 3301 logo.jpeg
 │   └── emoji2/
 │
 └── src/
     ├── main.py           # Application bootstrap & lifecycle manager
     │
     ├── core/             # Core Engine & HTTP Server
-    │   ├── bot.py        # HertzBot custom client with setup hooks
+    │   ├── bot.py        # CicadaBot custom client with setup hooks
     │   ├── config.py     # Environment variable validator & constants
     │   ├── context.py    # CustomContext with container dispatcher methods
     │   └── server.py     # 24/7 aiohttp Keep-Alive Health Server
@@ -136,7 +136,7 @@ Hertz/
 ```bash
 # Clone the repository
 git clone <repository_url>
-cd Hertz
+cd Cicada 3301
 
 # Create and activate virtual environment
 python -m venv venv
@@ -175,13 +175,13 @@ python -m src.main
 4. Set Start Command: `python -m src.main`.
 5. Add Environment Variables (`BOT_TOKEN`, `DATABASE_URL`, `DEVELOPER_IDS`, etc.).
 
-Render will automatically deploy Hertz alongside its integrated Keep-Alive Web Server (`http://0.0.0.0:8080`) for continuous 24/7 operation.
+Render will automatically deploy Cicada 3301 alongside its integrated Keep-Alive Web Server (`http://0.0.0.0:8080`) for continuous 24/7 operation.
 
 ---
 
 ## 🛡️ Credits & Lead Architect
 
-- **Bot Name**: Hertz
+- **Bot Name**: Cicada 3301
 - **Lead Architect & Developer**: `zerox.exe`
 - **Framework**: `discord.py` (Components V2 Extended)
 - **Database**: `Supabase PostgreSQL` with `asyncpg`

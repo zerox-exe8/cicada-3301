@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Enterprise SaaS Help & Module Console
+Cicada 3301 Discord Bot - Enterprise SaaS Help & Module Console
 Dynamic permission-aware help menu powered by Discord Components V2 Container Cards.
 Filters commands so users only see actions they have permission to execute.
 """
@@ -13,17 +13,17 @@ from discord.ext import commands
 
 from src.core.config import Config
 from src.core.context import CustomContext
-from src.utils.containers import HertzContainer, send_container_response, edit_container_response
+from src.utils.containers import CicadaContainer, send_container_response, edit_container_response
 
 if TYPE_CHECKING:
-    from src.core.bot import HertzBot
+    from src.core.bot import CicadaBot
 
 
 class Help(commands.Cog):
     """Enterprise SaaS Help & Module Console with dynamic permission filtering."""
     category: str = "General"
 
-    def __init__(self, bot: HertzBot) -> None:
+    def __init__(self, bot: CicadaBot) -> None:
         self.bot = bot
 
     async def _can_run_command(self, cmd: commands.Command, ctx: CustomContext) -> bool:
@@ -99,8 +99,8 @@ class Help(commands.Cog):
         visible_categories: dict[str, list[commands.Command]],
         custom_id_prefix: str,
         selected_val: str = "home",
-    ) -> HertzContainer:
-        """Construct the Signature Hertz SaaS Overview Card."""
+    ) -> CicadaContainer:
+        """Construct the Signature Cicada 3301 SaaS Overview Card."""
         guild = ctx.guild
         author = ctx.author
         current_prefix = self.bot.guild_mgr.get_prefix(guild.id if guild else None)
@@ -109,11 +109,11 @@ class Help(commands.Cog):
 
         # Check Subscription Tier
         is_pro = self.bot.premium_mgr.is_guild_premium(guild.id) if guild else False
-        status_text = "Hertz Pro Active • Enterprise Tier" if is_pro else "Hertz Infrastructure • 3-Day Trial Available"
+        status_text = "Cicada Pro Active • Enterprise Tier" if is_pro else "Cicada 3301 Infrastructure • 3-Day Trial Available"
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
-            f"**Hertz Community Operating System**\n"
+            f"**Cicada 3301 Community Operating System**\n"
             f"> Autonomous server protection, self-healing security, and high-capacity logging.\n\n"
             f"• **Status:** `{status_text}`\n"
             f"• **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
@@ -174,7 +174,7 @@ class Help(commands.Cog):
                 },
             ])
 
-        container.add_text("-# Hertz Autonomous Enterprise OS • Select a module above to browse commands")
+        container.add_text("-# Cicada 3301 Autonomous Enterprise OS • Select a module above to browse commands")
         return container
 
     def _build_category_container(
@@ -184,13 +184,13 @@ class Help(commands.Cog):
         commands_list: list[commands.Command],
         visible_categories: dict[str, list[commands.Command]],
         custom_id_prefix: str,
-    ) -> HertzContainer:
+    ) -> CicadaContainer:
         """Construct category command card with sleek typography and module select menu."""
         current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
         cat_icon = self._get_category_emoji(cat_name)
         header_text = f"{cat_icon} **{cat_name} Module ({len(commands_list)} Commands)**".strip()
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
             f"{header_text}\n"
             f"> Commands available for your role in this server.\n"
@@ -248,7 +248,7 @@ class Help(commands.Cog):
     @commands.hybrid_command(
         name="help",
         aliases=["commands", "modules"],
-        description="Display the Hertz Enterprise command directory tailored to your permissions.",
+        description="Display the Cicada 3301 Enterprise command directory tailored to your permissions.",
     )
     async def help_command(self, ctx: CustomContext, *, command_or_module: str | None = None) -> None:
         """Interactive help menu filtered by user permissions."""
@@ -266,7 +266,7 @@ class Help(commands.Cog):
                 aliases = ", ".join([f"`{a}`" for a in target_cmd.aliases]) if target_cmd.aliases else "`None`"
                 usage = f"`{current_prefix}{target_cmd.qualified_name} {target_cmd.signature}`".strip()
 
-                container = HertzContainer(accent_color=None)
+                container = CicadaContainer(accent_color=None)
                 container.add_text(
                     f"{cat_icon} **Command: {target_cmd.name.capitalize()}**\n\n"
                     f"• **Description:** {desc}\n"
@@ -275,7 +275,7 @@ class Help(commands.Cog):
                     f"• **Module:** `{cat}`"
                 )
                 container.add_separator(divider=True)
-                container.add_text(f"-# Hertz Enterprise Command Reference")
+                container.add_text(f"-# Cicada 3301 Enterprise Command Reference")
                 await send_container_response(ctx, container)
                 return
 
@@ -337,5 +337,5 @@ class Help(commands.Cog):
                 break
 
 
-async def setup(bot: HertzBot) -> None:
+async def setup(bot: CicadaBot) -> None:
     await bot.add_cog(Help(bot))

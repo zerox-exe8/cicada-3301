@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - 24/7 Keep-Alive Web Server & Razorpay Webhook Receiver
+Cicada 3301 Discord Bot - 24/7 Keep-Alive Web Server & Razorpay Webhook Receiver
 Provides HTTP endpoints for Render uptime health checks and automated payment webhook fulfillment.
 """
 
@@ -15,18 +15,18 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 
 from src.core.config import Config
-from src.utils.containers import HertzContainer
+from src.utils.containers import CicadaContainer
 
 if TYPE_CHECKING:
-    from src.core.bot import HertzBot
+    from src.core.bot import CicadaBot
 
-logger = logging.getLogger("Hertz.Server")
+logger = logging.getLogger("Cicada.Server")
 
 
 class HealthServer:
     """Async web server for hosting health checks and Razorpay webhooks."""
 
-    def __init__(self, bot: HertzBot) -> None:
+    def __init__(self, bot: CicadaBot) -> None:
         self.bot = bot
         self.app = web.Application()
         self.runner: web.AppRunner | None = None
@@ -40,7 +40,7 @@ class HealthServer:
     async def _handle_home(self, request: web.Request) -> web.Response:
         """Root endpoint returning basic status."""
         return web.Response(
-            text="⚡ Hertz Discord Bot is Online & Running 24/7!",
+            text="⚡ Cicada 3301 Discord Bot is Online & Running 24/7!",
             content_type="text/plain",
             status=200,
         )
@@ -50,7 +50,7 @@ class HealthServer:
         ws_ping = round(self.bot.latency * 1000) if self.bot.latency else 0
         data = {
             "status": "healthy",
-            "bot": "Hertz",
+            "bot": "Cicada 3301",
             "guilds": len(self.bot.guilds),
             "ping_ms": ws_ping,
         }
@@ -75,14 +75,14 @@ class HealthServer:
             dur_str = "Lifetime / Permanent" if duration_days == 0 else f"{duration_days} Days"
             amount_inr = amount_smallest // 100
 
-            container = HertzContainer(accent_color=None)
+            container = CicadaContainer(accent_color=None)
             e_reg = self.bot.custom_emojis
             sparkle = e_reg.get("icons_star", "")
             sparkle_prefix = f"{sparkle} " if sparkle else ""
 
             container.add_text(
-                f"{sparkle_prefix}**Payment Successful — Hertz Pro Activated!**\n\n"
-                f"> Thank you for upgrading **{guild_name}** to Hertz Pro.\n"
+                f"{sparkle_prefix}**Payment Successful — Cicada Pro Activated!**\n\n"
+                f"> Thank you for upgrading **{guild_name}** to Cicada Pro.\n"
                 f"> All enterprise superpowers and server protection features are now active!\n\n"
                 f"• **Target Server:** **{guild_name}**\n"
                 f"• **Duration:** `{dur_str}`\n"
@@ -91,7 +91,7 @@ class HealthServer:
                 f"• Your server's Pro status has been automatically updated in memory & database."
             )
             container.add_separator(divider=True)
-            container.add_text(f"-# Hertz Enterprise Subscription • Transaction ID: {payment_id}")
+            container.add_text(f"-# Cicada 3301 Enterprise Subscription • Transaction ID: {payment_id}")
 
             await user.send(embed=container.build())
             logger.info(f"Payment receipt DM sent to user ID {user_id} for payment {payment_id}.")
@@ -108,15 +108,15 @@ class HealthServer:
             guild = self.bot.get_guild(guild_id)
             guild_name = guild.name if guild else f"Server ID {guild_id}"
 
-            container = HertzContainer(accent_color=None)
+            container = CicadaContainer(accent_color=None)
             container.add_text(
-                f"**Hertz Pro Subscription Refunded**\n\n"
+                f"**Cicada Pro Subscription Refunded**\n\n"
                 f"> A refund was processed for **{guild_name}** (Payment ID: `{payment_id}`).\n"
                 f"> The Pro superpowers for this server have been automatically revoked.\n"
                 f"> Core free features remain active and unaffected."
             )
             container.add_separator(divider=True)
-            container.add_text("-# Hertz Community Infrastructure")
+            container.add_text("-# Cicada 3301 Infrastructure")
 
             await user.send(embed=container.build())
         except Exception as e:

@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Managers Package
+Cicada 3301 Discord Bot - Managers Package
 Centralized in-memory cache and state managers.
 """
 

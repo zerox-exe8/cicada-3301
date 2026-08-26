@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Universal Custom Decorators & Feature Guards
+Cicada 3301 Discord Bot - Universal Custom Decorators & Feature Guards
 Provides clean, reusable decorators for permission and premium feature gating.
 """
 
@@ -9,19 +9,19 @@ from typing import TYPE_CHECKING, Any, Callable
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.utils.containers import HertzContainer, send_container_response
+from src.utils.containers import CicadaContainer, send_container_response
 
 if TYPE_CHECKING:
-    from src.core.bot import HertzBot
+    from src.core.bot import CicadaBot
 
 
 def require_guild_premium() -> Callable[[Any], Any]:
     """
-    Decorator that restricts command usage to Hertz Pro Servers.
+    Decorator that restricts command usage to Cicada Pro Servers.
     Sends a sleek Components V2 notification card if not premium.
     """
     async def predicate(ctx: CustomContext) -> bool:
-        bot: HertzBot = ctx.bot  # type: ignore
+        bot: CicadaBot = ctx.bot  # type: ignore
         guild_id = ctx.guild.id if ctx.guild else None
 
         if bot.premium_mgr.is_guild_premium(guild_id):
@@ -36,15 +36,15 @@ def require_guild_premium() -> Callable[[Any], Any]:
         crown_icon = e_reg.get("icons_star", e_reg.get("icon_gift", ""))
         crown_prefix = f"{crown_icon} " if crown_icon else ""
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
-            f"{crown_prefix}**Hertz Pro Required**\n\n"
-            f"> This advanced module is exclusive to **Hertz Pro** servers.\n\n"
+            f"{crown_prefix}**Cicada Pro Required**\n\n"
+            f"> This advanced module is exclusive to **Cicada Pro** servers.\n\n"
             f"• **How to Unlock:** Get a license key and run `{ctx.prefix}redeem <key>`\n"
             f"• **Check Plan:** Use `{ctx.prefix}premium` to view your current status."
         )
         container.add_separator(divider=True)
-        container.add_text("-# Hertz Community Infrastructure • Pro Tier")
+        container.add_text("-# Cicada 3301 Infrastructure • Pro Tier")
 
         await send_container_response(ctx, container, ephemeral=True)
         return False
@@ -54,10 +54,10 @@ def require_guild_premium() -> Callable[[Any], Any]:
 
 def require_user_premium() -> Callable[[Any], Any]:
     """
-    Decorator that restricts personal cosmetic perks to Hertz VIP Users.
+    Decorator that restricts personal cosmetic perks to Cicada VIP Users.
     """
     async def predicate(ctx: CustomContext) -> bool:
-        bot: HertzBot = ctx.bot  # type: ignore
+        bot: CicadaBot = ctx.bot  # type: ignore
         user_id = ctx.author.id
 
         if bot.premium_mgr.is_user_premium(user_id):
@@ -70,14 +70,14 @@ def require_user_premium() -> Callable[[Any], Any]:
         crown_icon = e_reg.get("icons_star", e_reg.get("icon_gift", ""))
         crown_prefix = f"{crown_icon} " if crown_icon else ""
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
-            f"{crown_prefix}**Hertz VIP Pro Required**\n\n"
-            f"> This cosmetic superpower is exclusive to **Hertz VIP** members.\n\n"
+            f"{crown_prefix}**Cicada VIP Pro Required**\n\n"
+            f"> This cosmetic superpower is exclusive to **Cicada VIP** members.\n\n"
             f"• **How to Unlock:** Redeem your user license key with `{ctx.prefix}redeem <key>`"
         )
         container.add_separator(divider=True)
-        container.add_text("-# Hertz Personal Superpowers • VIP Tier")
+        container.add_text("-# Cicada Personal Superpowers • VIP Tier")
 
         await send_container_response(ctx, container, ephemeral=True)
         return False

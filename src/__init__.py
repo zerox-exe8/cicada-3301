@@ -1,3 +1,3 @@
 """
-Hertz Discord Bot Package
+Cicada 3301 Discord Bot Package
 """

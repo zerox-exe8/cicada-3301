@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Discord Components V2 (Container Layout) Utility
+Cicada 3301 Discord Bot - Discord Components V2 (Container Layout) Utility
 Implements Discord's new Container (type: 17) layout with embedded TextDisplays,
 Sections, Separators, and integrated Action Rows (Dropdowns/Buttons inside the card).
 """
@@ -13,14 +13,14 @@ from discord.ext import commands
 from src.core.config import Config
 
 
-class HertzContainer:
+class CicadaContainer:
     """Builder for Discord Components V2 Container cards."""
 
     def __init__(self, accent_color: int | None = None) -> None:
         self.accent_color = accent_color
         self.components: list[dict[str, Any]] = []
 
-    def add_text(self, content: str) -> HertzContainer:
+    def add_text(self, content: str) -> CicadaContainer:
         """Add a TextDisplay component (type: 10) inside the container."""
         self.components.append({
             "type": 10,
@@ -32,7 +32,7 @@ class HertzContainer:
         self,
         content: str,
         accessory: dict[str, Any] | None = None,
-    ) -> HertzContainer:
+    ) -> CicadaContainer:
         """Add a Section component (type: 9) with optional accessory (Button/Thumbnail)."""
         section_data: dict[str, Any] = {
             "type": 9,
@@ -48,7 +48,7 @@ class HertzContainer:
         self.components.append(section_data)
         return self
 
-    def add_separator(self, divider: bool = True) -> HertzContainer:
+    def add_separator(self, divider: bool = True) -> CicadaContainer:
         """Add a visual Separator component (type: 14)."""
         self.components.append({
             "type": 14,
@@ -56,12 +56,12 @@ class HertzContainer:
         })
         return self
 
-    def add_footer(self, text: str, icon_url: str | None = None) -> HertzContainer:
+    def add_footer(self, text: str, icon_url: str | None = None) -> CicadaContainer:
         """Add a subtle subtext footer."""
         self.add_text(f"-# {text}")
         return self
 
-    def add_action_row(self, items: list[dict[str, Any]]) -> HertzContainer:
+    def add_action_row(self, items: list[dict[str, Any]]) -> CicadaContainer:
         """Add an Action Row (type: 1) containing Select Menus or Buttons inside the container."""
         self.components.append({
             "type": 1,
@@ -90,7 +90,7 @@ class HertzContainer:
 
 async def send_container_response(
     interaction_or_ctx: discord.Interaction | commands.Context | discord.abc.Messageable,
-    container: HertzContainer,
+    container: CicadaContainer,
     ephemeral: bool = False,
 ) -> Any:
     """Send or edit a message using Components V2 Container."""
@@ -143,7 +143,7 @@ async def send_container_response(
 
 async def edit_container_response(
     interaction: discord.Interaction,
-    container: HertzContainer,
+    container: CicadaContainer,
 ) -> None:
     """Edit an existing Components V2 Container message safely with fallbacks."""
     bot = interaction.client
@@ -171,7 +171,7 @@ async def edit_container_response(
             return
     except Exception as e:
         import logging
-        logging.getLogger("Hertz.Containers").warning(f"Interaction callback edit failed ({e}). Attempting channel PATCH fallback.")
+        logging.getLogger("Cicada.Containers").warning(f"Interaction callback edit failed ({e}). Attempting channel PATCH fallback.")
 
     # 2. Fallback to direct channel message edit if interaction expired
     try:
@@ -185,4 +185,4 @@ async def edit_container_response(
             )
     except Exception as e2:
         import logging
-        logging.getLogger("Hertz.Containers").error(f"Fallback channel message edit also failed: {e2}")
+        logging.getLogger("Cicada.Containers").error(f"Fallback channel message edit also failed: {e2}")

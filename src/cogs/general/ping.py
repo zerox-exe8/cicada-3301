@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Ping & Diagnostic Command
+Cicada 3301 Discord Bot - Ping & Diagnostic Command
 Uses Discord Components V2 Container card with sleek, compact typography.
 """
 
@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.utils.containers import HertzContainer, send_container_response
+from src.utils.containers import CicadaContainer, send_container_response
 
 
 class Ping(commands.Cog):
@@ -23,7 +23,7 @@ class Ping(commands.Cog):
     @commands.hybrid_command(
         name="ping",
         aliases=["pong", "pung", "latency"],
-        description="Check Hertz Bot's websocket, latency, and database response speed.",
+        description="Check Cicada 3301 Bot's websocket, latency, and database response speed.",
     )
     async def ping(self, ctx: CustomContext) -> None:
         """Measure websocket latency, database roundtrip time, and uptime."""
@@ -48,7 +48,7 @@ class Ping(commands.Cog):
         e_reg = self.bot.custom_emojis
         ping_icon = e_reg.get("icons_goodping", e_reg.get("icons_ping", "📡"))
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
             f"{ping_icon} **Pong!**\n\n"
             f"• **Websocket:** `{ws_latency:.2f}ms`\n"

@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Dynamic Application Emoji Registry
+Cicada 3301 Discord Bot - Dynamic Application Emoji Registry
 Automatically caches all uploaded Discord Application Emojis and provides
 easy resolution for in-text mentions and Discord UI dropdown options.
 """
@@ -11,15 +11,15 @@ from typing import TYPE_CHECKING, Any
 import discord
 
 if TYPE_CHECKING:
-    from src.core.bot import HertzBot
+    from src.core.bot import CicadaBot
 
-logger = logging.getLogger("Hertz.Emojis")
+logger = logging.getLogger("Cicada.Emojis")
 
 
 class EmojiRegistry:
     """Central registry mapping emoji names to discord.Emoji objects."""
 
-    def __init__(self, bot: HertzBot) -> None:
+    def __init__(self, bot: CicadaBot) -> None:
         self.bot = bot
         self._emojis: dict[str, discord.Emoji] = {}
 

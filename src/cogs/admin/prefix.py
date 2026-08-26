@@ -1,5 +1,5 @@
 """
-Hertz Discord Bot - Prefix Management Command
+Cicada 3301 Discord Bot - Prefix Management Command
 Allows server administrators to set or reset custom server prefixes.
 Uses sleek, compact Components V2 Container Cards with clean proportions.
 """
@@ -11,7 +11,7 @@ from discord.ext import commands
 
 from src.core.config import Config
 from src.core.context import CustomContext
-from src.utils.containers import HertzContainer, send_container_response
+from src.utils.containers import CicadaContainer, send_container_response
 
 
 class Prefix(commands.Cog):
@@ -30,7 +30,7 @@ class Prefix(commands.Cog):
     async def set_prefix(self, ctx: CustomContext, new_prefix: str) -> None:
         """Set a new custom prefix for this server. Usage: ?setprefix !"""
         if len(new_prefix) > 5:
-            container = HertzContainer(accent_color=None)
+            container = CicadaContainer(accent_color=None)
             container.add_text(
                 "**Invalid Prefix**\n"
                 "> Prefix length cannot exceed 5 characters."
@@ -42,7 +42,7 @@ class Prefix(commands.Cog):
 
         await self.bot.guild_mgr.set_prefix(ctx.guild.id, new_prefix)
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
             "**Prefix Updated**\n"
             "> Server command prefix has been successfully configured.\n\n"
@@ -63,7 +63,7 @@ class Prefix(commands.Cog):
         """Reset custom prefix back to default '?'."""
         await self.bot.guild_mgr.reset_prefix(ctx.guild.id)
 
-        container = HertzContainer(accent_color=None)
+        container = CicadaContainer(accent_color=None)
         container.add_text(
             "**Prefix Reset**\n"
             "> Server command prefix has been restored to default.\n\n"

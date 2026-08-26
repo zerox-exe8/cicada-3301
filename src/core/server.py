@@ -298,13 +298,21 @@ class HealthServer:
         return web.json_response({"status": "ignored"}, status=200)
 
     async def start(self) -> None:
-        """Start the async HTTP server."""
-        port = int(os.getenv("PORT", 8080))
+        """Start the async HTTP server with automatic port fallback."""
+        base_port = int(os.getenv("PORT", 8080))
         self.runner = web.AppRunner(self.app)
         await self.runner.setup()
-        site = web.TCPSite(self.runner, "0.0.0.0", port)
-        await site.start()
-        logger.info(f"Keep-Alive Health & Webhook Server listening on http://0.0.0.0:{port}")
+
+        for port in [base_port, base_port + 1, base_port + 2, 0]:
+            try:
+                site = web.TCPSite(self.runner, "0.0.0.0", port)
+                await site.start()
+                actual_port = port if port != 0 else getattr(site._server.sockets[0], "getsockname", lambda: (0, 0))()[1]
+                logger.info(f"Keep-Alive Health & Webhook Server listening on http://0.0.0.0:{actual_port}")
+                return
+            except OSError as e:
+                logger.warning(f"Port {port} is in use ({e}). Trying next port...")
+        logger.error("Could not bind HealthServer to any open port.")
 
     async def stop(self) -> None:
         """Gracefully stop the web server."""

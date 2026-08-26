@@ -329,18 +329,12 @@ class EmbedBuilderView(discord.ui.View):
 
     async def update_preview(self, interaction: discord.Interaction) -> None:
         """Refresh the live preview container in Discord."""
+        from src.utils.containers import edit_container_response
         container = self.build_preview_container()
-        payload = container.to_dict()
-        if not interaction.response.is_done():
-            await interaction.response.edit_message(
-                content="",
-                view=self,
-                **payload,
-            )
-        elif self.message:
-            await self.message.edit(view=self, **payload)
+        await edit_container_response(interaction, container, view=self)
 
     # ─── Control Panel Buttons ────────────────────────────────────────────────
+
 
     @discord.ui.button(label="Edit Text", style=discord.ButtonStyle.primary, emoji="📝", row=0)
     async def btn_edit_text(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -435,9 +429,7 @@ class EmbedBuilder(commands.Cog):
         """Launch the live interactive embed builder."""
         view = EmbedBuilderView(self.bot, ctx.author)
         container = view.build_preview_container()
-        payload = container.to_dict()
-        msg = await ctx.send(view=view, **payload)
-        view.message = msg
+        await send_container_response(ctx, container, view=view)
 
     @embed_group.command(
         name="create",
@@ -448,6 +440,7 @@ class EmbedBuilder(commands.Cog):
     async def embed_create(self, ctx: CustomContext) -> None:
         """Launch the live interactive editor."""
         await self.embed_group(ctx)
+
 
     @embed_group.command(
         name="send",

@@ -70,24 +70,26 @@ class Help(commands.Cog):
         """Resolve custom application emoji for category header."""
         e_reg = self.bot.custom_emojis
         mapping = {
-            "General": e_reg.get("icons_utility", e_reg.get("icon_info", "")),
-            "Security": e_reg.get("icons_ban", e_reg.get("icon_mod", "")),
-            "Audit Logs": e_reg.get("icons_podcast", e_reg.get("icons_settings", "")),
-            "Settings": e_reg.get("icons_settings", ""),
-            "Premium": e_reg.get("icons_star", e_reg.get("icons_coin", "")),
-            "Developer": e_reg.get("icon_developer", ""),
+            "General": e_reg.get("icons_utility", e_reg.get("icon_info", "📌")),
+            "Settings": e_reg.get("icons_settings", "⚙️"),
+            "Admin": e_reg.get("icons_staff", e_reg.get("icon_mod", "🛡️")),
+            "Security": e_reg.get("icons_ban", "🔒"),
+            "Audit Logs": e_reg.get("icons_podcast", "📋"),
+            "Premium": e_reg.get("verified_premium", e_reg.get("icons_star", "⭐")),
+            "Developer": e_reg.get("icon_developer", e_reg.get("icon_dev", "💻")),
         }
-        return mapping.get(cat_name, e_reg.get("icons_folder", ""))
+        return mapping.get(cat_name, e_reg.get("icons_folder", "📁"))
 
     def _get_category_select_emoji(self, cat_name: str) -> dict[str, Any]:
         """Resolve emoji dict for Select Menu options."""
         e_reg = self.bot.custom_emojis
         mapping = {
             "General": "icons_utility",
+            "Settings": "icons_settings",
+            "Admin": "icons_staff",
             "Security": "icons_ban",
             "Audit Logs": "icons_podcast",
-            "Settings": "icons_settings",
-            "Premium": "icons_star",
+            "Premium": "verified_premium",
             "Developer": "icon_developer",
         }
         emoji_name = mapping.get(cat_name, "icons_folder")
@@ -106,36 +108,45 @@ class Help(commands.Cog):
         current_prefix = self.bot.guild_mgr.get_prefix(guild.id if guild else None)
         ws_ping = round(self.bot.latency * 1000) if self.bot.latency else 0
         total_commands = sum(len(cmds) for cmds in visible_categories.values())
+        e_reg = self.bot.custom_emojis
 
-        # Check Subscription Tier
-        is_pro = self.bot.premium_mgr.is_guild_premium(guild.id) if guild else False
-        status_text = "Cicada Pro Active" if is_pro else "Standard Tier"
-
-        cat_names_list = ", ".join(f"`{c}`" for c in visible_categories.keys())
+        # Bot Avatar Accessory on Right
+        bot_avatar = str(self.bot.user.display_avatar.url)
 
         container = CicadaContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### **Cicada 3301 Dashboard**\n"
+                f"> Clean, high-performance Discord administration & utility.\n"
+                f"> Select a category from the dropdown below to view commands."
+            ),
+            accessory={
+                "type": 11,
+                "media": {
+                    "url": bot_avatar,
+                },
+            },
+        )
+        container.add_separator(divider=True)
+
+        bot_icon = e_reg.get("icon_bot", "🤖")
+        slash_icon = e_reg.get("icons_slash", "⚡")
+        ping_icon = e_reg.get("icons_ping", "📡")
+        staff_icon = e_reg.get("icons_staff", "🛡️")
+
         container.add_text(
-            f"### ◈ CICADA 3301 // SYSTEM CONSOLE\n\n"
-            f"> ⌁ Modern Discord Administration & Cryptographic Utility Engine.\n\n"
-            f"```ansi\n"
-            f"\u001b[1;32m[TIER STATUS]\u001b[0m       :: {status_text}\n"
-            f"\u001b[1;36m[ACTIVE PREFIX]\u001b[0m     :: {current_prefix} | Slash (/)\n"
-            f"\u001b[1;33m[COMMANDS AVAILABLE]\u001b[0m:: {total_commands} Authorized Action(s)\n"
-            f"\u001b[1;35m[GATEWAY LATENCY]\u001b[0m   :: {ws_ping} ms\n"
-            f"```\n"
-            f"**◈ Active Modules:** {cat_names_list}\n"
-            f"> Select any module from the dropdown below to explore commands."
+            f"{bot_icon} **Prefix:** `{current_prefix}`  •  {slash_icon} **Slash:** `/`  •  {ping_icon} **Latency:** `{ws_ping}ms`\n"
+            f"{staff_icon} **Accessible Commands:** `{total_commands}` commands available for your role"
         )
         container.add_separator(divider=True)
 
         # Dropdown Options
-        e_reg = self.bot.custom_emojis
         home_emoji_data = e_reg.get_select_emoji("icon_home", fallback_unicode="🏠")
         options = [
             {
                 "label": "Overview Home",
                 "value": "home",
-                "description": "Return to main system overview",
+                "description": "Return to main dashboard overview",
                 "emoji": home_emoji_data,
                 "default": selected_val == "home",
             }
@@ -159,7 +170,7 @@ class Help(commands.Cog):
             }
         ])
 
-        container.add_text("-# ◈ Cicada 3301 Core System • Select a module above to browse commands")
+        container.add_text(f"-# Requested by {author.display_name} • Type {current_prefix}help <command> for syntax")
         return container
 
 
@@ -174,12 +185,20 @@ class Help(commands.Cog):
         """Construct category command card with sleek typography and module select menu."""
         current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
         cat_icon = self._get_category_emoji(cat_name)
-        header_text = f"{cat_icon} **{cat_name} Module ({len(commands_list)} Commands)**".strip()
+        bot_avatar = str(self.bot.user.display_avatar.url)
 
         container = CicadaContainer(accent_color=None)
-        container.add_text(
-            f"{header_text}\n"
-            f"> Commands available for your role in this server.\n"
+        container.add_section(
+            content=(
+                f"### **{cat_icon} {cat_name} Module**\n"
+                f"> Listing `{len(commands_list)}` accessible command(s) for your role."
+            ),
+            accessory={
+                "type": 11,
+                "media": {
+                    "url": bot_avatar,
+                },
+            },
         )
         container.add_separator(divider=True)
 
@@ -204,7 +223,7 @@ class Help(commands.Cog):
             {
                 "label": "Overview Home",
                 "value": "home",
-                "description": "Return to main infrastructure overview",
+                "description": "Return to main dashboard overview",
                 "emoji": home_emoji_data,
                 "default": False,
             }
@@ -223,18 +242,18 @@ class Help(commands.Cog):
             {
                 "type": 3,
                 "custom_id": f"{custom_id_prefix}:select_category",
-                "placeholder": "Select an infrastructure module...",
+                "placeholder": "Select a module to view commands...",
                 "options": options,
             }
         ])
 
-        container.add_text(f"-# Type {current_prefix}help <command> for detailed usage")
+        container.add_text(f"-# Requested by {ctx.author.display_name} • Type {current_prefix}help <command> for syntax")
         return container
 
     @commands.hybrid_command(
         name="help",
         aliases=["commands", "modules"],
-        description="Display the Cicada 3301 Enterprise command directory tailored to your permissions.",
+        description="Display the Cicada 3301 command directory tailored to your permissions.",
     )
     async def help_command(self, ctx: CustomContext, *, command_or_module: str | None = None) -> None:
         """Interactive help menu filtered by user permissions."""
@@ -251,17 +270,29 @@ class Help(commands.Cog):
                 desc = target_cmd.description or target_cmd.help or "No detailed description available."
                 aliases = ", ".join([f"`{a}`" for a in target_cmd.aliases]) if target_cmd.aliases else "`None`"
                 usage = f"`{current_prefix}{target_cmd.qualified_name} {target_cmd.signature}`".strip()
+                bot_avatar = str(self.bot.user.display_avatar.url)
 
                 container = CicadaContainer(accent_color=None)
-                container.add_text(
-                    f"{cat_icon} **Command: {target_cmd.name.capitalize()}**\n\n"
-                    f"• **Description:** {desc}\n"
-                    f"• **Usage:** {usage}\n"
-                    f"• **Aliases:** {aliases}\n"
-                    f"• **Module:** `{cat}`"
+                container.add_section(
+                    content=(
+                        f"### **{cat_icon} Command: {target_cmd.name}**\n"
+                        f"> {desc}"
+                    ),
+                    accessory={
+                        "type": 11,
+                        "media": {
+                            "url": bot_avatar,
+                        },
+                    },
                 )
                 container.add_separator(divider=True)
-                container.add_text(f"-# Cicada 3301 Enterprise Command Reference")
+                container.add_text(
+                    f"• **Usage:** `{usage}`\n"
+                    f"• **Aliases:** {aliases}\n"
+                    f"• **Category:** `{cat}`"
+                )
+                container.add_separator(divider=True)
+                container.add_text(f"-# Requested by {ctx.author.display_name}")
                 await send_container_response(ctx, container)
                 return
 

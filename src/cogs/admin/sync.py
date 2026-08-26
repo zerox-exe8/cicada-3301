@@ -47,6 +47,29 @@ class Sync(commands.Cog):
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
+    @commands.command(
+        name="syncemojis",
+        aliases=["emojisync", "uploademojis"],
+        description="Scan assets folders and sync custom application emojis to Discord.",
+        hidden=True,
+    )
+    @is_developer()
+    async def sync_emojis(self, ctx: CustomContext) -> None:
+        """Sync custom emojis from assets folder directly to Discord Application Emojis."""
+        status_msg = await ctx.send("⏳ Scanning assets and uploading application emojis...")
+        uploaded, total = await self.bot.custom_emojis.sync_from_assets()
+
+        container = CicadaContainer(accent_color=None)
+        container.add_text(
+            "**Application Emojis Synchronized**\n"
+            f"> Successfully uploaded `{uploaded}` new emoji(s).\n"
+            f"> Total cached custom emojis: `{total}`"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Sync(bot))
+

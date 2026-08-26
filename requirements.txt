@@ -1,0 +1,9 @@
+# Discord & Async Libraries
+discord.py>=2.3.2
+aiohttp>=3.9.0
+asyncpg>=0.29.0
+
+# Configuration & Utilities
+python-dotenv>=1.0.0
+colorlog>=6.8.0
+tabulate>=0.9.0

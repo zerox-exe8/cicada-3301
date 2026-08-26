@@ -1,0 +1,3 @@
+"""
+Hertz Discord Bot Package
+"""

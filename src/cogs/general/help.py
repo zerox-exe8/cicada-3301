@@ -71,6 +71,7 @@ class Help(commands.Cog):
         e_reg = self.bot.custom_emojis
         mapping = {
             "General": e_reg.get("icons_utility", e_reg.get("icon_info", "📌")),
+            "Utility": e_reg.get("icons_magicwand", e_reg.get("icons_utility", "🪄")),
             "Settings": e_reg.get("icons_settings", "⚙️"),
             "Admin": e_reg.get("icons_staff", e_reg.get("icon_mod", "🛡️")),
             "Security": e_reg.get("icons_ban", "🔒"),
@@ -85,6 +86,7 @@ class Help(commands.Cog):
         e_reg = self.bot.custom_emojis
         mapping = {
             "General": "icons_utility",
+            "Utility": "icons_magicwand",
             "Settings": "icons_settings",
             "Admin": "icons_staff",
             "Security": "icons_ban",
@@ -94,6 +96,7 @@ class Help(commands.Cog):
         }
         emoji_name = mapping.get(cat_name, "icons_folder")
         return e_reg.get_select_emoji(emoji_name, fallback_unicode="📁")
+
 
     def _build_home_container(
         self,

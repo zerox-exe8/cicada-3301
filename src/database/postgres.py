@@ -176,6 +176,18 @@ class PostgresDatabase(BaseDatabase):
                 paid_at TIMESTAMP
             );
             """,
+            # Custom Components V2 Embed / Container Templates table
+            """
+            CREATE TABLE IF NOT EXISTS server_embeds (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                embed_name VARCHAR(64) NOT NULL,
+                container_payload TEXT NOT NULL,
+                created_by BIGINT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(guild_id, embed_name)
+            );
+            """,
         ]
         async with self.pool.acquire() as conn:
             for query in queries:

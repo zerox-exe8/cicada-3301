@@ -22,6 +22,7 @@ from src.managers.blacklist_manager import BlacklistManager
 from src.managers.system_manager import SystemManager
 from src.managers.log_manager import LogManager
 from src.managers.premium_manager import PremiumManager
+from src.managers.embed_manager import EmbedManager
 from src.utils.emojis import EmojiRegistry
 
 logger = logging.getLogger("Cicada.Core")
@@ -74,7 +75,9 @@ class CicadaBot(commands.Bot):
         self.sys_mgr: SystemManager = SystemManager(self.db)
         self.log_mgr: LogManager = LogManager(self.db)
         self.premium_mgr: PremiumManager = PremiumManager(self.db)
+        self.embed_mgr: EmbedManager = EmbedManager(self.db)
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
+
         
         # 24/7 Keep-Alive Web Server
         from src.core.server import HealthServer

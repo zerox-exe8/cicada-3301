@@ -90,9 +90,7 @@ class Config:
                 "DISCORD_TOKEN is missing! Please set your bot token in the .env file."
             )
         if not cls.DATABASE_URL:
-            # Inform user that local SQLite fallback will be used
-            import logging
-            logging.getLogger("Cicada.Config").info(
-                "DATABASE_URL not set. Running in local mode using SQLite database (data/cicada.db)."
+            raise ValueError(
+                "DATABASE_URL is missing! Please set your Supabase connection string in the .env file."
             )
 

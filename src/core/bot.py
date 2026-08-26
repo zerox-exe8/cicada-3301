@@ -60,13 +60,9 @@ class CicadaBot(commands.Bot):
             strip_after_prefix=True,
         )
 
-        # Database Driver (Supabase PostgreSQL or Local SQLite fallback)
-        if Config.DATABASE_URL:
-            from src.database.postgres import PostgresDatabase
-            self.db: BaseDatabase = PostgresDatabase(Config.DATABASE_URL)
-        else:
-            from src.database.sqlite import SqliteDatabase
-            self.db: BaseDatabase = SqliteDatabase("data/cicada.db")
+        # Sole Database Driver (Supabase PostgreSQL)
+        from src.database.postgres import PostgresDatabase
+        self.db: PostgresDatabase = PostgresDatabase(Config.DATABASE_URL)
 
         self.session: aiohttp.ClientSession | None = None
         self.start_time: discord.datetime = discord.utils.utcnow()

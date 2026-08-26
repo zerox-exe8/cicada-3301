@@ -211,13 +211,13 @@ class CicadaBot(commands.Bot):
         try:
             await self.change_presence(
                 status=discord.Status.dnd,
-                activity=discord.Activity(
-                    type=discord.ActivityType.listening,
-                    name=f"{Config.DEFAULT_PREFIX}help",
+                activity=discord.CustomActivity(
+                    name=f"Listening to {Config.DEFAULT_PREFIX}help",
                 ),
             )
         except Exception:
             pass
+
 
     @_rotate_presence.before_loop
     async def _before_rotate_presence(self) -> None:

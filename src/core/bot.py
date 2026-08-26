@@ -214,11 +214,11 @@ class CicadaBot(commands.Bot):
         activities = [
             discord.Activity(
                 type=discord.ActivityType.listening,
-                name=f"{Config.DEFAULT_PREFIX}help • Developed by zerox.exe",
+                name=f"{Config.DEFAULT_PREFIX}help | Cicada 3301",
             ),
             discord.Activity(
                 type=discord.ActivityType.watching,
-                name=f"{Config.DEFAULT_PREFIX}help • {total_guilds} Servers • {total_users} Users",
+                name=f"{Config.DEFAULT_PREFIX}help | {total_guilds} Servers | {total_users} Members",
             ),
         ]
 

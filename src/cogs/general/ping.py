@@ -57,7 +57,7 @@ class Ping(commands.Cog):
             f"\u001b[1;33m[SYSTEM UPTIME]\u001b[0m     :: {uptime_str}\n"
             f"\u001b[1;35m[CLUSTER SHARD]\u001b[0m     :: #{shard_id}\n"
             f"```\n"
-            f"> ⌁ **Status:** `SYSTEM HEALTHY` • `0ms In-Memory Cache`"
+            f"> ⌁ **Status:** `OPERATIONAL` • `Supabase PostgreSQL Connected`"
         )
         container.add_separator(divider=True)
         container.add_footer(f"◈ Cicada 3301 Core Protocol • Telemetry requested by {ctx.author.display_name}")

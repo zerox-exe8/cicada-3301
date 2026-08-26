@@ -109,22 +109,22 @@ class Help(commands.Cog):
 
         # Check Subscription Tier
         is_pro = self.bot.premium_mgr.is_guild_premium(guild.id) if guild else False
-        status_text = "Cicada Pro Active • Enterprise Tier" if is_pro else "Cicada 3301 Infrastructure • 3-Day Trial Available"
+        status_text = "Cicada Pro Active" if is_pro else "Standard Tier"
+
+        cat_names_list = ", ".join(f"`{c}`" for c in visible_categories.keys())
 
         container = CicadaContainer(accent_color=None)
         container.add_text(
-            f"### ◈ CICADA 3301 // AUTONOMOUS SECURITY PROTOCOL\n\n"
-            f"> ⌁ High-assurance cryptographic protection, self-healing architecture, and low-latency audit logging.\n\n"
+            f"### ◈ CICADA 3301 // SYSTEM CONSOLE\n\n"
+            f"> ⌁ Modern Discord Administration & Cryptographic Utility Engine.\n\n"
             f"```ansi\n"
-            f"\u001b[1;32m[SYSTEM TIER]\u001b[0m       :: {status_text}\n"
+            f"\u001b[1;32m[TIER STATUS]\u001b[0m       :: {status_text}\n"
             f"\u001b[1;36m[ACTIVE PREFIX]\u001b[0m     :: {current_prefix} | Slash (/)\n"
-            f"\u001b[1;33m[ACCESS PRIVILEGES]\u001b[0m :: {total_commands} Authorized Command(s)\n"
-            f"\u001b[1;35m[SOCKET TELEMETRY]\u001b[0m  :: {ws_ping} ms (0ms Memory Bus)\n"
+            f"\u001b[1;33m[COMMANDS AVAILABLE]\u001b[0m:: {total_commands} Authorized Action(s)\n"
+            f"\u001b[1;35m[GATEWAY LATENCY]\u001b[0m   :: {ws_ping} ms\n"
             f"```\n"
-            f"**◈ Core Subsystems:**\n"
-            f"• `[ZERO-TRUST]` Anti-raid containment & self-healing channel rollback.\n"
-            f"• `[AUDIT-LOGS]` 6 dedicated high-throughput event channels.\n"
-            f"• `[DYNAMIC-VOICE]` Ephemeral voice hubs with interactive in-card controllers."
+            f"**◈ Active Modules:** {cat_names_list}\n"
+            f"> Select any module from the dropdown below to explore commands."
         )
         container.add_separator(divider=True)
 
@@ -135,7 +135,7 @@ class Help(commands.Cog):
             {
                 "label": "Overview Home",
                 "value": "home",
-                "description": "Return to main infrastructure overview",
+                "description": "Return to main system overview",
                 "emoji": home_emoji_data,
                 "default": selected_val == "home",
             }
@@ -154,30 +154,14 @@ class Help(commands.Cog):
             {
                 "type": 3,
                 "custom_id": f"{custom_id_prefix}:select_category",
-                "placeholder": "Select an infrastructure module...",
+                "placeholder": "Select a module to view commands...",
                 "options": options,
             }
         ])
 
-        # If server is unactivated, provide 1-click Pro Actions
-        if not is_pro:
-            container.add_action_row([
-                {
-                    "type": 2,
-                    "style": 3,  # Success Green
-                    "label": "Claim 3-Day Free Trial",
-                    "custom_id": f"{custom_id_prefix}:action_trial",
-                },
-                {
-                    "type": 2,
-                    "style": 1,  # Primary Blurple
-                    "label": "Upgrade to Pro ($4.99 / ₹399)",
-                    "custom_id": f"{custom_id_prefix}:action_buy",
-                },
-            ])
-
-        container.add_text("-# Cicada 3301 Autonomous Enterprise OS • Select a module above to browse commands")
+        container.add_text("-# ◈ Cicada 3301 Core System • Select a module above to browse commands")
         return container
+
 
     def _build_category_container(
         self,

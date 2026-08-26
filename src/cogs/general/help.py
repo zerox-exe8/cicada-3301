@@ -112,13 +112,14 @@ class Help(commands.Cog):
 
         # Bot Avatar Accessory on Right
         bot_avatar = str(self.bot.user.display_avatar.url)
+        dot_emoji = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### **Cicada 3301 Dashboard**\n"
-                f"> Clean, high-performance Discord administration & utility.\n"
-                f"> Select a category from the dropdown below to view commands."
+                f"### **Hey, {author.mention}! I am {Config.BOT_NAME}**\n"
+                f"> A fast, secure Discord administration and utility system crafted to manage and protect your server smoothly.\n"
+                f"> Select a category from the menu below to explore commands."
             ),
             accessory={
                 "type": 11,
@@ -129,14 +130,9 @@ class Help(commands.Cog):
         )
         container.add_separator(divider=True)
 
-        bot_icon = e_reg.get("icon_bot", "🤖")
-        slash_icon = e_reg.get("icons_slash", "⚡")
-        ping_icon = e_reg.get("icons_ping", "📡")
-        staff_icon = e_reg.get("icons_staff", "🛡️")
-
         container.add_text(
-            f"{bot_icon} **Prefix:** `{current_prefix}`  •  {slash_icon} **Slash:** `/`  •  {ping_icon} **Latency:** `{ws_ping}ms`\n"
-            f"{staff_icon} **Accessible Commands:** `{total_commands}` commands available for your role"
+            f"{dot_emoji} **Prefix:** `{current_prefix}`  •  **Slash:** `/`  •  **Latency:** `{ws_ping}ms`\n"
+            f"{dot_emoji} **Available Commands:** `{total_commands}` commands accessible for your role"
         )
         container.add_separator(divider=True)
 
@@ -170,9 +166,8 @@ class Help(commands.Cog):
             }
         ])
 
-        container.add_text(f"-# Requested by {author.display_name} • Type {current_prefix}help <command> for syntax")
+        container.add_text(f"-# Requested by {author.display_name}")
         return container
-
 
     def _build_category_container(
         self,
@@ -186,6 +181,8 @@ class Help(commands.Cog):
         current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
         cat_icon = self._get_category_emoji(cat_name)
         bot_avatar = str(self.bot.user.display_avatar.url)
+        e_reg = self.bot.custom_emojis
+        dot_emoji = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
         container = CicadaContainer(accent_color=None)
         container.add_section(
@@ -209,15 +206,14 @@ class Help(commands.Cog):
             if isinstance(cmd, commands.Group):
                 sub_names = [f"`{sub.name}`" for sub in cmd.commands if not sub.hidden]
                 sub_str = f" • Subcommands: {', '.join(sub_names)}" if sub_names else ""
-                cmd_lines.append(f"• **`{current_prefix}{cmd.name}`** — {desc}{sub_str}")
+                cmd_lines.append(f"{dot_emoji} **`{current_prefix}{cmd.name}`** — {desc}{sub_str}")
             else:
-                cmd_lines.append(f"• **`{current_prefix}{cmd.name}`** — {desc}")
+                cmd_lines.append(f"{dot_emoji} **`{current_prefix}{cmd.name}`** — {desc}")
 
         container.add_text("\n".join(cmd_lines))
         container.add_separator(divider=True)
 
         # Dropdown options
-        e_reg = self.bot.custom_emojis
         home_emoji_data = e_reg.get_select_emoji("icon_home", fallback_unicode="🏠")
         options = [
             {
@@ -247,8 +243,9 @@ class Help(commands.Cog):
             }
         ])
 
-        container.add_text(f"-# Requested by {ctx.author.display_name} • Type {current_prefix}help <command> for syntax")
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         return container
+
 
     @commands.hybrid_command(
         name="help",

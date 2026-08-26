@@ -50,15 +50,20 @@ class Ping(commands.Cog):
 
         container = CicadaContainer(accent_color=None)
         container.add_text(
-            f"{ping_icon} **Pong!**\n\n"
-            f"• **Websocket:** `{ws_latency:.2f}ms`\n"
-            f"• **Database:** `{db_latency:.2f}ms`\n"
-            f"• **Uptime:** `{uptime_str}` | **Shard:** `#{shard_id}`"
+            f"### ◈ CICADA 3301 // TELEMETRY PING\n\n"
+            f"```ansi\n"
+            f"\u001b[1;32m[GATEWAY LATENCY]\u001b[0m   :: {ws_latency:.2f} ms\n"
+            f"\u001b[1;36m[DATABASE LATENCY]\u001b[0m  :: {db_latency:.2f} ms\n"
+            f"\u001b[1;33m[SYSTEM UPTIME]\u001b[0m     :: {uptime_str}\n"
+            f"\u001b[1;35m[CLUSTER SHARD]\u001b[0m     :: #{shard_id}\n"
+            f"```\n"
+            f"> ⌁ **Status:** `SYSTEM HEALTHY` • `0ms In-Memory Cache`"
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        container.add_footer(f"◈ Cicada 3301 Core Protocol • Telemetry requested by {ctx.author.display_name}")
 
         await send_container_response(ctx, container)
+
 
 
 async def setup(bot: commands.Bot) -> None:

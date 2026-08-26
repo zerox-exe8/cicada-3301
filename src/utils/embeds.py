@@ -15,7 +15,7 @@ from src.utils.containers import CicadaContainer, send_container_response
 class CicadaCard(CicadaContainer):
     """
     Standardized Discord Components V2 Container Card builder for Cicada 3301.
-    Provides easy factory methods for creating consistent cards across all modules.
+    Features cryptographic styling, glowing status glyphs, and unified matrix theme.
     """
 
     def __init__(
@@ -31,15 +31,16 @@ class CicadaCard(CicadaContainer):
         if title or description:
             body = []
             if title:
-                body.append(f"## {title}" if not title.startswith("#") else title)
+                formatted_title = title if title.startswith("#") else f"### ◈ {title.upper()}"
+                body.append(formatted_title)
             if description:
-                body.append(description)
+                body.append(f"> ⌁ {description}" if not description.startswith(">") else description)
             self.add_text("\n".join(body))
 
         if author:
             self.add_separator(divider=True)
             self.add_footer(
-                f"Requested by {author.display_name}",
+                f"◈ Cicada 3301 Protocol • Initiated by {author.display_name}",
                 icon_url=str(author.display_avatar.url),
             )
 
@@ -58,13 +59,13 @@ class CicadaCard(CicadaContainer):
     def success(
         cls,
         message: str,
-        title: str = "Success",
+        title: str = "OPERATION COMPLETED",
         author: discord.User | discord.Member | None = None,
     ) -> CicadaCard:
         """Create a success container card."""
         return cls(
-            title=f"✅ {title}",
-            description=f"> {message}" if not message.startswith(">") else message,
+            title=f"🟢 {title}",
+            description=message,
             accent_color=None,
             author=author,
         )
@@ -73,13 +74,13 @@ class CicadaCard(CicadaContainer):
     def error(
         cls,
         message: str,
-        title: str = "Error Occurred",
+        title: str = "SYSTEM EXCEPTION",
         author: discord.User | discord.Member | None = None,
     ) -> CicadaCard:
         """Create an error container card."""
         return cls(
-            title=f"❌ {title}",
-            description=f"> {message}" if not message.startswith(">") else message,
+            title=f"🔴 {title}",
+            description=message,
             accent_color=None,
             author=author,
         )
@@ -88,13 +89,13 @@ class CicadaCard(CicadaContainer):
     def warning(
         cls,
         message: str,
-        title: str = "Warning",
+        title: str = "SYSTEM ADVISORY",
         author: discord.User | discord.Member | None = None,
     ) -> CicadaCard:
         """Create a warning container card."""
         return cls(
-            title=f"⚠️ {title}",
-            description=f"> {message}" if not message.startswith(">") else message,
+            title=f"🟡 {title}",
+            description=message,
             accent_color=None,
             author=author,
         )
@@ -103,13 +104,14 @@ class CicadaCard(CicadaContainer):
     def info(
         cls,
         message: str,
-        title: str = "Information",
+        title: str = "TELEMETRY DATA",
         author: discord.User | discord.Member | None = None,
     ) -> CicadaCard:
         """Create an informational container card."""
         return cls(
-            title=f"ℹ️ {title}",
-            description=f"> {message}" if not message.startswith(">") else message,
+            title=f"🌐 {title}",
+            description=message,
             accent_color=None,
             author=author,
         )
+

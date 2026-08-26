@@ -113,16 +113,18 @@ class Help(commands.Cog):
 
         container = CicadaContainer(accent_color=None)
         container.add_text(
-            f"**Cicada 3301 Community Operating System**\n"
-            f"> Autonomous server protection, self-healing security, and high-capacity logging.\n\n"
-            f"• **Status:** `{status_text}`\n"
-            f"• **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
-            f"• **Accessible Commands:** `{total_commands}` command(s) for your role\n"
-            f"• **Gateway Latency:** `{ws_ping}ms` (0ms In-Memory Execution)\n\n"
-            f"**Core Infrastructure Modules:**\n"
-            f"• **Zero-Trust Security:** Self-healing channel restoration & anti-raid containment.\n"
-            f"• **Audit Pipeline:** 6 dedicated event channels for messages, members, and mods.\n"
-            f"• **Dynamic Voice:** On-demand temporary voice hubs with in-voice control cards."
+            f"### ◈ CICADA 3301 // AUTONOMOUS SECURITY PROTOCOL\n\n"
+            f"> ⌁ High-assurance cryptographic protection, self-healing architecture, and low-latency audit logging.\n\n"
+            f"```ansi\n"
+            f"\u001b[1;32m[SYSTEM TIER]\u001b[0m       :: {status_text}\n"
+            f"\u001b[1;36m[ACTIVE PREFIX]\u001b[0m     :: {current_prefix} | Slash (/)\n"
+            f"\u001b[1;33m[ACCESS PRIVILEGES]\u001b[0m :: {total_commands} Authorized Command(s)\n"
+            f"\u001b[1;35m[SOCKET TELEMETRY]\u001b[0m  :: {ws_ping} ms (0ms Memory Bus)\n"
+            f"```\n"
+            f"**◈ Core Subsystems:**\n"
+            f"• `[ZERO-TRUST]` Anti-raid containment & self-healing channel rollback.\n"
+            f"• `[AUDIT-LOGS]` 6 dedicated high-throughput event channels.\n"
+            f"• `[DYNAMIC-VOICE]` Ephemeral voice hubs with interactive in-card controllers."
         )
         container.add_separator(divider=True)
 

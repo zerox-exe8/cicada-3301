@@ -17,30 +17,32 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 @dataclass(frozen=True)
 class ThemeColors:
-    """Standardized color palette for premium embeds."""
-    PRIMARY: int = 0x5865F2      # Discord Blurple
-    SUCCESS: int = 0x2ECC71      # Mint Green
-    ERROR: int = 0xED4245        # Crimson Coral
-    WARNING: int = 0xFEE75C      # Amber Gold
-    INFO: int = 0x3498DB         # Deep Sky Blue
-    DARK: int = 0x2B2D31         # Midnight Velvet
-    SECONDARY: int = 0x7289DA    # Soft Indigo
+    """Standardized color palette for Cicada 3301 cryptographic cyber theme."""
+    PRIMARY: int = 0x00FF66      # Cyber Cicada Neon Green
+    SUCCESS: int = 0x00E676      # Neon Emerald
+    ERROR: int = 0xFF3366        # Laser Crimson
+    WARNING: int = 0xFFB300      # Cyber Amber
+    INFO: int = 0x00E5FF         # Electric Cyan
+    DARK: int = 0x0A0E14         # Deep Cyber Void
+    SECONDARY: int = 0x10B981    # Dark Matrix Green
+    ACCENT: int = 0x76FF03       # Bright Lime
 
 
 @dataclass(frozen=True)
 class ThemeEmojis:
-    """Standardized system emojis for embeds and messages."""
-    SUCCESS: str = "✅"
-    ERROR: str = "❌"
-    WARNING: str = "⚠️"
-    INFO: str = "ℹ️"
+    """Standardized system emojis for Cicada 3301 cryptographic embeds."""
+    SUCCESS: str = "🟢"
+    ERROR: str = "🔴"
+    WARNING: str = "🟡"
+    INFO: str = "🌐"
     LOADING: str = "⏳"
     SHIELD: str = "🛡️"
-    SPARKLES: str = "✨"
+    SPARKLES: str = "⚡"
     SETTINGS: str = "⚙️"
-    PING: str = "🏓"
+    PING: str = "📡"
     DATABASE: str = "🗄️"
     BOT: str = "🤖"
+    CICADA: str = "◈"
 
 
 class Config:
@@ -78,7 +80,7 @@ class Config:
     
     # Bot Branding
     BOT_NAME: str = "Cicada 3301"
-    FOOTER_TEXT: str = "⚡ Cicada 3301 Core System"
+    FOOTER_TEXT: str = "◈ CICADA 3301 • Cryptographic Autonomous System"
 
     @classmethod
     def validate(cls) -> None:

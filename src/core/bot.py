@@ -213,12 +213,20 @@ class CicadaBot(commands.Bot):
 
         activities = [
             discord.Activity(
+                type=discord.ActivityType.watching,
+                name=f"◈ {Config.DEFAULT_PREFIX}help | 3301 Protocol",
+            ),
+            discord.Activity(
                 type=discord.ActivityType.listening,
-                name=f"{Config.DEFAULT_PREFIX}help | Cicada 3301",
+                name="◈ Cryptographic Frequencies // 3301",
             ),
             discord.Activity(
                 type=discord.ActivityType.watching,
-                name=f"{Config.DEFAULT_PREFIX}help | {total_guilds} Servers | {total_users} Members",
+                name=f"◈ {total_guilds} Network Nodes | {total_users} Entities",
+            ),
+            discord.Activity(
+                type=discord.ActivityType.competing,
+                name="◈ Prime Sequences & Ciphers",
             ),
         ]
 
@@ -234,6 +242,7 @@ class CicadaBot(commands.Bot):
             )
         except Exception:
             pass
+
 
     @_rotate_presence.before_loop
     async def _before_rotate_presence(self) -> None:

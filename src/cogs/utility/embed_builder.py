@@ -270,7 +270,10 @@ class ContainerDraft:
                 header_blocks.append(f"**{author_text}**")
 
         if title_text:
-            formatted_title = title_text if title_text.startswith("#") else f"## {title_text}"
+            if title_text.startswith("#"):
+                formatted_title = title_text
+            else:
+                formatted_title = f"**{title_text}**"
             if final_title_url and final_title_url.startswith("http"):
                 header_blocks.append(f"[{formatted_title}]({final_title_url})")
             else:
@@ -703,6 +706,7 @@ class AddModuleModal(discord.ui.Modal):
                 self.view_ref.draft.modules[self.edit_idx] = mod_data
             else:
                 self.view_ref.draft.modules.append(mod_data)
+        self.view_ref.preview_module_id = None
         await self.view_ref.update_view(interaction)
 
 
@@ -1196,9 +1200,9 @@ class EmbedBuilderView(discord.ui.View):
                         item.label = "Add Field"
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                            item.label = "Delete Module"
+                            item.label = "Edit Module"
                         else:
-                            item.label = "Add Button"
+                            item.label = "Add Module"
                     elif slide_key == "dispatch":
                         item.label = "Raw JSON/HTML"
                 elif item.custom_id == "btn_secondary_action":
@@ -1207,9 +1211,9 @@ class EmbedBuilderView(discord.ui.View):
                         item.disabled = (len(self.draft.fields) == 0)
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                            item.label = "Edit Module"
-                        else:
                             item.label = "Add Module"
+                        else:
+                            item.label = "Add Button"
                         item.disabled = False
                     elif slide_key == "dispatch":
                         item.label = "Reset Draft"
@@ -1289,20 +1293,14 @@ class EmbedBuilderView(discord.ui.View):
             if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                 try:
                     idx = int(self.preview_module_id.replace("mod_", ""))
-                    if 0 <= idx < len(self.draft.modules):
-                        self.draft.modules.pop(idx)
-                        for new_i, m in enumerate(self.draft.modules):
-                            m["id"] = f"mod_{new_i}"
-                    self.preview_module_id = None
-                    await self.update_view(interaction)
+                    await interaction.response.send_modal(AddModuleModal(self, edit_idx=idx))
                 except Exception:
-                    self.preview_module_id = None
-                    await self.update_view(interaction)
+                    await interaction.response.send_modal(AddModuleModal(self))
             else:
-                if len(self.draft.buttons) >= 5:
-                    await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
+                if len(self.draft.modules) >= 25:
+                    await interaction.response.send_message("Maximum 25 dropdown modules allowed.", ephemeral=True)
                     return
-                await interaction.response.send_modal(AddButtonModal(self))
+                await interaction.response.send_modal(AddModuleModal(self))
         elif slide_key == "dispatch":
             await interaction.response.send_modal(RawImportModal(self))
 
@@ -1315,16 +1313,15 @@ class EmbedBuilderView(discord.ui.View):
             await self.update_view(interaction)
         elif slide_key == "interactive":
             if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                try:
-                    idx = int(self.preview_module_id.replace("mod_", ""))
-                    await interaction.response.send_modal(AddModuleModal(self, edit_idx=idx))
-                except Exception:
-                    await interaction.response.send_modal(AddModuleModal(self))
-            else:
                 if len(self.draft.modules) >= 25:
                     await interaction.response.send_message("Maximum 25 dropdown modules allowed.", ephemeral=True)
                     return
                 await interaction.response.send_modal(AddModuleModal(self))
+            else:
+                if len(self.draft.buttons) >= 5:
+                    await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
+                    return
+                await interaction.response.send_modal(AddButtonModal(self))
         elif slide_key == "dispatch":
             self.draft = ContainerDraft()
             await self.update_view(interaction)

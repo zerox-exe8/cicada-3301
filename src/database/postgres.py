@@ -199,6 +199,21 @@ class PostgresDatabase(BaseDatabase):
                 PRIMARY KEY (guild_id, message_id)
             );
             """,
+            # Server Auto-Events (Welcome, Leave, Boost) binding table
+            """
+            CREATE TABLE IF NOT EXISTS server_events (
+                guild_id BIGINT NOT NULL,
+                event_type VARCHAR(32) NOT NULL,
+                channel_id BIGINT,
+                embed_name VARCHAR(64),
+                message_content TEXT,
+                is_enabled BOOLEAN DEFAULT TRUE,
+                dm_enabled BOOLEAN DEFAULT FALSE,
+                dm_embed_name VARCHAR(64),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, event_type)
+            );
+            """,
         ]
         async with self.pool.acquire() as conn:
             for query in queries:

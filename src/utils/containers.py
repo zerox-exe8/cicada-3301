@@ -79,7 +79,7 @@ class CicadaContainer:
         if hasattr(self, "_fallback_embed") and self._fallback_embed is not None:
             return self._fallback_embed
         embed = discord.Embed(
-            color=self.accent_color or 0x00FF66,
+            color=self.accent_color if self.accent_color is not None else None,
         )
         for comp in self.components:
             ctype = comp.get("type")
@@ -136,20 +136,35 @@ def build_container_payload(
     else:
         container_list = [container]
 
-    comps = []
-    for idx, c in enumerate(container_list):
+    root_comps = []
+    for c in container_list:
         c_dict = c.to_dict()
-        # Embed view's action rows directly inside the bottom/last container
-        if idx == len(container_list) - 1 and view is not None:
-            view_comps = view.to_components()
-            if view_comps:
-                c_dict["components"].extend(view_comps)
-        comps.append(c_dict)
+        
+        # Extract Action Rows (Type 1) to top-level message components (Discord Components V2 spec)
+        inner_comps = []
+        extracted_action_rows = []
+        for comp in c_dict.get("components", []):
+            if comp.get("type") == 1:
+                extracted_action_rows.append(comp)
+            else:
+                inner_comps.append(comp)
+        
+        if not inner_comps:
+            inner_comps.append({"type": 10, "content": " "})
+        c_dict["components"] = inner_comps
+        
+        root_comps.append(c_dict)
+        root_comps.extend(extracted_action_rows)
+
+    if view is not None:
+        view_comps = view.to_components()
+        if view_comps:
+            root_comps.extend(view_comps)
 
     payload: dict[str, Any] = {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
-        "components": comps,
-        "allowed_mentions": {"parse": ["users", "roles", "everyone"]},
+        "components": root_comps,
+        "allowed_mentions": {"parse": []},
     }
     if content:
         payload["content"] = str(content)

@@ -424,8 +424,8 @@ class ContainerDraft:
                     active_mod = m
                     break
 
-        accent = self.get_accent_int() or 0x00FF66
-        embed = discord.Embed(color=accent)
+        accent = self.get_accent_int()
+        embed = discord.Embed(color=accent if accent is not None else None)
 
         # Author
         author_raw = parse(self.author_name)

@@ -221,14 +221,23 @@ async def send_container_response(
             bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
             http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
 
-        msg_data = await http_client.request(
-            discord.http.Route("POST", f"/channels/{channel_id}/messages"),
-            json=payload,
-        )
-        if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
-            if hasattr(bot_instance, "_connection"):
-                bot_instance._connection.store_view(view, int(msg_data["id"]))
-        return msg_data
+        try:
+            msg_data = await http_client.request(
+                discord.http.Route("POST", f"/channels/{channel_id}/messages"),
+                json=payload,
+            )
+            if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
+                if hasattr(bot_instance, "_connection"):
+                    bot_instance._connection.store_view(view, int(msg_data["id"]))
+            return msg_data
+        except discord.Forbidden:
+            raise
+        except Exception as e:
+            logger.warning(f"Raw Components V2 HTTP request failed ({e}), attempting standard send fallback...")
+            if hasattr(obj, "send"):
+                primary = container if isinstance(container, CicadaContainer) else container[0]
+                return await obj.send(content=content, embed=primary.to_embed(), view=view)
+            raise
 
 
 async def edit_container_response(
@@ -238,25 +247,12 @@ async def edit_container_response(
 ) -> None:
     """Edit an existing Components V2 Container message safely with fallbacks."""
     bot = interaction.client
+    app_id = getattr(bot, "application_id", None) or (bot.user.id if bot and bot.user else None)
     payload = build_container_payload(container, view=view)
-    app_id = getattr(bot, "application_id", None) or (bot.user.id if bot.user else None)
 
-    # 1. Try interaction response callback first
     try:
-        if not interaction.response.is_done():
+        if interaction.response.is_done():
             await bot.http.request(
-                discord.http.Route(
-                    "POST",
-                    f"/interactions/{interaction.id}/{interaction.token}/callback",
-                ),
-                json={"type": 7, "data": payload},  # 7 = UPDATE_MESSAGE
-            )
-            if view and hasattr(bot, "_connection"):
-                msg_id = interaction.message.id if interaction.message else None
-                bot._connection.store_view(view, msg_id)
-            return
-        else:
-            msg_data = await bot.http.request(
                 discord.http.Route(
                     "PATCH",
                     f"/webhooks/{app_id}/{interaction.token}/messages/@original",

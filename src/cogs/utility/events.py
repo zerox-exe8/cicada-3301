@@ -35,20 +35,20 @@ class AutoEvents(commands.Cog):
         member: discord.Member | discord.User,
         extra: dict[str, Any] | None = None,
         test_channel: discord.TextChannel | discord.Thread | None = None,
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         """Helper to render and dispatch an event container card + outer message."""
         config = await self.bot.event_mgr.get_event_config(guild.id, event_type)
         if not config and not test_channel:
             logger.warning(f"No config found for {event_type} in {guild.name}")
-            return False
+            return False, "No event configuration found. Use `set` command first."
 
         if not test_channel and not config.get("is_enabled", True):
-            return False
+            return False, "Event system is currently disabled for this server."
 
         channel_id = test_channel.id if test_channel else config.get("channel_id")
         if not channel_id:
             logger.warning(f"No channel_id found for {event_type} in {guild.name}")
-            return False
+            return False, "No target channel is configured."
 
         channel = test_channel
         if not channel:
@@ -58,11 +58,22 @@ class AutoEvents(commands.Cog):
                     channel = await self.bot.fetch_channel(channel_id)
                 except Exception as e:
                     logger.error(f"Failed to fetch channel {channel_id} for {event_type}: {e}")
-                    return False
+                    return False, f"Could not find or fetch target channel: {e}"
 
         if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread)):
             logger.warning(f"Channel {channel_id} is not a TextChannel/Thread in {guild.name}")
-            return False
+            return False, "Target channel is not a valid text channel or thread."
+
+        # Permission verification
+        if isinstance(channel, discord.TextChannel):
+            bot_member = guild.me
+            perms = channel.permissions_for(bot_member)
+            if not perms.view_channel:
+                return False, f"Bot is missing `View Channel` permission in {channel.mention}."
+            if not perms.send_messages:
+                return False, f"Bot is missing `Send Messages` permission in {channel.mention}."
+            if not perms.embed_links:
+                return False, f"Bot is missing `Embed Links` permission in {channel.mention}."
 
         embed_name = config.get("embed_name") if config else None
         msg_template = config.get("message_content") if config else None
@@ -141,10 +152,13 @@ class AutoEvents(commands.Cog):
                         template_name=embed_name,
                         payload=draft_data,
                     )
-            return True
+            return True, None
+        except discord.Forbidden as e:
+            logger.error(f"Missing permissions to send {event_type} in {channel.name}: {e}")
+            return False, f"Permission Denied (403): Bot lacks permissions to send in {channel.mention}. Please grant `Send Messages` and `Embed Links` in channel settings."
         except Exception as e:
             logger.error(f"Failed to dispatch {event_type} card in {guild.name}: {e}", exc_info=e)
-            return False
+            return False, f"Error sending message: {e}"
 
     # ─── Event Listeners ─────────────────────────────────────────────────────
 
@@ -357,11 +371,11 @@ class AutoEvents(commands.Cog):
             await ctx.send(f"Configured welcome channel not found. Please set a new channel with `{prefix}welcome set`.")
             return
 
-        sent = await self._send_event_card("welcome", ctx.guild, ctx.author, test_channel=target_ch)
-        if sent:
+        success, err = await self._send_event_card("welcome", ctx.guild, ctx.author, test_channel=target_ch)
+        if success:
             await ctx.send(f"Test welcome card dispatched to {target_ch.mention}!")
         else:
-            await ctx.send(f"Failed to dispatch test card. Check bot permissions in {target_ch.mention}.")
+            await ctx.send(f"Failed to dispatch test card: {err}")
 
     @welcome_group.command(
         name="toggle",
@@ -554,11 +568,11 @@ class AutoEvents(commands.Cog):
             await ctx.send(f"Configured leave channel not found. Set a new channel with `{prefix}leave set`.")
             return
 
-        sent = await self._send_event_card("leave", ctx.guild, ctx.author, test_channel=target_ch)
-        if sent:
+        success, err = await self._send_event_card("leave", ctx.guild, ctx.author, test_channel=target_ch)
+        if success:
             await ctx.send(f"Test leave card dispatched to {target_ch.mention}!")
         else:
-            await ctx.send(f"Failed to dispatch test card. Check permissions in {target_ch.mention}.")
+            await ctx.send(f"Failed to dispatch test card: {err}")
 
     @leave_group.command(
         name="toggle",
@@ -755,11 +769,11 @@ class AutoEvents(commands.Cog):
             "boost_count": getattr(ctx.guild, "premium_subscription_count", 1),
             "boost_tier": f"Level {getattr(ctx.guild, 'premium_tier', 1)}",
         }
-        sent = await self._send_event_card("boost", ctx.guild, ctx.author, extra=extra, test_channel=target_ch)
-        if sent:
+        success, err = await self._send_event_card("boost", ctx.guild, ctx.author, extra=extra, test_channel=target_ch)
+        if success:
             await ctx.send(f"Test boost card dispatched to {target_ch.mention}!")
         else:
-            await ctx.send(f"Failed to dispatch test card. Check permissions in {target_ch.mention}.")
+            await ctx.send(f"Failed to dispatch test card: {err}")
 
     @boost_group.command(
         name="toggle",

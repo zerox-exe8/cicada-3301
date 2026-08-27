@@ -1032,16 +1032,6 @@ class EmbedBuilder(commands.Cog):
         await send_container_response(ctx, containers, view=view)
 
     @embed_group.command(
-        name="create",
-        aliases=["new", "builder"],
-        description="Launch a fresh interactive embed builder.",
-    )
-    @commands.has_permissions(manage_messages=True)
-    async def embed_create(self, ctx: CustomContext, template_name: str | None = None) -> None:
-        """Launch the interactive builder."""
-        await self.embed_group(ctx, template_name=template_name)
-
-    @embed_group.command(
         name="send",
         aliases=["post"],
         description="Send a saved template to a channel. Usage: ?embed send [#channel] <template_name>",

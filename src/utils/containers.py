@@ -109,9 +109,12 @@ class CicadaContainer:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize container to Discord API component structure."""
+        comps = list(self.components)
+        if not comps:
+            comps.append({"type": 10, "content": " "})
         data: dict[str, Any] = {
             "type": 17,
-            "components": self.components,
+            "components": comps,
         }
         if self.accent_color is not None:
             data["accent_color"] = self.accent_color

@@ -34,11 +34,12 @@ class AutoEvents(commands.Cog):
         guild: discord.Guild,
         member: discord.Member | discord.User,
         extra: dict[str, Any] | None = None,
-        test_channel: discord.TextChannel | None = None,
+        test_channel: discord.TextChannel | discord.Thread | None = None,
     ) -> bool:
         """Helper to render and dispatch an event container card + outer message."""
         config = await self.bot.event_mgr.get_event_config(guild.id, event_type)
         if not config and not test_channel:
+            logger.warning(f"No config found for {event_type} in {guild.name}")
             return False
 
         if not test_channel and not config.get("is_enabled", True):
@@ -46,16 +47,21 @@ class AutoEvents(commands.Cog):
 
         channel_id = test_channel.id if test_channel else config.get("channel_id")
         if not channel_id:
+            logger.warning(f"No channel_id found for {event_type} in {guild.name}")
             return False
 
-        channel = guild.get_channel(channel_id)
+        channel = test_channel
+        if not channel:
+            channel = guild.get_channel(channel_id) or self.bot.get_channel(channel_id)
+            if not channel:
+                try:
+                    channel = await self.bot.fetch_channel(channel_id)
+                except Exception as e:
+                    logger.error(f"Failed to fetch channel {channel_id} for {event_type}: {e}")
+                    return False
+
         if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread)):
-            return False
-
-        # Permissions check
-        perms = channel.permissions_for(guild.me)
-        if not perms.send_messages:
-            logger.warning(f"Missing send_messages perms in #{channel.name} ({guild.name}) for {event_type}")
+            logger.warning(f"Channel {channel_id} is not a TextChannel/Thread in {guild.name}")
             return False
 
         embed_name = config.get("embed_name") if config else None
@@ -80,9 +86,11 @@ class AutoEvents(commands.Cog):
                     bot=self.bot,
                     default_avatar=avatar_url,
                 )
+            else:
+                logger.warning(f"Bound template '{embed_name}' not found for {event_type} in guild {guild.id}")
 
-        if not container and not outer_content:
-            # Basic fallback if no embed is bound
+        if not container:
+            # Fallback container
             container = CicadaContainer(accent_color=None)
             if event_type == "welcome":
                 container.add_section(
@@ -114,7 +122,7 @@ class AutoEvents(commands.Cog):
         try:
             target_msg = await send_container_response(
                 channel,
-                container if container else CicadaContainer(),
+                container,
                 content=outer_content,
             )
             # If template has interactive modules, register card for page switching
@@ -337,8 +345,15 @@ class AutoEvents(commands.Cog):
             await ctx.send(f"Welcome is not configured yet! Use `{prefix}welcome set #channel {{user}} <embed_name>`.")
             return
 
-        target_ch = ctx.guild.get_channel(config["channel_id"])
-        if not target_ch or not isinstance(target_ch, discord.TextChannel):
+        ch_id = config["channel_id"]
+        target_ch = ctx.guild.get_channel(ch_id) or self.bot.get_channel(ch_id)
+        if not target_ch:
+            try:
+                target_ch = await self.bot.fetch_channel(ch_id)
+            except Exception:
+                target_ch = None
+
+        if not target_ch or not isinstance(target_ch, (discord.TextChannel, discord.Thread)):
             await ctx.send(f"Configured welcome channel not found. Please set a new channel with `{prefix}welcome set`.")
             return
 
@@ -527,8 +542,15 @@ class AutoEvents(commands.Cog):
             await ctx.send(f"Leave is not configured yet! Use `{prefix}leave set #channel {{user.name}} <embed_name>`.")
             return
 
-        target_ch = ctx.guild.get_channel(config["channel_id"])
-        if not target_ch or not isinstance(target_ch, discord.TextChannel):
+        ch_id = config["channel_id"]
+        target_ch = ctx.guild.get_channel(ch_id) or self.bot.get_channel(ch_id)
+        if not target_ch:
+            try:
+                target_ch = await self.bot.fetch_channel(ch_id)
+            except Exception:
+                target_ch = None
+
+        if not target_ch or not isinstance(target_ch, (discord.TextChannel, discord.Thread)):
             await ctx.send(f"Configured leave channel not found. Set a new channel with `{prefix}leave set`.")
             return
 
@@ -716,8 +738,15 @@ class AutoEvents(commands.Cog):
             await ctx.send(f"Boost is not configured yet! Use `{prefix}boost set #channel {{user}} <embed_name>`.")
             return
 
-        target_ch = ctx.guild.get_channel(config["channel_id"])
-        if not target_ch or not isinstance(target_ch, discord.TextChannel):
+        ch_id = config["channel_id"]
+        target_ch = ctx.guild.get_channel(ch_id) or self.bot.get_channel(ch_id)
+        if not target_ch:
+            try:
+                target_ch = await self.bot.fetch_channel(ch_id)
+            except Exception:
+                target_ch = None
+
+        if not target_ch or not isinstance(target_ch, (discord.TextChannel, discord.Thread)):
             await ctx.send(f"Configured boost channel not found. Set a new channel with `{prefix}boost set`.")
             return
 

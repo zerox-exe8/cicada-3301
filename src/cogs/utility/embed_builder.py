@@ -181,7 +181,7 @@ class ContainerDraft:
         self.title: str | None = None
         self.title_url: str | None = None
 
-        self.description: str | None = None
+        self.description: str | None = "> Welcome to your interactive container card preview.\n> Use the control panel below to customize and style your message."
 
         self.fields: list[dict[str, str]] = []  # [{"name": "...", "value": "..."}]
 
@@ -749,7 +749,6 @@ class EmbedBuilderView(discord.ui.View):
             self.btn_next.emoji = right_e if right_e else "▶"
 
             self.btn_edit_step.emoji = edit_e if edit_e else None
-            self.btn_edit_step.label = f"Step {self.current_slide_idx + 1}"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -839,7 +838,16 @@ class EmbedBuilderView(discord.ui.View):
                     opt.default = (opt.value == slide_key)
             elif isinstance(item, discord.ui.Button):
                 if item.custom_id == "btn_edit_step":
-                    item.label = f"Step {self.current_slide_idx + 1}"
+                    if slide_key == "content":
+                        item.label = "Edit Content"
+                    elif slide_key == "visuals":
+                        item.label = "Edit Visuals"
+                    elif slide_key == "fields":
+                        item.label = "Add Field"
+                    elif slide_key == "interactive":
+                        item.label = "Add Button"
+                    elif slide_key == "dispatch":
+                        item.label = "Raw JSON/HTML"
                 elif item.custom_id == "btn_secondary_action":
                     if slide_key == "fields":
                         item.label = "Clear Fields"
@@ -894,7 +902,7 @@ class EmbedBuilderView(discord.ui.View):
         self.current_slide_idx = (self.current_slide_idx + 1) % len(self.SLIDES)
         await self.update_view(interaction)
 
-    @discord.ui.button(label="Edit Content", style=discord.ButtonStyle.primary, custom_id="btn_edit_step", row=1)
+    @discord.ui.button(label="Edit Content", style=discord.ButtonStyle.secondary, custom_id="btn_edit_step", row=1)
     async def btn_edit_step(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 

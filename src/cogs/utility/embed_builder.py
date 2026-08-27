@@ -250,8 +250,8 @@ class ContainerDraft:
         else:
             desc_text = parse(self.description)
 
-        # Thumbnail / Author Icon Accessory (Type 11)
-        thumb_url = parse(self.thumbnail_url or self.author_icon_url)
+        # Thumbnail Accessory (Type 11) - Only if thumbnail_url is set
+        thumb_url = parse(self.thumbnail_url)
         accessory_dict = None
         if thumb_url and thumb_url.startswith("http"):
             accessory_dict = {
@@ -261,13 +261,13 @@ class ContainerDraft:
                 },
             }
 
-        # Compose Header Block
+        # Compose Header Block with proper breathing room
         header_blocks = []
         if author_text:
             if final_author_url and final_author_url.startswith("http"):
-                header_blocks.append(f"**[{author_text}]({final_author_url})**")
+                header_blocks.append(f"-# **[{author_text}]({final_author_url})**" if not author_text.startswith("-#") else f"**[{author_text}]({final_author_url})**")
             else:
-                header_blocks.append(f"**{author_text}**")
+                header_blocks.append(f"-# **{author_text}**" if not author_text.startswith("-#") else f"**{author_text}**")
 
         if title_text:
             if title_text.startswith("#"):
@@ -283,7 +283,7 @@ class ContainerDraft:
             header_blocks.append(desc_text)
 
         if header_blocks or accessory_dict:
-            full_header_content = "\n".join(header_blocks) if header_blocks else " "
+            full_header_content = "\n\n".join(header_blocks) if header_blocks else " "
             container.add_section(content=full_header_content, accessory=accessory_dict)
             container.add_separator(divider=True)
 

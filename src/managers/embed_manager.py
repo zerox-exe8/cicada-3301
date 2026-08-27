@@ -1,6 +1,7 @@
 """
 Cicada 3301 Discord Bot - Custom Embed & Container Manager
-Manages storing, retrieving, and serializing Components V2 Container templates per guild.
+Manages storing, retrieving, and serializing Components V2 Container templates per guild,
+along with live persistent interactive card state for dropdown page switchers.
 """
 
 from __future__ import annotations
@@ -16,10 +17,14 @@ logger = logging.getLogger("Cicada.EmbedManager")
 
 
 class EmbedManager:
-    """Manages custom server Components V2 Container templates."""
+    """Manages custom server Components V2 Container templates and interactive cards."""
 
     def __init__(self, db: BaseDatabase) -> None:
         self.db = db
+        # In-memory LRU cache: (guild_id, message_id) -> payload dict
+        self._card_cache: dict[tuple[int, int], dict[str, Any]] = {}
+        # In-memory template cache: (guild_id, name) -> payload dict
+        self._template_cache: dict[tuple[int, str], dict[str, Any]] = {}
 
     async def save_template(
         self,
@@ -43,6 +48,7 @@ class EmbedManager:
         """
         try:
             await self.db.execute(query, guild_id, clean_name, payload_str, created_by)
+            self._template_cache[(guild_id, clean_name)] = payload
             logger.info(f"Saved custom embed '{clean_name}' for guild {guild_id}")
             return True
         except Exception as e:
@@ -52,12 +58,18 @@ class EmbedManager:
     async def get_template(self, guild_id: int, name: str) -> dict[str, Any] | None:
         """Retrieve a saved container embed payload by name."""
         clean_name = name.strip().lower()
+        cache_key = (guild_id, clean_name)
+        if cache_key in self._template_cache:
+            return self._template_cache[cache_key]
+
         query = "SELECT container_payload FROM server_embeds WHERE guild_id = ? AND embed_name = ?;"
         row = await self.db.fetch_one(query, guild_id, clean_name)
         if row and row.get("container_payload"):
             try:
                 data = row["container_payload"]
-                return json.loads(data) if isinstance(data, str) else data
+                parsed = json.loads(data) if isinstance(data, str) else data
+                self._template_cache[cache_key] = parsed
+                return parsed
             except Exception as e:
                 logger.error(f"Failed to parse container payload for '{clean_name}': {e}")
                 return None
@@ -79,8 +91,66 @@ class EmbedManager:
         query = "DELETE FROM server_embeds WHERE guild_id = ? AND embed_name = ?;"
         try:
             await self.db.execute(query, guild_id, clean_name)
+            self._template_cache.pop((guild_id, clean_name), None)
             logger.info(f"Deleted custom embed '{clean_name}' for guild {guild_id}")
             return True
         except Exception as e:
             logger.error(f"Failed to delete custom embed template '{clean_name}': {e}")
             return False
+
+    # ─── Live Interactive Cards (Dropdown Page Switchers) ────────────────────
+
+    async def record_interactive_card(
+        self,
+        guild_id: int,
+        message_id: int,
+        template_name: str | None,
+        payload: dict[str, Any],
+    ) -> bool:
+        """Store posted interactive card data for persistent dropdown page switching."""
+        payload_str = json.dumps(payload)
+        self._card_cache[(guild_id, message_id)] = payload
+
+        # Keep in-memory cache bounded
+        if len(self._card_cache) > 2000:
+            oldest_key = next(iter(self._card_cache))
+            self._card_cache.pop(oldest_key, None)
+
+        query = """
+        INSERT INTO interactive_cards (guild_id, message_id, template_name, card_payload)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (guild_id, message_id)
+        DO UPDATE SET
+            template_name = EXCLUDED.template_name,
+            card_payload = EXCLUDED.card_payload,
+            created_at = CURRENT_TIMESTAMP;
+        """
+        try:
+            await self.db.execute(query, guild_id, message_id, template_name, payload_str)
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to persist interactive card state: {e}")
+            return False
+
+    async def get_interactive_card(
+        self,
+        guild_id: int,
+        message_id: int,
+    ) -> dict[str, Any] | None:
+        """Fetch interactive card payload for a message (from RAM cache or DB)."""
+        cache_key = (guild_id, message_id)
+        if cache_key in self._card_cache:
+            return self._card_cache[cache_key]
+
+        query = "SELECT card_payload FROM interactive_cards WHERE guild_id = ? AND message_id = ?;"
+        row = await self.db.fetch_one(query, guild_id, message_id)
+        if row and row.get("card_payload"):
+            try:
+                data = row["card_payload"]
+                parsed = json.loads(data) if isinstance(data, str) else data
+                self._card_cache[cache_key] = parsed
+                return parsed
+            except Exception as e:
+                logger.error(f"Failed to parse interactive card payload: {e}")
+                return None
+        return None

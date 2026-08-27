@@ -188,6 +188,17 @@ class PostgresDatabase(BaseDatabase):
                 UNIQUE(guild_id, embed_name)
             );
             """,
+            # Live Interactive Messages for Dropdown Page Switchers
+            """
+            CREATE TABLE IF NOT EXISTS interactive_cards (
+                guild_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL,
+                template_name VARCHAR(64),
+                card_payload TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, message_id)
+            );
+            """,
         ]
         async with self.pool.acquire() as conn:
             for query in queries:

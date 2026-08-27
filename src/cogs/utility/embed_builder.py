@@ -194,7 +194,7 @@ class ContainerDraft:
 
         self.accent_hex: str | None = None
         self.buttons: list[dict[str, str]] = []  # [{"label": "...", "url": "..."}]
-        self.faq_options: list[dict[str, str]] = []  # [{"label": "...", "description": "...", "answer": "..."}]
+        self.modules: list[dict[str, Any]] = []  # [{"id": "...", "label": "...", "description": "...", "page_title": "...", "content": "..."}]
 
     def get_accent_int(self) -> int | None:
         if not self.accent_hex or self.accent_hex.strip().lower() in ["none", "dark", "default"]:
@@ -207,13 +207,14 @@ class ContainerDraft:
 
     def to_container(
         self,
+        active_module_id: str | None = None,
         user: discord.Member | discord.User | None = None,
         guild: discord.Guild | None = None,
         channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None = None,
         bot: CicadaBot | None = None,
         default_avatar: str | None = None,
     ) -> CicadaContainer:
-        """Convert draft into a Discord Components V2 CicadaContainer."""
+        """Convert draft into a Discord Components V2 CicadaContainer with dynamic module page support."""
         container = CicadaContainer(accent_color=self.get_accent_int())
 
         def parse(t: str | None) -> str:
@@ -221,16 +222,33 @@ class ContainerDraft:
                 return ""
             return apply_placeholders(t, user=user, guild=guild, channel=channel, bot=bot)
 
+        # Check for active module page
+        active_mod: dict[str, Any] | None = None
+        if active_module_id and active_module_id not in ["home", "mod_home"]:
+            for idx, m in enumerate(self.modules):
+                if m.get("id") == active_module_id or f"mod_{idx}" == active_module_id or m.get("label") == active_module_id:
+                    active_mod = m
+                    break
+
         # 1. Author & Title Extraction
         author_raw = parse(self.author_name)
         author_text, author_url_extracted = parse_markdown_link(author_raw)
         final_author_url = self.author_url or author_url_extracted
 
-        title_raw = parse(self.title)
+        # If active module has page_title, use it; otherwise use main title
+        if active_mod and active_mod.get("page_title"):
+            title_raw = parse(active_mod["page_title"])
+        else:
+            title_raw = parse(self.title)
+
         title_text, title_url_extracted = parse_markdown_link(title_raw)
         final_title_url = self.title_url or title_url_extracted
 
-        desc_text = parse(self.description)
+        # If active module has content, use it; otherwise use main description
+        if active_mod and active_mod.get("content"):
+            desc_text = parse(active_mod["content"])
+        else:
+            desc_text = parse(self.description)
 
         # Thumbnail / Author Icon Accessory (Type 11)
         thumb_url = parse(self.thumbnail_url or self.author_icon_url)
@@ -266,8 +284,8 @@ class ContainerDraft:
             container.add_section(content=full_header_content, accessory=accessory_dict)
             container.add_separator(divider=True)
 
-        # 2. Custom Fields (Type 10 Text Displays)
-        if self.fields:
+        # 2. Custom Fields (Show on main overview or if active module doesn't replace them)
+        if not active_mod and self.fields:
             field_lines = []
             for f in self.fields:
                 f_name = parse(f.get("name", ""))
@@ -298,20 +316,30 @@ class ContainerDraft:
             })
             container.add_separator(divider=True)
 
-        # 4. FAQ Dropdown Select Menu (Type 3 Action Row)
-        if self.faq_options:
-            select_opts = []
-            for idx, opt in enumerate(self.faq_options[:25]):
+        # 4. Interactive Dropdown Modules Select Menu (Type 3 Action Row)
+        if self.modules:
+            select_opts = [
+                {
+                    "label": "Main Overview",
+                    "value": "mod_home",
+                    "description": "Return to original card overview",
+                    "default": (active_mod is None),
+                }
+            ]
+            for idx, mod in enumerate(self.modules[:24]):
+                mod_id = mod.get("id", f"mod_{idx}")
+                is_selected = (active_mod is not None and active_mod.get("id") == mod_id)
                 select_opts.append({
-                    "label": parse(opt.get("label", f"Option {idx + 1}"))[:100],
-                    "value": f"faq_{idx}",
-                    "description": parse(opt.get("description", ""))[:100] if opt.get("description") else None,
+                    "label": parse(mod.get("label", f"Page {idx + 1}"))[:100],
+                    "value": mod_id,
+                    "description": parse(mod.get("description", ""))[:100] if mod.get("description") else None,
+                    "default": is_selected,
                 })
             container.add_action_row([
                 {
                     "type": 3,
-                    "custom_id": "card_faq_select",
-                    "placeholder": "Select an FAQ question / topic...",
+                    "custom_id": "card_module_select",
+                    "placeholder": "Select an interactive module / page...",
                     "options": select_opts,
                 }
             ])
@@ -362,7 +390,7 @@ class ContainerDraft:
             "timestamp": self.timestamp,
             "accent_hex": self.accent_hex,
             "buttons": self.buttons,
-            "faq_options": self.faq_options,
+            "modules": self.modules,
         }
 
     @classmethod
@@ -379,10 +407,10 @@ class ContainerDraft:
         draft.image_url = data.get("image_url")
         draft.footer_text = data.get("footer_text")
         draft.footer_icon_url = data.get("footer_icon_url")
-        draft.timestamp = bool(data.get("timestamp", False))
+        draft.timestamp = data.get("timestamp", False)
         draft.accent_hex = data.get("accent_hex")
         draft.buttons = data.get("buttons", [])
-        draft.faq_options = data.get("faq_options", [])
+        draft.modules = data.get("modules") or data.get("faq_options") or []
         return draft
 
     @classmethod
@@ -612,42 +640,258 @@ class AddButtonModal(discord.ui.Modal, title="Add Link Button"):
         await self.view_ref.update_view(interaction)
 
 
-class AddFAQModal(discord.ui.Modal, title="Add FAQ Dropdown Option"):
-    label_input = discord.ui.TextInput(
-        label="Question / Option Label",
-        placeholder="How to upgrade to VIP?",
-        max_length=100,
-        required=True,
-    )
-    desc_input = discord.ui.TextInput(
-        label="Subtitle Description",
-        placeholder="Brief note or summary...",
-        max_length=100,
-        required=False,
-    )
-    answer_input = discord.ui.TextInput(
-        label="Answer / Response",
-        style=discord.TextStyle.paragraph,
-        placeholder="The answer shown when selected...",
-        max_length=2000,
-        required=True,
-    )
-
-    def __init__(self, view: EmbedBuilderView) -> None:
-        super().__init__()
+class AddModuleModal(discord.ui.Modal):
+    def __init__(self, view: EmbedBuilderView, edit_idx: int | None = None) -> None:
+        title = f"Edit Module #{edit_idx + 1}" if edit_idx is not None else "Add Dropdown Module"
+        super().__init__(title=title)
         self.view_ref = view
+        self.edit_idx = edit_idx
+
+        existing: dict[str, Any] = {}
+        if edit_idx is not None and 0 <= edit_idx < len(self.view_ref.draft.modules):
+            existing = self.view_ref.draft.modules[edit_idx]
+
+        self.label_input = discord.ui.TextInput(
+            label="Module Name (Label)",
+            placeholder="Server Rules, VIP Perks, Payment...",
+            default=existing.get("label", ""),
+            max_length=100,
+            required=True,
+        )
+        self.desc_input = discord.ui.TextInput(
+            label="Subtitle Description",
+            placeholder="Brief note shown in dropdown list...",
+            default=existing.get("description", "") or "",
+            max_length=100,
+            required=False,
+        )
+        self.page_title_input = discord.ui.TextInput(
+            label="Page Card Title (Optional)",
+            placeholder="Headline when this page is open...",
+            default=existing.get("page_title", "") or "",
+            max_length=100,
+            required=False,
+        )
+        self.content_input = discord.ui.TextInput(
+            label="Page Content (Description)",
+            style=discord.TextStyle.paragraph,
+            placeholder="Full markdown text to display on card when selected...",
+            default=existing.get("content", ""),
+            max_length=2000,
+            required=True,
+        )
+
+        self.add_item(self.label_input)
+        self.add_item(self.desc_input)
+        self.add_item(self.page_title_input)
+        self.add_item(self.content_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         label = str(self.label_input.value).strip()
         desc = str(self.desc_input.value).strip()
-        ans = str(self.answer_input.value).strip()
-        if label and ans:
-            self.view_ref.draft.faq_options.append({
+        page_title = str(self.page_title_input.value).strip()
+        content = str(self.content_input.value).strip()
+        if label and content:
+            mod_data = {
+                "id": f"mod_{self.edit_idx}" if self.edit_idx is not None else f"mod_{len(self.view_ref.draft.modules)}",
                 "label": label,
                 "description": desc if desc else None,
-                "answer": ans,
-            })
+                "page_title": page_title if page_title else None,
+                "content": content,
+            }
+            if self.edit_idx is not None and 0 <= self.edit_idx < len(self.view_ref.draft.modules):
+                self.view_ref.draft.modules[self.edit_idx] = mod_data
+            else:
+                self.view_ref.draft.modules.append(mod_data)
         await self.view_ref.update_view(interaction)
+
+
+class ModuleManagementPicker(discord.ui.View):
+    """Ephemeral picker to Add, Edit, or Delete dropdown modules."""
+    def __init__(self, parent_view: EmbedBuilderView) -> None:
+        super().__init__(timeout=60)
+        self.parent_view = parent_view
+
+        options = []
+        if len(self.parent_view.draft.modules) < 25:
+            options.append(discord.SelectOption(
+                label="Add New Module",
+                value="action_add",
+                description="Create a new dropdown page option",
+            ))
+
+        for i, mod in enumerate(self.parent_view.draft.modules):
+            options.append(discord.SelectOption(
+                label=f"Edit #{i+1}: {mod.get('label', 'Module')}"[:100],
+                value=f"edit_{i}",
+                description=f"Modify #{i+1} {mod.get('label', '')}"[:100],
+            ))
+
+        for i, mod in enumerate(self.parent_view.draft.modules):
+            options.append(discord.SelectOption(
+                label=f"Delete #{i+1}: {mod.get('label', 'Module')}"[:100],
+                value=f"delete_{i}",
+                description=f"Remove module #{i+1} permanently"[:100],
+            ))
+
+        if len(self.parent_view.draft.modules) > 1:
+            options.append(discord.SelectOption(
+                label="Clear All Modules",
+                value="action_clear_all",
+                description="Delete all dropdown modules",
+            ))
+
+        select = discord.ui.Select(
+            placeholder="Select a module to edit or delete...",
+            options=options[:25],
+        )
+        select.callback = self.on_select
+        self.add_item(select)
+
+    async def on_select(self, interaction: discord.Interaction) -> None:
+        select: discord.ui.Select = self.children[0]  # type: ignore
+        val = select.values[0]
+
+        if val == "action_add":
+            await interaction.response.send_modal(AddModuleModal(self.parent_view))
+        elif val.startswith("edit_"):
+            idx = int(val.replace("edit_", ""))
+            await interaction.response.send_modal(AddModuleModal(self.parent_view, edit_idx=idx))
+        elif val.startswith("delete_"):
+            idx = int(val.replace("delete_", ""))
+            if 0 <= idx < len(self.parent_view.draft.modules):
+                self.parent_view.draft.modules.pop(idx)
+                for new_i, m in enumerate(self.parent_view.draft.modules):
+                    m["id"] = f"mod_{new_i}"
+                if self.parent_view.preview_module_id == f"mod_{idx}":
+                    self.parent_view.preview_module_id = None
+                await self.parent_view.update_view(interaction)
+        elif val == "action_clear_all":
+            self.parent_view.draft.modules.clear()
+            self.parent_view.preview_module_id = None
+            await self.parent_view.update_view(interaction)
+
+
+class ButtonManagementPicker(discord.ui.View):
+    """Ephemeral picker to Add, Edit, or Delete link buttons."""
+    def __init__(self, parent_view: EmbedBuilderView) -> None:
+        super().__init__(timeout=60)
+        self.parent_view = parent_view
+
+        options = []
+        if len(self.parent_view.draft.buttons) < 5:
+            options.append(discord.SelectOption(
+                label="Add New Button",
+                value="action_add",
+                description="Create a new link button",
+            ))
+
+        for i, btn in enumerate(self.parent_view.draft.buttons):
+            options.append(discord.SelectOption(
+                label=f"Edit #{i+1}: {btn.get('label', 'Link')}"[:100],
+                value=f"edit_{i}",
+                description=f"Modify #{i+1} URL/Label"[:100],
+            ))
+
+        for i, btn in enumerate(self.parent_view.draft.buttons):
+            options.append(discord.SelectOption(
+                label=f"Delete #{i+1}: {btn.get('label', 'Link')}"[:100],
+                value=f"delete_{i}",
+                description=f"Remove button #{i+1}"[:100],
+            ))
+
+        if len(self.parent_view.draft.buttons) > 1:
+            options.append(discord.SelectOption(
+                label="Clear All Buttons",
+                value="action_clear_all",
+                description="Remove all buttons",
+            ))
+
+        select = discord.ui.Select(
+            placeholder="Select a button to edit or delete...",
+            options=options[:25],
+        )
+        select.callback = self.on_select
+        self.add_item(select)
+
+    async def on_select(self, interaction: discord.Interaction) -> None:
+        select: discord.ui.Select = self.children[0]  # type: ignore
+        val = select.values[0]
+
+        if val == "action_add":
+            await interaction.response.send_modal(AddButtonModal(self.parent_view))
+        elif val.startswith("edit_"):
+            idx = int(val.replace("edit_", ""))
+            await interaction.response.send_modal(AddButtonModal(self.parent_view, edit_idx=idx))
+        elif val.startswith("delete_"):
+            idx = int(val.replace("delete_", ""))
+            if 0 <= idx < len(self.parent_view.draft.buttons):
+                self.parent_view.draft.buttons.pop(idx)
+                await self.parent_view.update_view(interaction)
+        elif val == "action_clear_all":
+            self.parent_view.draft.buttons.clear()
+            await self.parent_view.update_view(interaction)
+
+
+class FieldManagementPicker(discord.ui.View):
+    """Ephemeral picker to Add, Edit, or Delete custom fields."""
+    def __init__(self, parent_view: EmbedBuilderView) -> None:
+        super().__init__(timeout=60)
+        self.parent_view = parent_view
+
+        options = []
+        if len(self.parent_view.draft.fields) < 25:
+            options.append(discord.SelectOption(
+                label="Add New Field",
+                value="action_add",
+                description="Add another structured section",
+            ))
+
+        for i, fld in enumerate(self.parent_view.draft.fields):
+            options.append(discord.SelectOption(
+                label=f"Edit #{i+1}: {fld.get('name', 'Field')}"[:100],
+                value=f"edit_{i}",
+                description=f"Modify field #{i+1}"[:100],
+            ))
+
+        for i, fld in enumerate(self.parent_view.draft.fields):
+            options.append(discord.SelectOption(
+                label=f"Delete #{i+1}: {fld.get('name', 'Field')}"[:100],
+                value=f"delete_{i}",
+                description=f"Remove field #{i+1}"[:100],
+            ))
+
+        if len(self.parent_view.draft.fields) > 1:
+            options.append(discord.SelectOption(
+                label="Clear All Fields",
+                value="action_clear_all",
+                description="Delete all fields",
+            ))
+
+        select = discord.ui.Select(
+            placeholder="Select a field to edit or delete...",
+            options=options[:25],
+        )
+        select.callback = self.on_select
+        self.add_item(select)
+
+    async def on_select(self, interaction: discord.Interaction) -> None:
+        select: discord.ui.Select = self.children[0]  # type: ignore
+        val = select.values[0]
+
+        if val == "action_add":
+            await interaction.response.send_modal(AddFieldModal(self.parent_view))
+        elif val.startswith("edit_"):
+            idx = int(val.replace("edit_", ""))
+            await interaction.response.send_modal(AddFieldModal(self.parent_view, edit_idx=idx))
+        elif val.startswith("delete_"):
+            idx = int(val.replace("delete_", ""))
+            if 0 <= idx < len(self.parent_view.draft.fields):
+                self.parent_view.draft.fields.pop(idx)
+                await self.parent_view.update_view(interaction)
+        elif val == "action_clear_all":
+            self.parent_view.draft.fields.clear()
+            await self.parent_view.update_view(interaction)
 
 
 class SaveModal(discord.ui.Modal, title="Save Template"):
@@ -713,25 +957,127 @@ class RawImportModal(discord.ui.Modal, title="Raw JSON / HTML Import"):
             await interaction.response.send_message(f"Import failed: {e}", ephemeral=True)
 
 
+class CreateEmbedModal(discord.ui.Modal, title="Create New Embed"):
+    name_input = discord.ui.TextInput(
+        label="Embed Name (Identifier)",
+        placeholder="rules, welcome, faq, announcement, perks...",
+        max_length=32,
+        required=True,
+    )
+
+    def __init__(self, bot: CicadaBot, author: discord.Member | discord.User) -> None:
+        super().__init__()
+        self.bot = bot
+        self.author = author
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        name = str(self.name_input.value).strip().lower()
+        clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name)
+        if not clean_name:
+            await interaction.response.send_message("Invalid embed name. Use letters, numbers, hyphens, and underscores.", ephemeral=True)
+            return
+
+        draft = ContainerDraft()
+        await self.bot.embed_mgr.save_template(
+            guild_id=interaction.guild_id or 0,
+            name=clean_name,
+            payload=draft.to_dict(),
+            created_by=self.author.id,
+        )
+
+        view = EmbedBuilderView(self.bot, self.author, draft=draft, template_name=clean_name)
+        containers = view.get_dual_containers(interaction.guild, interaction.channel)
+        msg_data = await send_container_response(interaction, containers, view=view)
+        msg_id = None
+        if isinstance(msg_data, dict) and "id" in msg_data:
+            msg_id = int(msg_data["id"])
+        elif hasattr(msg_data, "id"):
+            msg_id = int(msg_data.id)
+        if msg_id:
+            EmbedBuilderView.active_views[msg_id] = view
+
+
+class EmbedHubView(discord.ui.View):
+    """Server Embed Management Hub: Select an existing embed to edit."""
+    def __init__(self, bot: CicadaBot, author: discord.Member | discord.User, templates: list[dict[str, Any]]) -> None:
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.author = author
+        self.templates = templates
+
+        if templates:
+            options = [
+                discord.SelectOption(
+                    label=f"Edit: {t.get('embed_name', 'unknown')}"[:100],
+                    value=t.get("embed_name", "unknown"),
+                    description=f"Open builder for '{t.get('embed_name', '')}'"[:100],
+                )
+                for t in templates[:25]
+            ]
+            select = discord.ui.Select(
+                placeholder="Select an existing embed to edit...",
+                options=options,
+                row=0,
+            )
+            select.callback = self.on_select_template
+            self.add_item(select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Only the command author can use this menu.", ephemeral=True)
+            return False
+        return True
+
+    async def on_select_template(self, interaction: discord.Interaction) -> None:
+        select: discord.ui.Select = self.children[0]  # type: ignore
+        template_name = select.values[0]
+        data = await self.bot.embed_mgr.get_template(interaction.guild_id or 0, template_name)
+        if not data:
+            await interaction.response.send_message(f"Embed '{template_name}' not found.", ephemeral=True)
+            return
+
+        draft = ContainerDraft.from_dict(data)
+        view = EmbedBuilderView(self.bot, self.author, draft=draft, template_name=template_name)
+        containers = view.get_dual_containers(interaction.guild, interaction.channel)
+        msg_data = await send_container_response(interaction, containers, view=view)
+        msg_id = None
+        if isinstance(msg_data, dict) and "id" in msg_data:
+            msg_id = int(msg_data["id"])
+        elif hasattr(msg_data, "id"):
+            msg_id = int(msg_data.id)
+        if msg_id:
+            EmbedBuilderView.active_views[msg_id] = view
+
+
 # ─── Dual-Container Controller View ──────────────────────────────────────────
 
 class EmbedBuilderView(discord.ui.View):
     """Mimu-style dual-container builder: Top = Live Preview, Bottom = 5-Step Console."""
 
+    active_views: dict[int, EmbedBuilderView] = {}
+
     SLIDES = [
         ("content", "Step 1: Content & Theme", "Title, Author, Icon, Description, Color"),
         ("visuals", "Step 2: Images & Footer", "Thumbnail, Banner, Footer Text & Icon, Timestamp"),
         ("fields", "Step 3: Custom Fields", "Add, edit, or remove structured sections"),
-        ("interactive", "Step 4: Buttons & FAQ Menu", "Manage link buttons and FAQ dropdown options"),
+        ("interactive", "Step 4: Buttons & Modules", "Manage link buttons and interactive dropdown modules"),
         ("dispatch", "Step 5: Dispatch & Raw", "Send to channel, Save template, Raw JSON import"),
     ]
 
-    def __init__(self, bot: CicadaBot, author: discord.Member | discord.User, draft: ContainerDraft | None = None) -> None:
+    def __init__(
+        self,
+        bot: CicadaBot,
+        author: discord.Member | discord.User,
+        draft: ContainerDraft | None = None,
+        template_name: str = "default",
+    ) -> None:
         super().__init__(timeout=600)
         self.bot = bot
         self.author = author
         self.draft: ContainerDraft = draft or ContainerDraft()
+        self.template_name: str = template_name
         self.current_slide_idx: int = 0  # 0 to 4
+        self.preview_module_id: str | None = None
         self._setup_dynamic_buttons()
 
     def _setup_dynamic_buttons(self) -> None:
@@ -758,18 +1104,22 @@ class EmbedBuilderView(discord.ui.View):
 
     def build_preview_container(self, guild: discord.Guild | None = None, channel: discord.abc.Messageable | None = None) -> CicadaContainer:
         """Top Container: Live rendered preview of the custom card."""
-        return self.draft.to_container(user=self.author, guild=guild, channel=channel, bot=self.bot)
+        return self.draft.to_container(
+            active_module_id=self.preview_module_id,
+            user=self.author,
+            guild=guild,
+            channel=channel,
+            bot=self.bot,
+        )
 
     def build_control_container(self, guild: discord.Guild | None = None) -> CicadaContainer:
         """Bottom Container: Minimal 5-step editor console."""
         slide_key, slide_title, _ = self.SLIDES[self.current_slide_idx]
-        e_reg = getattr(self.bot, "custom_emojis", None)
-        dot = e_reg.get("icons_arrow", e_reg.get("icons_rightarrow", e_reg.get("heart_dot", "-"))) if e_reg else "-"
 
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                f"> **{slide_title}**\n"
+                f"> **{slide_title}** | **Name:** `{self.template_name}`\n"
                 f"> Use controls below to configure this section."
             )
         )
@@ -782,9 +1132,9 @@ class EmbedBuilderView(discord.ui.View):
             desc_len = len(self.draft.description) if self.draft.description else 0
             accent_str = f"`{self.draft.accent_hex}`" if self.draft.accent_hex else "`Default Dark`"
             container.add_text(
-                f"{dot} **Title:** {t_str} | **Author:** {a_str}\n"
-                f"{dot} **Author Icon:** {ai_str} | **Color:** {accent_str}\n"
-                f"{dot} **Description Length:** `{desc_len} chars`"
+                f"**Title:** {t_str} | **Author:** {a_str}\n"
+                f"**Author Icon:** {ai_str} | **Color:** {accent_str}\n"
+                f"**Description Length:** `{desc_len} chars`"
             )
         elif slide_key == "visuals":
             thumb_str = "`Set`" if self.draft.thumbnail_url else "`None`"
@@ -792,28 +1142,28 @@ class EmbedBuilderView(discord.ui.View):
             footer_str = f"`{self.draft.footer_text}`" if self.draft.footer_text else "`None`"
             ts_str = "`Enabled`" if self.draft.timestamp else "`Disabled`"
             container.add_text(
-                f"{dot} **Thumbnail:** {thumb_str} | **Banner:** {banner_str}\n"
-                f"{dot} **Footer:** {footer_str} | **Timestamp:** {ts_str}"
+                f"**Thumbnail:** {thumb_str} | **Banner:** {banner_str}\n"
+                f"**Footer:** {footer_str} | **Timestamp:** {ts_str}"
             )
         elif slide_key == "fields":
             f_cnt = len(self.draft.fields)
             f_summary = ", ".join([f"`{f['name']}`" for f in self.draft.fields[:4]]) if self.draft.fields else "`None`"
             container.add_text(
-                f"{dot} **Total Fields:** `{f_cnt}`\n"
-                f"{dot} **Fields:** {f_summary}"
+                f"**Total Fields:** `{f_cnt}`\n"
+                f"**Fields:** {f_summary}"
             )
         elif slide_key == "interactive":
             b_cnt = len(self.draft.buttons)
-            faq_cnt = len(self.draft.faq_options)
+            m_cnt = len(self.draft.modules)
             b_summary = ", ".join([f"`{b['label']}`" for b in self.draft.buttons[:3]]) if self.draft.buttons else "`None`"
-            faq_summary = ", ".join([f"`{q['label']}`" for q in self.draft.faq_options[:3]]) if self.draft.faq_options else "`None`"
+            m_summary = ", ".join([f"`{m['label']}`" for m in self.draft.modules[:3]]) if self.draft.modules else "`None`"
             container.add_text(
-                f"{dot} **Link Buttons ({b_cnt}/5):** {b_summary}\n"
-                f"{dot} **FAQ Dropdown Options ({faq_cnt}/25):** {faq_summary}"
+                f"**Link Buttons ({b_cnt}/5):** {b_summary}\n"
+                f"**Dropdown Modules ({m_cnt}/25):** {m_summary}"
             )
         elif slide_key == "dispatch":
             container.add_text(
-                f"{dot} **Ready to Publish:** Choose an action below to post, save, or import JSON/HTML."
+                f"**Auto-Saved to `{self.template_name}`:** Post to channel or import raw JSON below."
             )
 
         container.add_separator(divider=True)
@@ -845,7 +1195,10 @@ class EmbedBuilderView(discord.ui.View):
                     elif slide_key == "fields":
                         item.label = "Add Field"
                     elif slide_key == "interactive":
-                        item.label = "Add Button"
+                        if self.preview_module_id and self.preview_module_id.startswith("mod_"):
+                            item.label = "Delete Module"
+                        else:
+                            item.label = "Add Button"
                     elif slide_key == "dispatch":
                         item.label = "Raw JSON/HTML"
                 elif item.custom_id == "btn_secondary_action":
@@ -853,7 +1206,10 @@ class EmbedBuilderView(discord.ui.View):
                         item.label = "Clear Fields"
                         item.disabled = (len(self.draft.fields) == 0)
                     elif slide_key == "interactive":
-                        item.label = "Add FAQ Option"
+                        if self.preview_module_id and self.preview_module_id.startswith("mod_"):
+                            item.label = "Edit Module"
+                        else:
+                            item.label = "Add Module"
                         item.disabled = False
                     elif slide_key == "dispatch":
                         item.label = "Reset Draft"
@@ -863,8 +1219,22 @@ class EmbedBuilderView(discord.ui.View):
                         item.disabled = False
 
     async def update_view(self, interaction: discord.Interaction) -> None:
-        """Update the dual-container message."""
+        """Update the dual-container message and auto-save changes."""
         self._sync_controls()
+        if interaction.message:
+            EmbedBuilderView.active_views[interaction.message.id] = self
+
+        if self.template_name and interaction.guild_id:
+            try:
+                await self.bot.embed_mgr.save_template(
+                    guild_id=interaction.guild_id,
+                    name=self.template_name,
+                    payload=self.draft.to_dict(),
+                    created_by=self.author.id,
+                )
+            except Exception as e:
+                logger.error(f"Failed to auto-save template '{self.template_name}': {e}")
+
         containers = self.get_dual_containers(interaction.guild, interaction.channel)
         await edit_container_response(interaction, containers, view=self)
 
@@ -877,7 +1247,7 @@ class EmbedBuilderView(discord.ui.View):
             discord.SelectOption(label="Step 1: Content & Theme", value="content", description="Title, Author, Icon, Description, Color"),
             discord.SelectOption(label="Step 2: Images & Footer", value="visuals", description="Thumbnail, Banner, Footer Text & Icon, Timestamp"),
             discord.SelectOption(label="Step 3: Custom Fields", value="fields", description="Add, edit, or remove structured sections"),
-            discord.SelectOption(label="Step 4: Buttons & FAQ Menu", value="interactive", description="Manage link buttons and FAQ dropdown options"),
+            discord.SelectOption(label="Step 4: Buttons & Modules", value="interactive", description="Manage link buttons and interactive dropdown modules"),
             discord.SelectOption(label="Step 5: Dispatch & Raw", value="dispatch", description="Send to channel, Save template, Raw JSON import"),
         ],
         row=0,
@@ -911,12 +1281,28 @@ class EmbedBuilderView(discord.ui.View):
         elif slide_key == "visuals":
             await interaction.response.send_modal(VisualsModal(self))
         elif slide_key == "fields":
+            if len(self.draft.fields) >= 25:
+                await interaction.response.send_message("Maximum 25 fields allowed.", ephemeral=True)
+                return
             await interaction.response.send_modal(AddFieldModal(self))
         elif slide_key == "interactive":
-            if len(self.draft.buttons) >= 5:
-                await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
-                return
-            await interaction.response.send_modal(AddButtonModal(self))
+            if self.preview_module_id and self.preview_module_id.startswith("mod_"):
+                try:
+                    idx = int(self.preview_module_id.replace("mod_", ""))
+                    if 0 <= idx < len(self.draft.modules):
+                        self.draft.modules.pop(idx)
+                        for new_i, m in enumerate(self.draft.modules):
+                            m["id"] = f"mod_{new_i}"
+                    self.preview_module_id = None
+                    await self.update_view(interaction)
+                except Exception:
+                    self.preview_module_id = None
+                    await self.update_view(interaction)
+            else:
+                if len(self.draft.buttons) >= 5:
+                    await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
+                    return
+                await interaction.response.send_modal(AddButtonModal(self))
         elif slide_key == "dispatch":
             await interaction.response.send_modal(RawImportModal(self))
 
@@ -928,10 +1314,17 @@ class EmbedBuilderView(discord.ui.View):
             self.draft.fields.clear()
             await self.update_view(interaction)
         elif slide_key == "interactive":
-            if len(self.draft.faq_options) >= 25:
-                await interaction.response.send_message("Maximum 25 FAQ options allowed.", ephemeral=True)
-                return
-            await interaction.response.send_modal(AddFAQModal(self))
+            if self.preview_module_id and self.preview_module_id.startswith("mod_"):
+                try:
+                    idx = int(self.preview_module_id.replace("mod_", ""))
+                    await interaction.response.send_modal(AddModuleModal(self, edit_idx=idx))
+                except Exception:
+                    await interaction.response.send_modal(AddModuleModal(self))
+            else:
+                if len(self.draft.modules) >= 25:
+                    await interaction.response.send_message("Maximum 25 dropdown modules allowed.", ephemeral=True)
+                    return
+                await interaction.response.send_modal(AddModuleModal(self))
         elif slide_key == "dispatch":
             self.draft = ContainerDraft()
             await self.update_view(interaction)
@@ -979,7 +1372,14 @@ class EmbedBuilderView(discord.ui.View):
                     bot=self.parent_view.bot,
                 )
                 try:
-                    await send_container_response(target_ch, container)
+                    target_msg = await send_container_response(target_ch, container)
+                    if hasattr(target_msg, "id") and target_msg:
+                        await self.parent_view.bot.embed_mgr.record_interactive_card(
+                            guild_id=inter.guild_id or 0,
+                            message_id=target_msg.id,
+                            template_name=self.parent_view.template_name,
+                            payload=self.parent_view.draft.to_dict(),
+                        )
                     await inter.response.send_message(f"Card successfully posted to {target_ch.mention}.", ephemeral=True)
                 except Exception as e:
                     logger.error(f"Failed to post container card: {e}", exc_info=e)
@@ -999,45 +1399,271 @@ class EmbedBuilder(commands.Cog):
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction) -> None:
-        """Handle persistent FAQ dropdown select menu responses."""
-        if interaction.data and interaction.data.get("custom_id") == "card_faq_select":
-            selected_values = interaction.data.get("values", [])
-            if selected_values:
-                val = selected_values[0]
-                if val.startswith("faq_"):
-                    try:
-                        idx = int(val.replace("faq_", ""))
-                        # We can respond with FAQ information
-                        await interaction.response.send_message(
-                            f"Selected topic option #{idx + 1}.",
-                            ephemeral=True,
-                        )
-                    except Exception:
-                        pass
+        """Handle persistent interactive card dropdown module switching and hub template picker."""
+        if not interaction.data:
+            return
+        custom_id = interaction.data.get("custom_id")
+        if custom_id not in ("card_module_select", "hub_select_template"):
+            return
+
+        guild = interaction.guild
+        message = interaction.message
+        if not guild or not message:
+            return
+
+        selected_vals = interaction.data.get("values", [])
+        if not selected_vals:
+            return
+
+        selected_id = selected_vals[0]
+
+        # Handle Hub Template Selection Dropdown
+        if custom_id == "hub_select_template":
+            template_name = selected_id
+            data = await self.bot.embed_mgr.get_template(interaction.guild_id or 0, template_name)
+            if not data:
+                await interaction.response.send_message(f"Embed '{template_name}' not found.", ephemeral=True)
+                return
+
+            draft = ContainerDraft.from_dict(data)
+            view = EmbedBuilderView(self.bot, interaction.user, draft=draft, template_name=template_name)
+            containers = view.get_dual_containers(interaction.guild, interaction.channel)
+            msg_data = await send_container_response(interaction, containers, view=view)
+            msg_id = None
+            if isinstance(msg_data, dict) and "id" in msg_data:
+                msg_id = int(msg_data["id"])
+            elif hasattr(msg_data, "id"):
+                msg_id = int(msg_data.id)
+            if msg_id:
+                EmbedBuilderView.active_views[msg_id] = view
+            return
+
+        # Case 1: Inside active EmbedBuilderView session
+        if message.id in EmbedBuilderView.active_views:
+            active_view = EmbedBuilderView.active_views[message.id]
+            if interaction.user.id != active_view.author.id:
+                await interaction.response.send_message("Only the builder author can test the preview.", ephemeral=True)
+                return
+            active_view.preview_module_id = selected_id
+            await active_view.update_view(interaction)
+            return
+
+        # Case 2: On a posted channel card from database
+        card_data = await self.bot.embed_mgr.get_interactive_card(guild.id, message.id)
+        if card_data:
+            draft = ContainerDraft.from_dict(card_data)
+            avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
+            new_container = draft.to_container(
+                active_module_id=selected_id,
+                user=interaction.user,
+                guild=guild,
+                channel=interaction.channel,
+                bot=self.bot,
+                default_avatar=avatar_url,
+            )
+
+            payload = new_container.to_payload()
+            try:
+                if not interaction.response.is_done():
+                    await self.bot.http.request(
+                        discord.http.Route(
+                            "POST",
+                            f"/interactions/{interaction.id}/{interaction.token}/callback",
+                        ),
+                        json={"type": 7, "data": payload},  # 7 = UPDATE_MESSAGE
+                    )
+                else:
+                    await self.bot.http.request(
+                        discord.http.Route("PATCH", f"/channels/{interaction.channel_id}/messages/{message.id}"),
+                        json=payload,
+                    )
+            except Exception as e:
+                logger.error(f"Failed to switch interactive module page: {e}", exc_info=e)
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+        else:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
 
     @commands.hybrid_group(
         name="embed",
         aliases=["embedbuilder", "container", "card"],
         description="Design, customize, preview, save, edit, and post Components V2 container cards.",
-        fallback="create",
+        fallback="hub",
     )
     @commands.has_permissions(manage_messages=True)
     async def embed_group(self, ctx: CustomContext, template_name: str | None = None) -> None:
-        """Launch the dual-container interactive embed builder."""
-        draft = ContainerDraft()
+        """Launch the embed manager dashboard or a specific named builder."""
+        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         if template_name:
-            data = await self.bot.embed_mgr.get_template(ctx.guild.id, template_name)
-            if data:
-                draft = ContainerDraft.from_dict(data)
+            clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", template_name.lower())
+            data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
+            draft = ContainerDraft.from_dict(data) if data else ContainerDraft()
+            view = EmbedBuilderView(self.bot, ctx.author, draft=draft, template_name=clean_name)
+            containers = view.get_dual_containers(ctx.guild, ctx.channel)
+            msg_data = await send_container_response(ctx, containers, view=view)
+            msg_id = None
+            if isinstance(msg_data, dict) and "id" in msg_data:
+                msg_id = int(msg_data["id"])
+            elif hasattr(msg_data, "id"):
+                msg_id = int(msg_data.id)
+            if msg_id:
+                EmbedBuilderView.active_views[msg_id] = view
+            return
 
-        view = EmbedBuilderView(self.bot, ctx.author, draft=draft)
+        templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
+        hub_container = CicadaContainer(accent_color=None)
+        hub_container.add_section(
+            content=(
+                "**Server Embed Manager**\n"
+                f"> Manage, design, and dispatch custom container cards for **{ctx.guild.name}**.\n"
+                f"> All embeds are saved and managed by their unique **Name**."
+            )
+        )
+        hub_container.add_separator(divider=True)
+
+        if templates:
+            t_lines = [f"`{t.get('embed_name')}`" for t in templates[:25]]
+            hub_container.add_text(
+                f"**Saved Embeds ({len(templates)}):** " + " , ".join(t_lines)
+            )
+        else:
+            hub_container.add_text(
+                "**Saved Embeds:** `None`"
+            )
+
+        hub_container.add_separator(divider=True)
+        hub_container.add_text(
+            f"`{prefix}embed create <name>` , `{prefix}embed edit <name>`\n"
+            f"`{prefix}embed show <name>` , `{prefix}embed delete <name>`\n"
+            f"`{prefix}embed send #channel <name>` , `{prefix}embed list`"
+        )
+        if templates:
+            hub_container.add_separator(divider=True)
+            options = [
+                {
+                    "label": f"Edit: {t.get('embed_name', 'unknown')}"[:100],
+                    "value": t.get("embed_name", "unknown"),
+                    "description": f"Open builder for '{t.get('embed_name', '')}'"[:100],
+                }
+                for t in templates[:25]
+            ]
+            hub_container.add_action_row([
+                {
+                    "type": 3,
+                    "custom_id": "hub_select_template",
+                    "placeholder": "Select an existing embed to edit...",
+                    "options": options,
+                }
+            ])
+
+        hub_container.add_separator(divider=True)
+        hub_container.add_text(f"-# Requested by {ctx.author.display_name}")
+
+        await send_container_response(ctx, hub_container)
+
+    @embed_group.command(
+        name="create",
+        description="Create a new named embed. Usage: ?embed create <name>",
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def embed_create(self, ctx: CustomContext, name: str) -> None:
+        """Create a new named embed."""
+        clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
+        if not clean_name:
+            await ctx.send("Please provide a valid embed name (letters, numbers, hyphens). Example: `?embed create rules`")
+            return
+
+        existing = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
+        draft = ContainerDraft.from_dict(existing) if existing else ContainerDraft()
+
+        # Save initial template record
+        await self.bot.embed_mgr.save_template(
+            guild_id=ctx.guild.id,
+            name=clean_name,
+            payload=draft.to_dict(),
+            created_by=ctx.author.id,
+        )
+
+        view = EmbedBuilderView(self.bot, ctx.author, draft=draft, template_name=clean_name)
         containers = view.get_dual_containers(ctx.guild, ctx.channel)
-        await send_container_response(ctx, containers, view=view)
+        msg_data = await send_container_response(ctx, containers, view=view)
+        msg_id = None
+        if isinstance(msg_data, dict) and "id" in msg_data:
+            msg_id = int(msg_data["id"])
+        elif hasattr(msg_data, "id"):
+            msg_id = int(msg_data.id)
+        if msg_id:
+            EmbedBuilderView.active_views[msg_id] = view
+
+    @embed_group.command(
+        name="edit",
+        description="Edit an existing named embed. Usage: ?embed edit <name>",
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def embed_edit_template(self, ctx: CustomContext, name: str) -> None:
+        """Open the builder to edit a saved template."""
+        clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
+        template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
+        if not template_data:
+            await ctx.send(f"Embed template `{clean_name}` not found. Create it using `?embed create {clean_name}`.")
+            return
+
+        draft = ContainerDraft.from_dict(template_data)
+        view = EmbedBuilderView(self.bot, ctx.author, draft=draft, template_name=clean_name)
+        containers = view.get_dual_containers(ctx.guild, ctx.channel)
+        msg_data = await send_container_response(ctx, containers, view=view)
+        msg_id = None
+        if isinstance(msg_data, dict) and "id" in msg_data:
+            msg_id = int(msg_data["id"])
+        elif hasattr(msg_data, "id"):
+            msg_id = int(msg_data.id)
+        if msg_id:
+            EmbedBuilderView.active_views[msg_id] = view
+
+    @embed_group.command(
+        name="show",
+        aliases=["view", "preview"],
+        description="Preview a saved embed card. Usage: ?embed show <name>",
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def embed_show(self, ctx: CustomContext, name: str) -> None:
+        """View a live preview of a saved embed template."""
+        clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
+        template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
+        if not template_data:
+            await ctx.send(f"Embed template `{clean_name}` not found.")
+            return
+
+        draft = ContainerDraft.from_dict(template_data)
+        avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
+        container = draft.to_container(
+            user=ctx.author,
+            guild=ctx.guild,
+            channel=ctx.channel,
+            bot=self.bot,
+            default_avatar=avatar_url,
+        )
+        msg_data = await send_container_response(ctx, container)
+        if hasattr(msg_data, "id") and msg_data:
+            await self.bot.embed_mgr.record_interactive_card(
+                guild_id=ctx.guild.id,
+                message_id=msg_data.id,
+                template_name=clean_name,
+                payload=draft.to_dict(),
+            )
+        elif isinstance(msg_data, dict) and "id" in msg_data:
+            await self.bot.embed_mgr.record_interactive_card(
+                guild_id=ctx.guild.id,
+                message_id=int(msg_data["id"]),
+                template_name=clean_name,
+                payload=draft.to_dict(),
+            )
 
     @embed_group.command(
         name="send",
         aliases=["post"],
-        description="Send a saved template to a channel. Usage: ?embed send [#channel] <template_name>",
+        description="Send a saved template to a channel. Usage: ?embed send [#channel] <name>",
     )
     @commands.has_permissions(manage_messages=True)
     async def embed_send(
@@ -1065,9 +1691,10 @@ class EmbedBuilder(commands.Cog):
                     return
             actual_name = template_name
 
-        template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, actual_name)
+        clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", actual_name.lower())
+        template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
         if not template_data:
-            await ctx.send(f"Saved template '{actual_name}' not found.")
+            await ctx.send(f"Saved template '{clean_name}' not found.")
             return
 
         draft = ContainerDraft.from_dict(template_data)
@@ -1080,92 +1707,81 @@ class EmbedBuilder(commands.Cog):
             default_avatar=avatar_url,
         )
         try:
-            await send_container_response(target_channel, container)
-            ch_mention = getattr(target_channel, "mention", f"#{target_channel}")
+            target_msg = await send_container_response(target_channel, container)
+            msg_id = None
+            if hasattr(target_msg, "id"):
+                msg_id = target_msg.id
+            elif isinstance(target_msg, dict) and "id" in target_msg:
+                msg_id = int(target_msg["id"])
 
+            if msg_id:
+                await self.bot.embed_mgr.record_interactive_card(
+                    guild_id=ctx.guild.id,
+                    message_id=msg_id,
+                    template_name=clean_name,
+                    payload=draft.to_dict(),
+                )
+
+            ch_mention = getattr(target_channel, "mention", f"#{target_channel}")
             resp_container = CicadaContainer(accent_color=None)
             resp_container.add_section(
                 content=(
                     "**Card Dispatched**\n"
-                    f"> Saved template `{actual_name}` posted to {ch_mention}."
+                    f"> Saved embed `{clean_name}` posted to {ch_mention}."
                 )
             )
             resp_container.add_separator(divider=True)
             resp_container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, resp_container)
         except Exception as e:
-            logger.error(f"Failed to post embed template '{actual_name}': {e}", exc_info=e)
+            logger.error(f"Failed to post embed template '{clean_name}': {e}", exc_info=e)
             await ctx.send(f"Failed to post card: {e}")
 
     @embed_group.command(
-        name="edit",
-        description="Edit an existing bot message in this channel. Usage: ?embed edit <message_id> <template_name>",
+        name="delete",
+        aliases=["remove"],
+        description="Delete a saved template. Usage: ?embed delete <name>",
     )
     @commands.has_permissions(manage_messages=True)
-    async def embed_edit_msg(
-        self, ctx: CustomContext, message_id: int, template_name: str
-    ) -> None:
-        """Edit an existing bot container message."""
-        template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, template_name)
-        if not template_data:
-            await ctx.send(f"Saved template '{template_name}' not found.")
-            return
-
-        try:
-            target_msg = await ctx.channel.fetch_message(message_id)
-        except Exception:
-            await ctx.send(f"Message ID '{message_id}' not found in this channel.")
-            return
-
-        if self.bot.user and target_msg.author.id != self.bot.user.id:
-            await ctx.send("Can only edit messages sent by this bot.")
-            return
-
-        draft = ContainerDraft.from_dict(template_data)
-        avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
-        container = draft.to_container(
-            user=ctx.author,
-            guild=ctx.guild,
-            channel=ctx.channel,
-            bot=self.bot,
-            default_avatar=avatar_url,
-        )
-
-        payload = container.to_payload()
-        try:
-            await self.bot.http.request(
-                discord.http.Route("PATCH", f"/channels/{ctx.channel.id}/messages/{message_id}"),
-                json=payload,
-            )
-            resp_container = CicadaContainer(accent_color=None)
-            resp_container.add_section(
+    async def embed_delete(self, ctx: CustomContext, name: str) -> None:
+        """Delete a saved template."""
+        clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
+        success = await self.bot.embed_mgr.delete_template(ctx.guild.id, clean_name)
+        container = CicadaContainer(accent_color=None)
+        if success:
+            container.add_section(
                 content=(
-                    "**Message Updated**\n"
-                    f"> Target message `{message_id}` updated with template `{template_name}`."
+                    "**Embed Deleted**\n"
+                    f"> Embed template `{clean_name}` has been removed from this server."
                 )
             )
-            resp_container.add_separator(divider=True)
-            resp_container.add_text(f"-# Requested by {ctx.author.display_name}")
-            await send_container_response(ctx, resp_container)
-        except Exception as e:
-            logger.error(f"Failed to edit message {message_id}: {e}", exc_info=e)
-            await ctx.send(f"Failed to edit message {message_id}: {e}")
+        else:
+            container.add_section(
+                content=(
+                    "**Embed Not Found**\n"
+                    f"> Could not find or delete template `{clean_name}`."
+                )
+            )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
 
     @embed_group.command(
         name="list",
         aliases=["all", "templates"],
-        description="List all saved templates for this server.",
+        description="List all saved embeds in this server. Usage: ?embed list",
     )
     @commands.has_permissions(manage_messages=True)
     async def embed_list(self, ctx: CustomContext) -> None:
         """List all saved templates."""
         templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
+        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         if not templates:
             container = CicadaContainer(accent_color=None)
             container.add_section(
                 content=(
                     "**Saved Embed Templates**\n"
-                    "> No saved templates found in this server. Create one using `?embed`."
+                    f"> No saved embeds found in this server. Create one using `{prefix}embed create <name>`."
                 )
             )
             container.add_separator(divider=True)
@@ -1176,48 +1792,19 @@ class EmbedBuilder(commands.Cog):
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Saved Server Templates**\n"
-                f"> Listing `{len(templates)}` saved container template(s) in this server."
+                "**Saved Server Embeds**\n"
+                f"> Listing `{len(templates)}` saved embed template(s) in this server."
             )
         )
         container.add_separator(divider=True)
 
         lines = []
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         for t in templates:
-            name = t.get("embed_name", "unknown")
+            t_name = t.get("embed_name", "unknown")
             created_at = str(t.get("created_at", ""))[:10]
-            lines.append(f"`{name}` (Created {created_at}) — `{prefix}embed send {name}`")
+            lines.append(f"`{t_name}` (Created {created_at}) — `{prefix}embed edit {t_name}`")
 
         container.add_text("\n".join(lines))
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
-        await send_container_response(ctx, container)
-
-    @embed_group.command(
-        name="delete",
-        aliases=["remove"],
-        description="Delete a saved template. Usage: ?embed delete <template_name>",
-    )
-    @commands.has_permissions(manage_messages=True)
-    async def embed_delete(self, ctx: CustomContext, template_name: str) -> None:
-        """Delete a saved template."""
-        success = await self.bot.embed_mgr.delete_template(ctx.guild.id, template_name)
-        container = CicadaContainer(accent_color=None)
-        if success:
-            container.add_section(
-                content=(
-                    "**Template Deleted**\n"
-                    f"> Template `{template_name}` has been removed from this server."
-                )
-            )
-        else:
-            container.add_section(
-                content=(
-                    "**Template Not Found**\n"
-                    f"> Could not find or delete template `{template_name}`."
-                )
-            )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)

@@ -120,6 +120,7 @@ class CicadaContainer:
 def build_container_payload(
     container: CicadaContainer | list[CicadaContainer],
     view: discord.ui.View | None = None,
+    content: str | None = None,
 ) -> dict[str, Any]:
     """Generate the full Discord REST payload supporting single or multiple stacked containers with nested view controls."""
     if isinstance(container, list):
@@ -137,11 +138,14 @@ def build_container_payload(
                 c_dict["components"].extend(view_comps)
         comps.append(c_dict)
 
-    return {
+    payload: dict[str, Any] = {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
         "components": comps,
-        "allowed_mentions": {"parse": []},
+        "allowed_mentions": {"parse": ["users", "roles", "everyone"]},
     }
+    if content:
+        payload["content"] = str(content)
+    return payload
 
 
 async def send_container_response(
@@ -149,6 +153,7 @@ async def send_container_response(
     container: CicadaContainer | list[CicadaContainer],
     view: discord.ui.View | None = None,
     ephemeral: bool = False,
+    content: str | None = None,
 ) -> Any:
     """Send or edit a message using Components V2 Container(s)."""
     # 1. Resolve hybrid context interaction if present
@@ -158,7 +163,7 @@ async def send_container_response(
     else:
         target = interaction_or_ctx
 
-    payload = build_container_payload(container, view=view)
+    payload = build_container_payload(container, view=view, content=content)
 
     if isinstance(target, discord.Interaction):
         interaction = target

@@ -118,12 +118,18 @@ class AutoEvents(commands.Cog):
                 content=outer_content,
             )
             # If template has interactive modules, register card for page switching
-            if container and embed_name and hasattr(target_msg, "id") and target_msg:
+            msg_id = None
+            if isinstance(target_msg, dict) and "id" in target_msg:
+                msg_id = int(target_msg["id"])
+            elif hasattr(target_msg, "id"):
+                msg_id = int(target_msg.id)
+
+            if container and embed_name and msg_id:
                 draft_data = await self.bot.embed_mgr.get_template(guild.id, embed_name)
                 if draft_data:
                     await self.bot.embed_mgr.record_interactive_card(
                         guild_id=guild.id,
-                        message_id=target_msg.id,
+                        message_id=msg_id,
                         template_name=embed_name,
                         payload=draft_data,
                     )
@@ -230,15 +236,35 @@ class AutoEvents(commands.Cog):
     async def welcome_set(
         self,
         ctx: CustomContext,
-        channel: discord.TextChannel,
         *,
-        args: str,
+        args: str = "",
     ) -> None:
         """Bind channel, message content, and named embed template."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         raw_text = args.strip()
 
-        # Parse embed name & message content
+        target_channel = None
+        if ctx.message.channel_mentions:
+            target_channel = ctx.message.channel_mentions[0]
+            raw_text = re.sub(rf"<#{target_channel.id}>", "", raw_text).strip()
+        else:
+            words = raw_text.split()
+            if words:
+                first_w = words[0].lstrip("#")
+                if first_w.isdigit():
+                    ch = ctx.guild.get_channel(int(first_w))
+                    if isinstance(ch, discord.TextChannel):
+                        target_channel = ch
+                        raw_text = " ".join(words[1:]).strip()
+                if not target_channel:
+                    ch = discord.utils.get(ctx.guild.text_channels, name=first_w.lower())
+                    if ch:
+                        target_channel = ch
+                        raw_text = " ".join(words[1:]).strip()
+
+        if not target_channel:
+            target_channel = ctx.channel
+
         words = raw_text.split()
         embed_name = None
         message_content = None
@@ -249,23 +275,26 @@ class AutoEvents(commands.Cog):
             if template:
                 embed_name = clean_word
             else:
-                # If single word is not a template, treat as message content with default card
                 message_content = raw_text
-        else:
-            # Check if last word is a saved template
+        elif len(words) > 1:
             last_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[-1].lower())
-            template = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
-            if template:
+            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
+            if template_last:
                 embed_name = last_clean
-                message_content = raw_text[:-len(words[-1])].strip()
+                message_content = raw_text[:-len(words[-1])].strip() or None
             else:
-                # Entire text is message content
-                message_content = raw_text
+                first_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
+                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean)
+                if template_first:
+                    embed_name = first_clean
+                    message_content = raw_text[len(words[0]):].strip() or None
+                else:
+                    message_content = raw_text
 
         success = await self.bot.event_mgr.save_event_config(
             guild_id=ctx.guild.id,
             event_type="welcome",
-            channel_id=channel.id,
+            channel_id=target_channel.id,
             embed_name=embed_name,
             message_content=message_content,
             is_enabled=True,
@@ -279,14 +308,14 @@ class AutoEvents(commands.Cog):
         container.add_section(
             content=(
                 f"**Welcome System Configured**\n"
-                f"> New members will be greeted in {channel.mention}."
+                f"> New members will be greeted in {target_channel.mention}."
             )
         )
         container.add_separator(divider=True)
         emb_display = f"`{embed_name}`" if embed_name else "`Default Card`"
         msg_display = f"`{message_content}`" if message_content else "`None (Embed Only)`"
         container.add_text(
-            f"**Channel:** {channel.mention}\n"
+            f"**Channel:** {target_channel.mention}\n"
             f"**Bound Embed:** {emb_display}\n"
             f"**Outer Text:** {msg_display}\n\n"
             f"> Run `{prefix}welcome test` to preview the message live!"
@@ -397,13 +426,34 @@ class AutoEvents(commands.Cog):
     async def leave_set(
         self,
         ctx: CustomContext,
-        channel: discord.TextChannel,
         *,
-        args: str,
+        args: str = "",
     ) -> None:
         """Bind leave channel, message content, and named embed template."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         raw_text = args.strip()
+
+        target_channel = None
+        if ctx.message.channel_mentions:
+            target_channel = ctx.message.channel_mentions[0]
+            raw_text = re.sub(rf"<#{target_channel.id}>", "", raw_text).strip()
+        else:
+            words = raw_text.split()
+            if words:
+                first_w = words[0].lstrip("#")
+                if first_w.isdigit():
+                    ch = ctx.guild.get_channel(int(first_w))
+                    if isinstance(ch, discord.TextChannel):
+                        target_channel = ch
+                        raw_text = " ".join(words[1:]).strip()
+                if not target_channel:
+                    ch = discord.utils.get(ctx.guild.text_channels, name=first_w.lower())
+                    if ch:
+                        target_channel = ch
+                        raw_text = " ".join(words[1:]).strip()
+
+        if not target_channel:
+            target_channel = ctx.channel
 
         words = raw_text.split()
         embed_name = None
@@ -416,19 +466,25 @@ class AutoEvents(commands.Cog):
                 embed_name = clean_word
             else:
                 message_content = raw_text
-        else:
+        elif len(words) > 1:
             last_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[-1].lower())
-            template = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
-            if template:
+            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
+            if template_last:
                 embed_name = last_clean
-                message_content = raw_text[:-len(words[-1])].strip()
+                message_content = raw_text[:-len(words[-1])].strip() or None
             else:
-                message_content = raw_text
+                first_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
+                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean)
+                if template_first:
+                    embed_name = first_clean
+                    message_content = raw_text[len(words[0]):].strip() or None
+                else:
+                    message_content = raw_text
 
         success = await self.bot.event_mgr.save_event_config(
             guild_id=ctx.guild.id,
             event_type="leave",
-            channel_id=channel.id,
+            channel_id=target_channel.id,
             embed_name=embed_name,
             message_content=message_content,
             is_enabled=True,
@@ -442,14 +498,14 @@ class AutoEvents(commands.Cog):
         container.add_section(
             content=(
                 f"**Leave System Configured**\n"
-                f"> Departure messages will be posted in {channel.mention}."
+                f"> Departure messages will be posted in {target_channel.mention}."
             )
         )
         container.add_separator(divider=True)
         emb_display = f"`{embed_name}`" if embed_name else "`Default Card`"
         msg_display = f"`{message_content}`" if message_content else "`None (Embed Only)`"
         container.add_text(
-            f"**Channel:** {channel.mention}\n"
+            f"**Channel:** {target_channel.mention}\n"
             f"**Bound Embed:** {emb_display}\n"
             f"**Outer Text:** {msg_display}\n\n"
             f"> Run `{prefix}leave test` to preview the message live!"
@@ -559,13 +615,34 @@ class AutoEvents(commands.Cog):
     async def boost_set(
         self,
         ctx: CustomContext,
-        channel: discord.TextChannel,
         *,
-        args: str,
+        args: str = "",
     ) -> None:
         """Bind boost channel, message content, and named embed template."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         raw_text = args.strip()
+
+        target_channel = None
+        if ctx.message.channel_mentions:
+            target_channel = ctx.message.channel_mentions[0]
+            raw_text = re.sub(rf"<#{target_channel.id}>", "", raw_text).strip()
+        else:
+            words = raw_text.split()
+            if words:
+                first_w = words[0].lstrip("#")
+                if first_w.isdigit():
+                    ch = ctx.guild.get_channel(int(first_w))
+                    if isinstance(ch, discord.TextChannel):
+                        target_channel = ch
+                        raw_text = " ".join(words[1:]).strip()
+                if not target_channel:
+                    ch = discord.utils.get(ctx.guild.text_channels, name=first_w.lower())
+                    if ch:
+                        target_channel = ch
+                        raw_text = " ".join(words[1:]).strip()
+
+        if not target_channel:
+            target_channel = ctx.channel
 
         words = raw_text.split()
         embed_name = None
@@ -578,19 +655,25 @@ class AutoEvents(commands.Cog):
                 embed_name = clean_word
             else:
                 message_content = raw_text
-        else:
+        elif len(words) > 1:
             last_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[-1].lower())
-            template = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
-            if template:
+            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
+            if template_last:
                 embed_name = last_clean
-                message_content = raw_text[:-len(words[-1])].strip()
+                message_content = raw_text[:-len(words[-1])].strip() or None
             else:
-                message_content = raw_text
+                first_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
+                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean)
+                if template_first:
+                    embed_name = first_clean
+                    message_content = raw_text[len(words[0]):].strip() or None
+                else:
+                    message_content = raw_text
 
         success = await self.bot.event_mgr.save_event_config(
             guild_id=ctx.guild.id,
             event_type="boost",
-            channel_id=channel.id,
+            channel_id=target_channel.id,
             embed_name=embed_name,
             message_content=message_content,
             is_enabled=True,
@@ -604,14 +687,14 @@ class AutoEvents(commands.Cog):
         container.add_section(
             content=(
                 f"**Boost Celebration System Configured**\n"
-                f"> Boost announcements will be posted in {channel.mention}."
+                f"> Boost announcements will be posted in {target_channel.mention}."
             )
         )
         container.add_separator(divider=True)
         emb_display = f"`{embed_name}`" if embed_name else "`Default Card`"
         msg_display = f"`{message_content}`" if message_content else "`None (Embed Only)`"
         container.add_text(
-            f"**Channel:** {channel.mention}\n"
+            f"**Channel:** {target_channel.mention}\n"
             f"**Bound Embed:** {emb_display}\n"
             f"**Outer Text:** {msg_display}\n\n"
             f"> Run `{prefix}boost test` to preview the message live!"

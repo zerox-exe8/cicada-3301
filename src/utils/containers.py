@@ -137,38 +137,30 @@ def build_container_payload(
         container_list = [container]
 
     root_comps = []
-    for c in container_list:
+    if content and str(content).strip():
+        root_comps.append({
+            "type": 10,
+            "content": str(content).strip(),
+        })
+
+    for idx, c in enumerate(container_list):
         c_dict = c.to_dict()
+        # Embed view's action rows directly inside the bottom/last container
+        if idx == len(container_list) - 1 and view is not None:
+            view_comps = view.to_components()
+            if view_comps:
+                c_dict["components"].extend(view_comps)
         
-        # Extract Action Rows (Type 1) to top-level message components (Discord Components V2 spec)
-        inner_comps = []
-        extracted_action_rows = []
-        for comp in c_dict.get("components", []):
-            if comp.get("type") == 1:
-                extracted_action_rows.append(comp)
-            else:
-                inner_comps.append(comp)
-        
-        if not inner_comps:
-            inner_comps.append({"type": 10, "content": " "})
-        c_dict["components"] = inner_comps
-        
+        if not c_dict.get("components"):
+            c_dict["components"] = [{"type": 10, "content": " "}]
+            
         root_comps.append(c_dict)
-        root_comps.extend(extracted_action_rows)
 
-    if view is not None:
-        view_comps = view.to_components()
-        if view_comps:
-            root_comps.extend(view_comps)
-
-    payload: dict[str, Any] = {
+    return {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
         "components": root_comps,
         "allowed_mentions": {"parse": []},
     }
-    if content:
-        payload["content"] = str(content)
-    return payload
 
 
 async def send_container_response(
@@ -250,7 +242,7 @@ async def send_container_response(
                 if guild and guild.me and obj.permissions_for(guild.me).manage_webhooks:
                     webhooks = await obj.webhooks()
                     my_id = bot_user.id if bot_user else (guild.me.id if guild.me else None)
-                    wh = next((w for w in webhooks if w.user and my_id and w.user.id == my_id), None)
+                    wh = next((w for w in webhooks if w.token and (w.user and my_id and w.user.id == my_id or w.name == "Cicada Events")), None)
                     if not wh:
                         wh = await obj.create_webhook(name="Cicada Events", reason="Components V2 container dispatcher")
             except Exception as whe:

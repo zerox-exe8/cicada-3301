@@ -1245,9 +1245,9 @@ class EmbedBuilderView(discord.ui.View):
                         item.label = "Reset Draft"
                         item.disabled = False
                     elif slide_key == "visuals":
-                        ts_state = "ON" if self.draft.timestamp else "OFF"
-                        item.label = f"Timestamp: {ts_state}"
-                        item.disabled = False
+                        item.label = "Clear Visuals"
+                        has_vis = bool(self.draft.thumbnail_url or self.draft.image_url or self.draft.footer_text)
+                        item.disabled = not has_vis
                     elif slide_key == "fields":
                         item.label = "Reset Draft"
                         item.disabled = False
@@ -1260,14 +1260,6 @@ class EmbedBuilderView(discord.ui.View):
                             item.disabled = (len(self.draft.modules) == 0 and len(self.draft.buttons) == 0)
                     elif slide_key == "dispatch":
                         item.label = "Raw JSON"
-                        item.disabled = False
-                elif item.custom_id == "btn_action_4":
-                    if slide_key == "visuals":
-                        item.label = "Clear Visuals"
-                        has_vis = bool(self.draft.thumbnail_url or self.draft.image_url or self.draft.footer_text)
-                        item.disabled = not has_vis
-                    else:
-                        item.label = "Reset Draft"
                         item.disabled = False
                 elif item.custom_id == "btn_send":
                     if slide_key == "dispatch":
@@ -1393,7 +1385,9 @@ class EmbedBuilderView(discord.ui.View):
             self.draft = ContainerDraft()
             await self.update_view(interaction)
         elif slide_key == "visuals":
-            self.draft.timestamp = not self.draft.timestamp
+            self.draft.thumbnail_url = None
+            self.draft.image_url = None
+            self.draft.footer_text = None
             await self.update_view(interaction)
         elif slide_key == "interactive":
             if self.preview_module_id and self.preview_module_id.startswith("mod_"):
@@ -1408,18 +1402,6 @@ class EmbedBuilderView(discord.ui.View):
                 await self.update_view(interaction)
         elif slide_key == "dispatch":
             await interaction.response.send_modal(RawImportModal(self))
-
-    @discord.ui.button(label="Action 4", style=discord.ButtonStyle.secondary, custom_id="btn_action_4", row=1)
-    async def btn_action_4(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        slide_key, _, _ = self.SLIDES[self.current_slide_idx]
-        if slide_key == "visuals":
-            self.draft.thumbnail_url = None
-            self.draft.image_url = None
-            self.draft.footer_text = None
-            await self.update_view(interaction)
-        else:
-            self.draft = ContainerDraft()
-            await self.update_view(interaction)
 
     @discord.ui.button(label="Send Embed", style=discord.ButtonStyle.secondary, custom_id="btn_send", row=1)
     async def btn_send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:

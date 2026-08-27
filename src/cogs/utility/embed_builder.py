@@ -281,13 +281,13 @@ class ContainerDraft:
 
         # Render Header & Description with Divider Line between them
         if top_lines and desc_text:
-            top_header_content = "\n".join(top_lines)
+            top_header_content = "\n\n".join(top_lines)
             container.add_section(content=top_header_content, accessory=accessory_dict)
             container.add_separator(divider=True)
             container.add_text(desc_text)
             container.add_separator(divider=True)
         elif top_lines:
-            top_header_content = "\n".join(top_lines)
+            top_header_content = "\n\n".join(top_lines)
             container.add_section(content=top_header_content, accessory=accessory_dict)
             container.add_separator(divider=True)
         elif desc_text:

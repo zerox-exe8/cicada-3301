@@ -6,11 +6,14 @@ Sections, Separators, and integrated Action Rows (Dropdowns/Buttons inside the c
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 import discord
 from discord.ext import commands
 
 from src.core.config import Config
+
+logger = logging.getLogger("Cicada.Containers")
 
 
 class CicadaContainer:
@@ -73,6 +76,8 @@ class CicadaContainer:
 
     def to_embed(self) -> discord.Embed:
         """Convert container components into a standard discord.Embed for fallback compatibility."""
+        if hasattr(self, "_fallback_embed") and self._fallback_embed is not None:
+            return self._fallback_embed
         embed = discord.Embed(
             color=self.accent_color or 0x00FF66,
         )

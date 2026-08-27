@@ -373,9 +373,27 @@ class AutoEvents(commands.Cog):
 
         success, err = await self._send_event_card("welcome", ctx.guild, ctx.author, test_channel=target_ch)
         if success:
-            await ctx.send(f"Test welcome card dispatched to {target_ch.mention}!")
+            resp = CicadaContainer(accent_color=0x00FF66)
+            resp.add_section(
+                content=(
+                    f"**Welcome Test Card Dispatched**\n"
+                    f"> Test welcome message was successfully sent to {target_ch.mention}."
+                )
+            )
+            resp.add_separator(divider=True)
+            resp.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, resp)
         else:
-            await ctx.send(f"Failed to dispatch test card: {err}")
+            resp = CicadaContainer(accent_color=0xFF0033)
+            resp.add_section(
+                content=(
+                    f"**Welcome Test Dispatch Failed**\n"
+                    f"> {err}"
+                )
+            )
+            resp.add_separator(divider=True)
+            resp.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, resp)
 
     @welcome_group.command(
         name="toggle",
@@ -570,9 +588,27 @@ class AutoEvents(commands.Cog):
 
         success, err = await self._send_event_card("leave", ctx.guild, ctx.author, test_channel=target_ch)
         if success:
-            await ctx.send(f"Test leave card dispatched to {target_ch.mention}!")
+            resp = CicadaContainer(accent_color=0x00FF66)
+            resp.add_section(
+                content=(
+                    f"**Leave Test Card Dispatched**\n"
+                    f"> Test departure message was successfully sent to {target_ch.mention}."
+                )
+            )
+            resp.add_separator(divider=True)
+            resp.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, resp)
         else:
-            await ctx.send(f"Failed to dispatch test card: {err}")
+            resp = CicadaContainer(accent_color=0xFF0033)
+            resp.add_section(
+                content=(
+                    f"**Leave Test Dispatch Failed**\n"
+                    f"> {err}"
+                )
+            )
+            resp.add_separator(divider=True)
+            resp.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, resp)
 
     @leave_group.command(
         name="toggle",
@@ -771,9 +807,27 @@ class AutoEvents(commands.Cog):
         }
         success, err = await self._send_event_card("boost", ctx.guild, ctx.author, extra=extra, test_channel=target_ch)
         if success:
-            await ctx.send(f"Test boost card dispatched to {target_ch.mention}!")
+            resp = CicadaContainer(accent_color=0x00FF66)
+            resp.add_section(
+                content=(
+                    f"**Boost Test Card Dispatched**\n"
+                    f"> Test boost celebration was successfully sent to {target_ch.mention}."
+                )
+            )
+            resp.add_separator(divider=True)
+            resp.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, resp)
         else:
-            await ctx.send(f"Failed to dispatch test card: {err}")
+            resp = CicadaContainer(accent_color=0xFF0033)
+            resp.add_section(
+                content=(
+                    f"**Boost Test Dispatch Failed**\n"
+                    f"> {err}"
+                )
+            )
+            resp.add_separator(divider=True)
+            resp.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, resp)
 
     @boost_group.command(
         name="toggle",

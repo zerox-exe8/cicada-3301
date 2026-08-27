@@ -391,7 +391,106 @@ class ContainerDraft:
         if not container.components:
             container.add_text("Empty card container.")
 
+        container._fallback_embed = self.to_embed(
+            active_module_id=active_module_id,
+            user=user,
+            guild=guild,
+            channel=channel,
+            bot=bot,
+            default_avatar=default_avatar,
+        )
+
         return container
+
+    def to_embed(
+        self,
+        active_module_id: str | None = None,
+        user: discord.Member | discord.User | None = None,
+        guild: discord.Guild | None = None,
+        channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None = None,
+        bot: CicadaBot | None = None,
+        default_avatar: str | None = None,
+    ) -> discord.Embed:
+        """Convert draft into a standard rich discord.Embed with full formatting."""
+        def parse(t: str | None) -> str:
+            if not t:
+                return ""
+            return apply_placeholders(t, user=user, guild=guild, channel=channel, bot=bot)
+
+        active_mod: dict[str, Any] | None = None
+        if active_module_id and active_module_id not in ["home", "mod_home"]:
+            for idx, m in enumerate(self.modules):
+                if m.get("id") == active_module_id or f"mod_{idx}" == active_module_id or m.get("label") == active_module_id:
+                    active_mod = m
+                    break
+
+        accent = self.get_accent_int() or 0x00FF66
+        embed = discord.Embed(color=accent)
+
+        # Author
+        author_raw = parse(self.author_name)
+        author_text, author_url_extracted = parse_markdown_link(author_raw)
+        final_author_url = self.author_url or author_url_extracted
+        author_icon = parse(self.author_icon_url)
+        if author_text:
+            embed.set_author(
+                name=author_text,
+                url=final_author_url if (final_author_url and final_author_url.startswith("http")) else None,
+                icon_url=author_icon if (author_icon and author_icon.startswith("http")) else None,
+            )
+
+        # Title
+        if active_mod and active_mod.get("page_title"):
+            title_raw = parse(active_mod["page_title"])
+        else:
+            title_raw = parse(self.title)
+        title_text, title_url_extracted = parse_markdown_link(title_raw)
+        final_title_url = self.title_url or title_url_extracted
+        if title_text:
+            embed.title = title_text
+            if final_title_url and final_title_url.startswith("http"):
+                embed.url = final_title_url
+
+        # Description
+        if active_mod and active_mod.get("content"):
+            desc_text = parse(active_mod["content"])
+        else:
+            desc_text = parse(self.description)
+        if desc_text:
+            embed.description = desc_text
+
+        # Fields
+        if not active_mod and self.fields:
+            for f in self.fields:
+                f_name = parse(f.get("name", ""))
+                f_val = parse(f.get("value", ""))
+                if f_name and f_val:
+                    embed.add_field(name=f_name, value=f_val, inline=False)
+
+        # Thumbnail
+        thumb_url = parse(self.thumbnail_url or self.author_icon_url)
+        if thumb_url and thumb_url.startswith("http"):
+            embed.set_thumbnail(url=thumb_url)
+
+        # Image
+        banner_url = parse(self.image_url)
+        if banner_url and banner_url.startswith("http"):
+            embed.set_image(url=banner_url)
+
+        # Footer
+        footer_raw = parse(self.footer_text)
+        footer_icon = parse(self.footer_icon_url)
+        if footer_raw:
+            embed.set_footer(
+                text=footer_raw,
+                icon_url=footer_icon if (footer_icon and footer_icon.startswith("http")) else None,
+            )
+
+        if self.timestamp:
+            import datetime
+            embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
+
+        return embed
 
     def to_dict(self) -> dict[str, Any]:
         return {

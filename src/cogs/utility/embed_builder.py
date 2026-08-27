@@ -1012,11 +1012,11 @@ class EmbedBuilder(commands.Cog):
                     except Exception:
                         pass
 
-    @commands.group(
+    @commands.hybrid_group(
         name="embed",
         aliases=["embedbuilder", "container", "card"],
         description="Design, customize, preview, save, edit, and post Components V2 container cards.",
-        invoke_without_command=True,
+        fallback="create",
     )
     @commands.has_permissions(manage_messages=True)
     async def embed_group(self, ctx: CustomContext, template_name: str | None = None) -> None:

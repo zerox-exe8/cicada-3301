@@ -1,6 +1,6 @@
 """
 Cicada 3301 Discord Bot - Tree Synchronization Command
-Allows the bot owner to instantly sync slash commands to current or all guilds.
+Allows the bot owner to sync slash commands globally or clear duplicate guild-level commands.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from src.utils.containers import CicadaContainer, send_container_response
 
 
 class Sync(commands.Cog):
-    """Developer and Admin commands."""
+    """Developer and Admin command synchronization tools."""
     category: str = "Admin"
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -22,21 +22,50 @@ class Sync(commands.Cog):
 
     @commands.command(
         name="sync",
-        description="Sync application commands globally or to current guild.",
+        description="Sync application commands globally and remove duplicate guild commands.",
         hidden=True,
     )
     @is_developer()
     async def sync_tree(
-        self, ctx: CustomContext, scope: str = "guild"
+        self, ctx: CustomContext, scope: str = "global"
     ) -> None:
-        """Sync slash commands immediately. Usage: ?sync or ?sync global"""
-        if scope.lower() == "global":
-            synced = await self.bot.tree.sync()
-            msg = f"Successfully synced `{len(synced)}` application slash commands globally."
+        """
+        Clean & Sync slash commands.
+        Usage:
+          ?sync         -> Eliminates 2-2 duplicate commands and syncs all slash commands globally.
+          ?sync clear   -> Clears guild-specific commands in this server.
+          ?sync guild   -> Forces instant guild-only copy.
+        """
+        scope_clean = scope.lower().strip()
+        guild = ctx.guild
+
+        if scope_clean in ["clear", "clean", "clearguild"]:
+            if guild:
+                self.bot.tree.clear_commands(guild=guild)
+                await self.bot.tree.sync(guild=guild)
+                msg = (
+                    f"Cleared all guild-level commands in **{guild.name}**.\n"
+                    "> Duplicate 2-2 slash commands have been eliminated! Only clean global commands are active."
+                )
+            else:
+                msg = "No guild context found to clear."
+
+        elif scope_clean == "guild" and guild:
+            self.bot.tree.copy_global_to(guild=guild)
+            synced = await self.bot.tree.sync(guild=guild)
+            msg = f"Synced `{len(synced)}` application slash commands to guild **{guild.name}**."
+
         else:
-            self.bot.tree.copy_global_to(guild=ctx.guild)
-            synced = await self.bot.tree.sync(guild=ctx.guild)
-            msg = f"Successfully synced `{len(synced)}` application slash commands instantly to **{ctx.guild.name}**."
+            # Standard Global Sync + Auto-clean guild duplicates
+            if guild:
+                self.bot.tree.clear_commands(guild=guild)
+                await self.bot.tree.sync(guild=guild)
+
+            synced = await self.bot.tree.sync()
+            msg = (
+                f"Successfully synced `{len(synced)}` application slash commands globally.\n"
+                "> Guild duplicate commands were automatically cleaned. Slash commands are now 100% deduplicated!"
+            )
 
         container = CicadaContainer(accent_color=None)
         container.add_section(
@@ -76,4 +105,3 @@ class Sync(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Sync(bot))
-

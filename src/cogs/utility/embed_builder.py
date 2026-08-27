@@ -261,13 +261,14 @@ class ContainerDraft:
                 },
             }
 
-        # Compose Header Block with proper breathing room
+        # Compose Header Block with natural tight spacing
         header_blocks = []
+        top_lines = []
         if author_text:
             if final_author_url and final_author_url.startswith("http"):
-                header_blocks.append(f"-# **[{author_text}]({final_author_url})**" if not author_text.startswith("-#") else f"**[{author_text}]({final_author_url})**")
+                top_lines.append(f"-# **[{author_text}]({final_author_url})**" if not author_text.startswith("-#") else f"**[{author_text}]({final_author_url})**")
             else:
-                header_blocks.append(f"-# **{author_text}**" if not author_text.startswith("-#") else f"**{author_text}**")
+                top_lines.append(f"-# **{author_text}**" if not author_text.startswith("-#") else f"**{author_text}**")
 
         if title_text:
             if title_text.startswith("#"):
@@ -275,15 +276,18 @@ class ContainerDraft:
             else:
                 formatted_title = f"**{title_text}**"
             if final_title_url and final_title_url.startswith("http"):
-                header_blocks.append(f"[{formatted_title}]({final_title_url})")
+                top_lines.append(f"[{formatted_title}]({final_title_url})")
             else:
-                header_blocks.append(formatted_title)
+                top_lines.append(formatted_title)
+
+        if top_lines:
+            header_blocks.append("\n".join(top_lines))
 
         if desc_text:
             header_blocks.append(desc_text)
 
         if header_blocks or accessory_dict:
-            full_header_content = "\n\n".join(header_blocks) if header_blocks else " "
+            full_header_content = "\n".join(header_blocks) if header_blocks else " "
             container.add_section(content=full_header_content, accessory=accessory_dict)
             container.add_separator(divider=True)
 
@@ -1083,9 +1087,9 @@ class EmbedBuilderView(discord.ui.View):
             send_e = e_reg.get_emoji_obj("icon_send") or e_reg.get_emoji_obj("icons_send")
             for item in self.children:
                 if isinstance(item, discord.ui.Button):
-                    if item.custom_id == "btn_primary" and edit_e:
+                    if item.custom_id == "btn_action_1" and edit_e:
                         item.emoji = edit_e
-                    elif item.custom_id == "btn_send" and send_e:
+                    elif item.custom_id == "btn_send" and send_e and item.label == "Send Embed":
                         item.emoji = send_e
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -1177,16 +1181,19 @@ class EmbedBuilderView(discord.ui.View):
                 for opt in item.options:
                     opt.default = (opt.value == slide_key)
             elif isinstance(item, discord.ui.Button):
-                if item.custom_id == "btn_primary":
+                if item.custom_id == "btn_action_1":
                     if slide_key == "content":
                         item.label = "Edit Content"
                         item.style = discord.ButtonStyle.secondary
+                        item.disabled = False
                     elif slide_key == "visuals":
                         item.label = "Edit Visuals"
                         item.style = discord.ButtonStyle.secondary
+                        item.disabled = False
                     elif slide_key == "fields":
                         item.label = "Add Field"
                         item.style = discord.ButtonStyle.secondary
+                        item.disabled = False
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                             item.label = "Edit Module"
@@ -1194,13 +1201,21 @@ class EmbedBuilderView(discord.ui.View):
                         else:
                             item.label = "Add Module"
                             item.style = discord.ButtonStyle.primary
+                        item.disabled = False
                     elif slide_key == "dispatch":
                         item.label = "Send to Channel"
                         item.style = discord.ButtonStyle.success
-                elif item.custom_id == "btn_secondary":
-                    if slide_key in ["content", "visuals"]:
-                        item.label = "Save Template"
-                        item.style = discord.ButtonStyle.secondary
+                        item.disabled = False
+                elif item.custom_id == "btn_action_2":
+                    if slide_key == "content":
+                        item.label = "Clear Content"
+                        item.style = discord.ButtonStyle.danger
+                        has_content = bool(self.draft.title or self.draft.author_name or self.draft.description or self.draft.accent_hex)
+                        item.disabled = not has_content
+                    elif slide_key == "visuals":
+                        ts_state = "ON" if self.draft.timestamp else "OFF"
+                        item.label = f"Timestamp: {ts_state}"
+                        item.style = discord.ButtonStyle.primary if self.draft.timestamp else discord.ButtonStyle.secondary
                         item.disabled = False
                     elif slide_key == "fields":
                         item.label = "Clear Fields"
@@ -1216,13 +1231,22 @@ class EmbedBuilderView(discord.ui.View):
                             item.style = discord.ButtonStyle.secondary
                             item.disabled = False
                     elif slide_key == "dispatch":
-                        item.label = "Raw JSON"
+                        item.label = "Test in DM"
                         item.style = discord.ButtonStyle.secondary
                         item.disabled = False
-                elif item.custom_id == "btn_tertiary":
-                    if slide_key in ["content", "visuals", "fields"]:
-                        item.label = "Save As"
-                        item.style = discord.ButtonStyle.secondary
+                elif item.custom_id == "btn_action_3":
+                    if slide_key == "content":
+                        item.label = "Reset Draft"
+                        item.style = discord.ButtonStyle.danger
+                        item.disabled = False
+                    elif slide_key == "visuals":
+                        item.label = "Clear Visuals"
+                        item.style = discord.ButtonStyle.danger
+                        has_vis = bool(self.draft.thumbnail_url or self.draft.image_url or self.draft.footer_text)
+                        item.disabled = not has_vis
+                    elif slide_key == "fields":
+                        item.label = "Reset Draft"
+                        item.style = discord.ButtonStyle.danger
                         item.disabled = False
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
@@ -1230,16 +1254,21 @@ class EmbedBuilderView(discord.ui.View):
                             item.style = discord.ButtonStyle.primary
                             item.disabled = False
                         else:
-                            item.label = "Clear All"
+                            item.label = "Clear Modules"
                             item.style = discord.ButtonStyle.danger
                             item.disabled = (len(self.draft.modules) == 0 and len(self.draft.buttons) == 0)
                     elif slide_key == "dispatch":
-                        item.label = "Reset Draft"
-                        item.style = discord.ButtonStyle.danger
+                        item.label = "Raw JSON"
+                        item.style = discord.ButtonStyle.secondary
                         item.disabled = False
                 elif item.custom_id == "btn_send":
-                    item.label = "Send Card"
-                    item.style = discord.ButtonStyle.success
+                    if slide_key == "dispatch":
+                        item.label = "Reset Draft"
+                        item.style = discord.ButtonStyle.danger
+                    else:
+                        item.label = "Send Embed"
+                        item.style = discord.ButtonStyle.success
+                    item.disabled = False
 
     async def update_view(self, interaction: discord.Interaction) -> None:
         """Update the dual-container message and auto-save changes."""
@@ -1285,8 +1314,8 @@ class EmbedBuilderView(discord.ui.View):
 
     # ─── Action Buttons (Row 1) ──────────────────────────────────────────────
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.secondary, custom_id="btn_primary", row=1)
-    async def btn_primary(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.secondary, custom_id="btn_action_1", row=1)
+    async def btn_action_1(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 
         if slide_key == "content":
@@ -1313,12 +1342,19 @@ class EmbedBuilderView(discord.ui.View):
         elif slide_key == "dispatch":
             await self._open_send_picker(interaction)
 
-    @discord.ui.button(label="Secondary", style=discord.ButtonStyle.secondary, custom_id="btn_secondary", row=1)
-    async def btn_secondary(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    @discord.ui.button(label="Action 2", style=discord.ButtonStyle.secondary, custom_id="btn_action_2", row=1)
+    async def btn_action_2(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 
-        if slide_key in ["content", "visuals"]:
-            await interaction.response.send_modal(SaveModal(self))
+        if slide_key == "content":
+            self.draft.title = None
+            self.draft.author_name = None
+            self.draft.description = None
+            self.draft.accent_hex = None
+            await self.update_view(interaction)
+        elif slide_key == "visuals":
+            self.draft.timestamp = not self.draft.timestamp
+            await self.update_view(interaction)
         elif slide_key == "fields":
             self.draft.fields.clear()
             await self.update_view(interaction)
@@ -1341,14 +1377,20 @@ class EmbedBuilderView(discord.ui.View):
                     return
                 await interaction.response.send_modal(AddButtonModal(self))
         elif slide_key == "dispatch":
-            await interaction.response.send_modal(RawImportModal(self))
+            await self._send_test_dm(interaction)
 
-    @discord.ui.button(label="Tertiary", style=discord.ButtonStyle.secondary, custom_id="btn_tertiary", row=1)
-    async def btn_tertiary(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    @discord.ui.button(label="Action 3", style=discord.ButtonStyle.secondary, custom_id="btn_action_3", row=1)
+    async def btn_action_3(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 
-        if slide_key in ["content", "visuals", "fields"]:
-            await interaction.response.send_modal(SaveModal(self))
+        if slide_key in ["content", "fields"]:
+            self.draft = ContainerDraft()
+            await self.update_view(interaction)
+        elif slide_key == "visuals":
+            self.draft.thumbnail_url = None
+            self.draft.image_url = None
+            self.draft.footer_text = None
+            await self.update_view(interaction)
         elif slide_key == "interactive":
             if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                 if len(self.draft.modules) >= 25:
@@ -1361,12 +1403,32 @@ class EmbedBuilderView(discord.ui.View):
                 self.preview_module_id = None
                 await self.update_view(interaction)
         elif slide_key == "dispatch":
+            await interaction.response.send_modal(RawImportModal(self))
+
+    @discord.ui.button(label="Send Embed", style=discord.ButtonStyle.success, custom_id="btn_send", row=1)
+    async def btn_send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        slide_key, _, _ = self.SLIDES[self.current_slide_idx]
+        if slide_key == "dispatch":
             self.draft = ContainerDraft()
             await self.update_view(interaction)
+        else:
+            await self._open_send_picker(interaction)
 
-    @discord.ui.button(label="Send Card", style=discord.ButtonStyle.success, custom_id="btn_send", row=1)
-    async def btn_send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._open_send_picker(interaction)
+    async def _send_test_dm(self, interaction: discord.Interaction) -> None:
+        """Dispatch a live test copy of the embed container directly to user DM."""
+        container = self.draft.to_container(
+            user=self.author,
+            guild=interaction.guild,
+            bot=self.bot,
+        )
+        try:
+            dm_channel = self.author.dm_channel or await self.author.create_dm()
+            await send_container_response(dm_channel, container)
+            await interaction.response.send_message("Test embed dispatched to your DMs!", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("Could not send DM. Please enable DMs from server members.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to send DM: {e}", ephemeral=True)
 
     async def _open_send_picker(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
@@ -1383,7 +1445,7 @@ class EmbedBuilderView(discord.ui.View):
             discord.SelectOption(
                 label=f"#{c.name}"[:100],
                 value=str(c.id),
-                description=f"Send card to #{c.name}"[:100],
+                description=f"Send embed to #{c.name}"[:100],
             )
             for c in text_channels
         ]

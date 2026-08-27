@@ -92,9 +92,51 @@ class EmojiRegistry:
         emoji = self._emojis.get(name_clean)
         if not emoji and hasattr(self.bot, "emojis"):
             emoji = discord.utils.get(self.bot.emojis, name=name_clean)
+
+        # Smart alias fallbacks for arrow and common icons
+        if not emoji:
+            alias_map = {
+                "icons_arrow": ["icons_rightarrow", "heart_dot", "icon_arrow_left"],
+                "icons_rightarrow": ["icons_arrow", "heart_dot"],
+                "icon_arrow_left": ["icons_leftarrow"],
+                "icons_leftarrow": ["icon_arrow_left"],
+                "heart_dot": ["icons_arrow", "icons_rightarrow"],
+            }
+            for alias in alias_map.get(name_clean, []):
+                emoji = self._emojis.get(alias)
+                if not emoji and hasattr(self.bot, "emojis"):
+                    emoji = discord.utils.get(self.bot.emojis, name=alias)
+                if emoji:
+                    break
+
         if emoji:
             return str(emoji)
         return fallback
+
+    def get_emoji_obj(self, name: str) -> discord.Emoji | discord.PartialEmoji | str | None:
+        """
+        Get a discord.Emoji or discord.PartialEmoji object for UI buttons or components.
+        """
+        name_clean = name.lower().strip(":")
+        emoji = self._emojis.get(name_clean)
+        if not emoji and hasattr(self.bot, "emojis"):
+            emoji = discord.utils.get(self.bot.emojis, name=name_clean)
+
+        if not emoji:
+            alias_map = {
+                "icons_arrow": ["icons_rightarrow", "heart_dot"],
+                "icons_rightarrow": ["icons_arrow", "heart_dot"],
+                "icon_arrow_left": ["icons_leftarrow"],
+                "icons_leftarrow": ["icon_arrow_left"],
+            }
+            for alias in alias_map.get(name_clean, []):
+                emoji = self._emojis.get(alias)
+                if not emoji and hasattr(self.bot, "emojis"):
+                    emoji = discord.utils.get(self.bot.emojis, name=alias)
+                if emoji:
+                    break
+
+        return emoji
 
     def get_select_emoji(self, name: str, fallback_unicode: str | None = None) -> dict[str, Any] | None:
         """

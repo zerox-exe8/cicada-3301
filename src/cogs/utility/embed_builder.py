@@ -250,8 +250,8 @@ class ContainerDraft:
         else:
             desc_text = parse(self.description)
 
-        # Thumbnail Accessory (Type 11) - Only if thumbnail_url is set
-        thumb_url = parse(self.thumbnail_url)
+        # Thumbnail / Avatar Accessory (Type 11) - Uses thumbnail_url or author_icon_url
+        thumb_url = parse(self.thumbnail_url or self.author_icon_url)
         accessory_dict = None
         if thumb_url and thumb_url.startswith("http"):
             accessory_dict = {
@@ -261,8 +261,7 @@ class ContainerDraft:
                 },
             }
 
-        # Compose Header Block with natural micro-spacing
-        header_blocks = []
+        # Compose Top Header (Author & Title)
         top_lines = []
         if author_text:
             if final_author_url and final_author_url.startswith("http"):
@@ -280,18 +279,22 @@ class ContainerDraft:
             else:
                 top_lines.append(formatted_title)
 
-        if top_lines:
-            header_blocks.append("\n".join(top_lines))
-
-        if desc_text:
-            if top_lines:
-                # Half-height micro-spacer (creates a subtle 8px balanced gap)
-                header_blocks.append("-# \u200b")
-            header_blocks.append(desc_text)
-
-        if header_blocks or accessory_dict:
-            full_header_content = "\n".join(header_blocks) if header_blocks else " "
-            container.add_section(content=full_header_content, accessory=accessory_dict)
+        # Render Header & Description with Divider Line between them
+        if top_lines and desc_text:
+            top_header_content = "\n".join(top_lines)
+            container.add_section(content=top_header_content, accessory=accessory_dict)
+            container.add_separator(divider=True)
+            container.add_text(desc_text)
+            container.add_separator(divider=True)
+        elif top_lines:
+            top_header_content = "\n".join(top_lines)
+            container.add_section(content=top_header_content, accessory=accessory_dict)
+            container.add_separator(divider=True)
+        elif desc_text:
+            container.add_section(content=desc_text, accessory=accessory_dict)
+            container.add_separator(divider=True)
+        elif accessory_dict:
+            container.add_section(content=" ", accessory=accessory_dict)
             container.add_separator(divider=True)
 
         # 2. Custom Fields (Show on main overview or if active module doesn't replace them)
@@ -481,6 +484,12 @@ class ContentModal(discord.ui.Modal, title="Step 1: Content & Theme"):
         max_length=256,
         required=False,
     )
+    author_icon_input = discord.ui.TextInput(
+        label="Author Icon / Avatar URL",
+        placeholder="https://.../icon.png or {user.avatar}",
+        max_length=500,
+        required=False,
+    )
     desc_input = discord.ui.TextInput(
         label="Description",
         style=discord.TextStyle.paragraph,
@@ -500,17 +509,20 @@ class ContentModal(discord.ui.Modal, title="Step 1: Content & Theme"):
         self.view_ref = view
         self.title_input.default = self.view_ref.draft.title or ""
         self.author_input.default = self.view_ref.draft.author_name or ""
+        self.author_icon_input.default = self.view_ref.draft.author_icon_url or ""
         self.desc_input.default = self.view_ref.draft.description or ""
         self.accent_input.default = self.view_ref.draft.accent_hex or "none"
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         t = str(self.title_input.value).strip()
         a = str(self.author_input.value).strip()
+        ai = str(self.author_icon_input.value).strip()
         d = str(self.desc_input.value).strip()
         ac = str(self.accent_input.value).strip()
 
         self.view_ref.draft.title = t if t else None
         self.view_ref.draft.author_name = a if a else None
+        self.view_ref.draft.author_icon_url = ai if ai else None
         self.view_ref.draft.description = d if d else None
         self.view_ref.draft.accent_hex = None if ac.lower() in ["none", "dark", "default", ""] else ac
 
@@ -1120,11 +1132,13 @@ class EmbedBuilderView(discord.ui.View):
         if slide_key == "content":
             t_str = f"`{self.draft.title}`" if self.draft.title else "`None`"
             a_str = f"`{self.draft.author_name}`" if self.draft.author_name else "`None`"
+            ai_str = "`Set`" if self.draft.author_icon_url else "`None`"
             desc_len = len(self.draft.description) if self.draft.description else 0
             accent_str = f"`{self.draft.accent_hex}`" if self.draft.accent_hex else "`Default Dark`"
             container.add_text(
                 f"**Title:** {t_str} | **Author:** {a_str}\n"
-                f"**Accent Color:** {accent_str} | **Description:** `{desc_len} chars`"
+                f"**Avatar Icon:** {ai_str} | **Color:** {accent_str}\n"
+                f"**Description:** `{desc_len} chars`"
             )
         elif slide_key == "visuals":
             thumb_str = "`Set`" if self.draft.thumbnail_url else "`None`"

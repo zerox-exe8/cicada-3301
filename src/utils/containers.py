@@ -159,7 +159,7 @@ def build_container_payload(
     return {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
         "components": root_comps,
-        "allowed_mentions": {"parse": []},
+        "allowed_mentions": {"parse": ["users"]},
     }
 
 
@@ -259,7 +259,7 @@ async def send_container_response(
                         avatar = getattr(bot_user, "display_avatar", getattr(bot_user, "avatar", None))
                         if avatar and hasattr(avatar, "url"):
                             wh_payload["avatar_url"] = str(avatar.url)
-                    wh_payload["allowed_mentions"] = {"parse": []}
+                    wh_payload["allowed_mentions"] = {"parse": ["users"]}
 
                     import aiohttp
                     webhook_url = f"https://discord.com/api/v10/webhooks/{wh.id}/{wh.token}?wait=true"
@@ -317,7 +317,7 @@ async def send_container_response(
                     content=content,
                     embed=primary.to_embed(),
                     view=fallback_view,
-                    allowed_mentions=discord.AllowedMentions.none(),
+                    allowed_mentions=discord.AllowedMentions(users=True),
                 )
             raise
 

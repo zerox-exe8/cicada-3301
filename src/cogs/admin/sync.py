@@ -39,32 +39,25 @@ class Sync(commands.Cog):
         scope_clean = scope.lower().strip()
         guild = ctx.guild
 
-        if scope_clean in ["clear", "clean", "clearguild"]:
-            if guild:
-                self.bot.tree.clear_commands(guild=guild)
-                await self.bot.tree.sync(guild=guild)
-                msg = (
-                    f"Cleared all guild-level commands in **{guild.name}**.\n"
-                    "> Duplicate 2-2 slash commands have been eliminated! Only clean global commands are active."
-                )
-            else:
-                msg = "No guild context found to clear."
-
-        elif scope_clean == "guild" and guild:
-            self.bot.tree.copy_global_to(guild=guild)
-            synced = await self.bot.tree.sync(guild=guild)
-            msg = f"Synced `{len(synced)}` application slash commands to guild **{guild.name}**."
-
-        else:
-            # Standard Global Sync + Auto-clean guild duplicates
-            if guild:
-                self.bot.tree.clear_commands(guild=guild)
-                await self.bot.tree.sync(guild=guild)
-
-            synced = await self.bot.tree.sync()
+        if scope_clean in ["clear", "clean", "clearguild"] and guild:
+            self.bot.tree.clear_commands(guild=guild)
+            await self.bot.tree.sync(guild=guild)
             msg = (
-                f"Successfully synced `{len(synced)}` application slash commands globally.\n"
-                "> Guild duplicate commands were automatically cleaned. Slash commands are now 100% deduplicated!"
+                f"Cleared all guild-level commands in **{guild.name}**.\n"
+                "> Duplicate commands removed."
+            )
+        else:
+            if guild:
+                self.bot.tree.copy_global_to(guild=guild)
+                synced_guild = await self.bot.tree.sync(guild=guild)
+                guild_count = len(synced_guild)
+            else:
+                guild_count = 0
+
+            synced_global = await self.bot.tree.sync()
+            msg = (
+                f"Successfully synced `{len(synced_global)}` slash commands!\n"
+                f"> Instant guild sync applied to **{guild.name if guild else 'this server'}** (`{guild_count}` commands ready immediately)."
             )
 
         container = CicadaContainer(accent_color=None)

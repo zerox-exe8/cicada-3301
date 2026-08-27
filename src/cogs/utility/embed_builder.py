@@ -178,10 +178,10 @@ class ContainerDraft:
         self.author_icon_url: str | None = None
         self.author_url: str | None = None
 
-        self.title: str | None = "Cicada 3301 Custom Card"
+        self.title: str | None = None
         self.title_url: str | None = None
 
-        self.description: str | None = "This is your live Components V2 preview. Edit options below to customize."
+        self.description: str | None = None
 
         self.fields: list[dict[str, str]] = []  # [{"name": "...", "value": "..."}]
 
@@ -735,17 +735,21 @@ class EmbedBuilderView(discord.ui.View):
         self._setup_dynamic_buttons()
 
     def _setup_dynamic_buttons(self) -> None:
-        """Assign custom arrow emojis from emoji2 folder to navigation buttons."""
+        """Assign custom arrow and edit emojis from emoji2 folder to navigation buttons."""
         e_reg = getattr(self.bot, "custom_emojis", None)
         if e_reg:
             left_e = e_reg.get_emoji_obj("icon_arrow_left") or e_reg.get_emoji_obj("icons_leftarrow")
             right_e = e_reg.get_emoji_obj("icons_arrow") or e_reg.get_emoji_obj("icons_rightarrow")
+            edit_e = e_reg.get_emoji_obj("icons_edit") or e_reg.get_emoji_obj("icon_edit")
 
             self.btn_prev.label = None
             self.btn_prev.emoji = left_e if left_e else "◀"
 
             self.btn_next.label = None
             self.btn_next.emoji = right_e if right_e else "▶"
+
+            self.btn_edit_step.emoji = edit_e if edit_e else None
+            self.btn_edit_step.label = f"Step {self.current_slide_idx + 1}"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -766,7 +770,7 @@ class EmbedBuilderView(discord.ui.View):
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Cicada 3301 Builder — {slide_title}**\n"
+                f"> **{slide_title}**\n"
                 f"> Use controls below to configure this section."
             )
         )
@@ -780,7 +784,7 @@ class EmbedBuilderView(discord.ui.View):
             accent_str = f"`{self.draft.accent_hex}`" if self.draft.accent_hex else "`Default Dark`"
             container.add_text(
                 f"{dot} **Title:** {t_str} | **Author:** {a_str}\n"
-                f"{dot} **Author Icon:** {ai_str} | **Accent Color:** {accent_str}\n"
+                f"{dot} **Author Icon:** {ai_str} | **Color:** {accent_str}\n"
                 f"{dot} **Description Length:** `{desc_len} chars`"
             )
         elif slide_key == "visuals":
@@ -835,16 +839,7 @@ class EmbedBuilderView(discord.ui.View):
                     opt.default = (opt.value == slide_key)
             elif isinstance(item, discord.ui.Button):
                 if item.custom_id == "btn_edit_step":
-                    if slide_key == "content":
-                        item.label = "Edit Content"
-                    elif slide_key == "visuals":
-                        item.label = "Edit Visuals"
-                    elif slide_key == "fields":
-                        item.label = "Add Field"
-                    elif slide_key == "interactive":
-                        item.label = "Add Button"
-                    elif slide_key == "dispatch":
-                        item.label = "Raw JSON/HTML"
+                    item.label = f"Step {self.current_slide_idx + 1}"
                 elif item.custom_id == "btn_secondary_action":
                     if slide_key == "fields":
                         item.label = "Clear Fields"

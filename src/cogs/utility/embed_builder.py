@@ -190,6 +190,7 @@ class ContainerDraft:
 
         self.footer_text: str | None = None
         self.footer_icon_url: str | None = None
+        self.divider_line: bool = True
         self.timestamp: bool = False
 
         self.accent_hex: str | None = None
@@ -279,13 +280,18 @@ class ContainerDraft:
             else:
                 top_lines.append(formatted_title)
 
-        # Render Header & Description with Divider Line between them (Single \n, NO \n\n)
+        # Render Header & Description (Controlled by self.divider_line)
         if top_lines and desc_text:
-            top_header_content = "\n".join(top_lines)
-            container.add_section(content=top_header_content, accessory=accessory_dict)
-            container.add_separator(divider=True)
-            container.add_text(desc_text)
-            container.add_separator(divider=True)
+            if self.divider_line:
+                top_header_content = "\n".join(top_lines)
+                container.add_section(content=top_header_content, accessory=accessory_dict)
+                container.add_separator(divider=True)
+                container.add_text(desc_text)
+                container.add_separator(divider=True)
+            else:
+                combined_content = "\n".join(top_lines) + "\n" + desc_text
+                container.add_section(content=combined_content, accessory=accessory_dict)
+                container.add_separator(divider=True)
         elif top_lines:
             top_header_content = "\n".join(top_lines)
             container.add_section(content=top_header_content, accessory=accessory_dict)
@@ -400,6 +406,7 @@ class ContainerDraft:
             "image_url": self.image_url,
             "footer_text": self.footer_text,
             "footer_icon_url": self.footer_icon_url,
+            "divider_line": self.divider_line,
             "timestamp": self.timestamp,
             "accent_hex": self.accent_hex,
             "buttons": self.buttons,
@@ -420,6 +427,7 @@ class ContainerDraft:
         draft.image_url = data.get("image_url")
         draft.footer_text = data.get("footer_text")
         draft.footer_icon_url = data.get("footer_icon_url")
+        draft.divider_line = data.get("divider_line", True)
         draft.timestamp = data.get("timestamp", False)
         draft.accent_hex = data.get("accent_hex")
         draft.buttons = data.get("buttons", [])
@@ -1144,10 +1152,12 @@ class EmbedBuilderView(discord.ui.View):
             thumb_str = "`Set`" if self.draft.thumbnail_url else "`None`"
             banner_str = "`Set`" if self.draft.image_url else "`None`"
             footer_str = f"`{self.draft.footer_text}`" if self.draft.footer_text else "`None`"
+            div_str = "`Enabled`" if self.draft.divider_line else "`Disabled`"
             ts_str = "`Enabled`" if self.draft.timestamp else "`Disabled`"
             container.add_text(
                 f"**Thumbnail:** {thumb_str} | **Banner:** {banner_str}\n"
-                f"**Footer:** {footer_str} | **Timestamp:** {ts_str}"
+                f"**Divider Line:** {div_str} | **Timestamp:** {ts_str}\n"
+                f"**Footer:** {footer_str}"
             )
         elif slide_key == "fields":
             f_cnt = len(self.draft.fields)
@@ -1214,8 +1224,8 @@ class EmbedBuilderView(discord.ui.View):
                         has_content = bool(self.draft.title or self.draft.author_name or self.draft.description or self.draft.accent_hex)
                         item.disabled = not has_content
                     elif slide_key == "visuals":
-                        ts_state = "ON" if self.draft.timestamp else "OFF"
-                        item.label = f"Timestamp: {ts_state}"
+                        div_state = "ON" if self.draft.divider_line else "OFF"
+                        item.label = f"Line: {div_state}"
                         item.disabled = False
                     elif slide_key == "fields":
                         item.label = "Clear Fields"
@@ -1235,9 +1245,9 @@ class EmbedBuilderView(discord.ui.View):
                         item.label = "Reset Draft"
                         item.disabled = False
                     elif slide_key == "visuals":
-                        item.label = "Clear Visuals"
-                        has_vis = bool(self.draft.thumbnail_url or self.draft.image_url or self.draft.footer_text)
-                        item.disabled = not has_vis
+                        ts_state = "ON" if self.draft.timestamp else "OFF"
+                        item.label = f"Timestamp: {ts_state}"
+                        item.disabled = False
                     elif slide_key == "fields":
                         item.label = "Reset Draft"
                         item.disabled = False
@@ -1250,6 +1260,14 @@ class EmbedBuilderView(discord.ui.View):
                             item.disabled = (len(self.draft.modules) == 0 and len(self.draft.buttons) == 0)
                     elif slide_key == "dispatch":
                         item.label = "Raw JSON"
+                        item.disabled = False
+                elif item.custom_id == "btn_action_4":
+                    if slide_key == "visuals":
+                        item.label = "Clear Visuals"
+                        has_vis = bool(self.draft.thumbnail_url or self.draft.image_url or self.draft.footer_text)
+                        item.disabled = not has_vis
+                    else:
+                        item.label = "Reset Draft"
                         item.disabled = False
                 elif item.custom_id == "btn_send":
                     if slide_key == "dispatch":
@@ -1341,7 +1359,7 @@ class EmbedBuilderView(discord.ui.View):
             self.draft.accent_hex = None
             await self.update_view(interaction)
         elif slide_key == "visuals":
-            self.draft.timestamp = not self.draft.timestamp
+            self.draft.divider_line = not self.draft.divider_line
             await self.update_view(interaction)
         elif slide_key == "fields":
             self.draft.fields.clear()
@@ -1375,9 +1393,7 @@ class EmbedBuilderView(discord.ui.View):
             self.draft = ContainerDraft()
             await self.update_view(interaction)
         elif slide_key == "visuals":
-            self.draft.thumbnail_url = None
-            self.draft.image_url = None
-            self.draft.footer_text = None
+            self.draft.timestamp = not self.draft.timestamp
             await self.update_view(interaction)
         elif slide_key == "interactive":
             if self.preview_module_id and self.preview_module_id.startswith("mod_"):
@@ -1392,6 +1408,18 @@ class EmbedBuilderView(discord.ui.View):
                 await self.update_view(interaction)
         elif slide_key == "dispatch":
             await interaction.response.send_modal(RawImportModal(self))
+
+    @discord.ui.button(label="Action 4", style=discord.ButtonStyle.secondary, custom_id="btn_action_4", row=1)
+    async def btn_action_4(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        slide_key, _, _ = self.SLIDES[self.current_slide_idx]
+        if slide_key == "visuals":
+            self.draft.thumbnail_url = None
+            self.draft.image_url = None
+            self.draft.footer_text = None
+            await self.update_view(interaction)
+        else:
+            self.draft = ContainerDraft()
+            await self.update_view(interaction)
 
     @discord.ui.button(label="Send Embed", style=discord.ButtonStyle.secondary, custom_id="btn_send", row=1)
     async def btn_send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:

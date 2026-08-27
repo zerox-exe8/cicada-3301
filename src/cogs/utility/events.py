@@ -74,6 +74,8 @@ class AutoEvents(commands.Cog):
                 return False, f"Bot is missing `Send Messages` permission in {channel.mention}."
             if not perms.embed_links:
                 return False, f"Bot is missing `Embed Links` permission in {channel.mention}."
+            if not perms.manage_webhooks:
+                return False, f"Bot requires `Manage Webhooks` permission in {channel.mention} to render Discord Components V2 Container Cards."
 
         embed_name = config.get("embed_name") if config else None
         msg_template = config.get("message_content") if config else None

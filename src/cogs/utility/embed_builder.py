@@ -273,21 +273,21 @@ class ContainerDraft:
             if title_text.startswith("#"):
                 formatted_title = title_text
             else:
-                formatted_title = f"**{title_text}**"
+                formatted_title = f"### **{title_text}**"
             if final_title_url and final_title_url.startswith("http"):
                 top_lines.append(f"[{formatted_title}]({final_title_url})")
             else:
                 top_lines.append(formatted_title)
 
-        # Render Header & Description with Divider Line between them
+        # Render Header & Description with Divider Line between them (Single \n, NO \n\n)
         if top_lines and desc_text:
-            top_header_content = "\n\n".join(top_lines)
+            top_header_content = "\n".join(top_lines)
             container.add_section(content=top_header_content, accessory=accessory_dict)
             container.add_separator(divider=True)
             container.add_text(desc_text)
             container.add_separator(divider=True)
         elif top_lines:
-            top_header_content = "\n\n".join(top_lines)
+            top_header_content = "\n".join(top_lines)
             container.add_section(content=top_header_content, accessory=accessory_dict)
             container.add_separator(divider=True)
         elif desc_text:

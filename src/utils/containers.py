@@ -159,7 +159,7 @@ def build_container_payload(
     return {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
         "components": root_comps,
-        "allowed_mentions": {"parse": ["users"]},
+        "allowed_mentions": {"parse": []},
     }
 
 
@@ -243,8 +243,27 @@ async def send_container_response(
                     webhooks = await obj.webhooks()
                     my_id = bot_user.id if bot_user else (guild.me.id if guild.me else None)
                     wh = next((w for w in webhooks if w.token and (w.user and my_id and w.user.id == my_id or w.name == "Cicada Events")), None)
+                    
+                    # Fetch bot avatar bytes to assign directly to webhook
+                    avatar_bytes = None
+                    if bot_user and hasattr(bot_user, "display_avatar"):
+                        try:
+                            avatar_bytes = await bot_user.display_avatar.read()
+                        except Exception:
+                            pass
+
                     if not wh:
-                        wh = await obj.create_webhook(name="Cicada Events", reason="Components V2 container dispatcher")
+                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "cicada 3301")
+                        wh = await obj.create_webhook(
+                            name=str(uname),
+                            avatar=avatar_bytes,
+                            reason="Components V2 container dispatcher"
+                        )
+                    elif not wh.avatar and avatar_bytes:
+                        try:
+                            await wh.edit(avatar=avatar_bytes)
+                        except Exception:
+                            pass
             except Exception as whe:
                 logger.warning(f"Could not prepare webhook in #{obj.name}: {whe}")
 
@@ -253,13 +272,12 @@ async def send_container_response(
                     wh_payload = dict(payload)
                     # Clean username and avatar to avoid Discord 400 Bad Request
                     if bot_user:
-                        uname = getattr(bot_user, "name", None) or getattr(bot_user, "display_name", None)
-                        if uname:
-                            wh_payload["username"] = str(uname)
-                        avatar = getattr(bot_user, "display_avatar", getattr(bot_user, "avatar", None))
-                        if avatar and hasattr(avatar, "url"):
-                            wh_payload["avatar_url"] = str(avatar.url)
-                    wh_payload["allowed_mentions"] = {"parse": ["users"]}
+                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "cicada 3301")
+                        wh_payload["username"] = str(uname)
+                        avatar = getattr(bot_user, "display_avatar", None)
+                        if avatar:
+                            wh_payload["avatar_url"] = str(avatar.with_format("png").url if hasattr(avatar, "with_format") else avatar.url)
+                    wh_payload["allowed_mentions"] = {"parse": []}
 
                     import aiohttp
                     webhook_url = f"https://discord.com/api/v10/webhooks/{wh.id}/{wh.token}?wait=true"

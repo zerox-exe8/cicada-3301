@@ -241,6 +241,41 @@ async def send_container_response(
             bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
             http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
 
+        # 1. Guild text channels: Try Webhook dispatch for true native Components V2 Container support
+        if isinstance(obj, discord.TextChannel):
+            bot_user = getattr(bot_instance, "user", None) or (obj.guild.me if hasattr(obj, "guild") else None)
+            guild = obj.guild
+            wh = None
+            try:
+                if guild and guild.me and obj.permissions_for(guild.me).manage_webhooks:
+                    webhooks = await obj.webhooks()
+                    my_id = bot_user.id if bot_user else (guild.me.id if guild.me else None)
+                    wh = next((w for w in webhooks if w.user and my_id and w.user.id == my_id), None)
+                    if not wh:
+                        wh = await obj.create_webhook(name="Cicada Events", reason="Components V2 container dispatcher")
+            except Exception as whe:
+                logger.debug(f"Could not prepare webhook in #{obj.name}: {whe}")
+
+            if wh and wh.token:
+                try:
+                    wh_payload = dict(payload)
+                    if bot_user:
+                        wh_payload["username"] = getattr(bot_user, "display_name", "cicada 3301")
+                        wh_payload["avatar_url"] = str(getattr(bot_user.display_avatar, "url", ""))
+                    wh_payload["allowed_mentions"] = {"parse": []}
+
+                    msg_data = await http_client.request(
+                        discord.http.Route("POST", f"/webhooks/{wh.id}/{wh.token}?wait=true"),
+                        json=wh_payload,
+                    )
+                    if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
+                        if hasattr(bot_instance, "_connection"):
+                            bot_instance._connection.store_view(view, int(msg_data["id"]))
+                    return msg_data
+                except Exception as wh_post_err:
+                    logger.warning(f"Webhook container dispatch failed ({wh_post_err}), falling back to direct channel dispatch...")
+
+        # 2. Direct channel message dispatch
         try:
             msg_data = await http_client.request(
                 discord.http.Route("POST", f"/channels/{channel_id}/messages"),
@@ -256,7 +291,32 @@ async def send_container_response(
             logger.warning(f"Raw Components V2 HTTP request failed ({e}), attempting standard send fallback...")
             if hasattr(obj, "send"):
                 primary = container if isinstance(container, CicadaContainer) else container[0]
-                return await obj.send(content=content, embed=primary.to_embed(), view=view)
+                
+                # Extract link buttons from container into a fallback View if no view is provided
+                fallback_view = view
+                if fallback_view is None:
+                    container_list = container if isinstance(container, list) else [container]
+                    link_view = discord.ui.View(timeout=None)
+                    has_buttons = False
+                    for c in container_list:
+                        for comp in c.components:
+                            if comp.get("type") == 1:
+                                for item in comp.get("components", []):
+                                    if item.get("type") == 2 and item.get("style") == 5:
+                                        lbl = item.get("label", "Link")
+                                        u = item.get("url", "https://discord.com")
+                                        if u and u.startswith("http"):
+                                            link_view.add_item(discord.ui.Button(label=lbl, url=u, style=discord.ButtonStyle.link))
+                                            has_buttons = True
+                    if has_buttons:
+                        fallback_view = link_view
+
+                return await obj.send(
+                    content=content,
+                    embed=primary.to_embed(),
+                    view=fallback_view,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
             raise
 
 

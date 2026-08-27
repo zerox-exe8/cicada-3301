@@ -265,15 +265,15 @@ class ContainerDraft:
         top_lines = []
         if author_text:
             if final_author_url and final_author_url.startswith("http"):
-                top_lines.append(f"-# **[{author_text}]({final_author_url})**" if not author_text.startswith("-#") else f"**[{author_text}]({final_author_url})**")
+                top_lines.append(f"**[{author_text}]({final_author_url})**")
             else:
-                top_lines.append(f"-# **{author_text}**" if not author_text.startswith("-#") else f"**{author_text}**")
+                top_lines.append(f"**{author_text}**")
 
         if title_text:
             if title_text.startswith("#"):
                 formatted_title = title_text
             else:
-                formatted_title = f"### **{title_text}**"
+                formatted_title = f"**{title_text}**"
             if final_title_url and final_title_url.startswith("http"):
                 top_lines.append(f"[{formatted_title}]({final_title_url})")
             else:

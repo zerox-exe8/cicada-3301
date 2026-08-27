@@ -474,12 +474,6 @@ class ContentModal(discord.ui.Modal, title="Step 1: Content & Theme"):
         max_length=256,
         required=False,
     )
-    author_icon_input = discord.ui.TextInput(
-        label="Author Icon URL",
-        placeholder="https://.../icon.png or {user.avatar}",
-        max_length=500,
-        required=False,
-    )
     desc_input = discord.ui.TextInput(
         label="Description",
         style=discord.TextStyle.paragraph,
@@ -499,20 +493,17 @@ class ContentModal(discord.ui.Modal, title="Step 1: Content & Theme"):
         self.view_ref = view
         self.title_input.default = self.view_ref.draft.title or ""
         self.author_input.default = self.view_ref.draft.author_name or ""
-        self.author_icon_input.default = self.view_ref.draft.author_icon_url or ""
         self.desc_input.default = self.view_ref.draft.description or ""
         self.accent_input.default = self.view_ref.draft.accent_hex or "none"
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         t = str(self.title_input.value).strip()
         a = str(self.author_input.value).strip()
-        ai = str(self.author_icon_input.value).strip()
         d = str(self.desc_input.value).strip()
         ac = str(self.accent_input.value).strip()
 
         self.view_ref.draft.title = t if t else None
         self.view_ref.draft.author_name = a if a else None
-        self.view_ref.draft.author_icon_url = ai if ai else None
         self.view_ref.draft.description = d if d else None
         self.view_ref.draft.accent_hex = None if ac.lower() in ["none", "dark", "default", ""] else ac
 
@@ -1061,7 +1052,7 @@ class EmbedBuilderView(discord.ui.View):
     active_views: dict[int, EmbedBuilderView] = {}
 
     SLIDES = [
-        ("content", "Step 1: Content & Theme", "Title, Author, Icon, Description, Color"),
+        ("content", "Step 1: Content & Theme", "Title, Author, Description, Color"),
         ("visuals", "Step 2: Images & Footer", "Thumbnail, Banner, Footer Text & Icon, Timestamp"),
         ("fields", "Step 3: Custom Fields", "Add, edit, or remove structured sections"),
         ("interactive", "Step 4: Buttons & Modules", "Manage link buttons and interactive dropdown modules"),
@@ -1085,20 +1076,17 @@ class EmbedBuilderView(discord.ui.View):
         self._setup_dynamic_buttons()
 
     def _setup_dynamic_buttons(self) -> None:
-        """Assign custom arrow and edit emojis from emoji2 folder to navigation buttons."""
+        """Assign custom edit and send emojis from emoji registry."""
         e_reg = getattr(self.bot, "custom_emojis", None)
         if e_reg:
-            left_e = e_reg.get_emoji_obj("icon_arrow_left") or e_reg.get_emoji_obj("icons_leftarrow")
-            right_e = e_reg.get_emoji_obj("icons_arrow") or e_reg.get_emoji_obj("icons_rightarrow")
             edit_e = e_reg.get_emoji_obj("icons_edit") or e_reg.get_emoji_obj("icon_edit")
-
-            self.btn_prev.label = None
-            self.btn_prev.emoji = left_e if left_e else "◀"
-
-            self.btn_next.label = None
-            self.btn_next.emoji = right_e if right_e else "▶"
-
-            self.btn_edit_step.emoji = edit_e if edit_e else None
+            send_e = e_reg.get_emoji_obj("icon_send") or e_reg.get_emoji_obj("icons_send")
+            for item in self.children:
+                if isinstance(item, discord.ui.Button):
+                    if item.custom_id == "btn_primary" and edit_e:
+                        item.emoji = edit_e
+                    elif item.custom_id == "btn_send" and send_e:
+                        item.emoji = send_e
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -1132,13 +1120,11 @@ class EmbedBuilderView(discord.ui.View):
         if slide_key == "content":
             t_str = f"`{self.draft.title}`" if self.draft.title else "`None`"
             a_str = f"`{self.draft.author_name}`" if self.draft.author_name else "`None`"
-            ai_str = "`Set`" if self.draft.author_icon_url else "`None`"
             desc_len = len(self.draft.description) if self.draft.description else 0
             accent_str = f"`{self.draft.accent_hex}`" if self.draft.accent_hex else "`Default Dark`"
             container.add_text(
                 f"**Title:** {t_str} | **Author:** {a_str}\n"
-                f"**Author Icon:** {ai_str} | **Color:** {accent_str}\n"
-                f"**Description Length:** `{desc_len} chars`"
+                f"**Accent Color:** {accent_str} | **Description:** `{desc_len} chars`"
             )
         elif slide_key == "visuals":
             thumb_str = "`Set`" if self.draft.thumbnail_url else "`None`"
@@ -1191,36 +1177,69 @@ class EmbedBuilderView(discord.ui.View):
                 for opt in item.options:
                     opt.default = (opt.value == slide_key)
             elif isinstance(item, discord.ui.Button):
-                if item.custom_id == "btn_edit_step":
+                if item.custom_id == "btn_primary":
                     if slide_key == "content":
                         item.label = "Edit Content"
+                        item.style = discord.ButtonStyle.secondary
                     elif slide_key == "visuals":
                         item.label = "Edit Visuals"
+                        item.style = discord.ButtonStyle.secondary
                     elif slide_key == "fields":
                         item.label = "Add Field"
+                        item.style = discord.ButtonStyle.secondary
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                             item.label = "Edit Module"
+                            item.style = discord.ButtonStyle.secondary
                         else:
                             item.label = "Add Module"
+                            item.style = discord.ButtonStyle.primary
                     elif slide_key == "dispatch":
-                        item.label = "Raw JSON/HTML"
-                elif item.custom_id == "btn_secondary_action":
-                    if slide_key == "fields":
+                        item.label = "Send to Channel"
+                        item.style = discord.ButtonStyle.success
+                elif item.custom_id == "btn_secondary":
+                    if slide_key in ["content", "visuals"]:
+                        item.label = "Save Template"
+                        item.style = discord.ButtonStyle.secondary
+                        item.disabled = False
+                    elif slide_key == "fields":
                         item.label = "Clear Fields"
+                        item.style = discord.ButtonStyle.danger
                         item.disabled = (len(self.draft.fields) == 0)
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                            item.label = "Add Module"
+                            item.label = "Delete Module"
+                            item.style = discord.ButtonStyle.danger
+                            item.disabled = False
                         else:
                             item.label = "Add Button"
+                            item.style = discord.ButtonStyle.secondary
+                            item.disabled = False
+                    elif slide_key == "dispatch":
+                        item.label = "Raw JSON"
+                        item.style = discord.ButtonStyle.secondary
                         item.disabled = False
+                elif item.custom_id == "btn_tertiary":
+                    if slide_key in ["content", "visuals", "fields"]:
+                        item.label = "Save As"
+                        item.style = discord.ButtonStyle.secondary
+                        item.disabled = False
+                    elif slide_key == "interactive":
+                        if self.preview_module_id and self.preview_module_id.startswith("mod_"):
+                            item.label = "Add Module"
+                            item.style = discord.ButtonStyle.primary
+                            item.disabled = False
+                        else:
+                            item.label = "Clear All"
+                            item.style = discord.ButtonStyle.danger
+                            item.disabled = (len(self.draft.modules) == 0 and len(self.draft.buttons) == 0)
                     elif slide_key == "dispatch":
                         item.label = "Reset Draft"
+                        item.style = discord.ButtonStyle.danger
                         item.disabled = False
-                    else:
-                        item.label = "Save"
-                        item.disabled = False
+                elif item.custom_id == "btn_send":
+                    item.label = "Send Card"
+                    item.style = discord.ButtonStyle.success
 
     async def update_view(self, interaction: discord.Interaction) -> None:
         """Update the dual-container message and auto-save changes."""
@@ -1248,7 +1267,7 @@ class EmbedBuilderView(discord.ui.View):
         placeholder="Jump to a step...",
         custom_id="select_slide",
         options=[
-            discord.SelectOption(label="Step 1: Content & Theme", value="content", description="Title, Author, Icon, Description, Color"),
+            discord.SelectOption(label="Step 1: Content & Theme", value="content", description="Title, Author, Description, Color"),
             discord.SelectOption(label="Step 2: Images & Footer", value="visuals", description="Thumbnail, Banner, Footer Text & Icon, Timestamp"),
             discord.SelectOption(label="Step 3: Custom Fields", value="fields", description="Add, edit, or remove structured sections"),
             discord.SelectOption(label="Step 4: Buttons & Modules", value="interactive", description="Manage link buttons and interactive dropdown modules"),
@@ -1266,18 +1285,8 @@ class EmbedBuilderView(discord.ui.View):
 
     # ─── Action Buttons (Row 1) ──────────────────────────────────────────────
 
-    @discord.ui.button(style=discord.ButtonStyle.secondary, emoji="◀", row=1)
-    async def btn_prev(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.current_slide_idx = (self.current_slide_idx - 1) % len(self.SLIDES)
-        await self.update_view(interaction)
-
-    @discord.ui.button(style=discord.ButtonStyle.secondary, emoji="▶", row=1)
-    async def btn_next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.current_slide_idx = (self.current_slide_idx + 1) % len(self.SLIDES)
-        await self.update_view(interaction)
-
-    @discord.ui.button(label="Edit Content", style=discord.ButtonStyle.secondary, custom_id="btn_edit_step", row=1)
-    async def btn_edit_step(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.secondary, custom_id="btn_primary", row=1)
+    async def btn_primary(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 
         if slide_key == "content":
@@ -1302,15 +1311,44 @@ class EmbedBuilderView(discord.ui.View):
                     return
                 await interaction.response.send_modal(AddModuleModal(self))
         elif slide_key == "dispatch":
-            await interaction.response.send_modal(RawImportModal(self))
+            await self._open_send_picker(interaction)
 
-    @discord.ui.button(label="Save", style=discord.ButtonStyle.secondary, custom_id="btn_secondary_action", row=1)
-    async def btn_secondary_action(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    @discord.ui.button(label="Secondary", style=discord.ButtonStyle.secondary, custom_id="btn_secondary", row=1)
+    async def btn_secondary(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 
-        if slide_key == "fields":
+        if slide_key in ["content", "visuals"]:
+            await interaction.response.send_modal(SaveModal(self))
+        elif slide_key == "fields":
             self.draft.fields.clear()
             await self.update_view(interaction)
+        elif slide_key == "interactive":
+            if self.preview_module_id and self.preview_module_id.startswith("mod_"):
+                try:
+                    idx = int(self.preview_module_id.replace("mod_", ""))
+                    if 0 <= idx < len(self.draft.modules):
+                        self.draft.modules.pop(idx)
+                        for new_i, m in enumerate(self.draft.modules):
+                            m["id"] = f"mod_{new_i}"
+                    self.preview_module_id = None
+                    await self.update_view(interaction)
+                except Exception:
+                    self.preview_module_id = None
+                    await self.update_view(interaction)
+            else:
+                if len(self.draft.buttons) >= 5:
+                    await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
+                    return
+                await interaction.response.send_modal(AddButtonModal(self))
+        elif slide_key == "dispatch":
+            await interaction.response.send_modal(RawImportModal(self))
+
+    @discord.ui.button(label="Tertiary", style=discord.ButtonStyle.secondary, custom_id="btn_tertiary", row=1)
+    async def btn_tertiary(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        slide_key, _, _ = self.SLIDES[self.current_slide_idx]
+
+        if slide_key in ["content", "visuals", "fields"]:
+            await interaction.response.send_modal(SaveModal(self))
         elif slide_key == "interactive":
             if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                 if len(self.draft.modules) >= 25:
@@ -1318,18 +1356,19 @@ class EmbedBuilderView(discord.ui.View):
                     return
                 await interaction.response.send_modal(AddModuleModal(self))
             else:
-                if len(self.draft.buttons) >= 5:
-                    await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
-                    return
-                await interaction.response.send_modal(AddButtonModal(self))
+                self.draft.modules.clear()
+                self.draft.buttons.clear()
+                self.preview_module_id = None
+                await self.update_view(interaction)
         elif slide_key == "dispatch":
             self.draft = ContainerDraft()
             await self.update_view(interaction)
-        else:
-            await interaction.response.send_modal(SaveModal(self))
 
-    @discord.ui.button(label="Send", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="Send Card", style=discord.ButtonStyle.success, custom_id="btn_send", row=1)
     async def btn_send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._open_send_picker(interaction)
+
+    async def _open_send_picker(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         if not guild:
             await interaction.response.send_message("Cannot send in direct messages.", ephemeral=True)
@@ -1358,7 +1397,7 @@ class EmbedBuilderView(discord.ui.View):
             async def select_channel(self, inter: discord.Interaction, sel: discord.ui.Select) -> None:
                 ch_id = int(sel.values[0])
                 target_ch = inter.guild.get_channel(ch_id) if inter.guild else None
-                if not target_ch:
+                if not target_ch or not isinstance(target_ch, discord.TextChannel):
                     await inter.response.send_message("Target channel not found.", ephemeral=True)
                     return
 

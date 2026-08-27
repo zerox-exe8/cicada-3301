@@ -269,21 +269,19 @@ async def send_container_response(
                             wh_payload["avatar_url"] = str(avatar.url)
                     wh_payload["allowed_mentions"] = {"parse": []}
 
-                    route = discord.http.Route(
-                        "POST",
-                        "/webhooks/{webhook_id}/{webhook_token}",
-                        webhook_id=wh.id,
-                        webhook_token=wh.token,
-                    )
-                    msg_data = await http_client.request(
-                        route,
-                        json=wh_payload,
-                        params={"wait": "true"},
-                    )
-                    if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
-                        if hasattr(bot_instance, "_connection"):
-                            bot_instance._connection.store_view(view, int(msg_data["id"]))
-                    return msg_data
+                    import aiohttp
+                    webhook_url = f"https://discord.com/api/v10/webhooks/{wh.id}/{wh.token}?wait=true"
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(webhook_url, json=wh_payload) as resp:
+                            if resp.status in (200, 204):
+                                msg_data = await resp.json() if resp.status == 200 else {}
+                                if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
+                                    if hasattr(bot_instance, "_connection"):
+                                        bot_instance._connection.store_view(view, int(msg_data["id"]))
+                                return msg_data
+                            else:
+                                err_text = await resp.text()
+                                logger.error(f"Discord Webhook API returned {resp.status} in #{obj.name}: {err_text}")
                 except Exception as wh_post_err:
                     logger.error(f"Webhook container dispatch failed in #{obj.name}: {wh_post_err}", exc_info=wh_post_err)
 

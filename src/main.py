@@ -15,7 +15,7 @@ from src.core.bot import CicadaBot
 from src.core.config import Config
 from src.utils.logger import setup_logger
 
-logger = setup_logger("Cicada 3301")
+logger = setup_logger("Cicada")
 
 
 async def main() -> None:

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 
 from src.core.config import Config
-from src.utils.containers import CicadaContainer
+from src.utils.containers import CicadaContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import CicadaBot
@@ -93,7 +93,7 @@ class HealthServer:
             container.add_separator(divider=True)
             container.add_text(f"-# Cicada 3301 Enterprise Subscription • Transaction ID: {payment_id}")
 
-            await user.send(embed=container.build())
+            await send_container_response(user, container)
             logger.info(f"Payment receipt DM sent to user ID {user_id} for payment {payment_id}.")
         except Exception as e:
             logger.warning(f"Could not send receipt DM to user {user_id}: {e}")
@@ -118,7 +118,7 @@ class HealthServer:
             container.add_separator(divider=True)
             container.add_text("-# Cicada 3301 Infrastructure")
 
-            await user.send(embed=container.build())
+            await send_container_response(user, container)
         except Exception as e:
             logger.warning(f"Could not send refund DM to user {user_id}: {e}")
 

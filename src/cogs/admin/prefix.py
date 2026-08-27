@@ -29,11 +29,16 @@ class Prefix(commands.Cog):
     @commands.guild_only()
     async def set_prefix(self, ctx: CustomContext, new_prefix: str) -> None:
         """Set a new custom prefix for this server. Usage: ?setprefix !"""
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
+
         if len(new_prefix) > 5:
             container = CicadaContainer(accent_color=None)
-            container.add_text(
-                "**Invalid Prefix**\n"
-                "> Prefix length cannot exceed 5 characters."
+            container.add_section(
+                content=(
+                    "**Invalid Prefix**\n"
+                    "> Prefix length cannot exceed 5 characters."
+                )
             )
             container.add_separator(divider=True)
             container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -43,11 +48,15 @@ class Prefix(commands.Cog):
         await self.bot.guild_mgr.set_prefix(ctx.guild.id, new_prefix)
 
         container = CicadaContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Prefix Updated**\n"
+                "> Server command prefix has been successfully configured."
+            )
+        )
+        container.add_separator(divider=True)
         container.add_text(
-            "**Prefix Updated**\n"
-            "> Server command prefix has been successfully configured.\n\n"
-            f"• **New Prefix:** `{new_prefix}`\n"
-            f"• **Example:** `{new_prefix}help`"
+            f"{dot} **New Prefix:** `{new_prefix}` | **Example:** `{new_prefix}help`"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -61,14 +70,21 @@ class Prefix(commands.Cog):
     @commands.guild_only()
     async def reset_prefix(self, ctx: CustomContext) -> None:
         """Reset custom prefix back to default '?'."""
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
+
         await self.bot.guild_mgr.reset_prefix(ctx.guild.id)
 
         container = CicadaContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Prefix Reset**\n"
+                "> Server command prefix has been restored to default."
+            )
+        )
+        container.add_separator(divider=True)
         container.add_text(
-            "**Prefix Reset**\n"
-            "> Server command prefix has been restored to default.\n\n"
-            f"• **Default Prefix:** `{Config.DEFAULT_PREFIX}`\n"
-            f"• **Example:** `{Config.DEFAULT_PREFIX}help`"
+            f"{dot} **Default Prefix:** `{Config.DEFAULT_PREFIX}` | **Example:** `{Config.DEFAULT_PREFIX}help`"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")

@@ -606,7 +606,7 @@ class PremiumManager:
                 guild_name = guild.name if guild else f"Server ID {g_id}"
                 days_left = max(1, (exp - db_now).days)
 
-                from src.utils.containers import CicadaContainer
+                from src.utils.containers import CicadaContainer, send_container_response
                 container = CicadaContainer(accent_color=None)
                 container.add_text(
                     f"**Cicada Pro Subscription Expiring Soon**\n\n"
@@ -616,7 +616,7 @@ class PremiumManager:
                 container.add_separator(divider=True)
                 container.add_text("-# Cicada 3301 Subscription Renewal Alert")
 
-                await user.send(embed=container.build())
+                await send_container_response(user, container)
                 logger.info(f"Sent renewal reminder DM to user {user_id} for guild {g_id}.")
 
                 if tx_id:

@@ -1,7 +1,8 @@
 """
-Cicada 3301 Discord Bot - Advanced Mimu-Style Components V2 Embed Builder
-Full-featured interactive embed builder with zero required fields, placeholder support,
-field management, live previewing, template storage, and message editing.
+Cicada 3301 Discord Bot - Refined Mimu-Style Dual Embed Builder
+Top Container: Real-time Live Preview Card.
+Bottom Container: Ultra-minimal Slide Control Dashboard with focused actions.
+Includes Discohook/JSON/HTML raw import and full dynamic variable engine.
 """
 
 from __future__ import annotations
@@ -26,26 +27,113 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Cicada.EmbedBuilder")
 
 
-def apply_placeholders(text: str | None, user: discord.Member | discord.User, guild: discord.Guild | None) -> str:
-    """Replace dynamic template variables in text."""
+# ─── Dynamic Variable Parser ──────────────────────────────────────────────────
+
+def apply_placeholders(
+    text: str | None,
+    user: discord.Member | discord.User | None,
+    guild: discord.Guild | None,
+    channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None = None,
+    bot: CicadaBot | None = None,
+) -> str:
+    """Replace comprehensive dynamic template variables in text."""
     if not text:
         return ""
 
-    replacements = {
-        "{user}": user.mention,
-        "{user.mention}": user.mention,
-        "{user.name}": user.name,
-        "{user.id}": str(user.id),
-        "{user.avatar}": str(user.display_avatar.url),
+    now = discord.utils.utcnow()
+    replacements: dict[str, str] = {
+        # Timestamps
+        "{timestamp}": f"<t:{int(now.timestamp())}:f>",
+        "{timestamp.short_datetime}": f"<t:{int(now.timestamp())}:f>",
+        "{timestamp.long_datetime}": f"<t:{int(now.timestamp())}:F>",
+        "{timestamp.short_date}": f"<t:{int(now.timestamp())}:d>",
+        "{timestamp.long_date}": f"<t:{int(now.timestamp())}:D>",
+        "{timestamp.short_time}": f"<t:{int(now.timestamp())}:t>",
+        "{timestamp.long_time}": f"<t:{int(now.timestamp())}:T>",
+        "{timestamp.relative}": f"<t:{int(now.timestamp())}:R>",
+        "{relative_time}": f"<t:{int(now.timestamp())}:R>",
+        "{date}": now.strftime("%Y-%m-%d"),
+        "{time}": now.strftime("%H:%M:%S UTC"),
+        "{unix}": str(int(now.timestamp())),
     }
 
+    if user:
+        created_ts = int(user.created_at.timestamp())
+        replacements.update({
+            "{user}": user.mention,
+            "{user.mention}": user.mention,
+            "{user.name}": user.name,
+            "{user.display_name}": user.display_name,
+            "{user.id}": str(user.id),
+            "{user.avatar}": str(user.display_avatar.url),
+            "{user.avatar_url}": str(user.display_avatar.url),
+            "{user.default_avatar_url}": str(user.default_avatar.url),
+            "{user.created_at}": user.created_at.strftime("%Y-%m-%d"),
+            "{user.created_at_timestamp}": f"<t:{created_ts}:R>",
+            "{user.bot}": str(user.bot),
+        })
+        if isinstance(user, discord.Member):
+            joined_ts = int(user.joined_at.timestamp()) if user.joined_at else 0
+            replacements.update({
+                "{user.joined_at}": user.joined_at.strftime("%Y-%m-%d") if user.joined_at else "N/A",
+                "{user.joined_at_timestamp}": f"<t:{joined_ts}:R>" if joined_ts else "N/A",
+                "{user.top_role}": user.top_role.name if user.top_role else "None",
+                "{user.top_role_mention}": user.top_role.mention if user.top_role else "None",
+                "{user.roles_count}": str(len(user.roles) - 1),
+                "{user.color}": str(user.color),
+            })
+
     if guild:
+        guild_created_ts = int(guild.created_at.timestamp())
         replacements.update({
             "{server}": guild.name,
             "{server.name}": guild.name,
             "{server.id}": str(guild.id),
             "{server.members}": str(guild.member_count or 0),
+            "{server.member_count}": str(guild.member_count or 0),
             "{server.icon}": str(guild.icon.url) if guild.icon else "",
+            "{server.icon_url}": str(guild.icon.url) if guild.icon else "",
+            "{server.banner}": str(guild.banner.url) if guild.banner else "",
+            "{server.banner_url}": str(guild.banner.url) if guild.banner else "",
+            "{server.splash}": str(guild.splash.url) if guild.splash else "",
+            "{server.splash_url}": str(guild.splash.url) if guild.splash else "",
+            "{server.owner_id}": str(guild.owner_id),
+            "{server.created_at}": guild.created_at.strftime("%Y-%m-%d"),
+            "{server.created_at_timestamp}": f"<t:{guild_created_ts}:R>",
+            "{server.boost_count}": str(guild.premium_subscription_count or 0),
+            "{server.boosts}": str(guild.premium_subscription_count or 0),
+            "{server.boost_tier}": str(guild.premium_tier),
+            "{server.tier}": str(guild.premium_tier),
+            "{server.roles_count}": str(len(guild.roles)),
+            "{server.channels_count}": str(len(guild.channels)),
+        })
+        if guild.owner:
+            replacements.update({
+                "{server.owner}": guild.owner.display_name,
+                "{server.owner.name}": guild.owner.name,
+                "{server.owner.mention}": guild.owner.mention,
+            })
+
+    if channel:
+        replacements.update({
+            "{channel}": getattr(channel, "mention", f"#{channel}"),
+            "{channel.name}": getattr(channel, "name", str(channel)),
+            "{channel.id}": str(getattr(channel, "id", 0)),
+            "{channel.mention}": getattr(channel, "mention", f"#{channel}"),
+            "{channel.topic}": getattr(channel, "topic", "") or "",
+        })
+
+    if bot and bot.user:
+        replacements.update({
+            "{bot}": bot.user.mention,
+            "{bot.name}": bot.user.name,
+            "{bot.id}": str(bot.user.id),
+            "{bot.avatar}": str(bot.user.display_avatar.url),
+            "{bot.avatar_url}": str(bot.user.display_avatar.url),
+            "{bot.prefix}": bot.guild_mgr.get_prefix(guild.id if guild else None) if hasattr(bot, "guild_mgr") else "?",
+            "{bot.ping}": f"{round(bot.latency * 1000)}ms" if bot.latency else "0ms",
+            "{bot.latency}": f"{round(bot.latency * 1000)}ms" if bot.latency else "0ms",
+            "{bot.guilds_count}": str(len(bot.guilds)),
         })
 
     result = text
@@ -53,6 +141,24 @@ def apply_placeholders(text: str | None, user: discord.Member | discord.User, gu
         result = result.replace(key, val)
     return result
 
+
+def convert_html_to_markdown(text: str) -> str:
+    """Convert basic HTML tags to Discord Markdown format."""
+    if not text:
+        return ""
+    t = text
+    t = re.sub(r"<(?:b|strong)>(.*?)</(?:b|strong)>", r"**\1**", t, flags=re.IGNORECASE | re.DOTALL)
+    t = re.sub(r"<(?:i|em)>(.*?)</(?:i|em)>", r"*\1*", t, flags=re.IGNORECASE | re.DOTALL)
+    t = re.sub(r"<u>(.*?)</u>", r"__\1__", t, flags=re.IGNORECASE | re.DOTALL)
+    t = re.sub(r"<(?:s|strike|del)>(.*?)</(?:s|strike|del)>", r"~~\1~~", t, flags=re.IGNORECASE | re.DOTALL)
+    t = re.sub(r'<a\s+href=["\'](.*?)["\']>(.*?)</a>', r"[\2](\1)", t, flags=re.IGNORECASE | re.DOTALL)
+    t = re.sub(r"<code>(.*?)</code>", r"`\1`", t, flags=re.IGNORECASE | re.DOTALL)
+    t = re.sub(r"<br\s*/?>", "\n", t, flags=re.IGNORECASE)
+    t = re.sub(r"<p>(.*?)</p>", r"\1\n", t, flags=re.IGNORECASE | re.DOTALL)
+    return t
+
+
+# ─── Data Model ───────────────────────────────────────────────────────────────
 
 class ContainerDraft:
     """Modular data model for custom Components V2 container cards."""
@@ -65,22 +171,21 @@ class ContainerDraft:
         self.title: str | None = "Cicada 3301 Custom Card"
         self.title_url: str | None = None
 
-        self.description: str | None = "This is a clean Components V2 container card. You can edit or remove any element."
-        
+        self.description: str | None = "This is your live Components V2 preview. Edit options below to customize."
+
         self.fields: list[dict[str, str]] = []  # [{"name": "...", "value": "..."}]
 
         self.thumbnail_url: str | None = None
         self.image_url: str | None = None
 
         self.footer_text: str | None = None
-        self.footer_icon_url: str | None = None
         self.timestamp: bool = False
 
-        self.accent_hex: str | None = "#00FF66"
+        self.accent_hex: str | None = None
         self.buttons: list[dict[str, str]] = []  # [{"label": "...", "url": "..."}]
 
     def get_accent_int(self) -> int | None:
-        if not self.accent_hex:
+        if not self.accent_hex or self.accent_hex.strip().lower() in ["none", "dark", "default"]:
             return None
         clean = self.accent_hex.strip().lstrip("#")
         try:
@@ -92,29 +197,27 @@ class ContainerDraft:
         self,
         user: discord.Member | discord.User | None = None,
         guild: discord.Guild | None = None,
+        channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None = None,
+        bot: CicadaBot | None = None,
         default_avatar: str | None = None,
     ) -> CicadaContainer:
         """Convert draft into a Discord Components V2 CicadaContainer."""
         container = CicadaContainer(accent_color=self.get_accent_int())
 
-        # Resolve placeholders if user/guild provided
         def parse(t: str | None) -> str:
             if not t:
                 return ""
-            if user:
-                return apply_placeholders(t, user, guild)
-            return t
+            return apply_placeholders(t, user=user, guild=guild, channel=channel, bot=bot)
 
         # 1. Author Section
         author_text = parse(self.author_name)
-        author_icon = self.author_icon_url
 
         # 2. Title and Description Section
         title_text = parse(self.title)
         desc_text = parse(self.description)
 
         # Thumbnail Accessory (Type 11) on Header Section
-        thumb_url = self.thumbnail_url
+        thumb_url = self.thumbnail_url or self.author_icon_url
         accessory_dict = None
         if thumb_url and thumb_url.startswith("http"):
             accessory_dict = {
@@ -133,16 +236,17 @@ class ContainerDraft:
                 header_blocks.append(f"**{author_text}**")
 
         if title_text:
+            formatted_title = title_text if title_text.startswith("#") else f"## {title_text}"
             if self.title_url and self.title_url.startswith("http"):
-                header_blocks.append(f"## [{title_text}]({self.title_url})")
+                header_blocks.append(f"[{formatted_title}]({self.title_url})")
             else:
-                header_blocks.append(f"## {title_text}")
+                header_blocks.append(formatted_title)
 
         if desc_text:
             header_blocks.append(desc_text)
 
         if header_blocks or accessory_dict:
-            full_header_content = "\n".join(header_blocks) if header_blocks else "​"
+            full_header_content = "\n".join(header_blocks) if header_blocks else " "
             container.add_section(content=full_header_content, accessory=accessory_dict)
             container.add_separator(divider=True)
 
@@ -202,7 +306,6 @@ class ContainerDraft:
         if footer_parts:
             container.add_text(f"-# {' • '.join(footer_parts)}")
 
-        # Fallback if completely empty
         if not container.components:
             container.add_text("Empty card container.")
 
@@ -220,7 +323,6 @@ class ContainerDraft:
             "thumbnail_url": self.thumbnail_url,
             "image_url": self.image_url,
             "footer_text": self.footer_text,
-            "footer_icon_url": self.footer_icon_url,
             "timestamp": self.timestamp,
             "accent_hex": self.accent_hex,
             "buttons": self.buttons,
@@ -239,61 +341,77 @@ class ContainerDraft:
         draft.thumbnail_url = data.get("thumbnail_url")
         draft.image_url = data.get("image_url")
         draft.footer_text = data.get("footer_text")
-        draft.footer_icon_url = data.get("footer_icon_url")
         draft.timestamp = bool(data.get("timestamp", False))
         draft.accent_hex = data.get("accent_hex")
         draft.buttons = data.get("buttons", [])
         return draft
 
+    @classmethod
+    def from_raw_payload(cls, raw: str) -> ContainerDraft:
+        """Parse raw JSON (Discohook, standard Discord Embed, or internal dict) and HTML."""
+        cleaned = raw.strip()
+        draft = cls()
 
-# ─── Modals (All Fields Optional) ─────────────────────────────────────────────
+        try:
+            parsed_json = json.loads(cleaned)
+            if isinstance(parsed_json, dict):
+                # Check for Discohook / Standard Embed format: {"embeds": [{...}]}
+                if "embeds" in parsed_json and isinstance(parsed_json["embeds"], list) and parsed_json["embeds"]:
+                    emb = parsed_json["embeds"][0]
+                    draft.title = emb.get("title")
+                    draft.description = convert_html_to_markdown(emb.get("description", ""))
+                    draft.title_url = emb.get("url")
+                    if "author" in emb:
+                        draft.author_name = emb["author"].get("name")
+                        draft.author_icon_url = emb["author"].get("icon_url")
+                        draft.author_url = emb["author"].get("url")
+                    if "thumbnail" in emb:
+                        draft.thumbnail_url = emb["thumbnail"].get("url")
+                    if "image" in emb:
+                        draft.image_url = emb["image"].get("url")
+                    if "footer" in emb:
+                        draft.footer_text = emb["footer"].get("text")
+                    if "color" in emb:
+                        draft.accent_hex = f"#{emb['color']:06x}"
+                    if "fields" in emb and isinstance(emb["fields"], list):
+                        draft.fields = [{"name": f.get("name", ""), "value": convert_html_to_markdown(f.get("value", ""))} for f in emb["fields"]]
+                    return draft
 
-class AuthorModal(discord.ui.Modal, title="Edit Author"):
-    name_input = discord.ui.TextInput(
-        label="Author Name",
-        placeholder="Enter author text or leave empty to remove",
-        max_length=256,
-        required=False,
-    )
-    icon_input = discord.ui.TextInput(
-        label="Author Icon URL",
-        placeholder="https://example.com/icon.png",
-        required=False,
-    )
-    url_input = discord.ui.TextInput(
-        label="Author Clickable URL",
-        placeholder="https://example.com",
-        required=False,
-    )
+                # Direct Embed Dictionary: {"title": "...", "description": "..."}
+                if "title" in parsed_json or "description" in parsed_json or "fields" in parsed_json:
+                    return cls.from_dict(parsed_json)
+        except Exception:
+            pass
 
-    def __init__(self, view: EmbedBuilderView) -> None:
-        super().__init__()
-        self.view_ref = view
-        self.name_input.default = self.view_ref.draft.author_name or ""
-        self.icon_input.default = self.view_ref.draft.author_icon_url or ""
-        self.url_input.default = self.view_ref.draft.author_url or ""
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        name = str(self.name_input.value).strip()
-        icon = str(self.icon_input.value).strip()
-        url = str(self.url_input.value).strip()
-
-        self.view_ref.draft.author_name = name if name else None
-        self.view_ref.draft.author_icon_url = icon if icon.startswith("http") else None
-        self.view_ref.draft.author_url = url if url.startswith("http") else None
-
-        await self.view_ref.update_preview(interaction)
+        # Plain text / HTML fallback
+        draft.description = convert_html_to_markdown(cleaned)
+        return draft
 
 
-class TitleModal(discord.ui.Modal, title="Edit Title"):
+# ─── Modals (Minimal & Focused) ───────────────────────────────────────────────
+
+class ContentModal(discord.ui.Modal, title="Content Settings"):
     title_input = discord.ui.TextInput(
-        label="Title Text",
-        placeholder="Enter title text or leave empty to remove",
+        label="Title",
+        placeholder="Card title headline...",
         max_length=256,
         required=False,
     )
+    author_input = discord.ui.TextInput(
+        label="Author Name",
+        placeholder="Author or organization name...",
+        max_length=256,
+        required=False,
+    )
+    desc_input = discord.ui.TextInput(
+        label="Description",
+        style=discord.TextStyle.paragraph,
+        placeholder="Main description text, markdown, variables {user}, {server}...",
+        max_length=4000,
+        required=False,
+    )
     url_input = discord.ui.TextInput(
-        label="Title URL (Clickable)",
+        label="Title URL",
         placeholder="https://example.com",
         required=False,
     )
@@ -302,49 +420,83 @@ class TitleModal(discord.ui.Modal, title="Edit Title"):
         super().__init__()
         self.view_ref = view
         self.title_input.default = self.view_ref.draft.title or ""
+        self.author_input.default = self.view_ref.draft.author_name or ""
+        self.desc_input.default = self.view_ref.draft.description or ""
         self.url_input.default = self.view_ref.draft.title_url or ""
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         t = str(self.title_input.value).strip()
+        a = str(self.author_input.value).strip()
+        d = str(self.desc_input.value).strip()
         u = str(self.url_input.value).strip()
+
         self.view_ref.draft.title = t if t else None
+        self.view_ref.draft.author_name = a if a else None
+        self.view_ref.draft.description = d if d else None
         self.view_ref.draft.title_url = u if u.startswith("http") else None
-        await self.view_ref.update_preview(interaction)
+
+        await self.view_ref.update_view(interaction)
 
 
-class DescriptionModal(discord.ui.Modal, title="Edit Description"):
-    desc_input = discord.ui.TextInput(
-        label="Description Body",
-        style=discord.TextStyle.paragraph,
-        placeholder="Enter markdown text, quotes, variables {user}, {server}...",
-        max_length=4000,
+class VisualsModal(discord.ui.Modal, title="Visuals & Theme"):
+    thumb_input = discord.ui.TextInput(
+        label="Thumbnail URL",
+        placeholder="https://example.com/thumb.png or empty to remove",
+        required=False,
+    )
+    banner_input = discord.ui.TextInput(
+        label="Banner Image URL",
+        placeholder="https://example.com/banner.png or empty to remove",
+        required=False,
+    )
+    accent_input = discord.ui.TextInput(
+        label="Accent Color",
+        placeholder="#00FF66, #5865F2, or 'none'",
+        max_length=20,
+        required=False,
+    )
+    footer_input = discord.ui.TextInput(
+        label="Footer Subtext",
+        placeholder="Footer text or {timestamp}...",
+        max_length=1000,
         required=False,
     )
 
     def __init__(self, view: EmbedBuilderView) -> None:
         super().__init__()
         self.view_ref = view
-        self.desc_input.default = self.view_ref.draft.description or ""
+        self.thumb_input.default = self.view_ref.draft.thumbnail_url or ""
+        self.banner_input.default = self.view_ref.draft.image_url or ""
+        self.accent_input.default = self.view_ref.draft.accent_hex or "none"
+        self.footer_input.default = self.view_ref.draft.footer_text or ""
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        d = str(self.desc_input.value).strip()
-        self.view_ref.draft.description = d if d else None
-        await self.view_ref.update_preview(interaction)
+        th = str(self.thumb_input.value).strip()
+        bn = str(self.banner_input.value).strip()
+        ac = str(self.accent_input.value).strip()
+        ft = str(self.footer_input.value).strip()
+
+        self.view_ref.draft.thumbnail_url = th if th.startswith("http") else None
+        self.view_ref.draft.image_url = bn if bn.startswith("http") else None
+        self.view_ref.draft.accent_hex = None if ac.lower() in ["none", "dark", "default", ""] else ac
+        self.view_ref.draft.footer_text = ft if ft else None
+
+        await self.view_ref.update_view(interaction)
 
 
 class AddFieldModal(discord.ui.Modal, title="Add Field"):
     name_input = discord.ui.TextInput(
         label="Field Name",
-        placeholder="Field header or name...",
+        placeholder="Section name or header...",
         max_length=256,
-        required=False,
+        required=True,
     )
     value_input = discord.ui.TextInput(
         label="Field Value",
         style=discord.TextStyle.paragraph,
-        placeholder="Field text or details...",
+        placeholder="Field description or details...",
         max_length=1024,
-        required=False,
+        required=True,
     )
 
     def __init__(self, view: EmbedBuilderView) -> None:
@@ -354,111 +506,22 @@ class AddFieldModal(discord.ui.Modal, title="Add Field"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         n = str(self.name_input.value).strip()
         v = str(self.value_input.value).strip()
-        if n or v:
+        if n and v:
             self.view_ref.draft.fields.append({"name": n, "value": v})
-        await self.view_ref.update_preview(interaction)
+        await self.view_ref.update_view(interaction)
 
 
-class ThumbnailModal(discord.ui.Modal, title="Edit Thumbnail"):
-    thumb_input = discord.ui.TextInput(
-        label="Thumbnail Image URL",
-        placeholder="https://example.com/thumb.png or empty to remove",
-        required=False,
-    )
-
-    def __init__(self, view: EmbedBuilderView) -> None:
-        super().__init__()
-        self.view_ref = view
-        self.thumb_input.default = self.view_ref.draft.thumbnail_url or ""
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        t = str(self.thumb_input.value).strip()
-        self.view_ref.draft.thumbnail_url = t if t.startswith("http") else None
-        await self.view_ref.update_preview(interaction)
-
-
-class ImageModal(discord.ui.Modal, title="Edit Banner Image"):
-    img_input = discord.ui.TextInput(
-        label="Banner Image URL",
-        placeholder="https://example.com/banner.png or empty to remove",
-        required=False,
-    )
-
-    def __init__(self, view: EmbedBuilderView) -> None:
-        super().__init__()
-        self.view_ref = view
-        self.img_input.default = self.view_ref.draft.image_url or ""
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        img = str(self.img_input.value).strip()
-        self.view_ref.draft.image_url = img if img.startswith("http") else None
-        await self.view_ref.update_preview(interaction)
-
-
-class FooterModal(discord.ui.Modal, title="Edit Footer"):
-    text_input = discord.ui.TextInput(
-        label="Footer Text",
-        placeholder="Enter footer subtext or empty to remove",
-        max_length=2048,
-        required=False,
-    )
-    timestamp_input = discord.ui.TextInput(
-        label="Include Timestamp? (yes/no)",
-        placeholder="Type 'yes' to show current timestamp",
-        max_length=10,
-        required=False,
-    )
-
-    def __init__(self, view: EmbedBuilderView) -> None:
-        super().__init__()
-        self.view_ref = view
-        self.text_input.default = self.view_ref.draft.footer_text or ""
-        self.timestamp_input.default = "yes" if self.view_ref.draft.timestamp else "no"
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        f = str(self.text_input.value).strip()
-        ts = str(self.timestamp_input.value).strip().lower()
-
-        self.view_ref.draft.footer_text = f if f else None
-        self.view_ref.draft.timestamp = ts in ["yes", "true", "1", "y"]
-        await self.view_ref.update_preview(interaction)
-
-
-class ColorModal(discord.ui.Modal, title="Edit Accent Color"):
-    color_input = discord.ui.TextInput(
-        label="Hex Color",
-        placeholder="#00FF66, #5865F2, #E74C3C, or 'none' for Dark Mode",
-        max_length=20,
-        required=False,
-    )
-
-    def __init__(self, view: EmbedBuilderView) -> None:
-        super().__init__()
-        self.view_ref = view
-        self.color_input.default = self.view_ref.draft.accent_hex or "none"
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        val = str(self.color_input.value).strip().lower()
-        if val in ["none", "dark", "transparent", ""]:
-            self.view_ref.draft.accent_hex = None
-        else:
-            if not val.startswith("#"):
-                val = f"#{val}"
-            self.view_ref.draft.accent_hex = val
-        await self.view_ref.update_preview(interaction)
-
-
-class ButtonModal(discord.ui.Modal, title="Add Link Button"):
+class AddButtonModal(discord.ui.Modal, title="Add Link Button"):
     label_input = discord.ui.TextInput(
-        label="Button Text",
-        placeholder="Website, Rules, Support...",
+        label="Button Label",
+        placeholder="Visit Website, Join Server...",
         max_length=80,
-        required=False,
+        required=True,
     )
     url_input = discord.ui.TextInput(
-        label="Button Link URL",
-        placeholder="https://discord.gg/...",
-        required=False,
+        label="Destination URL",
+        placeholder="https://example.com",
+        required=True,
     )
 
     def __init__(self, view: EmbedBuilderView) -> None:
@@ -468,9 +531,11 @@ class ButtonModal(discord.ui.Modal, title="Add Link Button"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         label = str(self.label_input.value).strip() or "Link"
         url = str(self.url_input.value).strip()
-        if url.startswith("http"):
+        if url:
+            if not url.startswith("http://") and not url.startswith("https://"):
+                url = f"https://{url}"
             self.view_ref.draft.buttons.append({"label": label, "url": url})
-        await self.view_ref.update_preview(interaction)
+        await self.view_ref.update_view(interaction)
 
 
 class SaveModal(discord.ui.Modal, title="Save Template"):
@@ -478,7 +543,7 @@ class SaveModal(discord.ui.Modal, title="Save Template"):
         label="Template Name",
         placeholder="welcome, rules, announcement...",
         max_length=32,
-        required=False,
+        required=True,
     )
 
     def __init__(self, view: EmbedBuilderView) -> None:
@@ -489,7 +554,7 @@ class SaveModal(discord.ui.Modal, title="Save Template"):
         name = str(self.name_input.value).strip().lower()
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name)
         if not clean_name:
-            await interaction.response.send_message("Invalid template name. Use letters and numbers only.", ephemeral=True)
+            await interaction.response.send_message("Invalid template name.", ephemeral=True)
             return
 
         bot: CicadaBot = interaction.client  # type: ignore
@@ -501,18 +566,18 @@ class SaveModal(discord.ui.Modal, title="Save Template"):
         )
         if success:
             await interaction.response.send_message(
-                f"Saved template as '{clean_name}'. Use '?embed send #channel {clean_name}' to post.",
+                f"Saved template as `{clean_name}`. Use `?embed send #channel {clean_name}` to post.",
                 ephemeral=True,
             )
         else:
             await interaction.response.send_message("Failed to save template.", ephemeral=True)
 
 
-class JSONModal(discord.ui.Modal, title="JSON Payload"):
-    json_input = discord.ui.TextInput(
-        label="Container JSON Data",
+class RawImportModal(discord.ui.Modal, title="Raw JSON / HTML Import"):
+    raw_input = discord.ui.TextInput(
+        label="Payload / Code",
         style=discord.TextStyle.paragraph,
-        placeholder="Paste JSON payload or copy existing...",
+        placeholder="Paste Discohook JSON, raw embed JSON, or HTML text...",
         max_length=4000,
         required=False,
     )
@@ -520,106 +585,193 @@ class JSONModal(discord.ui.Modal, title="JSON Payload"):
     def __init__(self, view: EmbedBuilderView) -> None:
         super().__init__()
         self.view_ref = view
-        self.json_input.default = json.dumps(self.view_ref.draft.to_dict(), indent=2)
+        raw_json = json.dumps(self.view_ref.draft.to_dict(), indent=2)
+        if len(raw_json) > 3900:
+            raw_json = json.dumps(self.view_ref.draft.to_dict())
+        self.raw_input.default = raw_json[:3950]
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        raw = str(self.json_input.value).strip()
+        raw = str(self.raw_input.value).strip()
         if not raw:
             return
         try:
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                self.view_ref.draft = ContainerDraft.from_dict(data)
-                await self.view_ref.update_preview(interaction)
+            self.view_ref.draft = ContainerDraft.from_raw_payload(raw)
+            await self.view_ref.update_view(interaction)
         except Exception as e:
-            await interaction.response.send_message(f"Invalid JSON: {e}", ephemeral=True)
+            await interaction.response.send_message(f"Import failed: {e}", ephemeral=True)
 
 
-# ─── Interactive Controller View ─────────────────────────────────────────────
+# ─── Dual-Container Controller View ──────────────────────────────────────────
 
 class EmbedBuilderView(discord.ui.View):
-    """Full-featured Mimu-style builder view for Components V2 containers."""
+    """Mimu-style dual-container builder: Top = Live Preview, Bottom = Slide Console."""
+
+    SLIDES = [
+        ("content", "Content", "Title, Author, Body Description"),
+        ("visuals", "Visuals & Theme", "Thumbnail, Banner Image, Accent Color"),
+        ("fields", "Custom Fields", "Manage sections and fields"),
+        ("buttons", "Link Buttons", "Manage clickable URL buttons"),
+        ("dispatch", "Dispatch & Raw", "Send, Save Template, Raw Import/Export"),
+    ]
 
     def __init__(self, bot: CicadaBot, author: discord.Member | discord.User, draft: ContainerDraft | None = None) -> None:
         super().__init__(timeout=600)
         self.bot = bot
         self.author = author
         self.draft: ContainerDraft = draft or ContainerDraft()
+        self.current_slide_idx: int = 0  # 0 to 4
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message("Only the command author can use this menu.", ephemeral=True)
+            await interaction.response.send_message("Only the command author can use this builder.", ephemeral=True)
             return False
         return True
 
-    def build_preview_container(self, guild: discord.Guild | None = None) -> CicadaContainer:
-        return self.draft.to_container(
-            user=self.author,
-            guild=guild,
-            default_avatar=str(self.bot.user.display_avatar.url),
+    def build_preview_container(self, guild: discord.Guild | None = None, channel: discord.abc.Messageable | None = None) -> CicadaContainer:
+        """Top Container: Live rendered preview of the custom card."""
+        return self.draft.to_container(user=self.author, guild=guild, channel=channel, bot=self.bot)
+
+    def build_control_container(self, guild: discord.Guild | None = None) -> CicadaContainer:
+        """Bottom Container: Minimal slide editor console."""
+        slide_key, slide_title, _ = self.SLIDES[self.current_slide_idx]
+        e_reg = getattr(self.bot, "custom_emojis", None)
+        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-")) if e_reg else "-"
+
+        container = CicadaContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"**Cicada 3301 Builder — Slide {self.current_slide_idx + 1}/5: {slide_title}**\n"
+                f"> Use controls below to configure this section."
+            )
         )
+        container.add_separator(divider=True)
 
-    async def update_preview(self, interaction: discord.Interaction) -> None:
-        """Update the live preview container."""
-        container = self.build_preview_container(interaction.guild)
-        await edit_container_response(interaction, container, view=self)
+        if slide_key == "content":
+            t_str = f"`{self.draft.title}`" if self.draft.title else "`None`"
+            a_str = f"`{self.draft.author_name}`" if self.draft.author_name else "`None`"
+            desc_len = len(self.draft.description) if self.draft.description else 0
+            container.add_text(
+                f"{dot} **Title:** {t_str} | **Author:** {a_str}\n"
+                f"{dot} **Description Length:** `{desc_len} chars`"
+            )
+        elif slide_key == "visuals":
+            thumb_str = "`Set`" if self.draft.thumbnail_url else "`None`"
+            banner_str = "`Set`" if self.draft.image_url else "`None`"
+            accent_str = f"`{self.draft.accent_hex}`" if self.draft.accent_hex else "`Default Dark`"
+            container.add_text(
+                f"{dot} **Thumbnail:** {thumb_str} | **Banner:** {banner_str}\n"
+                f"{dot} **Accent Color:** {accent_str}"
+            )
+        elif slide_key == "fields":
+            f_cnt = len(self.draft.fields)
+            f_summary = ", ".join([f"`{f['name']}`" for f in self.draft.fields[:4]]) if self.draft.fields else "`None`"
+            container.add_text(
+                f"{dot} **Total Fields:** `{f_cnt}`\n"
+                f"{dot} **Fields:** {f_summary}"
+            )
+        elif slide_key == "buttons":
+            b_cnt = len(self.draft.buttons)
+            b_summary = ", ".join([f"`{b['label']}`" for b in self.draft.buttons[:4]]) if self.draft.buttons else "`None`"
+            container.add_text(
+                f"{dot} **Total Buttons:** `{b_cnt}`\n"
+                f"{dot} **Buttons:** {b_summary}"
+            )
+        elif slide_key == "dispatch":
+            container.add_text(
+                f"{dot} **Ready to Publish:** Choose an action below to post, save, or import JSON/HTML."
+            )
 
-    # ─── Dropdown Options ─────────────────────────────────────────────────────
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {self.author.display_name}")
+        return container
+
+    def get_dual_containers(self, guild: discord.Guild | None = None, channel: discord.abc.Messageable | None = None) -> list[CicadaContainer]:
+        """Return [Top: Live Preview, Bottom: Control Console]."""
+        return [
+            self.build_preview_container(guild=guild, channel=channel),
+            self.build_control_container(guild=guild),
+        ]
+
+    def _sync_controls(self) -> None:
+        """Update select menu placeholder and button states according to active slide."""
+        slide_key, slide_title, _ = self.SLIDES[self.current_slide_idx]
+
+        for item in self.children:
+            if isinstance(item, discord.ui.Select) and item.custom_id == "select_slide":
+                for opt in item.options:
+                    opt.default = (opt.value == slide_key)
+            elif isinstance(item, discord.ui.Button):
+                if item.custom_id == "btn_edit_step":
+                    if slide_key == "content":
+                        item.label = "Edit Content"
+                    elif slide_key == "visuals":
+                        item.label = "Edit Visuals"
+                    elif slide_key == "fields":
+                        item.label = "Add Field"
+                    elif slide_key == "buttons":
+                        item.label = "Add Button"
+                    elif slide_key == "dispatch":
+                        item.label = "Raw JSON/HTML"
+
+    async def update_view(self, interaction: discord.Interaction) -> None:
+        """Update the dual-container message."""
+        self._sync_controls()
+        containers = self.get_dual_containers(interaction.guild, interaction.channel)
+        await edit_container_response(interaction, containers, view=self)
+
+    # ─── Dropdown: Direct Slide Selector ──────────────────────────────────────
 
     @discord.ui.select(
-        placeholder="Choose an element to edit or configure...",
+        placeholder="Jump to a slide...",
+        custom_id="select_slide",
         options=[
-            discord.SelectOption(label="Author", value="opt_author", description="Set author name, icon, or link"),
-            discord.SelectOption(label="Title", value="opt_title", description="Set title text and clickable URL"),
-            discord.SelectOption(label="Description", value="opt_desc", description="Set main description body markdown"),
-            discord.SelectOption(label="Add Field", value="opt_add_field", description="Add a new custom name/value field"),
-            discord.SelectOption(label="Clear Fields", value="opt_clear_fields", description="Remove all custom fields"),
-            discord.SelectOption(label="Thumbnail", value="opt_thumb", description="Set top-right thumbnail image"),
-            discord.SelectOption(label="Banner Image", value="opt_image", description="Set large bottom banner image"),
-            discord.SelectOption(label="Footer", value="opt_footer", description="Set footer subtext and timestamp"),
-            discord.SelectOption(label="Accent Color", value="opt_color", description="Set card sidebar border color"),
-            discord.SelectOption(label="Add Link Button", value="opt_add_btn", description="Add a clickable URL button"),
-            discord.SelectOption(label="Clear Buttons", value="opt_clear_btns", description="Remove all URL buttons"),
-            discord.SelectOption(label="JSON Import / Export", value="opt_json", description="View or paste raw JSON code"),
+            discord.SelectOption(label="Slide 1: Content", value="content", description="Title, Author, Body Description"),
+            discord.SelectOption(label="Slide 2: Visuals & Theme", value="visuals", description="Thumbnail, Banner, Color, Footer"),
+            discord.SelectOption(label="Slide 3: Custom Fields", value="fields", description="Manage custom sections"),
+            discord.SelectOption(label="Slide 4: Link Buttons", value="buttons", description="Manage clickable destination buttons"),
+            discord.SelectOption(label="Slide 5: Dispatch & Raw", value="dispatch", description="Send, Save, Raw JSON/HTML Import"),
         ],
         row=0,
     )
-    async def select_element(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+    async def select_slide(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
         val = select.values[0]
+        for idx, (k, _, _) in enumerate(self.SLIDES):
+            if k == val:
+                self.current_slide_idx = idx
+                break
+        await self.update_view(interaction)
 
-        if val == "opt_author":
-            await interaction.response.send_modal(AuthorModal(self))
-        elif val == "opt_title":
-            await interaction.response.send_modal(TitleModal(self))
-        elif val == "opt_desc":
-            await interaction.response.send_modal(DescriptionModal(self))
-        elif val == "opt_add_field":
+    # ─── Action Buttons (Row 1) ──────────────────────────────────────────────
+
+    @discord.ui.button(label="◀ Prev", style=discord.ButtonStyle.secondary, row=1)
+    async def btn_prev(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.current_slide_idx = (self.current_slide_idx - 1) % len(self.SLIDES)
+        await self.update_view(interaction)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary, row=1)
+    async def btn_next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.current_slide_idx = (self.current_slide_idx + 1) % len(self.SLIDES)
+        await self.update_view(interaction)
+
+    @discord.ui.button(label="Edit Content", style=discord.ButtonStyle.primary, custom_id="btn_edit_step", row=1)
+    async def btn_edit_step(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        slide_key, _, _ = self.SLIDES[self.current_slide_idx]
+
+        if slide_key == "content":
+            await interaction.response.send_modal(ContentModal(self))
+        elif slide_key == "visuals":
+            await interaction.response.send_modal(VisualsModal(self))
+        elif slide_key == "fields":
             await interaction.response.send_modal(AddFieldModal(self))
-        elif val == "opt_clear_fields":
-            self.draft.fields.clear()
-            await self.update_preview(interaction)
-        elif val == "opt_thumb":
-            await interaction.response.send_modal(ThumbnailModal(self))
-        elif val == "opt_image":
-            await interaction.response.send_modal(ImageModal(self))
-        elif val == "opt_footer":
-            await interaction.response.send_modal(FooterModal(self))
-        elif val == "opt_color":
-            await interaction.response.send_modal(ColorModal(self))
-        elif val == "opt_add_btn":
+        elif slide_key == "buttons":
             if len(self.draft.buttons) >= 5:
-                await interaction.response.send_message("Maximum 5 buttons allowed per card.", ephemeral=True)
+                await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
                 return
-            await interaction.response.send_modal(ButtonModal(self))
-        elif val == "opt_clear_btns":
-            self.draft.buttons.clear()
-            await self.update_preview(interaction)
-        elif val == "opt_json":
-            await interaction.response.send_modal(JSONModal(self))
+            await interaction.response.send_modal(AddButtonModal(self))
+        elif slide_key == "dispatch":
+            await interaction.response.send_modal(RawImportModal(self))
 
-    # ─── Action Buttons ───────────────────────────────────────────────────────
-
-    @discord.ui.button(label="Send to Channel", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="Send", style=discord.ButtonStyle.success, row=1)
     async def btn_send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         guild = interaction.guild
         if not guild:
@@ -649,28 +801,28 @@ class EmbedBuilderView(discord.ui.View):
             async def select_channel(self, inter: discord.Interaction, sel: discord.ui.Select) -> None:
                 ch_id = int(sel.values[0])
                 target_ch = inter.guild.get_channel(ch_id) if inter.guild else None
-                if not isinstance(target_ch, discord.TextChannel):
-                    await inter.response.send_message("Invalid channel selected.", ephemeral=True)
+                if not target_ch:
+                    await inter.response.send_message("Target channel not found.", ephemeral=True)
                     return
 
-                container = self.parent_view.build_preview_container(inter.guild)
-                await send_container_response(target_ch, container)
-                await inter.response.send_message(f"Card posted to {target_ch.mention}.", ephemeral=True)
+                container = self.parent_view.draft.to_container(
+                    user=self.parent_view.author,
+                    guild=inter.guild,
+                    channel=target_ch,
+                    bot=self.parent_view.bot,
+                )
+                try:
+                    await send_container_response(target_ch, container)
+                    await inter.response.send_message(f"Card successfully posted to {target_ch.mention}.", ephemeral=True)
+                except Exception as e:
+                    logger.error(f"Failed to post container card: {e}", exc_info=e)
+                    await inter.response.send_message(f"Failed to post card: {e}", ephemeral=True)
 
-        await interaction.response.send_message("Select the channel where you want to post this card:", view=ChannelPicker(self), ephemeral=True)
+        await interaction.response.send_message("Select target channel to post card:", view=ChannelPicker(self), ephemeral=True)
 
-    @discord.ui.button(label="Save Template", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Save", style=discord.ButtonStyle.secondary, row=1)
     async def btn_save(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.send_modal(SaveModal(self))
-
-    @discord.ui.button(label="Clear All", style=discord.ButtonStyle.secondary, row=1)
-    async def btn_clear(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.draft = ContainerDraft()
-        self.draft.title = None
-        self.draft.description = None
-        self.draft.footer_text = None
-        self.draft.accent_hex = None
-        await self.update_preview(interaction)
 
 
 # ─── Cog Implementation ──────────────────────────────────────────────────────
@@ -690,7 +842,7 @@ class EmbedBuilder(commands.Cog):
     )
     @commands.has_permissions(manage_messages=True)
     async def embed_group(self, ctx: CustomContext, template_name: str | None = None) -> None:
-        """Launch the live interactive embed builder."""
+        """Launch the dual-container interactive embed builder."""
         draft = ContainerDraft()
         if template_name:
             data = await self.bot.embed_mgr.get_template(ctx.guild.id, template_name)
@@ -698,8 +850,8 @@ class EmbedBuilder(commands.Cog):
                 draft = ContainerDraft.from_dict(data)
 
         view = EmbedBuilderView(self.bot, ctx.author, draft=draft)
-        container = view.build_preview_container(ctx.guild)
-        await send_container_response(ctx, container, view=view)
+        containers = view.get_dual_containers(ctx.guild, ctx.channel)
+        await send_container_response(ctx, containers, view=view)
 
     @embed_group.command(
         name="create",
@@ -714,26 +866,65 @@ class EmbedBuilder(commands.Cog):
     @embed_group.command(
         name="send",
         aliases=["post"],
-        description="Send a saved template to a channel. Usage: ?embed send #channel <template_name>",
+        description="Send a saved template to a channel. Usage: ?embed send [#channel] <template_name>",
     )
     @commands.has_permissions(manage_messages=True)
     async def embed_send(
-        self, ctx: CustomContext, channel: discord.TextChannel, template_name: str
+        self, ctx: CustomContext, target_or_name: str, template_name: str | None = None
     ) -> None:
         """Send a saved template to a channel."""
-        template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, template_name)
+        target_channel: discord.abc.Messageable = ctx.channel
+        actual_name = target_or_name
+
+        if template_name is not None:
+            channel_converter = commands.TextChannelConverter()
+            try:
+                target_channel = await channel_converter.convert(ctx, target_or_name)
+            except Exception:
+                found = None
+                clean_id = re.sub(r"[<#>]", "", target_or_name)
+                if clean_id.isdigit() and ctx.guild:
+                    found = ctx.guild.get_channel(int(clean_id))
+                if not found and ctx.guild:
+                    found = discord.utils.get(ctx.guild.text_channels, name=target_or_name)
+                if found:
+                    target_channel = found
+                else:
+                    await ctx.send(f"Channel '{target_or_name}' not found.")
+                    return
+            actual_name = template_name
+
+        template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, actual_name)
         if not template_data:
-            await ctx.send(f"Saved template '{template_name}' not found. Use '?embed list' to view saved templates.")
+            await ctx.send(f"Saved template '{actual_name}' not found.")
             return
 
         draft = ContainerDraft.from_dict(template_data)
+        avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
         container = draft.to_container(
             user=ctx.author,
             guild=ctx.guild,
-            default_avatar=str(self.bot.user.display_avatar.url),
+            channel=target_channel,
+            bot=self.bot,
+            default_avatar=avatar_url,
         )
-        await send_container_response(channel, container)
-        await ctx.send(f"Card '{template_name}' posted to {channel.mention}.")
+        try:
+            await send_container_response(target_channel, container)
+            ch_mention = getattr(target_channel, "mention", f"#{target_channel}")
+
+            resp_container = CicadaContainer(accent_color=None)
+            resp_container.add_section(
+                content=(
+                    "**Card Dispatched**\n"
+                    f"> Saved template `{actual_name}` posted to {ch_mention}."
+                )
+            )
+            resp_container.add_separator(divider=True)
+            resp_container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, resp_container)
+        except Exception as e:
+            logger.error(f"Failed to post embed template '{actual_name}': {e}", exc_info=e)
+            await ctx.send(f"Failed to post card: {e}")
 
     @embed_group.command(
         name="edit",
@@ -755,23 +946,39 @@ class EmbedBuilder(commands.Cog):
             await ctx.send(f"Message ID '{message_id}' not found in this channel.")
             return
 
-        if target_msg.author.id != self.bot.user.id:
+        if self.bot.user and target_msg.author.id != self.bot.user.id:
             await ctx.send("Can only edit messages sent by this bot.")
             return
 
         draft = ContainerDraft.from_dict(template_data)
+        avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
         container = draft.to_container(
             user=ctx.author,
             guild=ctx.guild,
-            default_avatar=str(self.bot.user.display_avatar.url),
+            channel=ctx.channel,
+            bot=self.bot,
+            default_avatar=avatar_url,
         )
 
         payload = container.to_payload()
-        await self.bot.http.request(
-            discord.http.Route("PATCH", f"/channels/{ctx.channel.id}/messages/{message_id}"),
-            json=payload,
-        )
-        await ctx.send(f"Message {message_id} updated successfully.")
+        try:
+            await self.bot.http.request(
+                discord.http.Route("PATCH", f"/channels/{ctx.channel.id}/messages/{message_id}"),
+                json=payload,
+            )
+            resp_container = CicadaContainer(accent_color=None)
+            resp_container.add_section(
+                content=(
+                    "**Message Updated**\n"
+                    f"> Target message `{message_id}` updated with template `{template_name}`."
+                )
+            )
+            resp_container.add_separator(divider=True)
+            resp_container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, resp_container)
+        except Exception as e:
+            logger.error(f"Failed to edit message {message_id}: {e}", exc_info=e)
+            await ctx.send(f"Failed to edit message {message_id}: {e}")
 
     @embed_group.command(
         name="list",
@@ -783,21 +990,24 @@ class EmbedBuilder(commands.Cog):
         """List all saved templates."""
         templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
         if not templates:
-            await ctx.send("No saved templates found in this server. Create one using '?embed create'.")
+            container = CicadaContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Saved Embed Templates**\n"
+                    "> No saved templates found in this server. Create one using `?embed`."
+                )
+            )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
             return
 
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                f"## Saved Server Embed Templates\n"
-                f"> Found {len(templates)} saved container template(s) in this server."
-            ),
-            accessory={
-                "type": 11,
-                "media": {
-                    "url": str(self.bot.user.display_avatar.url),
-                },
-            },
+                "**Saved Server Templates**\n"
+                f"> Listing `{len(templates)}` saved container template(s) in this server."
+            )
         )
         container.add_separator(divider=True)
 
@@ -806,7 +1016,7 @@ class EmbedBuilder(commands.Cog):
         for t in templates:
             name = t.get("embed_name", "unknown")
             created_at = str(t.get("created_at", ""))[:10]
-            lines.append(f"- {name} (Created on {created_at}) - Use '{prefix}embed send #channel {name}'")
+            lines.append(f"`{name}` (Created {created_at}) — `{prefix}embed send {name}`")
 
         container.add_text("\n".join(lines))
         container.add_separator(divider=True)
@@ -822,10 +1032,24 @@ class EmbedBuilder(commands.Cog):
     async def embed_delete(self, ctx: CustomContext, template_name: str) -> None:
         """Delete a saved template."""
         success = await self.bot.embed_mgr.delete_template(ctx.guild.id, template_name)
+        container = CicadaContainer(accent_color=None)
         if success:
-            await ctx.send(f"Deleted template '{template_name}' from server.")
+            container.add_section(
+                content=(
+                    "**Template Deleted**\n"
+                    f"> Template `{template_name}` has been removed from this server."
+                )
+            )
         else:
-            await ctx.send(f"Could not find or delete template '{template_name}'.")
+            container.add_section(
+                content=(
+                    "**Template Not Found**\n"
+                    f"> Could not find or delete template `{template_name}`."
+                )
+            )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
 
     @embed_group.command(
         name="raw",
@@ -836,18 +1060,18 @@ class EmbedBuilder(commands.Cog):
     async def embed_raw(self, ctx: CustomContext, *, json_payload: str) -> None:
         """Send raw JSON container."""
         try:
-            data = json.loads(json_payload)
-            if isinstance(data, dict):
-                draft = ContainerDraft.from_dict(data)
-                container = draft.to_container(
-                    user=ctx.author,
-                    guild=ctx.guild,
-                    default_avatar=str(self.bot.user.display_avatar.url),
-                )
-                await send_container_response(ctx, container)
-                return
+            draft = ContainerDraft.from_raw_payload(json_payload)
+            avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
+            container = draft.to_container(
+                user=ctx.author,
+                guild=ctx.guild,
+                channel=ctx.channel,
+                bot=self.bot,
+                default_avatar=avatar_url,
+            )
+            await send_container_response(ctx, container)
         except Exception as e:
-            await ctx.send(f"Invalid JSON: {e}")
+            await ctx.send(f"Invalid payload: {e}")
 
 
 async def setup(bot: CicadaBot) -> None:

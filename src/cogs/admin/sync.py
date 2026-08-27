@@ -39,9 +39,11 @@ class Sync(commands.Cog):
             msg = f"Successfully synced `{len(synced)}` application slash commands instantly to **{ctx.guild.name}**."
 
         container = CicadaContainer(accent_color=None)
-        container.add_text(
-            "**Slash Commands Synchronized**\n"
-            f"> {msg}"
+        container.add_section(
+            content=(
+                "**Slash Commands Synchronized**\n"
+                f"> {msg}"
+            )
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -60,10 +62,12 @@ class Sync(commands.Cog):
         uploaded, total = await self.bot.custom_emojis.sync_from_assets()
 
         container = CicadaContainer(accent_color=None)
-        container.add_text(
-            "**Application Emojis Synchronized**\n"
-            f"> Successfully uploaded `{uploaded}` new emoji(s).\n"
-            f"> Total cached custom emojis: `{total}`"
+        container.add_section(
+            content=(
+                "**Application Emojis Synchronized**\n"
+                f"> Successfully uploaded `{uploaded}` new emoji(s).\n"
+                f"> Total cached custom emojis: `{total}`"
+            )
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")

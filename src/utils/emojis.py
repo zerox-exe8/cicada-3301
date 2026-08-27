@@ -40,6 +40,13 @@ class EmojiRegistry:
         from pathlib import Path
         import re
 
+        try:
+            if not self.bot.application_id:
+                app_info = await self.bot.application_info()
+                self.bot.application_id = app_info.id
+        except Exception as e:
+            logger.debug(f"Could not resolve application info: {e}")
+
         await self.load()
         uploaded = 0
 
@@ -51,7 +58,7 @@ class EmojiRegistry:
         for adir in asset_dirs:
             if not adir.exists():
                 continue
-            for img_file in adir.glob("*.png"):
+            for img_file in sorted(adir.glob("*.png")):
                 # Clean name: alphanumeric + underscores only, 2-32 chars
                 raw_name = img_file.stem.lower()
                 clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", raw_name)
@@ -81,22 +88,32 @@ class EmojiRegistry:
         Get custom emoji string (e.g. '<:icon_bot:123456789>') by name.
         If not found, returns the provided fallback.
         """
-        emoji = self._emojis.get(name.lower())
+        name_clean = name.lower().strip(":")
+        emoji = self._emojis.get(name_clean)
+        if not emoji and hasattr(self.bot, "emojis"):
+            emoji = discord.utils.get(self.bot.emojis, name=name_clean)
         if emoji:
             return str(emoji)
         return fallback
 
-    def get_select_emoji(self, name: str, fallback_unicode: str = "📁") -> dict[str, Any]:
+    def get_select_emoji(self, name: str, fallback_unicode: str | None = None) -> dict[str, Any] | None:
         """
         Get emoji dictionary structure suitable for Discord Select Menu options.
         Custom emoji requires {'id': str, 'name': str}.
+        If custom emoji is not found and no unicode fallback is given, returns None.
         """
-        emoji = self._emojis.get(name.lower())
+        name_clean = name.lower().strip(":")
+        emoji = self._emojis.get(name_clean)
+        if not emoji and hasattr(self.bot, "emojis"):
+            emoji = discord.utils.get(self.bot.emojis, name=name_clean)
         if emoji:
             return {
                 "id": str(emoji.id),
                 "name": emoji.name,
                 "animated": emoji.animated,
             }
-        return {"name": fallback_unicode}
+        if fallback_unicode:
+            return {"name": fallback_unicode}
+        return None
+
 

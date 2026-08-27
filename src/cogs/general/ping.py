@@ -46,21 +46,23 @@ class Ping(commands.Cog):
         shard_id = ctx.guild.shard_id if ctx.guild else 0
 
         e_reg = self.bot.custom_emojis
-        ping_icon = e_reg.get("icons_goodping", e_reg.get("icons_ping", "📡"))
+        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
         container = CicadaContainer(accent_color=None)
-        container.add_text(
-            f"### ◈ CICADA 3301 // TELEMETRY PING\n\n"
-            f"```ansi\n"
-            f"\u001b[1;32m[GATEWAY LATENCY]\u001b[0m   :: {ws_latency:.2f} ms\n"
-            f"\u001b[1;36m[DATABASE LATENCY]\u001b[0m  :: {db_latency:.2f} ms\n"
-            f"\u001b[1;33m[SYSTEM UPTIME]\u001b[0m     :: {uptime_str}\n"
-            f"\u001b[1;35m[CLUSTER SHARD]\u001b[0m     :: #{shard_id}\n"
-            f"```\n"
-            f"> ⌁ **Status:** `OPERATIONAL` • `Supabase PostgreSQL Connected`"
+        container.add_section(
+            content=(
+                f"**Cicada 3301 Latency**\n"
+                f"> Current gateway latency, database response speed, and system uptime."
+            )
         )
         container.add_separator(divider=True)
-        container.add_footer(f"◈ Cicada 3301 Core Protocol • Telemetry requested by {ctx.author.display_name}")
+
+        container.add_text(
+            f"{dot} **Gateway:** `{ws_latency:.2f}ms` | **Database:** `{db_latency:.2f}ms`\n"
+            f"{dot} **Uptime:** `{uptime_str}` | **Shard:** `#{shard_id}`"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
 
         await send_container_response(ctx, container)
 

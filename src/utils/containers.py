@@ -33,7 +33,10 @@ class CicadaContainer:
         content: str,
         accessory: dict[str, Any] | None = None,
     ) -> CicadaContainer:
-        """Add a Section component (type: 9) with optional accessory (Button/Thumbnail)."""
+        """Add a Section component (type: 9) if accessory is present, otherwise TextDisplay (type: 10)."""
+        if not accessory:
+            return self.add_text(content)
+
         section_data: dict[str, Any] = {
             "type": 9,
             "components": [
@@ -42,9 +45,8 @@ class CicadaContainer:
                     "content": content,
                 }
             ],
+            "accessory": accessory,
         }
-        if accessory:
-            section_data["accessory"] = accessory
         self.components.append(section_data)
         return self
 
@@ -69,6 +71,42 @@ class CicadaContainer:
         })
         return self
 
+    def to_embed(self) -> discord.Embed:
+        """Convert container components into a standard discord.Embed for fallback compatibility."""
+        embed = discord.Embed(
+            color=self.accent_color or 0x00FF66,
+        )
+        for comp in self.components:
+            ctype = comp.get("type")
+            if ctype == 10:  # TextDisplay
+                text = comp.get("content", "")
+                if text.startswith("-# "):
+                    embed.set_footer(text=text.replace("-# ", "").strip())
+                elif not embed.description:
+                    embed.description = text
+                else:
+                    embed.description += f"\n\n{text}"
+            elif ctype == 9:  # Section
+                sub_comps = comp.get("components", [])
+                for sc in sub_comps:
+                    text = sc.get("content", "")
+                    if not embed.description:
+                        embed.description = text
+                    else:
+                        embed.description += f"\n\n{text}"
+                acc = comp.get("accessory", {})
+                if acc.get("type") == 11 and "media" in acc:
+                    embed.set_thumbnail(url=acc["media"].get("url", ""))
+            elif ctype == 12:  # Media Gallery
+                items = comp.get("items", [])
+                if items and "media" in items[0]:
+                    embed.set_image(url=items[0]["media"].get("url", ""))
+        return embed
+
+    def build(self) -> discord.Embed:
+        """Compatibility method returning a discord.Embed representation."""
+        return self.to_embed()
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize container to Discord API component structure."""
         data: dict[str, Any] = {
@@ -79,26 +117,40 @@ class CicadaContainer:
             data["accent_color"] = self.accent_color
         return data
 
-    def to_payload(self, view: discord.ui.View | None = None) -> dict[str, Any]:
-        """Generate the full Discord REST payload with IS_COMPONENTS_V2 flag and no mentions."""
-        comps = [self.to_dict()]
-        if view is not None:
-            comps.extend(view.to_components())
+def build_container_payload(
+    container: CicadaContainer | list[CicadaContainer],
+    view: discord.ui.View | None = None,
+) -> dict[str, Any]:
+    """Generate the full Discord REST payload supporting single or multiple stacked containers with nested view controls."""
+    if isinstance(container, list):
+        container_list = container
+    else:
+        container_list = [container]
 
-        return {
-            "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
-            "components": comps,
-            "allowed_mentions": {"parse": []},
-        }
+    comps = []
+    for idx, c in enumerate(container_list):
+        c_dict = c.to_dict()
+        # Embed view's action rows directly inside the bottom/last container
+        if idx == len(container_list) - 1 and view is not None:
+            view_comps = view.to_components()
+            if view_comps:
+                c_dict["components"].extend(view_comps)
+        comps.append(c_dict)
+
+    return {
+        "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
+        "components": comps,
+        "allowed_mentions": {"parse": []},
+    }
 
 
 async def send_container_response(
-    interaction_or_ctx: discord.Interaction | commands.Context | discord.abc.Messageable,
-    container: CicadaContainer,
+    interaction_or_ctx: discord.Interaction | commands.Context | discord.abc.Messageable | discord.User | discord.Member,
+    container: CicadaContainer | list[CicadaContainer],
     view: discord.ui.View | None = None,
     ephemeral: bool = False,
 ) -> Any:
-    """Send or edit a message using Components V2 Container."""
+    """Send or edit a message using Components V2 Container(s)."""
     # 1. Resolve hybrid context interaction if present
     interaction = getattr(interaction_or_ctx, "interaction", None)
     if interaction is not None:
@@ -106,18 +158,27 @@ async def send_container_response(
     else:
         target = interaction_or_ctx
 
+    payload = build_container_payload(container, view=view)
+
     if isinstance(target, discord.Interaction):
         interaction = target
         bot = getattr(interaction, "client", getattr(interaction, "bot", None))
-        payload = container.to_payload(view=view)
+        app_id = getattr(bot, "application_id", None) or (bot.user.id if bot and bot.user else None)
         if ephemeral:
             payload["flags"] |= 64  # EPHEMERAL
 
         if interaction.response.is_done():
-            msg = await interaction.followup.send(**payload)
+            msg_data = await bot.http.request(
+                discord.http.Route(
+                    "POST",
+                    f"/webhooks/{app_id}/{interaction.token}",
+                ),
+                json=payload,
+            )
             if view and hasattr(bot, "_connection"):
-                bot._connection.store_view(view, msg.id if hasattr(msg, "id") else None)
-            return msg
+                msg_id = int(msg_data["id"]) if isinstance(msg_data, dict) and "id" in msg_data else None
+                bot._connection.store_view(view, msg_id)
+            return msg_data
         else:
             # Send initial response via raw interaction callback
             res = await bot.http.request(
@@ -131,20 +192,27 @@ async def send_container_response(
                 bot._connection.store_view(view)
             return res
     else:
-        # commands.Context, discord.Message, or discord.TextChannel
         obj = target
-        payload = container.to_payload(view=view)
 
-        if isinstance(obj, discord.abc.GuildChannel) or (isinstance(obj, discord.abc.Messageable) and hasattr(obj, "id") and not hasattr(obj, "channel")):
+        # Handle User / Member DMs
+        if isinstance(obj, (discord.User, discord.Member)):
+            dm = await obj.create_dm()
+            channel_id = dm.id
+            bot_instance = getattr(obj, "_state", None)
+            http_client = getattr(bot_instance, "http", None)
+        elif isinstance(obj, discord.abc.GuildChannel) or (isinstance(obj, discord.abc.Messageable) and hasattr(obj, "id") and not hasattr(obj, "channel")):
             channel_id = obj.id
+            bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
+            http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
         elif hasattr(obj, "channel"):
             channel_id = obj.channel.id
+            bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
+            http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
         else:
             channel_id = int(obj)
+            bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
+            http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
 
-        bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
-        http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
-        
         msg_data = await http_client.request(
             discord.http.Route("POST", f"/channels/{channel_id}/messages"),
             json=payload,
@@ -157,12 +225,13 @@ async def send_container_response(
 
 async def edit_container_response(
     interaction: discord.Interaction,
-    container: CicadaContainer,
+    container: CicadaContainer | list[CicadaContainer],
     view: discord.ui.View | None = None,
 ) -> None:
     """Edit an existing Components V2 Container message safely with fallbacks."""
     bot = interaction.client
-    payload = container.to_payload(view=view)
+    payload = build_container_payload(container, view=view)
+    app_id = getattr(bot, "application_id", None) or (bot.user.id if bot.user else None)
 
     # 1. Try interaction response callback first
     try:
@@ -175,18 +244,24 @@ async def edit_container_response(
                 json={"type": 7, "data": payload},  # 7 = UPDATE_MESSAGE
             )
             if view and hasattr(bot, "_connection"):
-                bot._connection.store_view(view)
+                msg_id = interaction.message.id if interaction.message else None
+                bot._connection.store_view(view, msg_id)
             return
         else:
             msg_data = await bot.http.request(
                 discord.http.Route(
                     "PATCH",
-                    f"/webhooks/{bot.user.id}/{interaction.token}/messages/@original",
+                    f"/webhooks/{app_id}/{interaction.token}/messages/@original",
                 ),
                 json=payload,
             )
-            if view and hasattr(bot, "_connection") and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
-                bot._connection.store_view(view, int(msg_data["id"]))
+            if view and hasattr(bot, "_connection"):
+                msg_id = None
+                if msg_data and isinstance(msg_data, dict) and "id" in msg_data:
+                    msg_id = int(msg_data["id"])
+                elif interaction.message:
+                    msg_id = interaction.message.id
+                bot._connection.store_view(view, msg_id)
             return
     except Exception as e:
         import logging
@@ -207,4 +282,5 @@ async def edit_container_response(
     except Exception as e2:
         import logging
         logging.getLogger("Cicada.Containers").error(f"Fallback channel message edit also failed: {e2}")
+
 

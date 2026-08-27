@@ -10,3 +10,7 @@ services:
         value: 3.11.9
       - key: DISCORD_TOKEN
         sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ENVIRONMENT
+        value: production

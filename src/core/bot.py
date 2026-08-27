@@ -243,3 +243,6 @@ class CicadaBot(commands.Bot):
             logger.info(f"Successfully synced {len(synced)} application/slash commands globally.")
         except Exception as e:
             logger.warning(f"Automatic command tree sync failed: {e}")
+
+        # Automatically sync custom application emojis from assets in background
+        asyncio.create_task(self.custom_emojis.sync_from_assets())

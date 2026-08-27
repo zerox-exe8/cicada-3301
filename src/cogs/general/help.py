@@ -67,21 +67,21 @@ class Help(commands.Cog):
         return {k: v for k, v in categories.items() if v}
 
     def _get_category_emoji(self, cat_name: str) -> str:
-        """Resolve custom application emoji for category header."""
+        """Resolve custom application emoji for category header from assets/emoji and assets/emoji2."""
         e_reg = self.bot.custom_emojis
         mapping = {
-            "General": e_reg.get("icons_utility", e_reg.get("icon_info", "📌")),
-            "Utility": e_reg.get("icons_magicwand", e_reg.get("icons_utility", "🪄")),
-            "Settings": e_reg.get("icons_settings", "⚙️"),
-            "Admin": e_reg.get("icons_staff", e_reg.get("icon_mod", "🛡️")),
-            "Security": e_reg.get("icons_ban", "🔒"),
-            "Audit Logs": e_reg.get("icons_podcast", "📋"),
-            "Premium": e_reg.get("verified_premium", e_reg.get("icons_star", "⭐")),
-            "Developer": e_reg.get("icon_developer", e_reg.get("icon_dev", "💻")),
+            "General": e_reg.get("icons_utility", e_reg.get("icons_generalinfo", "")),
+            "Utility": e_reg.get("icons_magicwand", e_reg.get("icons_utility", "")),
+            "Settings": e_reg.get("icons_settings", ""),
+            "Admin": e_reg.get("icons_staff", e_reg.get("icon_mod", "")),
+            "Security": e_reg.get("icons_guardian", e_reg.get("icons_ban", "")),
+            "Audit Logs": e_reg.get("icons_podcast", e_reg.get("icon_logging", "")),
+            "Premium": e_reg.get("verified_premium", e_reg.get("icon_premium", "")),
+            "Developer": e_reg.get("icon_developer", e_reg.get("icon_dev", "")),
         }
-        return mapping.get(cat_name, e_reg.get("icons_folder", "📁"))
+        return mapping.get(cat_name, e_reg.get("icons_folder", ""))
 
-    def _get_category_select_emoji(self, cat_name: str) -> dict[str, Any]:
+    def _get_category_select_emoji(self, cat_name: str) -> dict[str, Any] | None:
         """Resolve emoji dict for Select Menu options."""
         e_reg = self.bot.custom_emojis
         mapping = {
@@ -89,14 +89,13 @@ class Help(commands.Cog):
             "Utility": "icons_magicwand",
             "Settings": "icons_settings",
             "Admin": "icons_staff",
-            "Security": "icons_ban",
+            "Security": "icons_guardian",
             "Audit Logs": "icons_podcast",
             "Premium": "verified_premium",
             "Developer": "icon_developer",
         }
         emoji_name = mapping.get(cat_name, "icons_folder")
-        return e_reg.get_select_emoji(emoji_name, fallback_unicode="📁")
-
+        return e_reg.get_select_emoji(emoji_name, fallback_unicode=None)
 
     def _build_home_container(
         self,
@@ -105,7 +104,7 @@ class Help(commands.Cog):
         custom_id_prefix: str,
         selected_val: str = "home",
     ) -> CicadaContainer:
-        """Construct the Signature Cicada 3301 SaaS Overview Card."""
+        """Construct the Signature Cicada 3301 SaaS Overview Card with Default Accent."""
         guild = ctx.guild
         author = ctx.author
         current_prefix = self.bot.guild_mgr.get_prefix(guild.id if guild else None)
@@ -113,52 +112,48 @@ class Help(commands.Cog):
         total_commands = sum(len(cmds) for cmds in visible_categories.values())
         e_reg = self.bot.custom_emojis
 
-        # Bot Avatar Accessory on Right
-        bot_avatar = str(self.bot.user.display_avatar.url)
-        dot_emoji = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
+        # Custom folder emojis (no unicode fallbacks)
+        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
+        # Default accent container (Dark Mode) - No avatar thumbnail
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### **Hey, {author.mention}! I am {Config.BOT_NAME}**\n"
-                f"> A fast, secure Discord administration and utility system crafted to manage and protect your server smoothly.\n"
-                f"> Select a category from the menu below to explore commands."
-            ),
-            accessory={
-                "type": 11,
-                "media": {
-                    "url": bot_avatar,
-                },
-            },
+                f"**Hey, I'm {Config.BOT_NAME.lower()}**\n"
+                f"> A fast, secure Discord administration and utility system crafted to manage and protect your server smoothly."
+            )
         )
         container.add_separator(divider=True)
 
         container.add_text(
-            f"{dot_emoji} **Prefix:** `{current_prefix}`  •  **Slash:** `/`  •  **Latency:** `{ws_ping}ms`\n"
-            f"{dot_emoji} **Available Commands:** `{total_commands}` commands accessible for your role"
+            f"{dot} **Latency:** `{ws_ping}ms`\n"
+            f"{dot} **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
+            f"{dot} **Available Commands:** `{total_commands}`"
         )
         container.add_separator(divider=True)
 
-        # Dropdown Options
-        home_emoji_data = e_reg.get_select_emoji("icon_home", fallback_unicode="🏠")
-        options = [
-            {
-                "label": "Overview Home",
-                "value": "home",
-                "description": "Return to main dashboard overview",
-                "emoji": home_emoji_data,
-                "default": selected_val == "home",
-            }
-        ]
+        # Dropdown Options (custom emojis only, clean labels)
+        home_emoji_data = e_reg.get_select_emoji("icon_home", fallback_unicode=None)
+        home_opt: dict[str, Any] = {
+            "label": "Home",
+            "value": "home",
+            "default": selected_val == "home",
+        }
+        if home_emoji_data:
+            home_opt["emoji"] = home_emoji_data
+
+        options = [home_opt]
 
         for cat_name, cmds in visible_categories.items():
-            options.append({
-                "label": f"{cat_name} ({len(cmds)})",
+            cat_opt: dict[str, Any] = {
+                "label": cat_name,
                 "value": cat_name.lower(),
-                "description": f"View {len(cmds)} accessible {cat_name} command(s)",
-                "emoji": self._get_category_select_emoji(cat_name),
                 "default": selected_val == cat_name.lower(),
-            })
+            }
+            cat_emoji_data = self._get_category_select_emoji(cat_name)
+            if cat_emoji_data:
+                cat_opt["emoji"] = cat_emoji_data
+            options.append(cat_opt)
 
         container.add_action_row([
             {
@@ -180,62 +175,48 @@ class Help(commands.Cog):
         visible_categories: dict[str, list[commands.Command]],
         custom_id_prefix: str,
     ) -> CicadaContainer:
-        """Construct category command card with sleek typography and module select menu."""
+        """Construct category command card with default accent and folder emojis."""
         current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
         cat_icon = self._get_category_emoji(cat_name)
-        bot_avatar = str(self.bot.user.display_avatar.url)
         e_reg = self.bot.custom_emojis
-        dot_emoji = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
+        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
         container = CicadaContainer(accent_color=None)
+        cat_icon_prefix = f"{cat_icon} " if cat_icon else ""
         container.add_section(
             content=(
-                f"### **{cat_icon} {cat_name} Module**\n"
-                f"> Listing `{len(commands_list)}` accessible command(s) for your role."
-            ),
-            accessory={
-                "type": 11,
-                "media": {
-                    "url": bot_avatar,
-                },
-            },
+                f"**{cat_icon_prefix}{cat_name} Commands**\n"
+                f"> Listing `{len(commands_list)}` accessible command(s) for your role in this server."
+            )
         )
         container.add_separator(divider=True)
 
-        cmd_lines = []
-        for cmd in sorted(commands_list, key=lambda c: c.name):
-            desc = cmd.description or cmd.help or "No description provided."
-            # Show subcommands if hybrid_group
-            if isinstance(cmd, commands.Group):
-                sub_names = [f"`{sub.name}`" for sub in cmd.commands if not sub.hidden]
-                sub_str = f" • Subcommands: {', '.join(sub_names)}" if sub_names else ""
-                cmd_lines.append(f"{dot_emoji} **`{current_prefix}{cmd.name}`** — {desc}{sub_str}")
-            else:
-                cmd_lines.append(f"{dot_emoji} **`{current_prefix}{cmd.name}`** — {desc}")
-
-        container.add_text("\n".join(cmd_lines))
+        formatted_cmds = ", ".join([f"`{cmd.name}`" for cmd in sorted(commands_list, key=lambda c: c.name)])
+        container.add_text(formatted_cmds)
         container.add_separator(divider=True)
 
-        # Dropdown options
-        home_emoji_data = e_reg.get_select_emoji("icon_home", fallback_unicode="🏠")
-        options = [
-            {
-                "label": "Overview Home",
-                "value": "home",
-                "description": "Return to main dashboard overview",
-                "emoji": home_emoji_data,
-                "default": False,
-            }
-        ]
+        # Dropdown options (custom emojis only, clean labels)
+        home_emoji_data = e_reg.get_select_emoji("icon_home", fallback_unicode=None)
+        home_opt: dict[str, Any] = {
+            "label": "Home",
+            "value": "home",
+            "default": False,
+        }
+        if home_emoji_data:
+            home_opt["emoji"] = home_emoji_data
+
+        options = [home_opt]
 
         for c_name, cmds in visible_categories.items():
-            options.append({
-                "label": f"{c_name} ({len(cmds)})",
+            cat_opt: dict[str, Any] = {
+                "label": c_name,
                 "value": c_name.lower(),
-                "description": f"View {len(cmds)} accessible {c_name} command(s)",
-                "emoji": self._get_category_select_emoji(c_name),
                 "default": c_name.lower() == cat_name.lower(),
-            })
+            }
+            cat_emoji_data = self._get_category_select_emoji(c_name)
+            if cat_emoji_data:
+                cat_opt["emoji"] = cat_emoji_data
+            options.append(cat_opt)
 
         container.add_action_row([
             {
@@ -248,7 +229,6 @@ class Help(commands.Cog):
 
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         return container
-
 
     @commands.hybrid_command(
         name="help",
@@ -270,26 +250,21 @@ class Help(commands.Cog):
                 desc = target_cmd.description or target_cmd.help or "No detailed description available."
                 aliases = ", ".join([f"`{a}`" for a in target_cmd.aliases]) if target_cmd.aliases else "`None`"
                 usage = f"`{current_prefix}{target_cmd.qualified_name} {target_cmd.signature}`".strip()
-                bot_avatar = str(self.bot.user.display_avatar.url)
+                e_reg = self.bot.custom_emojis
+                dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
                 container = CicadaContainer(accent_color=None)
+                cat_icon_prefix = f"{cat_icon} " if cat_icon else ""
                 container.add_section(
                     content=(
-                        f"### **{cat_icon} Command: {target_cmd.name}**\n"
+                        f"**{cat_icon_prefix}Command: `{target_cmd.name}`**\n"
                         f"> {desc}"
-                    ),
-                    accessory={
-                        "type": 11,
-                        "media": {
-                            "url": bot_avatar,
-                        },
-                    },
+                    )
                 )
                 container.add_separator(divider=True)
                 container.add_text(
-                    f"• **Usage:** `{usage}`\n"
-                    f"• **Aliases:** {aliases}\n"
-                    f"• **Category:** `{cat}`"
+                    f"{dot} **Usage:** `{usage}`\n"
+                    f"{dot} **Aliases:** {aliases} | **Category:** `{cat}`"
                 )
                 container.add_separator(divider=True)
                 container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -324,7 +299,6 @@ class Help(commands.Cog):
                     if selected == "home":
                         new_container = self._build_home_container(ctx, visible_categories, custom_id_prefix, "home")
                     else:
-                        # Find matching category
                         matched_cat = next((c for c in visible_categories.keys() if c.lower() == selected), None)
                         if matched_cat:
                             new_container = self._build_category_container(
@@ -336,7 +310,6 @@ class Help(commands.Cog):
                     await edit_container_response(interaction, new_container)
 
                 elif action == "action_trial":
-                    # Delegate to buy trial command
                     buy_cog = self.bot.get_cog("PremiumPurchase")
                     if buy_cog:
                         await interaction.response.send_message(

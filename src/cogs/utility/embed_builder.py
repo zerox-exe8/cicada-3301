@@ -1080,17 +1080,10 @@ class EmbedBuilderView(discord.ui.View):
         self._setup_dynamic_buttons()
 
     def _setup_dynamic_buttons(self) -> None:
-        """Assign custom edit and send emojis from emoji registry."""
-        e_reg = getattr(self.bot, "custom_emojis", None)
-        if e_reg:
-            edit_e = e_reg.get_emoji_obj("icons_edit") or e_reg.get_emoji_obj("icon_edit")
-            send_e = e_reg.get_emoji_obj("icon_send") or e_reg.get_emoji_obj("icons_send")
-            for item in self.children:
-                if isinstance(item, discord.ui.Button):
-                    if item.custom_id == "btn_action_1" and edit_e:
-                        item.emoji = edit_e
-                    elif item.custom_id == "btn_send" and send_e and item.label == "Send Embed":
-                        item.emoji = send_e
+        """Ensure all buttons have clean text and no emojis."""
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.emoji = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -1181,93 +1174,71 @@ class EmbedBuilderView(discord.ui.View):
                 for opt in item.options:
                     opt.default = (opt.value == slide_key)
             elif isinstance(item, discord.ui.Button):
+                item.style = discord.ButtonStyle.secondary
+                item.emoji = None
                 if item.custom_id == "btn_action_1":
                     if slide_key == "content":
                         item.label = "Edit Content"
-                        item.style = discord.ButtonStyle.secondary
-                        item.disabled = False
                     elif slide_key == "visuals":
                         item.label = "Edit Visuals"
-                        item.style = discord.ButtonStyle.secondary
-                        item.disabled = False
                     elif slide_key == "fields":
                         item.label = "Add Field"
-                        item.style = discord.ButtonStyle.secondary
-                        item.disabled = False
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                             item.label = "Edit Module"
-                            item.style = discord.ButtonStyle.secondary
                         else:
                             item.label = "Add Module"
-                            item.style = discord.ButtonStyle.primary
-                        item.disabled = False
                     elif slide_key == "dispatch":
                         item.label = "Send to Channel"
-                        item.style = discord.ButtonStyle.success
-                        item.disabled = False
+                    item.disabled = False
                 elif item.custom_id == "btn_action_2":
                     if slide_key == "content":
                         item.label = "Clear Content"
-                        item.style = discord.ButtonStyle.danger
                         has_content = bool(self.draft.title or self.draft.author_name or self.draft.description or self.draft.accent_hex)
                         item.disabled = not has_content
                     elif slide_key == "visuals":
                         ts_state = "ON" if self.draft.timestamp else "OFF"
                         item.label = f"Timestamp: {ts_state}"
-                        item.style = discord.ButtonStyle.primary if self.draft.timestamp else discord.ButtonStyle.secondary
                         item.disabled = False
                     elif slide_key == "fields":
                         item.label = "Clear Fields"
-                        item.style = discord.ButtonStyle.danger
                         item.disabled = (len(self.draft.fields) == 0)
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                             item.label = "Delete Module"
-                            item.style = discord.ButtonStyle.danger
                             item.disabled = False
                         else:
                             item.label = "Add Button"
-                            item.style = discord.ButtonStyle.secondary
                             item.disabled = False
                     elif slide_key == "dispatch":
                         item.label = "Test in DM"
-                        item.style = discord.ButtonStyle.secondary
                         item.disabled = False
                 elif item.custom_id == "btn_action_3":
                     if slide_key == "content":
                         item.label = "Reset Draft"
-                        item.style = discord.ButtonStyle.danger
                         item.disabled = False
                     elif slide_key == "visuals":
                         item.label = "Clear Visuals"
-                        item.style = discord.ButtonStyle.danger
                         has_vis = bool(self.draft.thumbnail_url or self.draft.image_url or self.draft.footer_text)
                         item.disabled = not has_vis
                     elif slide_key == "fields":
                         item.label = "Reset Draft"
-                        item.style = discord.ButtonStyle.danger
                         item.disabled = False
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                             item.label = "Add Module"
-                            item.style = discord.ButtonStyle.primary
                             item.disabled = False
                         else:
                             item.label = "Clear Modules"
-                            item.style = discord.ButtonStyle.danger
                             item.disabled = (len(self.draft.modules) == 0 and len(self.draft.buttons) == 0)
                     elif slide_key == "dispatch":
                         item.label = "Raw JSON"
-                        item.style = discord.ButtonStyle.secondary
                         item.disabled = False
                 elif item.custom_id == "btn_send":
                     if slide_key == "dispatch":
                         item.label = "Reset Draft"
-                        item.style = discord.ButtonStyle.danger
                     else:
                         item.label = "Send Embed"
-                        item.style = discord.ButtonStyle.success
                     item.disabled = False
 
     async def update_view(self, interaction: discord.Interaction) -> None:
@@ -1405,7 +1376,7 @@ class EmbedBuilderView(discord.ui.View):
         elif slide_key == "dispatch":
             await interaction.response.send_modal(RawImportModal(self))
 
-    @discord.ui.button(label="Send Embed", style=discord.ButtonStyle.success, custom_id="btn_send", row=1)
+    @discord.ui.button(label="Send Embed", style=discord.ButtonStyle.secondary, custom_id="btn_send", row=1)
     async def btn_send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
         if slide_key == "dispatch":
@@ -1413,6 +1384,7 @@ class EmbedBuilderView(discord.ui.View):
             await self.update_view(interaction)
         else:
             await self._open_send_picker(interaction)
+
 
     async def _send_test_dm(self, interaction: discord.Interaction) -> None:
         """Dispatch a live test copy of the embed container directly to user DM."""

@@ -261,7 +261,7 @@ class ContainerDraft:
                 },
             }
 
-        # Compose Header Block with natural tight spacing
+        # Compose Header Block with natural micro-spacing
         header_blocks = []
         top_lines = []
         if author_text:
@@ -284,6 +284,9 @@ class ContainerDraft:
             header_blocks.append("\n".join(top_lines))
 
         if desc_text:
+            if top_lines:
+                # Half-height micro-spacer (creates a subtle 8px balanced gap)
+                header_blocks.append("-# \u200b")
             header_blocks.append(desc_text)
 
         if header_blocks or accessory_dict:

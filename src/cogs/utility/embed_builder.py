@@ -1319,36 +1319,30 @@ class EmbedBuilderView(discord.ui.View):
                         item.label = "Add Field"
                         item.disabled = (len(self.draft.fields) >= 25)
                     elif slide_key == "interactive":
-                        if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                            item.label = "Edit Current Module"
-                        else:
-                            item.label = "Add Module"
-                        item.disabled = False
+                        item.label = "Add Module"
+                        item.disabled = (len(self.draft.modules) >= 25)
                     elif slide_key == "dispatch":
-                        item.label = "Send to Channel"
+                        item.label = "Send Channel"
                         item.disabled = False
                 elif item.custom_id == "btn_action_2":
                     if slide_key == "content":
                         item.label = "Clear Text"
                         item.disabled = False
                     elif slide_key == "visuals":
-                        item.label = "Toggle Divider"
+                        item.label = "Toggle Line"
                         item.disabled = False
                     elif slide_key == "fields":
                         item.label = "Manage Fields"
                         item.disabled = (len(self.draft.fields) == 0)
                     elif slide_key == "interactive":
-                        if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                            item.label = "Delete Current Module"
-                        else:
-                            item.label = "Manage Modules"
-                        item.disabled = (len(self.draft.modules) == 0 and not self.preview_module_id)
+                        item.label = "Manage Modules"
+                        item.disabled = (len(self.draft.modules) == 0)
                     elif slide_key == "dispatch":
-                        item.label = "Test in DM"
+                        item.label = "Test DM"
                         item.disabled = False
                 elif item.custom_id == "btn_action_3":
                     if slide_key == "content":
-                        item.label = "Reset Draft"
+                        item.label = "Reset All"
                         item.disabled = False
                     elif slide_key == "visuals":
                         item.label = "Clear Visuals"
@@ -1502,17 +1496,10 @@ class EmbedBuilderView(discord.ui.View):
                 return
             await interaction.response.send_modal(AddFieldModal(self))
         elif slide_key == "interactive":
-            if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                try:
-                    idx = int(self.preview_module_id.replace("mod_", ""))
-                    await interaction.response.send_modal(AddModuleModal(self, edit_idx=idx))
-                except Exception:
-                    await interaction.response.send_modal(AddModuleModal(self))
-            else:
-                if len(self.draft.modules) >= 25:
-                    await interaction.response.send_message("Maximum 25 dropdown modules allowed.", ephemeral=True)
-                    return
-                await interaction.response.send_modal(AddModuleModal(self))
+            if len(self.draft.modules) >= 25:
+                await interaction.response.send_message("Maximum 25 dropdown modules allowed.", ephemeral=True)
+                return
+            await interaction.response.send_modal(AddModuleModal(self))
         elif slide_key == "dispatch":
             await self._open_send_picker(interaction)
 
@@ -1539,27 +1526,14 @@ class EmbedBuilderView(discord.ui.View):
                     ephemeral=True,
                 )
         elif slide_key == "interactive":
-            if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                try:
-                    idx = int(self.preview_module_id.replace("mod_", ""))
-                    if 0 <= idx < len(self.draft.modules):
-                        self.draft.modules.pop(idx)
-                        for new_i, m in enumerate(self.draft.modules):
-                            m["id"] = f"mod_{new_i}"
-                    self.preview_module_id = None
-                    await self.update_view(interaction)
-                except Exception:
-                    self.preview_module_id = None
-                    await self.update_view(interaction)
+            if not self.draft.modules:
+                await interaction.response.send_modal(AddModuleModal(self))
             else:
-                if not self.draft.modules:
-                    await interaction.response.send_modal(AddModuleModal(self))
-                else:
-                    await interaction.response.send_message(
-                        "Select a module to edit or delete:",
-                        view=ModuleManagementPicker(self),
-                        ephemeral=True,
-                    )
+                await interaction.response.send_message(
+                    "Select a module to edit or delete:",
+                    view=ModuleManagementPicker(self),
+                    ephemeral=True,
+                )
         elif slide_key == "dispatch":
             await self._send_test_dm(interaction)
 

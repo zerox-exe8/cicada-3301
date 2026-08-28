@@ -147,25 +147,15 @@ def build_container_payload(
     for c in container_list:
         c_dict: dict[str, Any] = {
             "type": 17,
-            "components": [],
+            "components": list(c.components),
         }
         if c.accent_color is not None:
             c_dict["accent_color"] = c.accent_color
-
-        c_action_rows = []
-        for comp in c.components:
-            # Action Rows (type 1) must remain at message root level in Discord API
-            if comp.get("type") == 1:
-                c_action_rows.append(comp)
-            else:
-                c_dict["components"].append(comp)
 
         if not c_dict["components"]:
             c_dict["components"] = [{"type": 10, "content": " "}]
 
         root_comps.append(c_dict)
-        if c_action_rows:
-            root_comps.extend(c_action_rows)
 
     # Append view action rows (e.g. interactive builder controls)
     if view is not None:

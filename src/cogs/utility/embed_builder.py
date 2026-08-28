@@ -396,8 +396,8 @@ class ContainerDraft:
 
         # ─── SHARED CONTROLS (Modules Dropdown & Buttons at the bottom) ─────
 
-        # Dropdown Module Switcher
-        if include_controls and self.modules:
+        # Dropdown Module Switcher (Always inside the card container)
+        if self.modules:
             select_opts = [
                 {
                     "label": "Main Overview",

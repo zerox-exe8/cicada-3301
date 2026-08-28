@@ -88,7 +88,7 @@ class AutoEvents(commands.Cog):
         # 2. Build Container from saved embed or fallback container
         container = None
         if embed_name:
-            template_data = await self.bot.embed_mgr.get_template(guild.id, embed_name, force_refresh=True)
+            template_data = await self.bot.embed_mgr.get_template(guild.id, embed_name)
             if template_data:
                 draft = ContainerDraft.from_dict(template_data)
                 avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
@@ -295,20 +295,20 @@ class AutoEvents(commands.Cog):
 
         if len(words) == 1:
             clean_word = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
-            template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_word, force_refresh=True)
+            template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_word)
             if template:
                 embed_name = clean_word
             else:
                 message_content = raw_text
         elif len(words) > 1:
             last_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[-1].lower())
-            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean, force_refresh=True)
+            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
             if template_last:
                 embed_name = last_clean
                 message_content = raw_text[:-len(words[-1])].strip() or None
             else:
                 first_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
-                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean, force_refresh=True)
+                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean)
                 if template_first:
                     embed_name = first_clean
                     message_content = raw_text[len(words[0]):].strip() or None
@@ -347,78 +347,6 @@ class AutoEvents(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
-
-    @welcome_group.command(
-        name="embed",
-        description="Bind a saved custom embed template to welcome messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def welcome_embed(self, ctx: CustomContext, *, name: str) -> None:
-        """Bind an existing saved embed template to welcome."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        clean_name = name.strip().lower()
-        template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name, force_refresh=True)
-        if not template:
-            templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
-            t_list = ", ".join([f"`{t['embed_name']}`" for t in templates]) if templates else "`None`"
-            await ctx.send(f"Embed template `{clean_name}` not found.\n**Saved Embeds in this server:** {t_list}\nCreate or save one using `?embed {clean_name}`.")
-            return
-
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "welcome")
-        ch_id = config.get("channel_id", ctx.channel.id) if config else ctx.channel.id
-        msg_cnt = config.get("message_content") if config else "{user}"
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="welcome",
-            channel_id=ch_id,
-            embed_name=clean_name,
-            message_content=msg_cnt,
-            is_enabled=True,
-        )
-        await ctx.send(f"Welcome embed template set to `{clean_name}`. Run `{prefix}welcome test` to test!")
-
-    @welcome_group.command(
-        name="message",
-        aliases=["text", "ping"],
-        description="Set outer ping text for welcome messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def welcome_message(self, ctx: CustomContext, *, text: str) -> None:
-        """Set outer message text containing {user}."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "welcome")
-        ch_id = config.get("channel_id", ctx.channel.id) if config else ctx.channel.id
-        emb = config.get("embed_name") if config else None
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="welcome",
-            channel_id=ch_id,
-            embed_name=emb,
-            message_content=text.strip(),
-            is_enabled=True,
-        )
-        await ctx.send(f"Welcome outer text updated to `{text.strip()}`. Run `{prefix}welcome test` to preview!")
-
-    @welcome_group.command(
-        name="channel",
-        description="Set target channel for welcome messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def welcome_channel(self, ctx: CustomContext, channel: discord.TextChannel) -> None:
-        """Set target welcome channel."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "welcome")
-        emb = config.get("embed_name") if config else None
-        msg_cnt = config.get("message_content") if config else "{user}"
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="welcome",
-            channel_id=channel.id,
-            embed_name=emb,
-            message_content=msg_cnt,
-            is_enabled=True,
-        )
-        await ctx.send(f"Welcome target channel set to {channel.mention}. Run `{prefix}welcome test` to test!")
 
     @welcome_group.command(
         name="test",
@@ -582,20 +510,20 @@ class AutoEvents(commands.Cog):
 
         if len(words) == 1:
             clean_word = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
-            template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_word, force_refresh=True)
+            template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_word)
             if template:
                 embed_name = clean_word
             else:
                 message_content = raw_text
         elif len(words) > 1:
             last_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[-1].lower())
-            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean, force_refresh=True)
+            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
             if template_last:
                 embed_name = last_clean
                 message_content = raw_text[:-len(words[-1])].strip() or None
             else:
                 first_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
-                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean, force_refresh=True)
+                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean)
                 if template_first:
                     embed_name = first_clean
                     message_content = raw_text[len(words[0]):].strip() or None
@@ -634,78 +562,6 @@ class AutoEvents(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
-
-    @leave_group.command(
-        name="embed",
-        description="Bind a saved custom embed template to leave messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def leave_embed(self, ctx: CustomContext, *, name: str) -> None:
-        """Bind an existing saved embed template to leave."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        clean_name = name.strip().lower()
-        template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name, force_refresh=True)
-        if not template:
-            templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
-            t_list = ", ".join([f"`{t['embed_name']}`" for t in templates]) if templates else "`None`"
-            await ctx.send(f"Embed template `{clean_name}` not found.\n**Saved Embeds in this server:** {t_list}\nCreate or save one using `?embed {clean_name}`.")
-            return
-
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "leave")
-        ch_id = config.get("channel_id", ctx.channel.id) if config else ctx.channel.id
-        msg_cnt = config.get("message_content") if config else None
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="leave",
-            channel_id=ch_id,
-            embed_name=clean_name,
-            message_content=msg_cnt,
-            is_enabled=True,
-        )
-        await ctx.send(f"Leave embed template set to `{clean_name}`. Run `{prefix}leave test` to test!")
-
-    @leave_group.command(
-        name="message",
-        aliases=["text"],
-        description="Set outer text for leave messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def leave_message(self, ctx: CustomContext, *, text: str) -> None:
-        """Set outer message text for leave."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "leave")
-        ch_id = config.get("channel_id", ctx.channel.id) if config else ctx.channel.id
-        emb = config.get("embed_name") if config else None
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="leave",
-            channel_id=ch_id,
-            embed_name=emb,
-            message_content=text.strip(),
-            is_enabled=True,
-        )
-        await ctx.send(f"Leave outer text updated to `{text.strip()}`. Run `{prefix}leave test` to preview!")
-
-    @leave_group.command(
-        name="channel",
-        description="Set target channel for leave messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def leave_channel(self, ctx: CustomContext, channel: discord.TextChannel) -> None:
-        """Set target leave channel."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "leave")
-        emb = config.get("embed_name") if config else None
-        msg_cnt = config.get("message_content") if config else None
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="leave",
-            channel_id=channel.id,
-            embed_name=emb,
-            message_content=msg_cnt,
-            is_enabled=True,
-        )
-        await ctx.send(f"Leave target channel set to {channel.mention}. Run `{prefix}leave test` to test!")
 
     @leave_group.command(
         name="test",
@@ -868,20 +724,20 @@ class AutoEvents(commands.Cog):
 
         if len(words) == 1:
             clean_word = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
-            template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_word, force_refresh=True)
+            template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_word)
             if template:
                 embed_name = clean_word
             else:
                 message_content = raw_text
         elif len(words) > 1:
             last_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[-1].lower())
-            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean, force_refresh=True)
+            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
             if template_last:
                 embed_name = last_clean
                 message_content = raw_text[:-len(words[-1])].strip() or None
             else:
                 first_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
-                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean, force_refresh=True)
+                template_first = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean)
                 if template_first:
                     embed_name = first_clean
                     message_content = raw_text[len(words[0]):].strip() or None
@@ -920,78 +776,6 @@ class AutoEvents(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
-
-    @boost_group.command(
-        name="embed",
-        description="Bind a saved custom embed template to boost messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def boost_embed(self, ctx: CustomContext, *, name: str) -> None:
-        """Bind an existing saved embed template to boost."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        clean_name = name.strip().lower()
-        template = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name, force_refresh=True)
-        if not template:
-            templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
-            t_list = ", ".join([f"`{t['embed_name']}`" for t in templates]) if templates else "`None`"
-            await ctx.send(f"Embed template `{clean_name}` not found.\n**Saved Embeds in this server:** {t_list}\nCreate or save one using `?embed {clean_name}`.")
-            return
-
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "boost")
-        ch_id = config.get("channel_id", ctx.channel.id) if config else ctx.channel.id
-        msg_cnt = config.get("message_content") if config else None
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="boost",
-            channel_id=ch_id,
-            embed_name=clean_name,
-            message_content=msg_cnt,
-            is_enabled=True,
-        )
-        await ctx.send(f"Boost embed template set to `{clean_name}`. Run `{prefix}boost test` to test!")
-
-    @boost_group.command(
-        name="message",
-        aliases=["text"],
-        description="Set outer text for boost messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def boost_message(self, ctx: CustomContext, *, text: str) -> None:
-        """Set outer message text for boost."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "boost")
-        ch_id = config.get("channel_id", ctx.channel.id) if config else ctx.channel.id
-        emb = config.get("embed_name") if config else None
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="boost",
-            channel_id=ch_id,
-            embed_name=emb,
-            message_content=text.strip(),
-            is_enabled=True,
-        )
-        await ctx.send(f"Boost outer text updated to `{text.strip()}`. Run `{prefix}boost test` to preview!")
-
-    @boost_group.command(
-        name="channel",
-        description="Set target channel for boost messages.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    async def boost_channel(self, ctx: CustomContext, channel: discord.TextChannel) -> None:
-        """Set target boost channel."""
-        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "boost")
-        emb = config.get("embed_name") if config else None
-        msg_cnt = config.get("message_content") if config else None
-        await self.bot.event_mgr.save_event_config(
-            guild_id=ctx.guild.id,
-            event_type="boost",
-            channel_id=channel.id,
-            embed_name=emb,
-            message_content=msg_cnt,
-            is_enabled=True,
-        )
-        await ctx.send(f"Boost target channel set to {channel.mention}. Run `{prefix}boost test` to test!")
 
     @boost_group.command(
         name="test",

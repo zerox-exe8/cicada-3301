@@ -380,19 +380,20 @@ class ContainerDraft:
                 })
                 container.add_separator(divider=True)
 
-        # Footer Subtext (Positioned above buttons)
-        footer_raw = parse(self.footer_text)
-        footer_parts = []
-        if footer_raw:
-            footer_parts.append(footer_raw)
-        if self.timestamp:
-            import datetime
-            now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-            footer_parts.append(now_str)
+        # Footer Subtext (Only on Main Overview, NOT on Module Sub-Pages)
+        if not active_mod:
+            footer_raw = parse(self.footer_text)
+            footer_parts = []
+            if footer_raw:
+                footer_parts.append(footer_raw)
+            if self.timestamp:
+                import datetime
+                now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                footer_parts.append(now_str)
 
-        if footer_parts:
-            container.add_text(" • ".join(footer_parts))
-            container.add_separator(divider=True)
+            if footer_parts:
+                container.add_text(" • ".join(footer_parts))
+                container.add_separator(divider=True)
 
         # ─── SHARED CONTROLS (Modules Dropdown & Buttons at the bottom) ─────
 

@@ -366,56 +366,45 @@ class ContainerDraft:
 
         # ─── SHARED CONTROLS (Modules Dropdown & Buttons) ────────────────────
 
-        if include_controls:
-            # Dropdown Module Switcher
-            if self.modules:
-                select_opts = [
-                    {
-                        "label": "Main Overview",
-                        "value": "mod_home",
-                        "description": "Return to original card overview",
-                        "default": (active_mod is None),
-                    }
-                ]
-                for idx, mod in enumerate(self.modules[:24]):
-                    mod_id = mod.get("id", f"mod_{idx}")
-                    is_selected = (active_mod is not None and active_mod.get("id") == mod_id)
-                    select_opts.append({
-                        "label": parse(mod.get("label", f"Page {idx + 1}"))[:100],
-                        "value": mod_id,
-                        "description": parse(mod.get("description", ""))[:100] if mod.get("description") else None,
-                        "default": is_selected,
-                    })
-                container.add_action_row([
-                    {
-                        "type": 3,
-                        "custom_id": "card_module_select",
-                        "placeholder": "Select a module / page...",
-                        "options": select_opts,
-                    }
-                ])
+        # Dropdown Module Switcher
+        if include_controls and self.modules:
+            select_opts = [
+                {
+                    "label": "Main Overview",
+                    "value": "mod_home",
+                    "description": "Return to original card overview",
+                    "default": (active_mod is None),
+                }
+            ]
+            for idx, mod in enumerate(self.modules[:24]):
+                mod_id = mod.get("id", f"mod_{idx}")
+                is_selected = (active_mod is not None and active_mod.get("id") == mod_id)
+                select_opts.append({
+                    "label": parse(mod.get("label", f"Page {idx + 1}"))[:100],
+                    "value": mod_id,
+                    "description": parse(mod.get("description", ""))[:100] if mod.get("description") else None,
+                    "default": is_selected,
+                })
+            container.add_action_row([
+                {
+                    "type": 3,
+                    "custom_id": "card_module_select",
+                    "placeholder": "Select a module / page...",
+                    "options": select_opts,
+                }
+            ])
 
-            # Link Buttons Row (Interactive Native Discord Buttons)
-            if self.buttons:
-                btn_comps = []
-                for b in self.buttons[:5]:
-                    btn_comps.append({
-                        "type": 2,
-                        "style": 5,  # Link URL Button
-                        "label": parse(b.get("label", "Link")),
-                        "url": parse(b.get("url", "https://discord.com")),
-                    })
-                container.add_action_row(btn_comps)
-        else:
-            # Live Preview Mode: Render visual button chips directly inside the card container
-            if self.buttons:
-                btn_previews = []
-                for b in self.buttons[:5]:
-                    b_label = parse(b.get("label", "Link"))
-                    b_url = parse(b.get("url", "https://discord.com"))
-                    btn_previews.append(f"[` {b_label} ↗ `]({b_url})")
-                container.add_text(" • ".join(btn_previews))
-                container.add_separator(divider=True)
+        # Link Buttons Row (Always Real Interactive Native Discord Buttons)
+        if self.buttons:
+            btn_comps = []
+            for b in self.buttons[:5]:
+                btn_comps.append({
+                    "type": 2,
+                    "style": 5,  # Link URL Button
+                    "label": parse(b.get("label", "Link")),
+                    "url": parse(b.get("url", "https://discord.com")),
+                })
+            container.add_action_row(btn_comps)
 
         # Footer Subtext
         footer_raw = parse(self.footer_text)

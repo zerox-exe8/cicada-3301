@@ -1375,7 +1375,15 @@ class EmbedBuilderView(discord.ui.View):
     async def update_view(self, interaction: discord.Interaction) -> None:
         """Update the dual-container message and auto-save changes."""
         self._sync_controls()
-        if interaction.message and not self.message_id:
+
+        # Determine if interaction is ephemeral or modal from an ephemeral picker
+        is_ephemeral = bool(
+            interaction.message and self.message_id and interaction.message.id != self.message_id
+        ) or bool(
+            interaction.message and hasattr(interaction.message, "flags") and interaction.message.flags.ephemeral
+        )
+
+        if not is_ephemeral and interaction.message and not self.message_id:
             self.message_id = interaction.message.id
             self.channel_id = interaction.channel_id
         if interaction.guild_id and not self.guild_id:
@@ -1395,15 +1403,26 @@ class EmbedBuilderView(discord.ui.View):
             except Exception as e:
                 logger.error(f"Failed to auto-save template '{self.template_name}': {e}")
 
-        containers = self.get_dual_containers(interaction.guild, interaction.channel)
+        guild = self.bot.get_guild(self.guild_id) if self.guild_id else (interaction.guild or getattr(self.author, "guild", None))
+        channel = self.bot.get_channel(self.channel_id) if self.channel_id else interaction.channel
+        containers = self.get_dual_containers(guild, channel)
 
-        if not interaction.response.is_done():
+        if not is_ephemeral and not interaction.response.is_done():
             try:
                 await edit_container_response(interaction, containers, view=self)
             except Exception as err:
                 logger.warning(f"edit_container_response in update_view: {err}")
+        else:
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.edit_message(content="Card updated.", view=None)
+                except Exception:
+                    try:
+                        await interaction.response.send_message("Card updated.", ephemeral=True)
+                    except Exception:
+                        pass
 
-        # Also patch the channel message directly if we have channel_id and message_id
+        # ALWAYS PATCH the main builder message in the channel
         if self.channel_id and self.message_id:
             try:
                 payload = build_container_payload(containers, view=self)
@@ -1412,7 +1431,7 @@ class EmbedBuilderView(discord.ui.View):
                     json=payload,
                 )
             except Exception as patch_err:
-                logger.debug(f"Direct channel PATCH in update_view: {patch_err}")
+                logger.error(f"Direct channel PATCH failed for message {self.message_id}: {patch_err}")
 
     async def update_view_channel_patch(self) -> None:
         """Directly sync state to DB and PATCH the main builder message."""
@@ -1430,7 +1449,7 @@ class EmbedBuilderView(discord.ui.View):
             except Exception as e:
                 logger.error(f"Failed to auto-save template '{self.template_name}': {e}")
 
-        guild = self.bot.get_guild(self.guild_id) if self.guild_id else None
+        guild = self.bot.get_guild(self.guild_id) if self.guild_id else (self.author.guild if hasattr(self.author, "guild") else None)
         channel = self.bot.get_channel(self.channel_id) if self.channel_id else None
         containers = self.get_dual_containers(guild, channel)
 

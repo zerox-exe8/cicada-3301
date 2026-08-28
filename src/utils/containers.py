@@ -314,8 +314,13 @@ async def send_container_response(
                 json=payload,
             )
             if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
+                msg_id = int(msg_data["id"])
+                if not getattr(view, "message_id", None):
+                    setattr(view, "message_id", msg_id)
+                if not getattr(view, "channel_id", None):
+                    setattr(view, "channel_id", channel_id)
                 if hasattr(bot_instance, "_connection"):
-                    bot_instance._connection.store_view(view, int(msg_data["id"]))
+                    bot_instance._connection.store_view(view, msg_id)
             return msg_data
         except discord.Forbidden:
             raise

@@ -62,8 +62,8 @@ class CicadaContainer:
         return self
 
     def add_footer(self, text: str, icon_url: str | None = None) -> CicadaContainer:
-        """Add a subtle subtext footer."""
-        self.add_text(f"-# {text}")
+        """Add a footer."""
+        self.add_text(f"{text}")
         return self
 
     def add_action_row(self, items: list[dict[str, Any]]) -> CicadaContainer:

@@ -417,7 +417,7 @@ class ContainerDraft:
             footer_parts.append(now_str)
 
         if footer_parts:
-            container.add_text(f"-# {' • '.join(footer_parts)}")
+            container.add_text(" • ".join(footer_parts))
 
         if not container.components:
             container.add_text("Empty card container.")

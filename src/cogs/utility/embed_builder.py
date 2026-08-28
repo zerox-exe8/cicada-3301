@@ -62,9 +62,12 @@ def apply_placeholders(
         replacements.update({
             "{user}": user.mention,
             "{user.mention}": user.mention,
+            "{member}": user.mention,
+            "{member.mention}": user.mention,
             "{user.name}": user.name,
             "{user.display_name}": user.display_name,
             "{user.id}": str(user.id),
+            "{avatar}": str(user.display_avatar.url),
             "{user.avatar}": str(user.display_avatar.url),
             "{user.avatar_url}": str(user.display_avatar.url),
             "{user.default_avatar_url}": str(user.default_avatar.url),
@@ -85,12 +88,25 @@ def apply_placeholders(
 
     if guild:
         guild_created_ts = int(guild.created_at.timestamp())
+        m_cnt = guild.member_count or 0
+        m_fmt = f"{m_cnt:,}"
+        n = m_cnt
+        if 11 <= (n % 100) <= 13:
+            sfx = "th"
+        else:
+            sfx = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+        ord_val = f"{n:,}{sfx}"
+
         replacements.update({
             "{server}": guild.name,
             "{server.name}": guild.name,
             "{server.id}": str(guild.id),
-            "{server.members}": str(guild.member_count or 0),
-            "{server.member_count}": str(guild.member_count or 0),
+            "{count}": m_fmt,
+            "{member_count}": m_fmt,
+            "{members}": m_fmt,
+            "{count.ordinal}": ord_val,
+            "{server.members}": str(m_cnt),
+            "{server.member_count}": str(m_cnt),
             "{server.icon}": str(guild.icon.url) if guild.icon else "",
             "{server.icon_url}": str(guild.icon.url) if guild.icon else "",
             "{server.banner}": str(guild.banner.url) if guild.banner else "",
@@ -364,7 +380,20 @@ class ContainerDraft:
                 })
                 container.add_separator(divider=True)
 
-        # ─── SHARED CONTROLS (Modules Dropdown & Buttons) ────────────────────
+        # Footer Subtext (Positioned above buttons)
+        footer_raw = parse(self.footer_text)
+        footer_parts = []
+        if footer_raw:
+            footer_parts.append(footer_raw)
+        if self.timestamp:
+            import datetime
+            now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            footer_parts.append(now_str)
+
+        if footer_parts:
+            container.add_text(" • ".join(footer_parts))
+
+        # ─── SHARED CONTROLS (Modules Dropdown & Buttons at the bottom) ─────
 
         # Dropdown Module Switcher
         if include_controls and self.modules:
@@ -394,7 +423,7 @@ class ContainerDraft:
                 }
             ])
 
-        # Link Buttons Row (Always Real Interactive Native Discord Buttons)
+        # Link Buttons Row (Always at the very bottom of the card)
         if self.buttons:
             btn_comps = []
             for b in self.buttons[:5]:
@@ -405,19 +434,6 @@ class ContainerDraft:
                     "url": parse(b.get("url", "https://discord.com")),
                 })
             container.add_action_row(btn_comps)
-
-        # Footer Subtext
-        footer_raw = parse(self.footer_text)
-        footer_parts = []
-        if footer_raw:
-            footer_parts.append(footer_raw)
-        if self.timestamp:
-            import datetime
-            now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-            footer_parts.append(now_str)
-
-        if footer_parts:
-            container.add_text(" • ".join(footer_parts))
 
         if not container.components:
             container.add_text("Empty card container.")

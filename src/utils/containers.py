@@ -129,6 +129,7 @@ def build_container_payload(
     container: CicadaContainer | list[CicadaContainer],
     view: discord.ui.View | None = None,
     content: str | None = None,
+    allowed_mentions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate the full Discord REST payload supporting single or multiple stacked containers with root-level controls."""
     if isinstance(container, list):
@@ -175,10 +176,15 @@ def build_container_payload(
         if view_comps:
             root_comps.extend(view_comps)
 
+    mentions_payload = allowed_mentions if allowed_mentions is not None else {
+        "parse": ["users", "roles"],
+        "replied_user": True,
+    }
+
     return {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
         "components": root_comps[:5],  # Discord allows maximum 5 top-level items
-        "allowed_mentions": {"parse": []},
+        "allowed_mentions": mentions_payload,
     }
 
 
@@ -296,7 +302,7 @@ async def send_container_response(
                         avatar = getattr(bot_user, "display_avatar", None)
                         if avatar:
                             wh_payload["avatar_url"] = str(avatar.with_format("png").url if hasattr(avatar, "with_format") else avatar.url)
-                    wh_payload["allowed_mentions"] = {"parse": []}
+                    wh_payload["allowed_mentions"] = payload.get("allowed_mentions", {"parse": ["users", "roles"], "replied_user": True})
 
                     import aiohttp
                     webhook_url = f"https://discord.com/api/v10/webhooks/{wh.id}/{wh.token}?wait=true"

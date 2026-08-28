@@ -157,11 +157,14 @@ def build_container_payload(
 
         root_comps.append(c_dict)
 
-    # Append view action rows (e.g. interactive builder controls)
+    # Place view action rows (builder buttons and dropdowns) directly INSIDE the container
     if view is not None:
         view_comps = view.to_components()
         if view_comps:
-            root_comps.extend(view_comps)
+            if root_comps and root_comps[-1].get("type") == 17:
+                root_comps[-1]["components"].extend(view_comps)
+            else:
+                root_comps.extend(view_comps)
 
     mentions_payload = allowed_mentions if allowed_mentions is not None else {
         "parse": ["users", "roles"],

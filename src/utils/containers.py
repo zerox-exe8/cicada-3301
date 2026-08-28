@@ -130,7 +130,7 @@ def build_container_payload(
     view: discord.ui.View | None = None,
     content: str | None = None,
 ) -> dict[str, Any]:
-    """Generate the full Discord REST payload supporting single or multiple stacked containers with nested view controls."""
+    """Generate the full Discord REST payload supporting single or multiple stacked containers with root-level controls."""
     if isinstance(container, list):
         container_list = container
     else:
@@ -143,22 +143,41 @@ def build_container_payload(
             "content": str(content).strip(),
         })
 
-    for idx, c in enumerate(container_list):
-        c_dict = c.to_dict()
-        # Embed view's action rows directly inside the bottom/last container
-        if idx == len(container_list) - 1 and view is not None:
-            view_comps = view.to_components()
-            if view_comps:
-                c_dict["components"].extend(view_comps)
-        
-        if not c_dict.get("components"):
+    root_action_rows = []
+
+    for c in container_list:
+        c_dict: dict[str, Any] = {
+            "type": 17,
+            "components": [],
+        }
+        if c.accent_color is not None:
+            c_dict["accent_color"] = c.accent_color
+
+        for comp in c.components:
+            # Action Rows (type 1) must remain at message root level in Discord API
+            if comp.get("type") == 1:
+                root_action_rows.append(comp)
+            else:
+                c_dict["components"].append(comp)
+
+        if not c_dict["components"]:
             c_dict["components"] = [{"type": 10, "content": " "}]
-            
+
         root_comps.append(c_dict)
+
+    # Append container action rows (e.g. card link buttons / FAQ select)
+    if root_action_rows:
+        root_comps.extend(root_action_rows)
+
+    # Append view action rows (e.g. interactive builder controls)
+    if view is not None:
+        view_comps = view.to_components()
+        if view_comps:
+            root_comps.extend(view_comps)
 
     return {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
-        "components": root_comps,
+        "components": root_comps[:5],  # Discord allows maximum 5 top-level items
         "allowed_mentions": {"parse": []},
     }
 

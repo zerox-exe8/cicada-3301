@@ -214,6 +214,7 @@ class ContainerDraft:
         channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None = None,
         bot: CicadaBot | None = None,
         default_avatar: str | None = None,
+        include_controls: bool = True,
     ) -> CicadaContainer:
         """Convert draft into a Discord Components V2 CicadaContainer with dynamic module page support."""
         container = CicadaContainer(accent_color=self.get_accent_int())
@@ -346,45 +347,46 @@ class ContainerDraft:
 
         # ─── SHARED CONTROLS (Modules Dropdown & Buttons) ────────────────────
 
-        # Dropdown Module Switcher
-        if self.modules:
-            select_opts = [
-                {
-                    "label": "Main Overview",
-                    "value": "mod_home",
-                    "description": "Return to original card overview",
-                    "default": (active_mod is None),
-                }
-            ]
-            for idx, mod in enumerate(self.modules[:24]):
-                mod_id = mod.get("id", f"mod_{idx}")
-                is_selected = (active_mod is not None and active_mod.get("id") == mod_id)
-                select_opts.append({
-                    "label": parse(mod.get("label", f"Page {idx + 1}"))[:100],
-                    "value": mod_id,
-                    "description": parse(mod.get("description", ""))[:100] if mod.get("description") else None,
-                    "default": is_selected,
-                })
-            container.add_action_row([
-                {
-                    "type": 3,
-                    "custom_id": "card_module_select",
-                    "placeholder": "Select a module / page...",
-                    "options": select_opts,
-                }
-            ])
+        if include_controls:
+            # Dropdown Module Switcher
+            if self.modules:
+                select_opts = [
+                    {
+                        "label": "Main Overview",
+                        "value": "mod_home",
+                        "description": "Return to original card overview",
+                        "default": (active_mod is None),
+                    }
+                ]
+                for idx, mod in enumerate(self.modules[:24]):
+                    mod_id = mod.get("id", f"mod_{idx}")
+                    is_selected = (active_mod is not None and active_mod.get("id") == mod_id)
+                    select_opts.append({
+                        "label": parse(mod.get("label", f"Page {idx + 1}"))[:100],
+                        "value": mod_id,
+                        "description": parse(mod.get("description", ""))[:100] if mod.get("description") else None,
+                        "default": is_selected,
+                    })
+                container.add_action_row([
+                    {
+                        "type": 3,
+                        "custom_id": "card_module_select",
+                        "placeholder": "Select a module / page...",
+                        "options": select_opts,
+                    }
+                ])
 
-        # Link Buttons Row
-        if self.buttons:
-            btn_comps = []
-            for b in self.buttons[:5]:
-                btn_comps.append({
-                    "type": 2,
-                    "style": 5,  # Link URL Button
-                    "label": parse(b.get("label", "Link")),
-                    "url": parse(b.get("url", "https://discord.com")),
-                })
-            container.add_action_row(btn_comps)
+            # Link Buttons Row
+            if self.buttons:
+                btn_comps = []
+                for b in self.buttons[:5]:
+                    btn_comps.append({
+                        "type": 2,
+                        "style": 5,  # Link URL Button
+                        "label": parse(b.get("label", "Link")),
+                        "url": parse(b.get("url", "https://discord.com")),
+                    })
+                container.add_action_row(btn_comps)
 
         # Footer Subtext
         footer_raw = parse(self.footer_text)
@@ -1132,6 +1134,7 @@ class EmbedBuilderView(discord.ui.View):
             guild=guild,
             channel=channel,
             bot=self.bot,
+            include_controls=False,
         )
 
     def build_control_container(self, guild: discord.Guild | None = None) -> CicadaContainer:

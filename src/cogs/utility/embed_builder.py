@@ -395,7 +395,7 @@ class ContainerDraft:
                     }
                 ])
 
-            # Link Buttons Row
+            # Link Buttons Row (Interactive Native Discord Buttons)
             if self.buttons:
                 btn_comps = []
                 for b in self.buttons[:5]:
@@ -406,6 +406,16 @@ class ContainerDraft:
                         "url": parse(b.get("url", "https://discord.com")),
                     })
                 container.add_action_row(btn_comps)
+        else:
+            # Live Preview Mode: Render visual button chips directly inside the card container
+            if self.buttons:
+                btn_previews = []
+                for b in self.buttons[:5]:
+                    b_label = parse(b.get("label", "Link"))
+                    b_url = parse(b.get("url", "https://discord.com"))
+                    btn_previews.append(f"[` {b_label} ↗ `]({b_url})")
+                container.add_text(" • ".join(btn_previews))
+                container.add_separator(divider=True)
 
         # Footer Subtext
         footer_raw = parse(self.footer_text)
@@ -599,46 +609,52 @@ class ContainerDraft:
 # ─── Modals (5-Step Focused Inputs) ──────────────────────────────────────────
 
 class ContentModal(discord.ui.Modal, title="Step 1: Content & Theme"):
-    title_input = discord.ui.TextInput(
-        label="Title",
-        placeholder="Card title headline or [Title](https://...)",
-        max_length=256,
-        required=False,
-    )
-    author_input = discord.ui.TextInput(
-        label="Author Name",
-        placeholder="Author name or [Author Name](https://...)",
-        max_length=256,
-        required=False,
-    )
-    author_icon_input = discord.ui.TextInput(
-        label="Author Icon / Avatar URL",
-        placeholder="https://.../icon.png or {user.avatar}",
-        max_length=500,
-        required=False,
-    )
-    desc_input = discord.ui.TextInput(
-        label="Description",
-        style=discord.TextStyle.paragraph,
-        placeholder="Main description text, [rules](url), {user}, {server}...",
-        max_length=4000,
-        required=False,
-    )
-    accent_input = discord.ui.TextInput(
-        label="Accent Color",
-        placeholder="#00FF66, #5865F2, or 'none'",
-        max_length=20,
-        required=False,
-    )
-
     def __init__(self, view: EmbedBuilderView) -> None:
         super().__init__()
         self.view_ref = view
-        self.title_input.default = self.view_ref.draft.title or ""
-        self.author_input.default = self.view_ref.draft.author_name or ""
-        self.author_icon_input.default = self.view_ref.draft.author_icon_url or ""
-        self.desc_input.default = self.view_ref.draft.description or ""
-        self.accent_input.default = self.view_ref.draft.accent_hex or "none"
+
+        self.title_input = discord.ui.TextInput(
+            label="Title",
+            placeholder="Card title headline or [Title](https://...)",
+            default=self.view_ref.draft.title or "",
+            max_length=256,
+            required=False,
+        )
+        self.author_input = discord.ui.TextInput(
+            label="Author Name",
+            placeholder="Author name or [Author Name](https://...)",
+            default=self.view_ref.draft.author_name or "",
+            max_length=256,
+            required=False,
+        )
+        self.author_icon_input = discord.ui.TextInput(
+            label="Author Icon / Avatar URL",
+            placeholder="https://.../icon.png or {user.avatar}",
+            default=self.view_ref.draft.author_icon_url or "",
+            max_length=500,
+            required=False,
+        )
+        self.desc_input = discord.ui.TextInput(
+            label="Description",
+            style=discord.TextStyle.paragraph,
+            placeholder="Main description text, [rules](url), {user}, {server}...",
+            default=self.view_ref.draft.description or "",
+            max_length=4000,
+            required=False,
+        )
+        self.accent_input = discord.ui.TextInput(
+            label="Accent Color",
+            placeholder="#00FF66, #5865F2, or 'none'",
+            default=self.view_ref.draft.accent_hex or "none",
+            max_length=20,
+            required=False,
+        )
+
+        self.add_item(self.title_input)
+        self.add_item(self.author_input)
+        self.add_item(self.author_icon_input)
+        self.add_item(self.desc_input)
+        self.add_item(self.accent_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         t = str(self.title_input.value).strip()
@@ -657,42 +673,48 @@ class ContentModal(discord.ui.Modal, title="Step 1: Content & Theme"):
 
 
 class VisualsModal(discord.ui.Modal, title="Step 2: Images & Footer"):
-    thumb_input = discord.ui.TextInput(
-        label="Thumbnail URL",
-        placeholder="https://example.com/thumb.png or empty to remove",
-        required=False,
-    )
-    banner_input = discord.ui.TextInput(
-        label="Banner Image URL",
-        placeholder="https://example.com/banner.png or empty to remove",
-        required=False,
-    )
-    footer_input = discord.ui.TextInput(
-        label="Footer Subtext",
-        placeholder="Footer text or {server.name}...",
-        max_length=1000,
-        required=False,
-    )
-    footer_icon_input = discord.ui.TextInput(
-        label="Footer Icon URL",
-        placeholder="https://example.com/footer_icon.png or empty",
-        required=False,
-    )
-    timestamp_input = discord.ui.TextInput(
-        label="Timestamp (on / off)",
-        placeholder="on or off",
-        max_length=10,
-        required=False,
-    )
-
     def __init__(self, view: EmbedBuilderView) -> None:
         super().__init__()
         self.view_ref = view
-        self.thumb_input.default = self.view_ref.draft.thumbnail_url or ""
-        self.banner_input.default = self.view_ref.draft.image_url or ""
-        self.footer_input.default = self.view_ref.draft.footer_text or ""
-        self.footer_icon_input.default = self.view_ref.draft.footer_icon_url or ""
-        self.timestamp_input.default = "on" if self.view_ref.draft.timestamp else "off"
+
+        self.thumb_input = discord.ui.TextInput(
+            label="Thumbnail URL",
+            placeholder="https://example.com/thumb.png or empty to remove",
+            default=self.view_ref.draft.thumbnail_url or "",
+            required=False,
+        )
+        self.banner_input = discord.ui.TextInput(
+            label="Banner Image URL",
+            placeholder="https://example.com/banner.png or empty to remove",
+            default=self.view_ref.draft.image_url or "",
+            required=False,
+        )
+        self.footer_input = discord.ui.TextInput(
+            label="Footer Subtext",
+            placeholder="Footer text or {server.name}...",
+            default=self.view_ref.draft.footer_text or "",
+            max_length=1000,
+            required=False,
+        )
+        self.footer_icon_input = discord.ui.TextInput(
+            label="Footer Icon URL",
+            placeholder="https://example.com/footer_icon.png or empty",
+            default=self.view_ref.draft.footer_icon_url or "",
+            required=False,
+        )
+        self.timestamp_input = discord.ui.TextInput(
+            label="Timestamp (on / off)",
+            placeholder="on or off",
+            default="on" if self.view_ref.draft.timestamp else "off",
+            max_length=10,
+            required=False,
+        )
+
+        self.add_item(self.thumb_input)
+        self.add_item(self.banner_input)
+        self.add_item(self.footer_input)
+        self.add_item(self.footer_icon_input)
+        self.add_item(self.timestamp_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         th = str(self.thumb_input.value).strip()
@@ -710,29 +732,35 @@ class VisualsModal(discord.ui.Modal, title="Step 2: Images & Footer"):
         await self.view_ref.update_view(interaction)
 
 
-class AddFieldModal(discord.ui.Modal, title="Custom Field"):
-    name_input = discord.ui.TextInput(
-        label="Field Name",
-        placeholder="Section name or header...",
-        max_length=256,
-        required=True,
-    )
-    value_input = discord.ui.TextInput(
-        label="Field Value",
-        style=discord.TextStyle.paragraph,
-        placeholder="Field description, details, or [links](url)...",
-        max_length=1024,
-        required=True,
-    )
-
+class AddFieldModal(discord.ui.Modal):
     def __init__(self, view: EmbedBuilderView, edit_idx: int | None = None) -> None:
-        super().__init__()
+        title = f"Edit Field #{edit_idx + 1}" if edit_idx is not None else "Add Custom Field"
+        super().__init__(title=title)
         self.view_ref = view
         self.edit_idx = edit_idx
+
+        existing: dict[str, Any] = {}
         if edit_idx is not None and 0 <= edit_idx < len(self.view_ref.draft.fields):
             existing = self.view_ref.draft.fields[edit_idx]
-            self.name_input.default = existing.get("name", "")
-            self.value_input.default = existing.get("value", "")
+
+        self.name_input = discord.ui.TextInput(
+            label="Field Name",
+            placeholder="Section name or header...",
+            default=existing.get("name", ""),
+            max_length=256,
+            required=True,
+        )
+        self.value_input = discord.ui.TextInput(
+            label="Field Value",
+            style=discord.TextStyle.paragraph,
+            placeholder="Field description, details, or [links](url)...",
+            default=existing.get("value", ""),
+            max_length=1024,
+            required=True,
+        )
+
+        self.add_item(self.name_input)
+        self.add_item(self.value_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         n = str(self.name_input.value).strip()
@@ -745,33 +773,40 @@ class AddFieldModal(discord.ui.Modal, title="Custom Field"):
         await self.view_ref.update_view(interaction)
 
 
-class AddButtonModal(discord.ui.Modal, title="Link Button"):
-    label_input = discord.ui.TextInput(
-        label="Button Label",
-        placeholder="Visit Website, Join Server...",
-        max_length=80,
-        required=True,
-    )
-    url_input = discord.ui.TextInput(
-        label="Destination URL",
-        placeholder="https://example.com",
-        required=True,
-    )
-
+class AddButtonModal(discord.ui.Modal):
     def __init__(self, view: EmbedBuilderView, edit_idx: int | None = None) -> None:
-        super().__init__()
+        title = f"Edit Button #{edit_idx + 1}" if edit_idx is not None else "Add Link Button"
+        super().__init__(title=title)
         self.view_ref = view
         self.edit_idx = edit_idx
+
+        existing: dict[str, Any] = {}
         if edit_idx is not None and 0 <= edit_idx < len(self.view_ref.draft.buttons):
-            b = self.view_ref.draft.buttons[edit_idx]
-            self.label_input.default = b.get("label", "")
-            self.url_input.default = b.get("url", "")
+            existing = self.view_ref.draft.buttons[edit_idx]
+
+        self.label_input = discord.ui.TextInput(
+            label="Button Label",
+            placeholder="Visit Website, Join Server, Rules...",
+            default=existing.get("label", ""),
+            max_length=80,
+            required=True,
+        )
+        self.url_input = discord.ui.TextInput(
+            label="Destination URL",
+            placeholder="https://example.com or discord.gg/...",
+            default=existing.get("url", ""),
+            max_length=512,
+            required=True,
+        )
+
+        self.add_item(self.label_input)
+        self.add_item(self.url_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         label = str(self.label_input.value).strip() or "Link"
         url = str(self.url_input.value).strip()
         if url:
-            if not url.startswith("http://") and not url.startswith("https://"):
+            if not url.startswith("http://") and not url.startswith("https://") and not url.startswith("discord://"):
                 url = f"https://{url}"
             if self.edit_idx is not None and 0 <= self.edit_idx < len(self.view_ref.draft.buttons):
                 self.view_ref.draft.buttons[self.edit_idx] = {"label": label, "url": url}
@@ -1038,16 +1073,18 @@ class FieldManagementPicker(discord.ui.View):
 
 
 class SaveModal(discord.ui.Modal, title="Save Template"):
-    name_input = discord.ui.TextInput(
-        label="Template Name",
-        placeholder="welcome, rules, faq, announcement...",
-        max_length=32,
-        required=True,
-    )
-
     def __init__(self, view: EmbedBuilderView) -> None:
         super().__init__()
         self.view_ref = view
+
+        self.name_input = discord.ui.TextInput(
+            label="Template Name",
+            placeholder="welcome, rules, faq, announcement...",
+            default=self.view_ref.template_name or "",
+            max_length=32,
+            required=True,
+        )
+        self.add_item(self.name_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         name = str(self.name_input.value).strip().lower()
@@ -1075,21 +1112,22 @@ class SaveModal(discord.ui.Modal, title="Save Template"):
 
 
 class RawImportModal(discord.ui.Modal, title="Raw JSON / HTML Import"):
-    raw_input = discord.ui.TextInput(
-        label="Payload / Code",
-        style=discord.TextStyle.paragraph,
-        placeholder="Paste Discohook JSON, raw embed JSON, or HTML text...",
-        max_length=4000,
-        required=False,
-    )
-
     def __init__(self, view: EmbedBuilderView) -> None:
         super().__init__()
         self.view_ref = view
         raw_json = json.dumps(self.view_ref.draft.to_dict(), indent=2)
         if len(raw_json) > 3900:
             raw_json = json.dumps(self.view_ref.draft.to_dict())
-        self.raw_input.default = raw_json[:3950]
+
+        self.raw_input = discord.ui.TextInput(
+            label="Payload / Code",
+            style=discord.TextStyle.paragraph,
+            placeholder="Paste Discohook JSON, raw embed JSON, or HTML text...",
+            default=raw_json[:3950],
+            max_length=4000,
+            required=False,
+        )
+        self.add_item(self.raw_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         raw = str(self.raw_input.value).strip()
@@ -1131,6 +1169,8 @@ class EmbedBuilderView(discord.ui.View):
         self.template_name: str = template_name
         self.current_slide_idx: int = 0  # 0 to 4
         self.preview_module_id: str | None = None
+        self.message_id: int | None = None
+        self.channel_id: int | None = None
         self._setup_dynamic_buttons()
 
     def _setup_dynamic_buttons(self) -> None:
@@ -1309,8 +1349,11 @@ class EmbedBuilderView(discord.ui.View):
     async def update_view(self, interaction: discord.Interaction) -> None:
         """Update the dual-container message and auto-save changes."""
         self._sync_controls()
-        if interaction.message:
-            EmbedBuilderView.active_views[interaction.message.id] = self
+        if interaction.message and not self.message_id:
+            self.message_id = interaction.message.id
+            self.channel_id = interaction.channel_id
+        if self.message_id:
+            EmbedBuilderView.active_views[self.message_id] = self
 
         if self.template_name and interaction.guild_id:
             try:
@@ -1324,7 +1367,31 @@ class EmbedBuilderView(discord.ui.View):
                 logger.error(f"Failed to auto-save template '{self.template_name}': {e}")
 
         containers = self.get_dual_containers(interaction.guild, interaction.channel)
-        await edit_container_response(interaction, containers, view=self)
+
+        is_direct_builder_msg = bool(
+            interaction.message and self.message_id and interaction.message.id == self.message_id
+        )
+
+        if is_direct_builder_msg:
+            await edit_container_response(interaction, containers, view=self)
+        else:
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.send_message("Card updated!", ephemeral=True)
+                except Exception:
+                    pass
+
+            if self.channel_id and self.message_id:
+                try:
+                    payload = build_container_payload(containers, view=self)
+                    await self.bot.http.request(
+                        discord.http.Route("PATCH", f"/channels/{self.channel_id}/messages/{self.message_id}"),
+                        json=payload,
+                    )
+                except Exception as patch_err:
+                    logger.error(f"Failed to patch main builder message {self.message_id}: {patch_err}")
+            else:
+                await edit_container_response(interaction, containers, view=self)
 
     # ─── Dropdown: Direct Slide Selector ──────────────────────────────────────
 
@@ -1590,6 +1657,8 @@ class EmbedBuilder(commands.Cog):
             elif hasattr(msg_data, "id"):
                 msg_id = int(msg_data.id)
             if msg_id:
+                view.message_id = msg_id
+                view.channel_id = interaction.channel_id
                 EmbedBuilderView.active_views[msg_id] = view
             return
 
@@ -1645,6 +1714,8 @@ class EmbedBuilder(commands.Cog):
             elif hasattr(msg_data, "id"):
                 msg_id = int(msg_data.id)
             if msg_id:
+                view.message_id = msg_id
+                view.channel_id = ctx.channel.id
                 EmbedBuilderView.active_views[msg_id] = view
             return
 
@@ -1731,6 +1802,8 @@ class EmbedBuilder(commands.Cog):
         elif hasattr(msg_data, "id"):
             msg_id = int(msg_data.id)
         if msg_id:
+            view.message_id = msg_id
+            view.channel_id = ctx.channel.id
             EmbedBuilderView.active_views[msg_id] = view
 
     @embed_group.command(
@@ -1756,6 +1829,8 @@ class EmbedBuilder(commands.Cog):
         elif hasattr(msg_data, "id"):
             msg_id = int(msg_data.id)
         if msg_id:
+            view.message_id = msg_id
+            view.channel_id = ctx.channel.id
             EmbedBuilderView.active_views[msg_id] = view
 
     @embed_group.command(

@@ -392,6 +392,7 @@ class ContainerDraft:
 
         if footer_parts:
             container.add_text(" • ".join(footer_parts))
+            container.add_separator(divider=True)
 
         # ─── SHARED CONTROLS (Modules Dropdown & Buttons at the bottom) ─────
 

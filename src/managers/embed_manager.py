@@ -55,11 +55,11 @@ class EmbedManager:
             logger.error(f"Failed to save custom embed template '{clean_name}': {e}")
             return False
 
-    async def get_template(self, guild_id: int, name: str) -> dict[str, Any] | None:
-        """Retrieve a saved container embed payload by name."""
+    async def get_template(self, guild_id: int, name: str, force_refresh: bool = False) -> dict[str, Any] | None:
+        """Retrieve a saved container embed payload by name with optional cache refresh."""
         clean_name = name.strip().lower()
         cache_key = (guild_id, clean_name)
-        if cache_key in self._template_cache:
+        if not force_refresh and cache_key in self._template_cache:
             return self._template_cache[cache_key]
 
         query = "SELECT container_payload FROM server_embeds WHERE guild_id = ? AND embed_name = ?;"

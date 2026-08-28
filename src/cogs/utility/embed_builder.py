@@ -1179,6 +1179,11 @@ class EmbedBuilderView(discord.ui.View):
         self._sync_controls()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.message:
+            self.message_id = interaction.message.id
+            self.channel_id = interaction.channel_id
+        if interaction.guild_id:
+            self.guild_id = interaction.guild_id
         if interaction.user.id != self.author.id:
             await interaction.response.send_message(
                 f"Only {self.author.mention} can control this embed builder session.",

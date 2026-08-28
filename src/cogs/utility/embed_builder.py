@@ -159,12 +159,12 @@ def convert_html_to_markdown(text: str) -> str:
 
 
 def parse_markdown_link(text: str | None) -> tuple[str | None, str | None]:
-    """Parse [Text](URL) format into (text, url). If plain text, returns (text, None)."""
+    """Extract [Label](url) into (Label, URL)."""
     if not text:
         return None, None
     m = re.match(r"^\[(.*?)\]\((https?://[^\s]+)\)$", text.strip())
     if m:
-        return m.group(1).strip(), m.group(2).strip()
+        return m.group(1), m.group(2)
     return text.strip(), None
 
 
@@ -178,10 +178,10 @@ class ContainerDraft:
         self.author_icon_url: str | None = None
         self.author_url: str | None = None
 
-        self.title: str | None = None
+        self.title: str | None = "Cicada 3301 Custom Card"
         self.title_url: str | None = None
 
-        self.description: str | None = "> Welcome to your interactive container card preview.\n> Use the control panel below to customize and style your message."
+        self.description: str | None = "This is your live Components V2 preview. Edit options below to customize."
 
         self.fields: list[dict[str, str]] = []  # [{"name": "...", "value": "..."}]
 
@@ -195,7 +195,7 @@ class ContainerDraft:
 
         self.accent_hex: str | None = None
         self.buttons: list[dict[str, str]] = []  # [{"label": "...", "url": "..."}]
-        self.modules: list[dict[str, Any]] = []  # [{"id": "...", "label": "...", "description": "...", "page_title": "...", "content": "..."}]
+        self.modules: list[dict[str, Any]] = []  # [{"id": "mod_0", "label": "...", "description": "...", "page_title": "...", "content": "..."}]
 
     def get_accent_int(self) -> int | None:
         if not self.accent_hex or self.accent_hex.strip().lower() in ["none", "dark", "default"]:
@@ -231,111 +231,122 @@ class ContainerDraft:
                     active_mod = m
                     break
 
-        # 1. Author & Title Extraction
-        author_raw = parse(self.author_name)
-        author_text, author_url_extracted = parse_markdown_link(author_raw)
-        final_author_url = self.author_url or author_url_extracted
+        if active_mod:
+            # ─── ACTIVE MODULE SUB-PAGE VIEW (Clean Standalone) ───────────────
+            page_title = active_mod.get("page_title") or active_mod.get("label") or "Page"
+            page_title_parsed = parse(page_title)
+            formatted_title = page_title_parsed if page_title_parsed.startswith("#") else f"## {page_title_parsed}"
+            page_content_parsed = parse(active_mod.get("content", ""))
 
-        # If active module has page_title, use it; otherwise use main title
-        if active_mod and active_mod.get("page_title"):
-            title_raw = parse(active_mod["page_title"])
+            # Thumbnail for module if set, else fallback to global thumbnail
+            mod_thumb = active_mod.get("thumbnail_url") or self.thumbnail_url or self.author_icon_url
+            mod_thumb_parsed = parse(mod_thumb)
+            accessory_dict = None
+            if mod_thumb_parsed and mod_thumb_parsed.startswith("http"):
+                accessory_dict = {
+                    "type": 11,
+                    "media": {"url": mod_thumb_parsed},
+                }
+
+            if self.divider_line:
+                container.add_section(content=formatted_title, accessory=accessory_dict)
+                container.add_separator(divider=True)
+                if page_content_parsed:
+                    container.add_text(page_content_parsed)
+                    container.add_separator(divider=True)
+            else:
+                combined = f"{formatted_title}\n{page_content_parsed}" if page_content_parsed else formatted_title
+                container.add_section(content=combined, accessory=accessory_dict)
+                container.add_separator(divider=True)
+
         else:
+            # ─── BASE OVERVIEW VIEW ──────────────────────────────────────────
+            author_raw = parse(self.author_name)
+            author_text, author_url_extracted = parse_markdown_link(author_raw)
+            final_author_url = self.author_url or author_url_extracted
+
             title_raw = parse(self.title)
+            title_text, title_url_extracted = parse_markdown_link(title_raw)
+            final_title_url = self.title_url or title_url_extracted
 
-        title_text, title_url_extracted = parse_markdown_link(title_raw)
-        final_title_url = self.title_url or title_url_extracted
-
-        # If active module has content, use it; otherwise use main description
-        if active_mod and active_mod.get("content"):
-            desc_text = parse(active_mod["content"])
-        else:
             desc_text = parse(self.description)
 
-        # Thumbnail / Avatar Accessory (Type 11) - Uses thumbnail_url or author_icon_url
-        thumb_url = parse(self.thumbnail_url or self.author_icon_url)
-        accessory_dict = None
-        if thumb_url and thumb_url.startswith("http"):
-            accessory_dict = {
-                "type": 11,
-                "media": {
-                    "url": thumb_url,
-                },
-            }
+            thumb_url = parse(self.thumbnail_url or self.author_icon_url)
+            accessory_dict = None
+            if thumb_url and thumb_url.startswith("http"):
+                accessory_dict = {
+                    "type": 11,
+                    "media": {"url": thumb_url},
+                }
 
-        # Compose Top Header (Author & Title)
-        top_lines = []
-        if author_text:
-            if final_author_url and final_author_url.startswith("http"):
-                top_lines.append(f"**[{author_text}]({final_author_url})**")
-            else:
-                top_lines.append(f"**{author_text}**")
+            top_lines = []
+            if author_text:
+                if final_author_url and final_author_url.startswith("http"):
+                    top_lines.append(f"**[{author_text}]({final_author_url})**")
+                else:
+                    top_lines.append(f"**{author_text}**")
 
-        if title_text:
-            if title_text.startswith("#"):
-                formatted_title = title_text
-            else:
-                formatted_title = f"**{title_text}**"
-            if final_title_url and final_title_url.startswith("http"):
-                top_lines.append(f"[{formatted_title}]({final_title_url})")
-            else:
-                top_lines.append(formatted_title)
+            if title_text:
+                if title_text.startswith("#"):
+                    formatted_title = title_text
+                else:
+                    formatted_title = f"**{title_text}**"
+                if final_title_url and final_title_url.startswith("http"):
+                    top_lines.append(f"[{formatted_title}]({final_title_url})")
+                else:
+                    top_lines.append(formatted_title)
 
-        # Render Header & Description (Controlled by self.divider_line)
-        if top_lines and desc_text:
-            if self.divider_line:
+            if top_lines and desc_text:
+                if self.divider_line:
+                    top_header_content = "\n".join(top_lines)
+                    container.add_section(content=top_header_content, accessory=accessory_dict)
+                    container.add_separator(divider=True)
+                    container.add_text(desc_text)
+                    container.add_separator(divider=True)
+                else:
+                    combined_content = "\n".join(top_lines) + "\n" + desc_text
+                    container.add_section(content=combined_content, accessory=accessory_dict)
+                    container.add_separator(divider=True)
+            elif top_lines:
                 top_header_content = "\n".join(top_lines)
                 container.add_section(content=top_header_content, accessory=accessory_dict)
                 container.add_separator(divider=True)
-                container.add_text(desc_text)
+            elif desc_text:
+                container.add_section(content=desc_text, accessory=accessory_dict)
                 container.add_separator(divider=True)
-            else:
-                combined_content = "\n".join(top_lines) + "\n" + desc_text
-                container.add_section(content=combined_content, accessory=accessory_dict)
-                container.add_separator(divider=True)
-        elif top_lines:
-            top_header_content = "\n".join(top_lines)
-            container.add_section(content=top_header_content, accessory=accessory_dict)
-            container.add_separator(divider=True)
-        elif desc_text:
-            container.add_section(content=desc_text, accessory=accessory_dict)
-            container.add_separator(divider=True)
-        elif accessory_dict:
-            container.add_section(content=" ", accessory=accessory_dict)
-            container.add_separator(divider=True)
-
-        # 2. Custom Fields (Show on main overview or if active module doesn't replace them)
-        if not active_mod and self.fields:
-            field_lines = []
-            for f in self.fields:
-                f_name = parse(f.get("name", ""))
-                f_val = parse(f.get("value", ""))
-                if f_name and f_val:
-                    field_lines.append(f"**{f_name}**\n{f_val}")
-                elif f_name:
-                    field_lines.append(f"**{f_name}**")
-                elif f_val:
-                    field_lines.append(f_val)
-
-            if field_lines:
-                container.add_text("\n\n".join(field_lines))
+            elif accessory_dict:
+                container.add_section(content=" ", accessory=accessory_dict)
                 container.add_separator(divider=True)
 
-        # 3. Large Banner Image (Media Gallery Type 12)
-        banner_url = parse(self.image_url)
-        if banner_url and banner_url.startswith("http"):
-            container.components.append({
-                "type": 12,
-                "items": [
-                    {
-                        "media": {
-                            "url": banner_url,
-                        }
-                    }
-                ],
-            })
-            container.add_separator(divider=True)
+            # Custom Fields (Only on Main Overview)
+            if self.fields:
+                field_lines = []
+                for f in self.fields:
+                    f_name = parse(f.get("name", ""))
+                    f_val = parse(f.get("value", ""))
+                    if f_name and f_val:
+                        field_lines.append(f"**{f_name}**\n{f_val}")
+                    elif f_name:
+                        field_lines.append(f"**{f_name}**")
+                    elif f_val:
+                        field_lines.append(f_val)
 
-        # 4. Interactive Dropdown Modules Select Menu (Type 3 Action Row)
+                if field_lines:
+                    container.add_text("\n\n".join(field_lines))
+                    container.add_separator(divider=True)
+
+            # Large Banner Image (Only on Main Overview)
+            banner_url = parse(self.image_url)
+            if banner_url and banner_url.startswith("http"):
+                container.components.append({
+                    "type": 12,
+                    "items": [{"media": {"url": banner_url}}],
+                })
+                container.add_separator(divider=True)
+
+        # ─── SHARED CONTROLS (Modules Dropdown & Buttons) ────────────────────
+
+        # Dropdown Module Switcher
         if self.modules:
             select_opts = [
                 {
@@ -358,12 +369,12 @@ class ContainerDraft:
                 {
                     "type": 3,
                     "custom_id": "card_module_select",
-                    "placeholder": "Select an interactive module / page...",
+                    "placeholder": "Select a module / page...",
                     "options": select_opts,
                 }
             ])
 
-        # 5. Link Buttons Row (Type 1 Action Row with Type 2 Buttons)
+        # Link Buttons Row
         if self.buttons:
             btn_comps = []
             for b in self.buttons[:5]:
@@ -375,7 +386,7 @@ class ContainerDraft:
                 })
             container.add_action_row(btn_comps)
 
-        # 6. Footer Subtext & Icon & Timestamp
+        # Footer Subtext
         footer_raw = parse(self.footer_text)
         footer_parts = []
         if footer_raw:
@@ -427,57 +438,47 @@ class ContainerDraft:
         accent = self.get_accent_int()
         embed = discord.Embed(color=accent if accent is not None else None)
 
-        # Author
-        author_raw = parse(self.author_name)
-        author_text, author_url_extracted = parse_markdown_link(author_raw)
-        final_author_url = self.author_url or author_url_extracted
-        author_icon = parse(self.author_icon_url)
-        if author_text:
-            embed.set_author(
-                name=author_text,
-                url=final_author_url if (final_author_url and final_author_url.startswith("http")) else None,
-                icon_url=author_icon if (author_icon and author_icon.startswith("http")) else None,
-            )
-
-        # Title
-        if active_mod and active_mod.get("page_title"):
-            title_raw = parse(active_mod["page_title"])
+        if active_mod:
+            page_title = active_mod.get("page_title") or active_mod.get("label") or "Page"
+            embed.title = parse(page_title)
+            embed.description = parse(active_mod.get("content", ""))
         else:
+            author_raw = parse(self.author_name)
+            author_text, author_url_extracted = parse_markdown_link(author_raw)
+            final_author_url = self.author_url or author_url_extracted
+            author_icon = parse(self.author_icon_url)
+            if author_text:
+                embed.set_author(
+                    name=author_text,
+                    url=final_author_url if (final_author_url and final_author_url.startswith("http")) else None,
+                    icon_url=author_icon if (author_icon and author_icon.startswith("http")) else None,
+                )
+
             title_raw = parse(self.title)
-        title_text, title_url_extracted = parse_markdown_link(title_raw)
-        final_title_url = self.title_url or title_url_extracted
-        if title_text:
-            embed.title = title_text
-            if final_title_url and final_title_url.startswith("http"):
-                embed.url = final_title_url
+            title_text, title_url_extracted = parse_markdown_link(title_raw)
+            final_title_url = self.title_url or title_url_extracted
+            if title_text:
+                embed.title = title_text
+                if final_title_url and final_title_url.startswith("http"):
+                    embed.url = final_title_url
 
-        # Description
-        if active_mod and active_mod.get("content"):
-            desc_text = parse(active_mod["content"])
-        else:
-            desc_text = parse(self.description)
-        if desc_text:
-            embed.description = desc_text
+            embed.description = parse(self.description)
 
-        # Fields
-        if not active_mod and self.fields:
-            for f in self.fields:
-                f_name = parse(f.get("name", ""))
-                f_val = parse(f.get("value", ""))
-                if f_name and f_val:
-                    embed.add_field(name=f_name, value=f_val, inline=False)
+            if self.fields:
+                for f in self.fields:
+                    fn = parse(f.get("name", ""))
+                    fv = parse(f.get("value", ""))
+                    if fn and fv:
+                        embed.add_field(name=fn, value=fv, inline=False)
 
-        # Thumbnail
+            banner_url = parse(self.image_url)
+            if banner_url and banner_url.startswith("http"):
+                embed.set_image(url=banner_url)
+
         thumb_url = parse(self.thumbnail_url or self.author_icon_url)
         if thumb_url and thumb_url.startswith("http"):
             embed.set_thumbnail(url=thumb_url)
 
-        # Image
-        banner_url = parse(self.image_url)
-        if banner_url and banner_url.startswith("http"):
-            embed.set_image(url=banner_url)
-
-        # Footer
         footer_raw = parse(self.footer_text)
         footer_icon = parse(self.footer_icon_url)
         if footer_raw:
@@ -485,7 +486,6 @@ class ContainerDraft:
                 text=footer_raw,
                 icon_url=footer_icon if (footer_icon and footer_icon.startswith("http")) else None,
             )
-
         if self.timestamp:
             import datetime
             embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
@@ -527,7 +527,7 @@ class ContainerDraft:
         draft.footer_text = data.get("footer_text")
         draft.footer_icon_url = data.get("footer_icon_url")
         draft.divider_line = data.get("divider_line", True)
-        draft.timestamp = data.get("timestamp", False)
+        draft.timestamp = bool(data.get("timestamp", False))
         draft.accent_hex = data.get("accent_hex")
         draft.buttons = data.get("buttons", [])
         draft.modules = data.get("modules") or data.get("faq_options") or []
@@ -565,8 +565,7 @@ class ContainerDraft:
                         draft.fields = [{"name": f.get("name", ""), "value": convert_html_to_markdown(f.get("value", ""))} for f in emb["fields"]]
                     return draft
 
-                # Direct Embed Dictionary: {"title": "...", "description": "..."}
-                if "title" in parsed_json or "description" in parsed_json or "fields" in parsed_json:
+                if "title" in parsed_json or "description" in parsed_json or "fields" in parsed_json or "modules" in parsed_json:
                     return cls.from_dict(parsed_json)
         except Exception:
             pass
@@ -690,7 +689,7 @@ class VisualsModal(discord.ui.Modal, title="Step 2: Images & Footer"):
         await self.view_ref.update_view(interaction)
 
 
-class AddFieldModal(discord.ui.Modal, title="Add Field"):
+class AddFieldModal(discord.ui.Modal, title="Custom Field"):
     name_input = discord.ui.TextInput(
         label="Field Name",
         placeholder="Section name or header...",
@@ -725,7 +724,7 @@ class AddFieldModal(discord.ui.Modal, title="Add Field"):
         await self.view_ref.update_view(interaction)
 
 
-class AddButtonModal(discord.ui.Modal, title="Add Link Button"):
+class AddButtonModal(discord.ui.Modal, title="Link Button"):
     label_input = discord.ui.TextInput(
         label="Button Label",
         placeholder="Visit Website, Join Server...",
@@ -779,7 +778,7 @@ class AddModuleModal(discord.ui.Modal):
             required=True,
         )
         self.desc_input = discord.ui.TextInput(
-            label="Subtitle Description",
+            label="Subtitle Description (Optional)",
             placeholder="Brief note shown in dropdown list...",
             default=existing.get("description", "") or "",
             max_length=100,
@@ -787,7 +786,7 @@ class AddModuleModal(discord.ui.Modal):
         )
         self.page_title_input = discord.ui.TextInput(
             label="Page Card Title (Optional)",
-            placeholder="Headline when this page is open...",
+            placeholder="Headline on card when open (defaults to label)...",
             default=existing.get("page_title", "") or "",
             max_length=100,
             required=False,
@@ -812,8 +811,9 @@ class AddModuleModal(discord.ui.Modal):
         page_title = str(self.page_title_input.value).strip()
         content = str(self.content_input.value).strip()
         if label and content:
+            mod_id = f"mod_{self.edit_idx}" if self.edit_idx is not None else f"mod_{len(self.view_ref.draft.modules)}"
             mod_data = {
-                "id": f"mod_{self.edit_idx}" if self.edit_idx is not None else f"mod_{len(self.view_ref.draft.modules)}",
+                "id": mod_id,
                 "label": label,
                 "description": desc if desc else None,
                 "page_title": page_title if page_title else None,
@@ -821,9 +821,10 @@ class AddModuleModal(discord.ui.Modal):
             }
             if self.edit_idx is not None and 0 <= self.edit_idx < len(self.view_ref.draft.modules):
                 self.view_ref.draft.modules[self.edit_idx] = mod_data
+                self.view_ref.preview_module_id = mod_id
             else:
                 self.view_ref.draft.modules.append(mod_data)
-        self.view_ref.preview_module_id = None
+                self.view_ref.preview_module_id = mod_id
         await self.view_ref.update_view(interaction)
 
 
@@ -1042,10 +1043,12 @@ class SaveModal(discord.ui.Modal, title="Save Template"):
             created_by=interaction.user.id,
         )
         if success:
+            self.view_ref.template_name = clean_name
             await interaction.response.send_message(
                 f"Saved template as `{clean_name}`. Use `?embed send #channel {clean_name}` to post.",
                 ephemeral=True,
             )
+            await self.view_ref.update_view(interaction)
         else:
             await interaction.response.send_message("Failed to save template.", ephemeral=True)
 
@@ -1076,98 +1079,6 @@ class RawImportModal(discord.ui.Modal, title="Raw JSON / HTML Import"):
             await self.view_ref.update_view(interaction)
         except Exception as e:
             await interaction.response.send_message(f"Import failed: {e}", ephemeral=True)
-
-
-class CreateEmbedModal(discord.ui.Modal, title="Create New Embed"):
-    name_input = discord.ui.TextInput(
-        label="Embed Name (Identifier)",
-        placeholder="rules, welcome, faq, announcement, perks...",
-        max_length=32,
-        required=True,
-    )
-
-    def __init__(self, bot: CicadaBot, author: discord.Member | discord.User) -> None:
-        super().__init__()
-        self.bot = bot
-        self.author = author
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        name = str(self.name_input.value).strip().lower()
-        clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name)
-        if not clean_name:
-            await interaction.response.send_message("Invalid embed name. Use letters, numbers, hyphens, and underscores.", ephemeral=True)
-            return
-
-        draft = ContainerDraft()
-        await self.bot.embed_mgr.save_template(
-            guild_id=interaction.guild_id or 0,
-            name=clean_name,
-            payload=draft.to_dict(),
-            created_by=self.author.id,
-        )
-
-        view = EmbedBuilderView(self.bot, self.author, draft=draft, template_name=clean_name)
-        containers = view.get_dual_containers(interaction.guild, interaction.channel)
-        msg_data = await send_container_response(interaction, containers, view=view)
-        msg_id = None
-        if isinstance(msg_data, dict) and "id" in msg_data:
-            msg_id = int(msg_data["id"])
-        elif hasattr(msg_data, "id"):
-            msg_id = int(msg_data.id)
-        if msg_id:
-            EmbedBuilderView.active_views[msg_id] = view
-
-
-class EmbedHubView(discord.ui.View):
-    """Server Embed Management Hub: Select an existing embed to edit."""
-    def __init__(self, bot: CicadaBot, author: discord.Member | discord.User, templates: list[dict[str, Any]]) -> None:
-        super().__init__(timeout=180)
-        self.bot = bot
-        self.author = author
-        self.templates = templates
-
-        if templates:
-            options = [
-                discord.SelectOption(
-                    label=f"Edit: {t.get('embed_name', 'unknown')}"[:100],
-                    value=t.get("embed_name", "unknown"),
-                    description=f"Open builder for '{t.get('embed_name', '')}'"[:100],
-                )
-                for t in templates[:25]
-            ]
-            select = discord.ui.Select(
-                placeholder="Select an existing embed to edit...",
-                options=options,
-                row=0,
-            )
-            select.callback = self.on_select_template
-            self.add_item(select)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author.id:
-            await interaction.response.send_message("Only the command author can use this menu.", ephemeral=True)
-            return False
-        return True
-
-    async def on_select_template(self, interaction: discord.Interaction) -> None:
-        select: discord.ui.Select = self.children[0]  # type: ignore
-        template_name = select.values[0]
-        data = await self.bot.embed_mgr.get_template(interaction.guild_id or 0, template_name)
-        if not data:
-            await interaction.response.send_message(f"Embed '{template_name}' not found.", ephemeral=True)
-            return
-
-        draft = ContainerDraft.from_dict(data)
-        view = EmbedBuilderView(self.bot, self.author, draft=draft, template_name=template_name)
-        containers = view.get_dual_containers(interaction.guild, interaction.channel)
-        msg_data = await send_container_response(interaction, containers, view=view)
-        msg_id = None
-        if isinstance(msg_data, dict) and "id" in msg_data:
-            msg_id = int(msg_data["id"])
-        elif hasattr(msg_data, "id"):
-            msg_id = int(msg_data.id)
-        if msg_id:
-            EmbedBuilderView.active_views[msg_id] = view
 
 
 # ─── Dual-Container Controller View ──────────────────────────────────────────
@@ -1270,13 +1181,21 @@ class EmbedBuilderView(discord.ui.View):
             m_cnt = len(self.draft.modules)
             b_summary = ", ".join([f"`{b['label']}`" for b in self.draft.buttons[:3]]) if self.draft.buttons else "`None`"
             m_summary = ", ".join([f"`{m['label']}`" for m in self.draft.modules[:3]]) if self.draft.modules else "`None`"
+            cur_preview = "Main Overview"
+            if self.preview_module_id and self.preview_module_id.startswith("mod_"):
+                for m in self.draft.modules:
+                    if m.get("id") == self.preview_module_id:
+                        cur_preview = m.get("label", "Module")
+                        break
             container.add_text(
+                f"**Previewing:** `{cur_preview}`\n"
                 f"**Link Buttons ({b_cnt}/5):** {b_summary}\n"
                 f"**Dropdown Modules ({m_cnt}/25):** {m_summary}"
             )
         elif slide_key == "dispatch":
             container.add_text(
-                f"**Auto-Saved to `{self.template_name}`:** Post to channel or import raw JSON below."
+                f"**Embed Template:** `{self.template_name}`\n"
+                f"Post to any server channel, test in your DMs, or import raw JSON/HTML."
             )
 
         container.add_separator(divider=True)
@@ -1311,7 +1230,7 @@ class EmbedBuilderView(discord.ui.View):
                         item.label = "Add Field"
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                            item.label = "Edit Module"
+                            item.label = "Edit Current Module"
                         else:
                             item.label = "Add Module"
                     elif slide_key == "dispatch":
@@ -1327,14 +1246,14 @@ class EmbedBuilderView(discord.ui.View):
                         item.label = f"Line: {div_state}"
                         item.disabled = False
                     elif slide_key == "fields":
-                        item.label = "Clear Fields"
-                        item.disabled = (len(self.draft.fields) == 0)
+                        item.label = "Manage Fields"
+                        item.disabled = False
                     elif slide_key == "interactive":
                         if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                            item.label = "Delete Module"
+                            item.label = "Delete Current Module"
                             item.disabled = False
                         else:
-                            item.label = "Add Button"
+                            item.label = "Manage Modules"
                             item.disabled = False
                     elif slide_key == "dispatch":
                         item.label = "Test in DM"
@@ -1348,21 +1267,19 @@ class EmbedBuilderView(discord.ui.View):
                         has_vis = bool(self.draft.thumbnail_url or self.draft.image_url or self.draft.footer_text)
                         item.disabled = not has_vis
                     elif slide_key == "fields":
-                        item.label = "Reset Draft"
-                        item.disabled = False
+                        item.label = "Clear Fields"
+                        item.disabled = (len(self.draft.fields) == 0)
                     elif slide_key == "interactive":
-                        if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                            item.label = "Add Module"
-                            item.disabled = False
-                        else:
-                            item.label = "Clear Modules"
-                            item.disabled = (len(self.draft.modules) == 0 and len(self.draft.buttons) == 0)
+                        item.label = "Add Button"
+                        item.disabled = False
                     elif slide_key == "dispatch":
                         item.label = "Raw JSON"
                         item.disabled = False
                 elif item.custom_id == "btn_send":
-                    if slide_key == "dispatch":
-                        item.label = "Reset Draft"
+                    if slide_key == "interactive":
+                        item.label = "Manage Buttons"
+                    elif slide_key == "dispatch":
+                        item.label = "Save Template"
                     else:
                         item.label = "Send Embed"
                     item.disabled = False
@@ -1453,8 +1370,14 @@ class EmbedBuilderView(discord.ui.View):
             self.draft.divider_line = not self.draft.divider_line
             await self.update_view(interaction)
         elif slide_key == "fields":
-            self.draft.fields.clear()
-            await self.update_view(interaction)
+            if not self.draft.fields:
+                await interaction.response.send_modal(AddFieldModal(self))
+            else:
+                await interaction.response.send_message(
+                    "Select a field to edit or delete:",
+                    view=FieldManagementPicker(self),
+                    ephemeral=True,
+                )
         elif slide_key == "interactive":
             if self.preview_module_id and self.preview_module_id.startswith("mod_"):
                 try:
@@ -1469,10 +1392,14 @@ class EmbedBuilderView(discord.ui.View):
                     self.preview_module_id = None
                     await self.update_view(interaction)
             else:
-                if len(self.draft.buttons) >= 5:
-                    await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
-                    return
-                await interaction.response.send_modal(AddButtonModal(self))
+                if not self.draft.modules:
+                    await interaction.response.send_modal(AddModuleModal(self))
+                else:
+                    await interaction.response.send_message(
+                        "Select a module to edit or delete:",
+                        view=ModuleManagementPicker(self),
+                        ephemeral=True,
+                    )
         elif slide_key == "dispatch":
             await self._send_test_dm(interaction)
 
@@ -1480,7 +1407,7 @@ class EmbedBuilderView(discord.ui.View):
     async def btn_action_3(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 
-        if slide_key in ["content", "fields"]:
+        if slide_key == "content":
             self.draft = ContainerDraft()
             await self.update_view(interaction)
         elif slide_key == "visuals":
@@ -1488,29 +1415,33 @@ class EmbedBuilderView(discord.ui.View):
             self.draft.image_url = None
             self.draft.footer_text = None
             await self.update_view(interaction)
+        elif slide_key == "fields":
+            self.draft.fields.clear()
+            await self.update_view(interaction)
         elif slide_key == "interactive":
-            if self.preview_module_id and self.preview_module_id.startswith("mod_"):
-                if len(self.draft.modules) >= 25:
-                    await interaction.response.send_message("Maximum 25 dropdown modules allowed.", ephemeral=True)
-                    return
-                await interaction.response.send_modal(AddModuleModal(self))
-            else:
-                self.draft.modules.clear()
-                self.draft.buttons.clear()
-                self.preview_module_id = None
-                await self.update_view(interaction)
+            if len(self.draft.buttons) >= 5:
+                await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
+                return
+            await interaction.response.send_modal(AddButtonModal(self))
         elif slide_key == "dispatch":
             await interaction.response.send_modal(RawImportModal(self))
 
     @discord.ui.button(label="Send Embed", style=discord.ButtonStyle.secondary, custom_id="btn_send", row=1)
     async def btn_send(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
-        if slide_key == "dispatch":
-            self.draft = ContainerDraft()
-            await self.update_view(interaction)
+        if slide_key == "interactive":
+            if not self.draft.buttons:
+                await interaction.response.send_modal(AddButtonModal(self))
+            else:
+                await interaction.response.send_message(
+                    "Select a button to edit or delete:",
+                    view=ButtonManagementPicker(self),
+                    ephemeral=True,
+                )
+        elif slide_key == "dispatch":
+            await interaction.response.send_modal(SaveModal(self))
         else:
             await self._open_send_picker(interaction)
-
 
     async def _send_test_dm(self, interaction: discord.Interaction) -> None:
         """Dispatch a live test copy of the embed container directly to user DM."""
@@ -1569,10 +1500,16 @@ class EmbedBuilderView(discord.ui.View):
                 )
                 try:
                     target_msg = await send_container_response(target_ch, container)
-                    if hasattr(target_msg, "id") and target_msg:
+                    msg_id = None
+                    if isinstance(target_msg, dict) and "id" in target_msg:
+                        msg_id = int(target_msg["id"])
+                    elif hasattr(target_msg, "id"):
+                        msg_id = int(target_msg.id)
+
+                    if msg_id:
                         await self.parent_view.bot.embed_mgr.record_interactive_card(
                             guild_id=inter.guild_id or 0,
-                            message_id=target_msg.id,
+                            message_id=msg_id,
                             template_name=self.parent_view.template_name,
                             payload=self.parent_view.draft.to_dict(),
                         )
@@ -1634,7 +1571,7 @@ class EmbedBuilder(commands.Cog):
                 EmbedBuilderView.active_views[msg_id] = view
             return
 
-        # Case 1: Inside active EmbedBuilderView session
+        # Case 1: Inside active EmbedBuilderView session (Live Preview Dropdown clicked)
         if message.id in EmbedBuilderView.active_views:
             active_view = EmbedBuilderView.active_views[message.id]
             if interaction.user.id != active_view.author.id:
@@ -1658,25 +1595,7 @@ class EmbedBuilder(commands.Cog):
                 default_avatar=avatar_url,
             )
 
-            payload = new_container.to_payload()
-            try:
-                if not interaction.response.is_done():
-                    await self.bot.http.request(
-                        discord.http.Route(
-                            "POST",
-                            f"/interactions/{interaction.id}/{interaction.token}/callback",
-                        ),
-                        json={"type": 7, "data": payload},  # 7 = UPDATE_MESSAGE
-                    )
-                else:
-                    await self.bot.http.request(
-                        discord.http.Route("PATCH", f"/channels/{interaction.channel_id}/messages/{message.id}"),
-                        json=payload,
-                    )
-            except Exception as e:
-                logger.error(f"Failed to switch interactive module page: {e}", exc_info=e)
-                if not interaction.response.is_done():
-                    await interaction.response.defer()
+            await edit_container_response(interaction, new_container)
         else:
             if not interaction.response.is_done():
                 await interaction.response.defer()
@@ -1841,17 +1760,16 @@ class EmbedBuilder(commands.Cog):
             default_avatar=avatar_url,
         )
         msg_data = await send_container_response(ctx, container)
-        if hasattr(msg_data, "id") and msg_data:
+        msg_id = None
+        if isinstance(msg_data, dict) and "id" in msg_data:
+            msg_id = int(msg_data["id"])
+        elif hasattr(msg_data, "id"):
+            msg_id = int(msg_data.id)
+
+        if msg_id:
             await self.bot.embed_mgr.record_interactive_card(
                 guild_id=ctx.guild.id,
-                message_id=msg_data.id,
-                template_name=clean_name,
-                payload=draft.to_dict(),
-            )
-        elif isinstance(msg_data, dict) and "id" in msg_data:
-            await self.bot.embed_mgr.record_interactive_card(
-                guild_id=ctx.guild.id,
-                message_id=int(msg_data["id"]),
+                message_id=msg_id,
                 template_name=clean_name,
                 payload=draft.to_dict(),
             )
@@ -1905,10 +1823,10 @@ class EmbedBuilder(commands.Cog):
         try:
             target_msg = await send_container_response(target_channel, container)
             msg_id = None
-            if hasattr(target_msg, "id"):
-                msg_id = target_msg.id
-            elif isinstance(target_msg, dict) and "id" in target_msg:
+            if isinstance(target_msg, dict) and "id" in target_msg:
                 msg_id = int(target_msg["id"])
+            elif hasattr(target_msg, "id"):
+                msg_id = int(target_msg.id)
 
             if msg_id:
                 await self.bot.embed_mgr.record_interactive_card(

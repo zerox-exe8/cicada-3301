@@ -350,9 +350,23 @@ async def edit_container_response(
     app_id = getattr(bot, "application_id", None) or (bot.user.id if bot and bot.user else None)
     payload = build_container_payload(container, view=view)
 
+    # 1. Try interaction response callback (type 7 UPDATE_MESSAGE) if not done
     try:
-        if interaction.response.is_done():
+        if not interaction.response.is_done():
             await bot.http.request(
+                discord.http.Route(
+                    "POST",
+                    f"/interactions/{interaction.id}/{interaction.token}/callback",
+                ),
+                json={"type": 7, "data": payload},  # 7 = UPDATE_MESSAGE
+            )
+            if view and hasattr(bot, "_connection"):
+                msg_id = interaction.message.id if interaction.message else None
+                bot._connection.store_view(view, msg_id)
+            return
+        else:
+            # 2. If interaction is already done/deferred, edit original webhook message
+            msg_data = await bot.http.request(
                 discord.http.Route(
                     "PATCH",
                     f"/webhooks/{app_id}/{interaction.token}/messages/@original",
@@ -361,17 +375,16 @@ async def edit_container_response(
             )
             if view and hasattr(bot, "_connection"):
                 msg_id = None
-                if msg_data and isinstance(msg_data, dict) and "id" in msg_data:
+                if isinstance(msg_data, dict) and "id" in msg_data:
                     msg_id = int(msg_data["id"])
                 elif interaction.message:
                     msg_id = interaction.message.id
                 bot._connection.store_view(view, msg_id)
             return
     except Exception as e:
-        import logging
-        logging.getLogger("Cicada.Containers").warning(f"Interaction callback edit failed ({e}). Attempting channel PATCH fallback.")
+        logger.warning(f"Interaction callback edit failed ({e}). Attempting channel PATCH fallback.")
 
-    # 2. Fallback to direct channel message edit if interaction expired
+    # 3. Fallback to direct channel message edit if interaction expired
     try:
         if interaction.message and interaction.channel_id:
             await bot.http.request(
@@ -384,7 +397,6 @@ async def edit_container_response(
             if view and hasattr(bot, "_connection"):
                 bot._connection.store_view(view, interaction.message.id)
     except Exception as e2:
-        import logging
-        logging.getLogger("Cicada.Containers").error(f"Fallback channel message edit also failed: {e2}")
+        logger.error(f"Fallback channel message edit also failed: {e2}")
 
 

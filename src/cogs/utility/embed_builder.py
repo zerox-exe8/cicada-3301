@@ -147,6 +147,7 @@ def convert_html_to_markdown(text: str) -> str:
     if not text:
         return ""
     t = text
+    t = re.sub(r"<blockquote>(.*?)</blockquote>", r"> \1\n", t, flags=re.IGNORECASE | re.DOTALL)
     t = re.sub(r"<(?:b|strong)>(.*?)</(?:b|strong)>", r"**\1**", t, flags=re.IGNORECASE | re.DOTALL)
     t = re.sub(r"<(?:i|em)>(.*?)</(?:i|em)>", r"*\1*", t, flags=re.IGNORECASE | re.DOTALL)
     t = re.sub(r"<u>(.*?)</u>", r"__\1__", t, flags=re.IGNORECASE | re.DOTALL)
@@ -156,6 +157,21 @@ def convert_html_to_markdown(text: str) -> str:
     t = re.sub(r"<br\s*/?>", "\n", t, flags=re.IGNORECASE)
     t = re.sub(r"<p>(.*?)</p>", r"\1\n", t, flags=re.IGNORECASE | re.DOTALL)
     return t
+
+
+def clean_description_markdown(text: str) -> str:
+    """Ensure Discord blockquote (>) and markdown syntax renders properly."""
+    if not text:
+        return ""
+    lines = text.split("\n")
+    fixed_lines = []
+    for line in lines:
+        # If user wrote '>text' without space, convert to '> text' so Discord recognizes blockquote
+        if re.match(r"^>([^\s>].*)$", line):
+            fixed_lines.append(f"> {line[1:]}")
+        else:
+            fixed_lines.append(line)
+    return "\n".join(fixed_lines)
 
 
 def parse_markdown_link(text: str | None) -> tuple[str | None, str | None]:
@@ -236,8 +252,11 @@ class ContainerDraft:
             # ─── ACTIVE MODULE SUB-PAGE VIEW (Clean Standalone) ───────────────
             page_title = active_mod.get("page_title") or active_mod.get("label") or "Page"
             page_title_parsed = parse(page_title)
-            formatted_title = page_title_parsed if page_title_parsed.startswith("#") else f"## {page_title_parsed}"
-            page_content_parsed = parse(active_mod.get("content", ""))
+            if page_title_parsed.startswith("#") or page_title_parsed.startswith("**"):
+                formatted_title = page_title_parsed
+            else:
+                formatted_title = f"**{page_title_parsed}**"
+            page_content_parsed = clean_description_markdown(parse(active_mod.get("content", "")))
 
             # Thumbnail for module if set, else fallback to global thumbnail
             mod_thumb = active_mod.get("thumbnail_url") or self.thumbnail_url or self.author_icon_url
@@ -270,7 +289,7 @@ class ContainerDraft:
             title_text, title_url_extracted = parse_markdown_link(title_raw)
             final_title_url = self.title_url or title_url_extracted
 
-            desc_text = parse(self.description)
+            desc_text = clean_description_markdown(parse(self.description))
 
             thumb_url = parse(self.thumbnail_url or self.author_icon_url)
             accessory_dict = None
@@ -443,7 +462,7 @@ class ContainerDraft:
         if active_mod:
             page_title = active_mod.get("page_title") or active_mod.get("label") or "Page"
             embed.title = parse(page_title)
-            embed.description = parse(active_mod.get("content", ""))
+            embed.description = clean_description_markdown(parse(active_mod.get("content", "")))
         else:
             author_raw = parse(self.author_name)
             author_text, author_url_extracted = parse_markdown_link(author_raw)
@@ -464,7 +483,7 @@ class ContainerDraft:
                 if final_title_url and final_title_url.startswith("http"):
                     embed.url = final_title_url
 
-            embed.description = parse(self.description)
+            embed.description = clean_description_markdown(parse(self.description))
 
             if self.fields:
                 for f in self.fields:

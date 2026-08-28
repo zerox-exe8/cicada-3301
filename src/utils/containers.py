@@ -258,8 +258,8 @@ async def send_container_response(
             bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
             http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
 
-        # 1. Guild text channels: Try Webhook dispatch for true native Components V2 Container support
-        if isinstance(obj, discord.TextChannel):
+        # 1. Guild text channels: Try Webhook dispatch for true native Components V2 Container support (when no interactive View is attached)
+        if isinstance(obj, discord.TextChannel) and view is None:
             guild = obj.guild
             bot_user = getattr(bot_instance, "user", None) or (guild.me if guild else None)
             wh = None

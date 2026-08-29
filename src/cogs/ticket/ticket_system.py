@@ -666,7 +666,7 @@ class TicketSystem(commands.Cog):
             ticket_channel = await interaction.guild.create_text_channel(
                 name=channel_name,
                 category=category,
-                overrides=overrides,
+                overwrites=overrides,
                 topic=f"Ticket #{ticket_str} | Creator: {interaction.user} (ID: {interaction.user.id})",
                 reason=f"Ticket created by {interaction.user}",
             )
@@ -675,7 +675,7 @@ class TicketSystem(commands.Cog):
             try:
                 ticket_channel = await interaction.guild.create_text_channel(
                     name=channel_name,
-                    overrides=overrides,
+                    overwrites=overrides,
                     topic=f"Ticket #{ticket_str} | Creator: {interaction.user} (ID: {interaction.user.id})",
                     reason=f"Ticket created by {interaction.user}",
                 )
@@ -778,21 +778,22 @@ class TicketSystem(commands.Cog):
         # Send transcript to ticket owner DM
         user_id = ticket_data.get("user_id")
         if user_id:
-            user = guild.get_member(user_id) or await self.bot.fetch_user(user_id)
-            if user:
-                try:
+            try:
+                user = guild.get_member(user_id) or await self.bot.fetch_user(user_id)
+                if user:
+                    t_num_int = int(ticket_num) if str(ticket_num).isdigit() else 1
                     dm_container = CicadaContainer(accent_color=15548997)  # Red
                     dm_container.add_section(
                         content=(
-                            f"**Ticket #{ticket_num:04d} Closed**\n"
+                            f"**Ticket #{t_num_int:04d} Closed**\n"
                             f"> Server: **{guild.name}**\n"
                             f"> Closed By: **{closer.display_name}**\n"
                             f"> Reason: `{reason}`"
                         )
                     )
-                    await user.send(file=transcript_file)
-                except Exception:
-                    pass
+                    await user.send(embed=dm_container.to_embed(), file=transcript_file)
+            except Exception as dm_e:
+                logger.debug(f"Could not DM user close transcript: {dm_e}")
 
         # Send transcript to log channel if configured
         log_channel_id = panel.get("log_channel_id") if panel else None
@@ -802,18 +803,18 @@ class TicketSystem(commands.Cog):
                 try:
                     # Re-generate transcript stream for log channel
                     t_file_2 = await generate_html_transcript(channel, ticket_data, bot=self.bot)
+                    t_num_int = int(ticket_num) if str(ticket_num).isdigit() else 1
                     log_c = CicadaContainer(accent_color=15548997)  # Red
                     log_c.add_section(
                         content=(
-                            f"**Ticket Closed • #{ticket_num:04d}**\n"
+                            f"**Ticket Closed • #{t_num_int:04d}**\n"
                             f"> Channel: `#{channel.name}`\n"
                             f"> Creator: <@{user_id}> (`{user_id}`)\n"
                             f"> Closed By: {closer.mention} (`{closer.id}`)\n"
                             f"> Reason: `{reason}`"
                         )
                     )
-                    await log_ch.send(file=t_file_2)
-                    await send_container_response(log_ch, log_c)
+                    await log_ch.send(embed=log_c.to_embed(), file=t_file_2)
                 except Exception as log_err:
                     logger.warning(f"Could not send close log: {log_err}")
 

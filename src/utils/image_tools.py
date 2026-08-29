@@ -30,31 +30,20 @@ def create_slim_banner(
     image_bytes: bytes,
     target_width: int = 1000,
     target_height: int = 280,
-    mode: str = "cover",
+    mode: str = "compress",
 ) -> io.BytesIO:
     """
-    Transform image into a full-bleed widescreen Discord header banner (1000x280px).
-    - 'cover' (default): Stretches image to 100% full width with 0 empty margins on left/right.
-    - 'contain': Fits the image centered inside a transparent canvas.
+    Transform image into a slim Discord-ready header banner (1000x280px).
+    - 'compress' (default): Compresses / scales 100% of the original image into the banner dimensions with ZERO crop/cut.
+    - 'cover': Crops sides/top to fill without aspect distortion.
+    - 'contain': Fits centered inside a transparent canvas.
     """
     if not HAS_PIL:
         return io.BytesIO(image_bytes)
 
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
 
-    if mode == "contain":
-        canvas = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
-        img.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
-        offset_x = (target_width - img.width) // 2
-        offset_y = (target_height - img.height) // 2
-        canvas.paste(img, (offset_x, offset_y), img)
-
-        output = io.BytesIO()
-        canvas.save(output, format="PNG", optimize=True)
-        output.seek(0)
-        return output
-    else:
-        # Full-width edge-to-edge cover mode (fills the entire 1000px width with 0 side padding)
+    if mode == "cover":
         ratio = target_width / target_height
         img_ratio = img.width / img.height
         if img_ratio > ratio:
@@ -67,7 +56,18 @@ def create_slim_banner(
             img = img.crop((0, top, img.width, top + new_h))
 
         img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-        output = io.BytesIO()
-        img.save(output, format="PNG", optimize=True)
-        output.seek(0)
-        return output
+    elif mode == "contain":
+        canvas = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
+        img.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
+        offset_x = (target_width - img.width) // 2
+        offset_y = (target_height - img.height) // 2
+        canvas.paste(img, (offset_x, offset_y), img)
+        img = canvas
+    else:
+        # Default 'compress': Directly compress and scale entire image into 1000x280 (zero crop, zero cuts)
+        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+    output = io.BytesIO()
+    img.save(output, format="PNG", optimize=True)
+    output.seek(0)
+    return output

@@ -583,11 +583,17 @@ class TicketSystem(commands.Cog):
         existing = await self.bot.ticket_mgr.get_active_ticket_for_user(interaction.guild.id, interaction.user.id, panel_id=panel_id)
         if existing:
             ch_id = existing.get("channel_id")
-            await interaction.response.send_message(
-                f"You already have an open ticket in <#{ch_id}>.",
-                ephemeral=True,
-            )
-            return
+            ch_obj = interaction.guild.get_channel(ch_id) if ch_id else None
+            if ch_obj:
+                await interaction.response.send_message(
+                    f"You already have an open ticket in {ch_obj.mention}.",
+                    ephemeral=True,
+                )
+                return
+            else:
+                # Ghost ticket (channel was deleted from Discord), auto-close in database
+                if ch_id:
+                    await self.bot.ticket_mgr.close_ticket(ch_id, self.bot.user.id if self.bot.user else 0)
 
         await interaction.response.defer(ephemeral=True)
 

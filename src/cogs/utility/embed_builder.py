@@ -2025,7 +2025,7 @@ class EmbedBuilder(commands.Cog):
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Saved Server Embeds**\n"
+                "**Saved Embed Templates**\n"
                 f"> Listing `{len(templates)}` saved embed template(s) in this server."
             )
         )
@@ -2042,48 +2042,52 @@ class EmbedBuilder(commands.Cog):
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
-    @embed_group.command(
-        name="raw",
-        aliases=["json"],
-        description="Send a raw Components V2 JSON container. Usage: ?embed raw <json>",
-    )
-    @commands.has_permissions(manage_messages=True)
-    async def embed_raw(self, ctx: CustomContext, *, json_payload: str) -> None:
-        """Send raw JSON container."""
-        try:
-            draft = ContainerDraft.from_raw_payload(json_payload)
-            avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
-            container = draft.to_container(
-                user=ctx.author,
-                guild=ctx.guild,
-                channel=ctx.channel,
-                bot=self.bot,
-                default_avatar=avatar_url,
-            )
-            await send_container_response(ctx, container)
-        except Exception as e:
-            await ctx.send(f"Invalid payload: {e}")
-
     @commands.hybrid_command(
         name="banner",
         aliases=["resizebanner", "fitbanner", "slimbanner"],
         description="Convert any tall image into a slim, compact Discord header banner.",
     )
+    @discord.app_commands.describe(
+        image="Attach an image file directly (Upload file)",
+        image_url="Or provide a direct image URL (Optional)",
+    )
     async def banner_cmd(
         self,
         ctx: CustomContext,
+        image: discord.Attachment | None = None,
+        *,
         image_url: str | None = None,
-        mode: str = "contain",
     ) -> None:
         """Resize or fit any image into a slim, compact Discord header banner."""
-        target_url = image_url
-        if ctx.message.attachments:
+        target_url = None
+        if image:
+            target_url = image.url
+        elif ctx.message and ctx.message.attachments:
             target_url = ctx.message.attachments[0].url
+        elif image_url:
+            target_url = image_url.strip()
 
         if not target_url:
-            await ctx.send("Please provide an image URL or attach an image with this command (e.g. `?banner https://...` or upload an image).")
+            await ctx.send("Please provide an image: attach a file directly or provide a URL (e.g. `?banner https://...`).")
             return
 
+        await self._process_banner(ctx, target_url)
+
+    @banner_cmd.error
+    async def banner_cmd_error(self, ctx: CustomContext, error: commands.CommandError) -> None:
+        """Handle prefix URL argument recovery if typed without slash attachment."""
+        if isinstance(error, (commands.BadArgument, commands.BadUnionArgument)):
+            args = ctx.message.content.split()[1:] if ctx.message else []
+            if args:
+                potential_url = args[0].strip()
+                if potential_url.startswith("http://") or potential_url.startswith("https://"):
+                    await self._process_banner(ctx, potential_url)
+                    return
+        logger.warning(f"Error in banner command: {error}")
+        await ctx.send(f"Could not process banner: `{error}`")
+
+    async def _process_banner(self, ctx: CustomContext, target_url: str) -> None:
+        """Download, transform to 1000x260 widescreen banner, and respond with download link."""
         session = getattr(self.bot, "session", None)
         if not session:
             import aiohttp
@@ -2091,26 +2095,26 @@ class EmbedBuilder(commands.Cog):
 
         image_bytes = await download_image_bytes(target_url, session)
         if not image_bytes:
-            await ctx.send("Could not download image from the provided link. Please ensure it is a valid image URL.")
+            await ctx.send("Could not download image from the provided link/attachment. Please ensure it is a valid image.")
             return
 
-        clean_mode = "cover" if mode.lower() in ["cover", "crop"] else "contain"
-        banner_stream = create_slim_banner(image_bytes, target_width=1000, target_height=260, mode=clean_mode)
+        banner_stream = create_slim_banner(image_bytes, target_width=1000, target_height=260, mode="contain")
         file = discord.File(banner_stream, filename="slim_banner.png")
 
+        arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Slim Header Banner Generated**\n"
-                "> Transformed image into a compact widescreen banner (approx 4:1 ratio).\n"
-                "> Right-click / hold the image below ➔ **Copy Link** and paste into your Embed Builder!"
+                f"> Transformed image into a compact widescreen banner (1000x260px).\n"
+                f"> Right-click / hold the image below {arrow} **Copy Link** and paste into your Embed Builder!"
             )
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Generated for {ctx.author.display_name}")
 
         msg = await ctx.send(file=file)
-        if msg.attachments:
+        if msg and msg.attachments:
             cdn_url = msg.attachments[0].url
             container.add_text(f"**Image Link:** `{cdn_url}`")
         await send_container_response(ctx, container)

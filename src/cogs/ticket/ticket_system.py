@@ -341,6 +341,7 @@ class TicketSetupWizard(discord.ui.View):
         """Render the single sleek Components V2 Ticket Dashboard Container."""
         container = CicadaContainer(accent_color=None)
         slide_key, slide_title, slide_desc = self.SLIDES[self.current_slide_idx]
+        arrow = self.bot.custom_emojis.get("icons_rightarrow", self.bot.custom_emojis.get("icons_arrow", "›"))
 
         container.add_section(
             content=(
@@ -351,19 +352,19 @@ class TicketSetupWizard(discord.ui.View):
         )
         container.add_separator(divider=True)
 
-        e_disp = f"`{self.selected_embed}`" if self.selected_embed else "*None Selected*"
-        r_disp = f"<@&{self.selected_role_id}>" if self.selected_role_id else "*Administrators (Default)*"
-        c_disp = f"<#{self.selected_category_id}>" if self.selected_category_id else "*Auto-Create 'Tickets' Category*"
-        l_disp = f"<#{self.selected_log_channel_id}>" if self.selected_log_channel_id else "*None (Direct DM)*"
-        t_disp = f"<#{self.selected_target_channel_id}>" if self.selected_target_channel_id else "*Not Selected*"
+        e_disp = f"`{self.selected_embed}`" if self.selected_embed and self.selected_embed != "__default__" else "`Default Template`"
+        r_disp = f"<@&{self.selected_role_id}>" if self.selected_role_id else "`Administrators (Default)`"
+        c_disp = f"<#{self.selected_category_id}>" if self.selected_category_id else "`Auto-Create 'Tickets'`"
+        l_disp = f"<#{self.selected_log_channel_id}>" if self.selected_log_channel_id else "`None (Direct DM)`"
+        t_disp = f"<#{self.selected_target_channel_id}>" if self.selected_target_channel_id else "`Not Selected`"
 
         container.add_text(
-            f"• **Selected Embed:** {e_disp}\n"
-            f"• **Support Role:** {r_disp}\n"
-            f"• **Target Category:** {c_disp}\n"
-            f"• **Log Channel:** {l_disp}\n"
-            f"• **Naming Format:** `{self.naming_format}`\n"
-            f"• **Deploy Target:** {t_disp}"
+            f"{arrow} **Selected Embed:** {e_disp}\n"
+            f"{arrow} **Support Role:** {r_disp}\n"
+            f"{arrow} **Target Category:** {c_disp}\n"
+            f"{arrow} **Log Channel:** {l_disp}\n"
+            f"{arrow} **Naming Format:** `{self.naming_format}`\n"
+            f"{arrow} **Deploy Target:** {t_disp}"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Step {self.current_slide_idx + 1}/4 • Setup Session for {self.author.display_name}")
@@ -512,14 +513,15 @@ class TicketSetupWizard(discord.ui.View):
             )
 
         # Success confirmation on dashboard
+        arrow = self.bot.custom_emojis.get("icons_rightarrow", self.bot.custom_emojis.get("icons_arrow", "›"))
         conf_container = CicadaContainer(accent_color=5763719)  # Green
         conf_container.add_section(
             content=(
                 "**Ticket Panel Deployed Successfully**\n"
                 f"> Panel **{panel_name}** is now live in {target_channel.mention}.\n\n"
-                f"• **Category:** {f'<#{self.selected_category_id}>' if self.selected_category_id else 'Auto-Create'}\n"
-                f"• **Support Role:** {f'<@&{self.selected_role_id}>' if self.selected_role_id else 'Administrators'}\n"
-                f"• **Logs Channel:** {f'<#{self.selected_log_channel_id}>' if self.selected_log_channel_id else 'None'}"
+                f"{arrow} **Category:** {f'<#{self.selected_category_id}>' if self.selected_category_id else '`Auto-Create`'}\n"
+                f"{arrow} **Support Role:** {f'<@&{self.selected_role_id}>' if self.selected_role_id else '`Administrators`'}\n"
+                f"{arrow} **Logs Channel:** {f'<#{self.selected_log_channel_id}>' if self.selected_log_channel_id else '`None`'}"
             )
         )
         conf_container.add_separator(divider=True)
@@ -663,6 +665,7 @@ class TicketSystem(commands.Cog):
         )
 
         # Send welcome card in ticket channel
+        arrow = self.bot.custom_emojis.get("icons_rightarrow", self.bot.custom_emojis.get("icons_arrow", "›"))
         welcome_container = CicadaContainer(accent_color=5793266)  # Blurple
         welcome_container.add_section(
             content=(
@@ -673,9 +676,9 @@ class TicketSystem(commands.Cog):
         )
         welcome_container.add_separator(divider=True)
         welcome_container.add_text(
-            f"• **Ticket ID:** `#{ticket_str}`\n"
-            f"• **Panel:** `{panel.get('panel_name', 'Support')}`\n"
-            f"• **Status:** `Open` • **Claimed:** *Unclaimed*"
+            f"{arrow} **Ticket ID:** `#{ticket_str}`\n"
+            f"{arrow} **Panel:** `{panel.get('panel_name', 'Support')}`\n"
+            f"{arrow} **Status:** `Open` • **Claimed:** *Unclaimed*"
         )
         welcome_container.add_separator(divider=True)
         welcome_container.add_text("-# Use the buttons below to manage this ticket.")

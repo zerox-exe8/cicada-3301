@@ -61,7 +61,18 @@ def create_slim_banner(
 
     crisp_art = img.resize((new_w, new_h), Image.Resampling.LANCZOS).convert("RGBA")
 
-    # 3. Paste the crisp artwork in the center
+    # 3. Apply soft horizontal feathering to melt center card smoothly into background
+    feather_w = min(40, new_w // 8)
+    if feather_w > 5:
+        mask = Image.new("L", (new_w, new_h), 255)
+        m_draw = ImageDraw.Draw(mask)
+        for x in range(feather_w):
+            alpha = int(255 * (x / feather_w))
+            m_draw.line([(x, 0), (x, new_h)], fill=alpha)
+            m_draw.line([(new_w - 1 - x, 0), (new_w - 1 - x, new_h)], fill=alpha)
+        crisp_art.putalpha(mask)
+
+    # 4. Paste the crisp artwork in the center
     offset_x = (target_width - new_w) // 2
     offset_y = (target_height - new_h) // 2
 

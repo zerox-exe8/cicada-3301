@@ -217,6 +217,7 @@ class ContainerDraft:
 
         self.fields: list[dict[str, str]] = []  # [{"name": "...", "value": "..."}]
 
+        self.top_image_url: str | None = None
         self.thumbnail_url: str | None = None
         self.image_url: str | None = None
 
@@ -297,6 +298,15 @@ class ContainerDraft:
 
         else:
             # ─── BASE OVERVIEW VIEW ──────────────────────────────────────────
+            # 0. Top Header Banner Image (If set, placed at the VERY TOP of the card)
+            top_banner_url = parse(self.top_image_url)
+            if top_banner_url and top_banner_url.startswith("http"):
+                container.components.append({
+                    "type": 12,
+                    "items": [{"media": {"url": top_banner_url}}],
+                })
+                container.add_separator(divider=True)
+
             author_raw = parse(self.author_name)
             author_text, author_url_extracted = parse_markdown_link(author_raw)
             final_author_url = self.author_url or author_url_extracted
@@ -539,6 +549,7 @@ class ContainerDraft:
             "title_url": self.title_url,
             "description": self.description,
             "fields": self.fields,
+            "top_image_url": self.top_image_url,
             "thumbnail_url": self.thumbnail_url,
             "image_url": self.image_url,
             "footer_text": self.footer_text,
@@ -560,8 +571,9 @@ class ContainerDraft:
         draft.title_url = data.get("title_url")
         draft.description = data.get("description")
         draft.fields = data.get("fields", [])
+        draft.top_image_url = data.get("top_image_url") or data.get("top_banner_url")
         draft.thumbnail_url = data.get("thumbnail_url")
-        draft.image_url = data.get("image_url")
+        draft.image_url = data.get("image_url") or data.get("banner_url") or data.get("bottom_image_url")
         draft.footer_text = data.get("footer_text")
         draft.footer_icon_url = data.get("footer_icon_url")
         draft.divider_line = data.get("divider_line", True)
@@ -594,6 +606,8 @@ class ContainerDraft:
                         draft.thumbnail_url = emb["thumbnail"].get("url")
                     if "image" in emb:
                         draft.image_url = emb["image"].get("url")
+                    if "top_image" in emb:
+                        draft.top_image_url = emb["top_image"].get("url")
                     if "footer" in emb:
                         draft.footer_text = emb["footer"].get("text")
                         draft.footer_icon_url = emb["footer"].get("icon_url")
@@ -684,16 +698,22 @@ class VisualsModal(discord.ui.Modal, title="Step 2: Images & Footer"):
         super().__init__()
         self.view_ref = view
 
-        self.thumb_input = discord.ui.TextInput(
-            label="Thumbnail URL",
-            placeholder="https://example.com/thumb.png or empty to remove",
-            default=self.view_ref.draft.thumbnail_url or "",
+        self.top_banner_input = discord.ui.TextInput(
+            label="Top Banner URL (Header Image)",
+            placeholder="https://example.com/header.png or {server.banner_url}",
+            default=self.view_ref.draft.top_image_url or "",
             required=False,
         )
-        self.banner_input = discord.ui.TextInput(
-            label="Banner Image URL",
+        self.bottom_banner_input = discord.ui.TextInput(
+            label="Bottom Banner URL (Image)",
             placeholder="https://example.com/banner.png or empty to remove",
             default=self.view_ref.draft.image_url or "",
+            required=False,
+        )
+        self.thumb_input = discord.ui.TextInput(
+            label="Thumbnail URL (Top-Right Icon)",
+            placeholder="https://example.com/thumb.png or {user.avatar_url}",
+            default=self.view_ref.draft.thumbnail_url or "",
             required=False,
         )
         self.footer_input = discord.ui.TextInput(
@@ -709,32 +729,25 @@ class VisualsModal(discord.ui.Modal, title="Step 2: Images & Footer"):
             default=self.view_ref.draft.footer_icon_url or "",
             required=False,
         )
-        self.timestamp_input = discord.ui.TextInput(
-            label="Timestamp (on / off)",
-            placeholder="on or off",
-            default="on" if self.view_ref.draft.timestamp else "off",
-            max_length=10,
-            required=False,
-        )
 
+        self.add_item(self.top_banner_input)
+        self.add_item(self.bottom_banner_input)
         self.add_item(self.thumb_input)
-        self.add_item(self.banner_input)
         self.add_item(self.footer_input)
         self.add_item(self.footer_icon_input)
-        self.add_item(self.timestamp_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        top_bn = str(self.top_banner_input.value).strip()
+        btm_bn = str(self.bottom_banner_input.value).strip()
         th = str(self.thumb_input.value).strip()
-        bn = str(self.banner_input.value).strip()
         ft = str(self.footer_input.value).strip()
         fi = str(self.footer_icon_input.value).strip()
-        ts = str(self.timestamp_input.value).strip().lower()
 
+        self.view_ref.draft.top_image_url = top_bn if top_bn.startswith("http") or "{" in top_bn else None
+        self.view_ref.draft.image_url = btm_bn if btm_bn.startswith("http") or "{" in btm_bn else None
         self.view_ref.draft.thumbnail_url = th if th.startswith("http") or "{" in th else None
-        self.view_ref.draft.image_url = bn if bn.startswith("http") or "{" in bn else None
         self.view_ref.draft.footer_text = ft if ft else None
         self.view_ref.draft.footer_icon_url = fi if fi.startswith("http") or "{" in fi else None
-        self.view_ref.draft.timestamp = (ts in ["on", "true", "yes", "1", "enable", "enabled"])
 
         await self.view_ref.update_view(interaction)
 
@@ -1250,14 +1263,14 @@ class EmbedBuilderView(discord.ui.View):
                 f"**Description:** {d_disp} • **Color:** {c_disp}"
             )
         elif slide_key == "visuals":
+            top_img_disp = "Set" if self.draft.top_image_url else "None"
+            btm_img_disp = "Set" if self.draft.image_url else "None"
             th_disp = "Set" if self.draft.thumbnail_url else "None"
-            img_disp = "Set" if self.draft.image_url else "None"
             ft_disp = "Set" if self.draft.footer_text else "None"
             div_disp = "Enabled" if self.draft.divider_line else "Disabled"
-            ts_disp = "Enabled" if self.draft.timestamp else "Disabled"
             bottom_container.add_text(
-                f"**Thumbnail:** `{th_disp}` • **Banner:** `{img_disp}`\n"
-                f"**Footer:** `{ft_disp}` • **Divider:** `{div_disp}` • **Timestamp:** `{ts_disp}`"
+                f"**Top Banner:** `{top_img_disp}` • **Bottom Banner:** `{btm_img_disp}`\n"
+                f"**Thumbnail:** `{th_disp}` • **Footer:** `{ft_disp}` • **Divider:** `{div_disp}`"
             )
         elif slide_key == "fields":
             count = len(self.draft.fields)

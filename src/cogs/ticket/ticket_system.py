@@ -212,9 +212,19 @@ class TicketSetupWizard(discord.ui.View):
             select.callback = self._on_embed_selected
             self.add_item(select)
 
-            # Continue button
+            # Back button (disabled on Slide 1 for consistent layout)
+            btn_back_disabled = discord.ui.Button(
+                label="Back",
+                style=discord.ButtonStyle.secondary,
+                custom_id="wiz_btn_back_dis",
+                disabled=True,
+                row=1,
+            )
+            self.add_item(btn_back_disabled)
+
+            # Continue button on right
             btn_continue = discord.ui.Button(
-                label="Continue >",
+                label="Continue",
                 style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_continue",
                 disabled=(self.selected_embed is None),
@@ -226,7 +236,7 @@ class TicketSetupWizard(discord.ui.View):
         elif slide_key == "roles":
             # Slide 2: Role Select & Category Select
             role_select = discord.ui.RoleSelect(
-                placeholder="Select a Support Staff Role...",
+                placeholder="Select a Support Staff Role (Optional)...",
                 custom_id="wiz_select_role",
                 min_values=0,
                 max_values=1,
@@ -236,7 +246,7 @@ class TicketSetupWizard(discord.ui.View):
             self.add_item(role_select)
 
             cat_select = discord.ui.ChannelSelect(
-                placeholder="Select a Category for Ticket Channels...",
+                placeholder="Select a Category for Ticket Channels (Optional)...",
                 channel_types=[discord.ChannelType.category],
                 custom_id="wiz_select_cat",
                 min_values=0,
@@ -247,7 +257,7 @@ class TicketSetupWizard(discord.ui.View):
             self.add_item(cat_select)
 
             btn_back = discord.ui.Button(
-                label="< Back",
+                label="Back",
                 style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_back",
                 row=2,
@@ -256,7 +266,7 @@ class TicketSetupWizard(discord.ui.View):
             self.add_item(btn_back)
 
             btn_continue = discord.ui.Button(
-                label="Continue >",
+                label="Continue",
                 style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_continue",
                 row=2,
@@ -267,7 +277,7 @@ class TicketSetupWizard(discord.ui.View):
         elif slide_key == "logs":
             # Slide 3: Log Channel Select
             log_select = discord.ui.ChannelSelect(
-                placeholder="Select a Log Channel for Transcripts...",
+                placeholder="Select a Log Channel for Transcripts (Optional)...",
                 channel_types=[discord.ChannelType.text],
                 custom_id="wiz_select_log",
                 min_values=0,
@@ -288,7 +298,7 @@ class TicketSetupWizard(discord.ui.View):
             self.add_item(btn_name)
 
             btn_back = discord.ui.Button(
-                label="< Back",
+                label="Back",
                 style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_back",
                 row=2,
@@ -297,7 +307,7 @@ class TicketSetupWizard(discord.ui.View):
             self.add_item(btn_back)
 
             btn_continue = discord.ui.Button(
-                label="Continue >",
+                label="Continue",
                 style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_continue",
                 row=2,
@@ -319,7 +329,7 @@ class TicketSetupWizard(discord.ui.View):
             self.add_item(target_select)
 
             btn_back = discord.ui.Button(
-                label="< Back",
+                label="Back",
                 style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_back",
                 row=1,
@@ -474,19 +484,22 @@ class TicketSetupWizard(discord.ui.View):
         )
         panel_id = temp_row.get("id", 1)
 
-        # Attach interactive persistent button inside panel container
-        btn_action_row = {
+        # Attach interactive persistent button inside panel container (Secondary Default Gray + Custom Ticket Emoji)
+        ticket_emoji = self.bot.custom_emojis.get_select_emoji("ticket_support") or self.bot.custom_emojis.get_select_emoji("icon_ticket")
+        btn_action_row: dict[str, Any] = {
             "type": 1,
             "components": [
                 {
                     "type": 2,
-                    "style": 1,  # Primary Blurple
-                    "label": self.button_label,
+                    "style": 2,  # Secondary (Default Gray)
+                    "label": self.button_label or "Create Ticket",
                     "custom_id": f"ticket_open_{panel_id}",
-                    "emoji": {"name": "📩"},
                 }
             ],
         }
+        if ticket_emoji:
+            btn_action_row["components"][0]["emoji"] = ticket_emoji
+
         panel_container.components.append(btn_action_row)
 
         msg_data = await send_container_response(target_channel, panel_container)
@@ -596,44 +609,51 @@ class TicketSystem(commands.Cog):
                 category = cat_obj
 
         if not category:
-            # Auto-find or create 'Tickets' category
             category = discord.utils.get(interaction.guild.categories, name="Tickets")
             if not category:
                 try:
                     category = await interaction.guild.create_category(
                         name="Tickets",
-                        reason="Cicada 3301 Ticket Engine Category",
+                        reason="Cicada 3301 Support Tickets Category",
                     )
                 except Exception as cat_err:
-                    logger.warning(f"Could not create Tickets category: {cat_err}")
+                    logger.warning(f"Could not auto-create Tickets category (fallback to root): {cat_err}")
+                    category = None
+
+        # Safely resolve bot member
+        bot_member = interaction.guild.me
+        if not bot_member and self.bot.user:
+            bot_member = interaction.guild.get_member(self.bot.user.id)
 
         # Construct permission overrides
         overrides: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
-            interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
+            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False, send_messages=False),
             interaction.user: discord.PermissionOverwrite(
-                read_messages=True,
+                view_channel=True,
                 send_messages=True,
-                attach_files=True,
-                embed_links=True,
-                read_message_history=True,
-            ),
-            interaction.guild.me: discord.PermissionOverwrite(
-                read_messages=True,
-                send_messages=True,
-                manage_channels=True,
-                manage_messages=True,
                 attach_files=True,
                 embed_links=True,
                 read_message_history=True,
             ),
         }
 
+        if bot_member:
+            overrides[bot_member] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_channels=True,
+                manage_messages=True,
+                attach_files=True,
+                embed_links=True,
+                read_message_history=True,
+            )
+
         support_role_id = panel.get("support_role_id")
         if support_role_id:
             s_role = interaction.guild.get_role(support_role_id)
             if s_role:
                 overrides[s_role] = discord.PermissionOverwrite(
-                    read_messages=True,
+                    view_channel=True,
                     send_messages=True,
                     manage_messages=True,
                     attach_files=True,
@@ -641,7 +661,7 @@ class TicketSystem(commands.Cog):
                     read_message_history=True,
                 )
 
-        # Create private ticket text channel
+        # Create private ticket text channel (with root fallback if category fails)
         try:
             ticket_channel = await interaction.guild.create_text_channel(
                 name=channel_name,
@@ -651,9 +671,21 @@ class TicketSystem(commands.Cog):
                 reason=f"Ticket created by {interaction.user}",
             )
         except Exception as create_err:
-            logger.error(f"Failed to create ticket channel: {create_err}", exc_info=create_err)
-            await interaction.followup.send("Failed to create ticket channel. Please ensure the bot has 'Manage Channels' permission.", ephemeral=True)
-            return
+            logger.warning(f"Failed to create channel under category '{category}', attempting root creation fallback: {create_err}")
+            try:
+                ticket_channel = await interaction.guild.create_text_channel(
+                    name=channel_name,
+                    overrides=overrides,
+                    topic=f"Ticket #{ticket_str} | Creator: {interaction.user} (ID: {interaction.user.id})",
+                    reason=f"Ticket created by {interaction.user}",
+                )
+            except Exception as final_err:
+                logger.error(f"Final ticket channel creation failed: {final_err}", exc_info=final_err)
+                await interaction.followup.send(
+                    f"Failed to create ticket channel: `{final_err}`. Please ensure the bot has **Manage Channels** permission in this server.",
+                    ephemeral=True,
+                )
+                return
 
         # Record ticket in database
         await self.bot.ticket_mgr.create_ticket(

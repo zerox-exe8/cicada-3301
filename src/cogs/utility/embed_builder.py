@@ -20,6 +20,7 @@ from src.utils.containers import (
     send_container_response,
     edit_container_response,
 )
+from src.utils.image_tools import create_slim_banner, download_image_bytes
 
 if TYPE_CHECKING:
     from src.core.bot import CicadaBot
@@ -2099,6 +2100,57 @@ class EmbedBuilder(commands.Cog):
             await send_container_response(ctx, container)
         except Exception as e:
             await ctx.send(f"Invalid payload: {e}")
+
+    @commands.hybrid_command(
+        name="banner",
+        aliases=["resizebanner", "fitbanner", "slimbanner"],
+        description="Convert any tall image into a slim, compact Discord header banner.",
+    )
+    async def banner_cmd(
+        self,
+        ctx: CustomContext,
+        image_url: str | None = None,
+        mode: str = "contain",
+    ) -> None:
+        """Resize or fit any image into a slim, compact Discord header banner."""
+        target_url = image_url
+        if ctx.message.attachments:
+            target_url = ctx.message.attachments[0].url
+
+        if not target_url:
+            await ctx.send("Please provide an image URL or attach an image with this command (e.g. `?banner https://...` or upload an image).")
+            return
+
+        session = getattr(self.bot, "session", None)
+        if not session:
+            import aiohttp
+            session = aiohttp.ClientSession()
+
+        image_bytes = await download_image_bytes(target_url, session)
+        if not image_bytes:
+            await ctx.send("Could not download image from the provided link. Please ensure it is a valid image URL.")
+            return
+
+        clean_mode = "cover" if mode.lower() in ["cover", "crop"] else "contain"
+        banner_stream = create_slim_banner(image_bytes, target_width=1000, target_height=260, mode=clean_mode)
+        file = discord.File(banner_stream, filename="slim_banner.png")
+
+        container = CicadaContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Slim Header Banner Generated**\n"
+                "> Transformed image into a compact widescreen banner (approx 4:1 ratio).\n"
+                "> Right-click / hold the image below ➔ **Copy Link** and paste into your Embed Builder!"
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Generated for {ctx.author.display_name}")
+
+        msg = await ctx.send(file=file)
+        if msg.attachments:
+            cdn_url = msg.attachments[0].url
+            container.add_text(f"**Image Link:** `{cdn_url}`")
+        await send_container_response(ctx, container)
 
 
 async def setup(bot: CicadaBot) -> None:

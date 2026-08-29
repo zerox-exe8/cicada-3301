@@ -47,7 +47,19 @@ class Music(commands.Cog):
             return
         self._connected = True
 
-        nodes = [
+        nodes: list[wavelink.Node] = []
+        if Config.LAVALINK_URI:
+            nodes.append(
+                wavelink.Node(
+                    identifier="Private-Dedicated-Node",
+                    uri=Config.LAVALINK_URI,
+                    password=Config.LAVALINK_PASSWORD,
+                    inactive_player_timeout=300,
+                )
+            )
+
+        # Fallback community nodes
+        nodes.extend([
             wavelink.Node(
                 identifier="Serenetia-V4-SSL",
                 uri="https://lavalinkv4.serenetia.com:443",
@@ -66,7 +78,7 @@ class Music(commands.Cog):
                 password="https://discord.gg/mjS5J2K3ep",
                 inactive_player_timeout=300,
             ),
-        ]
+        ])
         try:
             await wavelink.Pool.connect(nodes=nodes, client=self.bot, cache_capacity=100)
             logger.info("Connected to Wavelink Lavalink v4 nodes pool successfully!")

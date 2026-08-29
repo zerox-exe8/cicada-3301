@@ -74,6 +74,10 @@ class Config:
     RAZORPAY_KEY_SECRET: str = os.getenv("RAZORPAY_KEY_SECRET", "").strip()
     RAZORPAY_WEBHOOK_SECRET: str = os.getenv("RAZORPAY_WEBHOOK_SECRET", "").strip()
     
+    # Lavalink / Audio Settings
+    LAVALINK_URI: str = os.getenv("LAVALINK_URI", "").strip()
+    LAVALINK_PASSWORD: str = os.getenv("LAVALINK_PASSWORD", "youshallnotpass").strip()
+
     # Aesthetics
     COLORS: ThemeColors = ThemeColors()
     EMOJIS: ThemeEmojis = ThemeEmojis()

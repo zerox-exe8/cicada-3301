@@ -2059,6 +2059,9 @@ class EmbedBuilder(commands.Cog):
         image_url: str | None = None,
     ) -> None:
         """Resize or fit any image into a slim, compact Discord header banner."""
+        # Defer immediately so Discord knows the bot is processing (prevents 3s timeout)
+        await ctx.defer()
+
         target_url = None
         if image:
             target_url = image.url

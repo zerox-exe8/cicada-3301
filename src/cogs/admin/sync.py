@@ -39,25 +39,23 @@ class Sync(commands.Cog):
         scope_clean = scope.lower().strip()
         guild = ctx.guild
 
-        if scope_clean in ["clear", "clean", "clearguild"] and guild:
-            self.bot.tree.clear_commands(guild=guild)
-            await self.bot.tree.sync(guild=guild)
-            msg = (
-                f"Cleared all guild-level commands in **{guild.name}**.\n"
-                "> Duplicate commands removed."
-            )
-        else:
+        if scope_clean in ["guild", "local"]:
             if guild:
                 self.bot.tree.copy_global_to(guild=guild)
                 synced_guild = await self.bot.tree.sync(guild=guild)
-                guild_count = len(synced_guild)
+                msg = f"Synced `{len(synced_guild)}` commands locally to **{guild.name}**."
             else:
-                guild_count = 0
+                msg = "Guild not found."
+        else:
+            # Default ?sync: clear local guild commands to eliminate duplicates, and sync global commands
+            if guild:
+                self.bot.tree.clear_commands(guild=guild)
+                await self.bot.tree.sync(guild=guild)
 
             synced_global = await self.bot.tree.sync()
             msg = (
-                f"Successfully synced `{len(synced_global)}` slash commands!\n"
-                f"> Instant guild sync applied to **{guild.name if guild else 'this server'}** (`{guild_count}` commands ready immediately)."
+                f"Successfully synced `{len(synced_global)}` slash commands globally.\n"
+                f"> Removed 2-2 duplicate guild commands in **{guild.name if guild else 'this server'}**."
             )
 
         container = CicadaContainer(accent_color=None)

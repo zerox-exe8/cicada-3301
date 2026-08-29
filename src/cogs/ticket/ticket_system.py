@@ -215,7 +215,7 @@ class TicketSetupWizard(discord.ui.View):
             # Continue button
             btn_continue = discord.ui.Button(
                 label="Continue >",
-                style=discord.ButtonStyle.primary,
+                style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_continue",
                 disabled=(self.selected_embed is None),
                 row=1,
@@ -257,7 +257,7 @@ class TicketSetupWizard(discord.ui.View):
 
             btn_continue = discord.ui.Button(
                 label="Continue >",
-                style=discord.ButtonStyle.primary,
+                style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_continue",
                 row=2,
             )
@@ -298,7 +298,7 @@ class TicketSetupWizard(discord.ui.View):
 
             btn_continue = discord.ui.Button(
                 label="Continue >",
-                style=discord.ButtonStyle.primary,
+                style=discord.ButtonStyle.secondary,
                 custom_id="wiz_btn_continue",
                 row=2,
             )
@@ -344,7 +344,8 @@ class TicketSetupWizard(discord.ui.View):
 
         container.add_section(
             content=(
-                f"**Ticket Dashboard** • {slide_title}\n"
+                "**Ticket Dashboard**\n"
+                f"> **{slide_title}**\n"
                 f"> {slide_desc}"
             )
         )

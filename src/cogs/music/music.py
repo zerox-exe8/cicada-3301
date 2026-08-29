@@ -94,6 +94,11 @@ class Music(commands.Cog):
         track: wavelink.Playable = payload.track
         logger.info(f"Track started in guild {player.guild.name}: {track.title} by {track.author}")
 
+    @commands.Cog.listener()
+    async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
+        """Fired when an error occurs during track playback."""
+        logger.error(f"Track exception on {payload.player}: {payload.exception}")
+
     # ─── MUSIC PLAY COMMANDS ──────────────────────────────────────────────────
 
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song or audio stream in voice channel.")
@@ -124,11 +129,16 @@ class Music(commands.Cog):
         if ctx.interaction:
             await ctx.defer()
 
-        # Search track
+        # Search track (SoundCloud / YouTubeMusic for zero-login blocks)
         try:
-            tracks: wavelink.Search = await wavelink.Playable.search(query)
+            if query.startswith("http://") or query.startswith("https://"):
+                tracks: wavelink.Search = await wavelink.Playable.search(query)
+            else:
+                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
+                if not tracks:
+                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
         except Exception as e:
-            await ctx.send_error(f"Failed to fetch audio from Lavalink: `{e}`")
+            await ctx.send_error(f"Failed to fetch audio: `{e}`")
             return
 
         if not tracks:

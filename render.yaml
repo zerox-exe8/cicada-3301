@@ -14,3 +14,17 @@ services:
         sync: false
       - key: ENVIRONMENT
         value: production
+      - key: LAVALINK_URI
+        sync: false
+      - key: LAVALINK_PASSWORD
+        value: youshallnotpass
+
+  - type: web
+    name: cicada-lavalink-server
+    runtime: docker
+    dockerfilePath: lavalink/Dockerfile
+    dockerContext: lavalink
+    plan: free
+    envVars:
+      - key: PORT
+        value: 2333

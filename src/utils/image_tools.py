@@ -34,8 +34,9 @@ def create_slim_banner(
 ) -> io.BytesIO:
     """
     Transform image into a seamless, edge-to-edge widescreen Discord header banner (1000x300px).
-    - 'seamless' (default): Automatically covers 100% of the 1000x300 canvas with the original background,
-      keeping centered text/graphics large and crisp with NO frames, NO borders, and NO dark boxes around it.
+    - Ensures all text/graphics fit comfortably with safe vertical padding so NO letters/headers are cut.
+    - Seamlessly extends the image's own matching background color across the full 1000px width.
+    - 0% text cuts, 0% squishing, 0% dark frames.
     """
     if not HAS_PIL:
         return io.BytesIO(image_bytes)
@@ -43,20 +44,30 @@ def create_slim_banner(
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     orig_w, orig_h = img.size
 
-    # Smart scale & fill: Scale so that image completely covers the 1000x300 canvas
-    scale = max(target_width / orig_w, target_height / orig_h)
+    # 1. Background: Stretch image to 1000x300 and apply a gentle blur so the exact background color/hue matches
+    bg = img.resize((target_width, target_height), Image.Resampling.BILINEAR).convert("RGBA")
+    bg = bg.filter(ImageFilter.GaussianBlur(radius=16))
+
+    # 2. Crisp artwork: Scale to fit inside target_height with safe vertical padding (265px)
+    safe_h = max(100, target_height - 30)
+    scale = safe_h / orig_h
     new_w = int(orig_w * scale)
     new_h = int(orig_h * scale)
 
-    scaled = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    if new_w > target_width - 32:
+        scale = (target_width - 32) / orig_w
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
 
-    # Center crop to exact 1000x300
-    left = (new_w - target_width) // 2
-    top = (new_h - target_height) // 2
+    crisp_art = img.resize((new_w, new_h), Image.Resampling.LANCZOS).convert("RGBA")
 
-    result = scaled.crop((left, top, left + target_width, top + target_height))
+    # 3. Paste the crisp artwork in the center
+    offset_x = (target_width - new_w) // 2
+    offset_y = (target_height - new_h) // 2
+
+    bg.paste(crisp_art, (offset_x, offset_y), crisp_art)
 
     output = io.BytesIO()
-    result.save(output, format="PNG", optimize=True)
+    bg.save(output, format="PNG", optimize=True)
     output.seek(0)
     return output

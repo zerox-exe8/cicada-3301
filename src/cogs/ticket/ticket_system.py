@@ -146,12 +146,14 @@ class TicketSetupWizard(discord.ui.View):
         self,
         cog: TicketSystem,
         author: discord.User | discord.Member,
+        templates: list[dict[str, Any]] | None = None,
         initial_embed: str | None = None,
     ) -> None:
         super().__init__(timeout=600)
         self.cog = cog
         self.bot = cog.bot
         self.author = author
+        self.templates: list[dict[str, Any]] = templates or []
         self.current_slide_idx: int = 0
 
         # Wizard State
@@ -178,16 +180,12 @@ class TicketSetupWizard(discord.ui.View):
         """Rebuild view items dynamically according to current slide index."""
         self.clear_items()
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
-        guild = getattr(self.author, "guild", None)
-        templates = []
-        if guild:
-            templates = self.cog.bot.embed_mgr._templates_cache.get(guild.id, [])
 
         if slide_key == "embed":
             # Slide 1: Embed Select Menu
             options = []
-            if templates:
-                for t in templates[:25]:
+            if self.templates:
+                for t in self.templates[:25]:
                     name = t.get("embed_name", "unknown")
                     options.append(discord.SelectOption(
                         label=name,
@@ -202,7 +200,8 @@ class TicketSetupWizard(discord.ui.View):
                     description="Standard clean ticket support embed card",
                     default=True,
                 ))
-                self.selected_embed = "__default__"
+                if not self.selected_embed:
+                    self.selected_embed = "__default__"
 
             select = discord.ui.Select(
                 placeholder="Select an embed template...",
@@ -379,29 +378,25 @@ class TicketSetupWizard(discord.ui.View):
 
     async def _on_role_selected(self, interaction: discord.Interaction) -> None:
         values = interaction.data.get("values", [])
-        if values:
-            self.selected_role_id = int(values[0])
+        self.selected_role_id = int(values[0]) if values else None
         self._build_components_for_slide()
         await edit_container_response(interaction, self.get_dashboard_container(interaction.guild), view=self)
 
     async def _on_category_selected(self, interaction: discord.Interaction) -> None:
         values = interaction.data.get("values", [])
-        if values:
-            self.selected_category_id = int(values[0])
+        self.selected_category_id = int(values[0]) if values else None
         self._build_components_for_slide()
         await edit_container_response(interaction, self.get_dashboard_container(interaction.guild), view=self)
 
     async def _on_log_channel_selected(self, interaction: discord.Interaction) -> None:
         values = interaction.data.get("values", [])
-        if values:
-            self.selected_log_channel_id = int(values[0])
+        self.selected_log_channel_id = int(values[0]) if values else None
         self._build_components_for_slide()
         await edit_container_response(interaction, self.get_dashboard_container(interaction.guild), view=self)
 
     async def _on_target_selected(self, interaction: discord.Interaction) -> None:
         values = interaction.data.get("values", [])
-        if values:
-            self.selected_target_channel_id = int(values[0])
+        self.selected_target_channel_id = int(values[0]) if values else None
         self._build_components_for_slide()
         await edit_container_response(interaction, self.get_dashboard_container(interaction.guild), view=self)
 
@@ -848,7 +843,8 @@ class TicketSystem(commands.Cog):
     @commands.has_permissions(manage_guild=True)
     async def ticket_setup(self, ctx: CustomContext, embed_name: str | None = None) -> None:
         """Launch the 4-step Slide Wizard."""
-        wizard = TicketSetupWizard(self, ctx.author, initial_embed=embed_name)
+        templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
+        wizard = TicketSetupWizard(self, ctx.author, templates=templates, initial_embed=embed_name)
         dashboard_container = wizard.get_dashboard_container(ctx.guild)
         await send_container_response(ctx, dashboard_container, view=wizard)
 

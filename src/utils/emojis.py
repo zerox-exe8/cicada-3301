@@ -101,6 +101,12 @@ class EmojiRegistry:
                 "icon_arrow_left": ["icons_leftarrow"],
                 "icons_leftarrow": ["icon_arrow_left"],
                 "heart_dot": ["icons_arrow", "icons_rightarrow"],
+                "ticket_nox": ["icon_ticket", "ticket_support"],
+                "icon_ticket": ["ticket_nox", "ticket_support"],
+                "icons_locked": ["icon_lock", "icon_locked"],
+                "icon_lock": ["icons_locked", "icon_locked"],
+                "icons_staff": ["icon_mod", "icon_support", "icons_supportteam"],
+                "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)
@@ -128,6 +134,12 @@ class EmojiRegistry:
                 "icons_rightarrow": ["icons_arrow", "heart_dot"],
                 "icon_arrow_left": ["icons_leftarrow"],
                 "icons_leftarrow": ["icon_arrow_left"],
+                "ticket_nox": ["icon_ticket", "ticket_support"],
+                "icon_ticket": ["ticket_nox", "ticket_support"],
+                "icons_locked": ["icon_lock", "icon_locked"],
+                "icon_lock": ["icons_locked", "icon_locked"],
+                "icons_staff": ["icon_mod", "icon_support", "icons_supportteam"],
+                "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)
@@ -140,14 +152,30 @@ class EmojiRegistry:
 
     def get_select_emoji(self, name: str, fallback_unicode: str | None = None) -> dict[str, Any] | None:
         """
-        Get emoji dictionary structure suitable for Discord Select Menu options.
+        Get emoji dictionary structure suitable for Discord Select Menu options and components.
         Custom emoji requires {'id': str, 'name': str}.
-        If custom emoji is not found and no unicode fallback is given, returns None.
         """
         name_clean = name.lower().strip(":")
         emoji = self._emojis.get(name_clean)
         if not emoji and hasattr(self.bot, "emojis"):
             emoji = discord.utils.get(self.bot.emojis, name=name_clean)
+
+        if not emoji:
+            alias_map = {
+                "ticket_nox": ["icon_ticket", "ticket_support"],
+                "icon_ticket": ["ticket_nox", "ticket_support"],
+                "icons_locked": ["icon_lock", "icon_locked"],
+                "icon_lock": ["icons_locked", "icon_locked"],
+                "icons_staff": ["icon_mod", "icon_support", "icons_supportteam"],
+                "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
+            }
+            for alias in alias_map.get(name_clean, []):
+                emoji = self._emojis.get(alias)
+                if not emoji and hasattr(self.bot, "emojis"):
+                    emoji = discord.utils.get(self.bot.emojis, name=alias)
+                if emoji:
+                    break
+
         if emoji:
             return {
                 "id": str(emoji.id),

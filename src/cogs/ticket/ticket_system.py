@@ -50,11 +50,23 @@ class TicketInsideControlsView(discord.ui.View):
     def __init__(self, cog: TicketSystem) -> None:
         super().__init__(timeout=None)
         self.cog = cog
+        e_reg = getattr(cog.bot, "custom_emojis", None)
+        if e_reg:
+            lock_em = e_reg.get_emoji_obj("icons_locked") or e_reg.get_emoji_obj("icon_lock")
+            if lock_em:
+                self.btn_close.emoji = lock_em
+
+            staff_em = e_reg.get_emoji_obj("icons_staff") or e_reg.get_emoji_obj("icon_mod")
+            if staff_em:
+                self.btn_claim.emoji = staff_em
+
+            file_em = e_reg.get_emoji_obj("icons_file") or e_reg.get_emoji_obj("icons_files")
+            if file_em:
+                self.btn_transcript.emoji = file_em
 
     @discord.ui.button(
         label="Close Ticket",
         style=discord.ButtonStyle.danger,
-        emoji="🔒",
         custom_id="ticket_ctrl_close",
         row=0,
     )
@@ -69,8 +81,7 @@ class TicketInsideControlsView(discord.ui.View):
 
     @discord.ui.button(
         label="Claim Ticket",
-        style=discord.ButtonStyle.success,
-        emoji="🙋",
+        style=discord.ButtonStyle.secondary,
         custom_id="ticket_ctrl_claim",
         row=0,
     )
@@ -105,7 +116,6 @@ class TicketInsideControlsView(discord.ui.View):
     @discord.ui.button(
         label="Save Transcript",
         style=discord.ButtonStyle.secondary,
-        emoji="📋",
         custom_id="ticket_ctrl_transcript",
         row=0,
     )
@@ -484,8 +494,12 @@ class TicketSetupWizard(discord.ui.View):
         )
         panel_id = temp_row.get("id", 1)
 
-        # Attach interactive persistent button inside panel container (Secondary Default Gray + Custom Ticket Emoji)
-        ticket_emoji = self.bot.custom_emojis.get_select_emoji("ticket_support") or self.bot.custom_emojis.get_select_emoji("icon_ticket")
+        # Attach interactive persistent button inside panel container (Secondary Default Gray + Custom ticket_nox Emoji)
+        ticket_emoji = (
+            self.bot.custom_emojis.get_select_emoji("ticket_nox")
+            or self.bot.custom_emojis.get_select_emoji("ticket_support")
+            or self.bot.custom_emojis.get_select_emoji("icon_ticket")
+        )
         btn_action_row: dict[str, Any] = {
             "type": 1,
             "components": [
@@ -703,8 +717,8 @@ class TicketSystem(commands.Cog):
         )
 
         # Send welcome card in ticket channel
-        arrow = self.bot.custom_emojis.get("icons_rightarrow", self.bot.custom_emojis.get("icons_arrow", "›"))
-        welcome_container = CicadaContainer(accent_color=5793266)  # Blurple
+        arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
+        welcome_container = CicadaContainer(accent_color=None)  # Sleek Dark Mode Default
         welcome_container.add_section(
             content=(
                 f"**Ticket #{ticket_str} • {interaction.user.display_name}**\n"

@@ -2101,15 +2101,15 @@ class EmbedBuilder(commands.Cog):
             await ctx.send("Could not download image from the provided link/attachment. Please ensure it is a valid image.")
             return
 
-        banner_stream = create_slim_banner(image_bytes, target_width=1000, target_height=280, mode="compress")
-        file = discord.File(banner_stream, filename="slim_banner.png")
+        banner_stream = create_slim_banner(image_bytes, target_width=1000, target_height=300, mode="studio")
+        file = discord.File(banner_stream, filename="studio_banner.png")
 
         arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Slim Header Banner Generated**\n"
-                f"> Compressed and scaled image to full banner dimensions (1000x280px) with 0% cropped.\n"
+                "**Canva-Grade Studio Banner Generated**\n"
+                f"> Automatically transformed image into a 1000x300px widescreen banner with ambient studio lighting.\n"
                 f"> Right-click / hold the image below {arrow} **Copy Link** and paste into your Embed Builder!"
             )
         )

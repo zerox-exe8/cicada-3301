@@ -5,6 +5,7 @@ Provides ultra low-latency 320kbps HD audio streaming, multi-node resiliency, an
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, cast
 
@@ -121,6 +122,13 @@ class Music(commands.Cog):
         if not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send_error("You must be in a Voice Channel to play music.")
             return
+
+        # Ensure node pool is ready (wait up to 4s if bot just started)
+        if not wavelink.Pool.nodes:
+            for _ in range(4):
+                await asyncio.sleep(1)
+                if wavelink.Pool.nodes:
+                    break
 
         user_channel = ctx.author.voice.channel
         player: wavelink.Player = cast(wavelink.Player, ctx.guild.voice_client)

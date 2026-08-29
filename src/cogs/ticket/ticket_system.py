@@ -820,23 +820,21 @@ class TicketSystem(commands.Cog):
         hub_container.add_separator(divider=True)
 
         if panels:
-            p_names = [f"`{p.get('panel_name')}`" for p in panels[:10]]
+            p_names = [f"`{p.get('panel_name')}`" for p in panels[:25]]
             hub_container.add_text(
-                f"• **Active Panels ({len(panels)}):** " + " , ".join(p_names)
+                f"**Configured Panels ({len(panels)}):** " + " , ".join(p_names)
             )
         else:
-            hub_container.add_text("• **Active Panels:** `None configured yet`")
+            hub_container.add_text(
+                "**Configured Panels:** `None`"
+            )
 
         hub_container.add_separator(divider=True)
         hub_container.add_text(
-            f"• `{prefix}ticket setup` — Launch the Interactive Slide Setup Wizard\n"
-            f"• `{prefix}ticket list` — View all configured panels\n"
-            f"• `{prefix}ticket close [reason]` — Close current active ticket\n"
-            f"• `{prefix}ticket claim` — Claim current ticket\n"
-            f"• `{prefix}ticket add @user` — Add a user to current ticket\n"
-            f"• `{prefix}ticket remove @user` — Remove a user from current ticket\n"
-            f"• `{prefix}ticket transcript` — Download current ticket chat log\n"
-            f"• `{prefix}ticket delete <name>` — Delete a ticket panel"
+            f"`{prefix}ticket setup` , `{prefix}ticket list`\n"
+            f"`{prefix}ticket close` , `{prefix}ticket claim`\n"
+            f"`{prefix}ticket add <@user>` , `{prefix}ticket remove <@user>`\n"
+            f"`{prefix}ticket transcript` , `{prefix}ticket delete <name>`"
         )
         hub_container.add_separator(divider=True)
         hub_container.add_text(f"-# Requested by {ctx.author.display_name}")

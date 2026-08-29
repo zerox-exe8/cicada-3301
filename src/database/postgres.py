@@ -214,6 +214,50 @@ class PostgresDatabase(BaseDatabase):
                 PRIMARY KEY (guild_id, event_type)
             );
             """,
+            # Modular Ticket Panels configuration table
+            """
+            CREATE TABLE IF NOT EXISTS ticket_panels (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                panel_name VARCHAR(64) NOT NULL,
+                embed_name VARCHAR(64) NOT NULL,
+                channel_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL,
+                category_id BIGINT,
+                support_role_id BIGINT,
+                log_channel_id BIGINT,
+                naming_format VARCHAR(64) DEFAULT 'ticket-{count}',
+                button_label VARCHAR(64) DEFAULT 'Create Ticket',
+                button_style INT DEFAULT 1,
+                button_emoji VARCHAR(64),
+                created_by BIGINT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(guild_id, panel_name)
+            );
+            """,
+            # Active Open/Closed Tickets tracking table
+            """
+            CREATE TABLE IF NOT EXISTS active_tickets (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                panel_id INT REFERENCES ticket_panels(id) ON DELETE CASCADE,
+                channel_id BIGINT NOT NULL UNIQUE,
+                user_id BIGINT NOT NULL,
+                ticket_number INT NOT NULL,
+                claimed_by BIGINT,
+                status VARCHAR(20) DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                closed_at TIMESTAMP,
+                closed_by BIGINT
+            );
+            """,
+            # Guild Sequential Ticket Number Counter table
+            """
+            CREATE TABLE IF NOT EXISTS guild_ticket_counters (
+                guild_id BIGINT PRIMARY KEY,
+                total_tickets INT DEFAULT 0
+            );
+            """,
         ]
         async with self.pool.acquire() as conn:
             for query in queries:

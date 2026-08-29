@@ -1757,27 +1757,9 @@ class EmbedBuilder(commands.Cog):
         fallback="hub",
     )
     @commands.has_permissions(manage_messages=True)
-    async def embed_group(self, ctx: CustomContext, template_name: str | None = None) -> None:
-        """Launch the embed manager dashboard or a specific named builder."""
+    async def embed_group(self, ctx: CustomContext) -> None:
+        """Launch the embed manager dashboard."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-        if template_name:
-            clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", template_name.lower())
-            data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
-            draft = ContainerDraft.from_dict(data) if data else ContainerDraft()
-            view = EmbedBuilderView(self.bot, ctx.author, draft=draft, template_name=clean_name)
-            containers = view.get_dual_containers(ctx.guild, ctx.channel)
-            msg_data = await send_container_response(ctx, containers, view=view)
-            msg_id = None
-            if isinstance(msg_data, dict) and "id" in msg_data:
-                msg_id = int(msg_data["id"])
-            elif hasattr(msg_data, "id"):
-                msg_id = int(msg_data.id)
-            if msg_id:
-                view.message_id = msg_id
-                view.channel_id = ctx.channel.id
-                EmbedBuilderView.active_views[msg_id] = view
-            return
-
         templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
         hub_container = CicadaContainer(accent_color=None)
         hub_container.add_section(
@@ -1805,25 +1787,6 @@ class EmbedBuilder(commands.Cog):
             f"`{prefix}embed show <name>` , `{prefix}embed delete <name>`\n"
             f"`{prefix}embed send #channel <name>` , `{prefix}embed list`"
         )
-        if templates:
-            hub_container.add_separator(divider=True)
-            options = [
-                {
-                    "label": f"Edit: {t.get('embed_name', 'unknown')}"[:100],
-                    "value": t.get("embed_name", "unknown"),
-                    "description": f"Open builder for '{t.get('embed_name', '')}'"[:100],
-                }
-                for t in templates[:25]
-            ]
-            hub_container.add_action_row([
-                {
-                    "type": 3,
-                    "custom_id": "hub_select_template",
-                    "placeholder": "Select an existing embed to edit...",
-                    "options": options,
-                }
-            ])
-
         hub_container.add_separator(divider=True)
         hub_container.add_text(f"-# Requested by {ctx.author.display_name}")
 

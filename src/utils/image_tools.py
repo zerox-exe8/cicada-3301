@@ -7,7 +7,12 @@ from __future__ import annotations
 
 import io
 import aiohttp
-from PIL import Image
+
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 
 async def download_image_bytes(url: str, session: aiohttp.ClientSession) -> bytes | None:
@@ -32,6 +37,9 @@ def create_slim_banner(
     - 'contain': Fits the full image centered inside a transparent canvas without cropping text/logos.
     - 'cover': Crops the image center to fill the widescreen banner.
     """
+    if not HAS_PIL:
+        return io.BytesIO(image_bytes)
+
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
 
     if mode == "contain":

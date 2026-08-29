@@ -13,6 +13,7 @@ from discord import app_commands
 from discord.ext import commands
 import wavelink
 
+from src.core.config import Config
 from src.core.context import CustomContext
 from src.utils.containers import CicadaContainer, send_container_response
 

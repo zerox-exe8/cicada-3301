@@ -37,38 +37,39 @@ class Music(commands.Cog):
 
     def __init__(self, bot: CicadaBot) -> None:
         self.bot: CicadaBot = bot
+        self._connected: bool = False
+        self.bot.loop.create_task(self._connect_nodes())
 
-    async def cog_load(self) -> None:
-        """Initialize and connect Lavalink nodes into Wavelink pool."""
+    async def _connect_nodes(self) -> None:
+        """Wait until bot is logged in so bot.user.id is available, then connect Lavalink nodes."""
+        await self.bot.wait_until_ready()
+        if self._connected:
+            return
+        self._connected = True
+
         nodes = [
-            wavelink.Node(
-                identifier="Trinium-V4-SSL",
-                uri="https://lavalink-v4.triniumhost.com:443",
-                password="free",
-                inactive_player_timeout=300,
-            ),
-            wavelink.Node(
-                identifier="NodeLink-Trinium-SSL",
-                uri="https://nodelink-triniumhost.com:443",
-                password="free",
-                inactive_player_timeout=300,
-            ),
-            wavelink.Node(
-                identifier="Jirayu-V4-SSL",
-                uri="https://lavalink.jirayu.net:443",
-                password="youshallnotpass",
-                inactive_player_timeout=300,
-            ),
             wavelink.Node(
                 identifier="Serenetia-V4-SSL",
                 uri="https://lavalinkv4.serenetia.com:443",
                 password="https://seretia.link/discord",
                 inactive_player_timeout=300,
             ),
+            wavelink.Node(
+                identifier="Minecuta-V4",
+                uri="http://lavav4.minecuta.com:2333",
+                password="discord.gg/gKuXdHs",
+                inactive_player_timeout=300,
+            ),
+            wavelink.Node(
+                identifier="Millohost-SSL",
+                uri="https://lava-v4.millohost.my.id:443",
+                password="https://discord.gg/mjS5J2K3ep",
+                inactive_player_timeout=300,
+            ),
         ]
         try:
             await wavelink.Pool.connect(nodes=nodes, client=self.bot, cache_capacity=100)
-            logger.info("Connecting to Wavelink Lavalink v4 nodes pool...")
+            logger.info("Connected to Wavelink Lavalink v4 nodes pool successfully!")
         except Exception as e:
             logger.error(f"Error during Wavelink pool connection: {e}")
 

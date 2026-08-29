@@ -244,7 +244,7 @@ class Music(commands.Cog):
         await player.skip(force=True)
         await ctx.send_success("Skipped to next track.")
 
-    @commands.hybrid_command(name="stop", aliases=["disconnect", "leave", "dc"], description="Stop playback and leave voice channel.")
+    @commands.hybrid_command(name="stop", aliases=["disconnect", "dc", "st"], description="Stop playback and leave voice channel.")
     async def stop(self, ctx: CustomContext) -> None:
         """Stop music, clear queue, and disconnect from voice."""
         player: wavelink.Player = cast(wavelink.Player, ctx.guild.voice_client)

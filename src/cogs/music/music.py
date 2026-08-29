@@ -142,14 +142,16 @@ class Music(commands.Cog):
         if ctx.interaction:
             await ctx.defer()
 
-        # Search track (SoundCloud / YouTubeMusic for zero-login blocks)
+        # Search track across high-speed sources
         try:
             if query.startswith("http://") or query.startswith("https://"):
                 tracks: wavelink.Search = await wavelink.Playable.search(query)
             else:
-                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
+                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
                 if not tracks:
-                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
+                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
+                if not tracks:
+                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTube)
         except Exception as e:
             await ctx.send_error(f"Failed to fetch audio: `{e}`")
             return

@@ -9,7 +9,7 @@ lavalink:
   server:
     password: "NfJXUsGSO4tVI1LDl7v3XPYZ"
     sources:
-      youtube: false
+      youtube: true
       bandcamp: true
       soundcloud: true
       twitch: true
@@ -34,9 +34,12 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
-      - MUSIC
       - TVHTML5EMBEDDED
-      - ANDROID_TESTSUITE
+      - ANDROID_VR
+      - MUSIC
+      - WEB
+      - ANDROID
+      - IOS
     oauth:
       enabled: true
-      skipInitialization: false
+      skipInitialization: true

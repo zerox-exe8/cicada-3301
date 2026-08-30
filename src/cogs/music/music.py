@@ -299,11 +299,26 @@ class Music(commands.Cog):
         # 1. Connect or retrieve player cleanly
         player: wavelink.Player | None = cast(wavelink.Player, ctx.guild.voice_client)
         if not player or not player.connected:
+            if ctx.guild.me and ctx.guild.me.voice:
+                try:
+                    await ctx.guild.change_voice_state(channel=None)
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+
             try:
-                player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
+                player = await user_channel.connect(cls=wavelink.Player, timeout=12.0, reconnect=True, self_deaf=True)
             except Exception as e:
-                await ctx.send_error(f"Could not connect to voice channel: `{e}`")
-                return
+                logger.warning(f"Initial voice connect failed: {e}. Retrying with clean disconnect...")
+                try:
+                    if ctx.guild.voice_client:
+                        await ctx.guild.voice_client.disconnect(force=True)
+                    await ctx.guild.change_voice_state(channel=None)
+                    await asyncio.sleep(0.5)
+                    player = await user_channel.connect(cls=wavelink.Player, timeout=10.0, reconnect=False, self_deaf=True)
+                except Exception as e2:
+                    await ctx.send_error(f"Could not connect to voice channel: `{e2}`")
+                    return
         elif player.channel != user_channel:
             if not player.playing:
                 await player.move_to(user_channel)

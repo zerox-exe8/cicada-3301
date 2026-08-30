@@ -249,5 +249,13 @@ class CicadaBot(commands.Bot):
         except Exception as e:
             logger.warning(f"Automatic command tree sync failed: {e}")
 
+        # Clean up any lingering ghost voice states on startup
+        for guild in self.guilds:
+            if guild.me and guild.me.voice:
+                try:
+                    await guild.change_voice_state(channel=None)
+                except Exception:
+                    pass
+
         # Automatically sync custom application emojis from assets in background
         asyncio.create_task(self.custom_emojis.sync_from_assets())

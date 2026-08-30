@@ -615,7 +615,10 @@ class Music(commands.Cog):
             if not vc:
                 lines.append("• **Voice Client:** `None (Not connected in guild)`")
             else:
-                lines.append(f"• **Voice Client:** `Type: {type(vc).__name__}` | `Connected: {vc.is_connected()}` | `Channel: {vc.channel}`")
+                is_conn = getattr(vc, "connected", None)
+                if is_conn is None:
+                    is_conn = getattr(vc, "is_connected", lambda: False)()
+                lines.append(f"• **Voice Client:** `Type: {type(vc).__name__}` | `Connected: {is_conn}` | `Channel: {getattr(vc, 'channel', 'N/A')}`")
 
             # 3. Wavelink Player
             player = cast(wavelink.Player, vc) if isinstance(vc, wavelink.Player) else None

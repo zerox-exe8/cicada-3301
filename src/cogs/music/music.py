@@ -1,11 +1,11 @@
 """
 Cicada 3301 Discord Bot - High-Performance Clean Music Engine (Lavalink v4)
 Features:
-- Interactive Button Controller (Play/Pause, Skip, Stop, Queue)
-- Zero Chat Spam & Clean Container Cards
-- High-Accuracy YouTube & Spotify Search
+- Minimalist Premium Container Layout (No cheap emojis, sleek dark aesthetic)
+- Clean Button Controller (Pause/Resume, Skip, Stop, Queue)
+- High-Accuracy Search Engine
 - Automatic Auto-Play Queue System
-- 320kbps Lossless Audio Playback
+- 320kbps HD Audio Stream
 """
 
 from __future__ import annotations
@@ -39,34 +39,34 @@ def format_duration(ms: int) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
-def build_now_playing_container(track: wavelink.Playable, player: wavelink.Player, author: discord.Member | discord.User, arrow: str = "›") -> CicadaContainer:
-    """Build a rich, beautiful Now Playing Container card."""
+def build_now_playing_container(track: wavelink.Playable, player: wavelink.Player, author: discord.Member | discord.User) -> CicadaContainer:
+    """Build a sleek, minimalist Now Playing Container card without noisy emojis."""
     duration_str = format_duration(track.length) if track.length else "Live Stream"
-    pos_str = format_duration(int(player.position)) if player.position else "00:00"
+    channel_name = player.channel.name if player.channel else "Voice Channel"
 
     accessory = None
     if track.artwork:
         accessory = {"type": 11, "media": {"url": track.artwork}}
 
-    container = CicadaContainer(accent_color=0x00FF66)
+    container = CicadaContainer(accent_color=None)
     container.add_section(
         content=(
             f"**Now Playing**\n"
-            f"{arrow} **[{track.title}]({track.uri})**\n"
-            f"> **Artist:** `{track.author}`\n"
-            f"> **Duration:** `{pos_str} / {duration_str}`\n"
-            f"> **Requested By:** {author.mention}"
+            f"> **Title:** **[{track.title}]({track.uri})**\n"
+            f"> **Artist:** `{track.author}` • **Duration:** `{duration_str}`"
         ),
         accessory=accessory,
     )
     container.add_separator(divider=True)
-    channel_name = player.channel.name if player.channel else "Voice Channel"
-    container.add_text(f"-# High-Definition 320kbps Audio {arrow} {channel_name}")
+    container.add_text(
+        f"• **Channel:** `{channel_name}` | **Bitrate:** `320 kbps (HD)`\n"
+        f"• **Requested By:** {author.mention}"
+    )
     return container
 
 
 class MusicControllerView(discord.ui.View):
-    """Interactive Button Controller for Discord Music Player."""
+    """Clean, minimalist button controller for Discord Music Player."""
 
     def __init__(self, bot: CicadaBot, player: wavelink.Player, author_id: int) -> None:
         super().__init__(timeout=300)
@@ -78,14 +78,14 @@ class MusicControllerView(discord.ui.View):
         if not interaction.user or not isinstance(interaction.user, discord.Member):
             return False
         if not interaction.user.voice or not self.player.channel or interaction.user.voice.channel != self.player.channel:
-            await interaction.response.send_message("❌ You must be in the same Voice Channel as the bot to use controls.", ephemeral=True)
+            await interaction.response.send_message("You must be in the same Voice Channel as the bot to use controls.", ephemeral=True)
             return False
         return True
 
-    @discord.ui.button(label="Pause", style=discord.ButtonStyle.secondary, emoji="⏯️", row=0)
+    @discord.ui.button(label="Pause", style=discord.ButtonStyle.secondary, row=0)
     async def pause_resume_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not self.player.playing:
-            await interaction.response.send_message("❌ No audio is currently playing.", ephemeral=True)
+            await interaction.response.send_message("No audio is currently playing.", ephemeral=True)
             return
 
         is_paused = not self.player.paused
@@ -94,41 +94,32 @@ class MusicControllerView(discord.ui.View):
         button.style = discord.ButtonStyle.success if is_paused else discord.ButtonStyle.secondary
         await interaction.response.edit_message(view=self)
 
-    @discord.ui.button(label="Skip", style=discord.ButtonStyle.primary, emoji="⏭️", row=0)
+    @discord.ui.button(label="Skip", style=discord.ButtonStyle.secondary, row=0)
     async def skip_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not self.player.playing:
-            await interaction.response.send_message("❌ No audio is playing to skip.", ephemeral=True)
+            await interaction.response.send_message("No audio is currently playing to skip.", ephemeral=True)
             return
 
         if not self.player.queue.is_empty:
             next_track = await self.player.queue.get_wait()
             await self.player.play(next_track)
-            arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
-            container = build_now_playing_container(next_track, self.player, interaction.user, arrow)
+            container = build_now_playing_container(next_track, self.player, interaction.user)
             view = MusicControllerView(self.bot, self.player, interaction.user.id)
             await send_container_response(interaction, container, view=view)
         else:
             await self.player.skip(force=True)
-            await interaction.response.send_message("⏭️ Skipped! Queue is now empty.", ephemeral=True)
+            await interaction.response.send_message("Skipped. Queue is now empty.", ephemeral=True)
 
-    @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger, emoji="⏹️", row=0)
-    async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.player.queue.clear()
-        await self.player.disconnect()
-        self.stop()
-        await interaction.response.send_message("⏹️ Music stopped and disconnected from voice channel.", ephemeral=False)
-
-    @discord.ui.button(label="Queue", style=discord.ButtonStyle.secondary, emoji="📜", row=0)
+    @discord.ui.button(label="Queue", style=discord.ButtonStyle.secondary, row=0)
     async def queue_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not self.player.current and self.player.queue.is_empty:
             await interaction.response.send_message("The queue is currently empty.", ephemeral=True)
             return
 
-        arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
         lines = []
         if self.player.current:
             cur_len = format_duration(self.player.current.length) if self.player.current.length else "Live"
-            lines.append(f"**Now Playing:**\n{arrow} **[{self.player.current.title}]({self.player.current.uri})** (`{cur_len}`)")
+            lines.append(f"**Now Playing:**\n> **[{self.player.current.title}]({self.player.current.uri})** (`{cur_len}`)")
 
         if not self.player.queue.is_empty:
             lines.append("\n**Up Next:**")
@@ -136,13 +127,20 @@ class MusicControllerView(discord.ui.View):
                 dur = format_duration(track.length) if track.length else "Live"
                 lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
             if self.player.queue.count > 10:
-                lines.append(f"-# ...and `{self.player.queue.count - 10}` more songs")
+                lines.append(f"-# ...and `{self.player.queue.count - 10}` more tracks")
 
-        container = CicadaContainer(accent_color=0x5865F2)
+        container = CicadaContainer(accent_color=None)
         container.add_section(content="\n".join(lines))
         container.add_separator(divider=True)
         container.add_text(f"-# Total Queue: {self.player.queue.count} tracks")
         await send_container_response(interaction, container, ephemeral=True)
+
+    @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger, row=0)
+    async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.player.queue.clear()
+        await self.player.disconnect()
+        self.stop()
+        await interaction.response.send_message("Playback stopped and left voice channel.", ephemeral=False)
 
 
 class Music(commands.Cog):
@@ -228,7 +226,7 @@ class Music(commands.Cog):
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song or playlist in voice channel.")
     @app_commands.describe(query="Song title, artist name, YouTube/Spotify link")
     async def play(self, ctx: CustomContext, *, query: str) -> None:
-        """Join voice channel and play requested track with interactive player controller."""
+        """Join voice channel and play requested track with sleek minimalist player controller."""
         if not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send_error("You must join a Voice Channel to play music.")
             return
@@ -262,14 +260,14 @@ class Music(commands.Cog):
                 await ctx.send_error(f"I am already playing audio in {player.channel.mention}.")
                 return
 
-        # Clean, accurate multi-source track search (YouTube Direct -> YouTubeMusic -> SoundCloud)
+        # Accurate search fallback
         try:
             if query.startswith("http://") or query.startswith("https://"):
                 tracks: wavelink.Search = await wavelink.Playable.search(query)
             else:
-                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTube)
+                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
                 if not tracks:
-                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
+                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTube)
                 if not tracks:
                     tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
         except Exception as e:
@@ -279,8 +277,6 @@ class Music(commands.Cog):
         if not tracks:
             await ctx.send_error(f"No tracks found for `{query}`.")
             return
-
-        arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
 
         if isinstance(tracks, wavelink.Playlist):
             added_count = len(tracks.tracks)
@@ -292,17 +288,19 @@ class Music(commands.Cog):
                 for t in tracks.tracks:
                     await player.queue.put_wait(t)
 
-            container = CicadaContainer(accent_color=0x5865F2)
+            container = CicadaContainer(accent_color=None)
             container.add_section(
                 content=(
                     f"**Playlist Loaded**\n"
-                    f"> **Title:** {tracks.name}\n"
-                    f"> **Tracks Added:** `{added_count}` songs\n"
-                    f"> **Requested By:** {ctx.author.mention}"
+                    f"> **Title:** **{tracks.name}**\n"
+                    f"> **Tracks Added:** `{added_count}` songs"
                 )
             )
             container.add_separator(divider=True)
-            container.add_text(f"-# Streaming in {user_channel.name}")
+            container.add_text(
+                f"• **Channel:** `{user_channel.name}` | **Bitrate:** `320 kbps (HD)`\n"
+                f"• **Requested By:** {ctx.author.mention}"
+            )
             view = MusicControllerView(self.bot, player, ctx.author.id)
             await send_container_response(ctx, container, view=view)
             return
@@ -311,24 +309,26 @@ class Music(commands.Cog):
 
         if not player.playing:
             await player.play(track)
-            container = build_now_playing_container(track, player, ctx.author, arrow)
+            container = build_now_playing_container(track, player, ctx.author)
             view = MusicControllerView(self.bot, player, ctx.author.id)
             await send_container_response(ctx, container, view=view)
         else:
             await player.queue.put_wait(track)
             duration_str = format_duration(track.length) if track.length else "Live Stream"
 
-            container = CicadaContainer(accent_color=0xF39C12)
+            container = CicadaContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"**Added to Queue (Position #{player.queue.count})**\n"
-                    f"{arrow} **[{track.title}]({track.uri})**\n"
-                    f"> **Artist:** `{track.author}` | **Length:** `{duration_str}`\n"
-                    f"> **Requested By:** {ctx.author.mention}"
+                    f"**Track Queued (Position #{player.queue.count})**\n"
+                    f"> **Title:** **[{track.title}]({track.uri})**\n"
+                    f"> **Artist:** `{track.author}` • **Duration:** `{duration_str}`"
                 )
             )
             container.add_separator(divider=True)
-            container.add_text(f"-# Queue size: {player.queue.count} tracks")
+            container.add_text(
+                f"• **Queue Length:** `{player.queue.count} tracks` | **Bitrate:** `320 kbps`\n"
+                f"• **Requested By:** {ctx.author.mention}"
+            )
             await send_container_response(ctx, container)
 
     @commands.hybrid_command(name="skip", aliases=["next", "s"], description="Skip the current track.")
@@ -342,13 +342,12 @@ class Music(commands.Cog):
         if not player.queue.is_empty:
             next_track = await player.queue.get_wait()
             await player.play(next_track)
-            arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
-            container = build_now_playing_container(next_track, player, ctx.author, arrow)
+            container = build_now_playing_container(next_track, player, ctx.author)
             view = MusicControllerView(self.bot, player, ctx.author.id)
             await send_container_response(ctx, container, view=view)
         else:
             await player.skip(force=True)
-            await ctx.send_success("Skipped! Queue is now empty.")
+            await ctx.send_success("Skipped playback. Queue is now empty.")
 
     @commands.hybrid_command(name="pause", description="Pause currently playing music.")
     async def pause(self, ctx: CustomContext) -> None:
@@ -363,7 +362,7 @@ class Music(commands.Cog):
             return
 
         await player.pause(True)
-        await ctx.send_success("Music paused.")
+        await ctx.send_success("Playback paused.")
 
     @commands.hybrid_command(name="resume", aliases=["unpause"], description="Resume paused music.")
     async def resume(self, ctx: CustomContext) -> None:
@@ -378,7 +377,7 @@ class Music(commands.Cog):
             return
 
         await player.pause(False)
-        await ctx.send_success("Music resumed.")
+        await ctx.send_success("Playback resumed.")
 
     @commands.hybrid_command(name="stop", aliases=["disconnect", "dc", "st"], description="Stop playback and leave voice channel.")
     async def stop(self, ctx: CustomContext) -> None:
@@ -390,7 +389,7 @@ class Music(commands.Cog):
 
         player.queue.clear()
         await player.disconnect()
-        await ctx.send_success("Stopped playback and left voice channel.")
+        await ctx.send_success("Playback stopped and left voice channel.")
 
     @commands.hybrid_command(name="queue", aliases=["q"], description="Display the current song queue.")
     async def queue(self, ctx: CustomContext) -> None:
@@ -400,11 +399,10 @@ class Music(commands.Cog):
             await ctx.send_error("The queue is currently empty.")
             return
 
-        arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
         lines = []
         if player.current:
             cur_len = format_duration(player.current.length) if player.current.length else "Live"
-            lines.append(f"**Now Playing:**\n{arrow} **[{player.current.title}]({player.current.uri})** (`{cur_len}`)")
+            lines.append(f"**Now Playing:**\n> **[{player.current.title}]({player.current.uri})** (`{cur_len}`)")
 
         if not player.queue.is_empty:
             lines.append("\n**Up Next:**")
@@ -412,9 +410,9 @@ class Music(commands.Cog):
                 dur = format_duration(track.length) if track.length else "Live"
                 lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
             if player.queue.count > 10:
-                lines.append(f"-# ...and `{player.queue.count - 10}` more songs")
+                lines.append(f"-# ...and `{player.queue.count - 10}` more tracks")
 
-        container = CicadaContainer(accent_color=0x5865F2)
+        container = CicadaContainer(accent_color=None)
         container.add_section(content="\n".join(lines))
         container.add_separator(divider=True)
         container.add_text(f"-# Total in Queue: {player.queue.count} tracks")
@@ -428,8 +426,7 @@ class Music(commands.Cog):
             await ctx.send_error("No track is currently playing.")
             return
 
-        arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
-        container = build_now_playing_container(player.current, player, ctx.author, arrow)
+        container = build_now_playing_container(player.current, player, ctx.author)
         view = MusicControllerView(self.bot, player, ctx.author.id)
         await send_container_response(ctx, container, view=view)
 

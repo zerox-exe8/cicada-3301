@@ -3,6 +3,9 @@ server:
   address: 0.0.0.0
 
 lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
+      repository: "https://maven.lavalink.dev/releases"
   server:
     password: "youshallnotpass"
     sources:
@@ -13,16 +16,26 @@ lavalink:
       vimeo: true
       http: true
       local: false
-    bufferDurationMs: 4000
-    frameBufferDurationMs: 10000
-    opusEncodingQuality: 10
-    resamplingQuality: HIGH
+    bufferDurationMs: 2500
+    frameBufferDurationMs: 6000
+    opusEncodingQuality: 7
+    resamplingQuality: MEDIUM
     trackStuckThresholdMs: 10000
     useSeekGhosting: true
     playerUpdateInterval: 5
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true
+
+plugins:
+  youtube:
+    enabled: true
+    v2:
+      enabled: true
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - WEB
 
 metrics:
   prometheus:
@@ -38,16 +51,3 @@ logging:
 
   level:
     root: INFO
-    lavalink: INFO
-
-  request:
-    enabled: false
-    includeClientInfo: false
-    includeHeaders: false
-    includePayload: false
-    includeQueryString: false
-
-  logback:
-    rollingpolicy:
-      max-file-size: 1GB
-      max-history: 7

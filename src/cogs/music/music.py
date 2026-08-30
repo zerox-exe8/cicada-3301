@@ -2,8 +2,8 @@
 Cicada 3301 Discord Bot - Ultra Low-Latency Clean Music Engine (Lavalink v4)
 Features:
 - Instant 0-Delay Playback (<300ms execution)
-- Full Spotify & YouTube URL + Playlist Support (No API keys needed)
-- Canonical Search Engine (Exact Official Studio Tracks, 0% Random Garbage)
+- Official YouTube Music & Spotify High-Accuracy Search Engine
+- Full Spotify & YouTube URL + Playlist Support
 - Auto-Healing & Resilient Node Pool Connection
 - Minimalist Premium Container Layout (Integrated Custom Emojis)
 - Responsive Button Controller (Pause/Resume, Skip, Stop, Queue)
@@ -140,7 +140,7 @@ class MusicControllerView(discord.ui.View):
                 dur = format_duration(track.length) if track.length else "Live"
                 lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
             if self.player.queue.count > 10:
-                lines.append(f"-# ...and `{self.player.queue.count - 10}` more tracks")
+                lines.append(f"-# ...and `{player.queue.count - 10}` more tracks")
 
         container = CicadaContainer(accent_color=None)
         container.add_section(content="\n".join(lines))
@@ -240,7 +240,7 @@ class Music(commands.Cog):
     # ─── MUSIC COMMANDS ───────────────────────────────────────────────────────
 
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song, Spotify link, or playlist in voice channel.")
-    @app_commands.describe(query="Song title, artist name, Spotify or YouTube link")
+    @app_commands.describe(query="Song title, artist name, Spotify, YouTube or SoundCloud link")
     async def play(self, ctx: CustomContext, *, query: str) -> None:
         """Instant ultra low-latency music playback with Spotify & YouTube support."""
         if not ctx.author.voice or not ctx.author.voice.channel:
@@ -282,26 +282,30 @@ class Music(commands.Cog):
                     await ctx.send_error("Could not load tracks from this Spotify playlist.")
                     return
 
-                # Load first track immediately
-                first_tracks = await wavelink.Playable.search(track_queries[0], source=wavelink.TrackSource.SoundCloud)
-                if not first_tracks:
-                    first_tracks = await wavelink.Playable.search(track_queries[0], source=wavelink.TrackSource.YouTube)
+                # Search helper: YouTubeMusic -> YouTube -> SoundCloud
+                async def search_single(q: str):
+                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube, wavelink.TrackSource.SoundCloud):
+                        try:
+                            res = await wavelink.Playable.search(q, source=src)
+                            if res:
+                                return res[0]
+                        except Exception:
+                            continue
+                    return None
 
-                if first_tracks:
+                first_track = await search_single(track_queries[0])
+                if first_track:
                     if not player.playing:
-                        await player.play(first_tracks[0])
+                        await player.play(first_track)
                     else:
-                        await player.queue.put_wait(first_tracks[0])
+                        await player.queue.put_wait(first_track)
 
-                # Background queue loader for rest of playlist
+                # Background loader for rest of playlist
                 async def load_remaining():
                     for q in track_queries[1:]:
-                        try:
-                            t = await wavelink.Playable.search(q, source=wavelink.TrackSource.SoundCloud)
-                            if t:
-                                await player.queue.put_wait(t[0])
-                        except Exception:
-                            pass
+                        t = await search_single(q)
+                        if t:
+                            await player.queue.put_wait(t)
 
                 asyncio.create_task(load_remaining())
 
@@ -324,21 +328,20 @@ class Music(commands.Cog):
             elif spotify_data["type"] == "track":
                 query = spotify_data["query"]
 
-        # 3. Canonical song title resolution for loose search strings
-        resolved_query = query
-        if not (query.startswith("http://") or query.startswith("https://")):
-            resolved_query = await SpotifyResolver.resolve_canonical(query)
-
-        # 4. Search and fetch tracks
+        # 3. High-Accuracy Search: Try YouTubeMusic -> YouTube -> SoundCloud
+        tracks = None
         try:
-            if resolved_query.startswith("http://") or resolved_query.startswith("https://"):
-                tracks: wavelink.Search = await wavelink.Playable.search(resolved_query)
+            if query.startswith("http://") or query.startswith("https://"):
+                tracks = await wavelink.Playable.search(query)
             else:
-                tracks = await wavelink.Playable.search(resolved_query, source=wavelink.TrackSource.SoundCloud)
-                if not tracks and resolved_query != query:
-                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
-                if not tracks:
-                    tracks = await wavelink.Playable.search(resolved_query, source=wavelink.TrackSource.YouTube)
+                for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube, wavelink.TrackSource.SoundCloud):
+                    try:
+                        res = await wavelink.Playable.search(query, source=src)
+                        if res:
+                            tracks = res
+                            break
+                    except Exception:
+                        continue
         except Exception as e:
             await ctx.send_error(f"Failed to find song: `{e}`")
             return
@@ -347,7 +350,7 @@ class Music(commands.Cog):
             await ctx.send_error(f"No tracks found for `{query}`.")
             return
 
-        # 5. Handle Standard Playlist (YouTube / SoundCloud)
+        # 4. Handle Standard Playlist (YouTube / SoundCloud)
         if isinstance(tracks, wavelink.Playlist):
             added_count = len(tracks.tracks)
             if not player.playing:
@@ -375,7 +378,7 @@ class Music(commands.Cog):
             await send_container_response(ctx, container, view=view)
             return
 
-        # 6. Handle Single Track
+        # 5. Handle Single Track
         track: wavelink.Playable = tracks[0]
 
         if not player.playing:

@@ -192,6 +192,25 @@ class MusicControllerView(discord.ui.View):
         await interaction.response.send_message("Playback stopped and left voice channel.", ephemeral=False)
 
 
+class CicadaPlayer(wavelink.Player):
+    """Custom resilient Wavelink player that prevents unexpected destruction during connection handshakes."""
+
+    async def on_voice_state_update(self, data: dict, /) -> None:
+        channel_id = data.get("channel_id")
+        if not channel_id:
+            if not self._connected:
+                logger.debug("Ignoring stale voice disconnect event for %s during pending connect.", self.guild)
+                return
+            await self._destroy()
+            return
+
+        self._connected = True
+        self._voice_state["voice"]["session_id"] = data["session_id"]
+        self._voice_state["channel_id"] = str(channel_id)
+        if self.client and channel_id:
+            self.channel = self.client.get_channel(int(channel_id))  # type: ignore
+
+
 class Music(commands.Cog):
     """High-Performance, Ultra-Reliable Music Cog."""
 
@@ -303,10 +322,10 @@ class Music(commands.Cog):
         user_channel = ctx.author.voice.channel
 
         # 1. Connect or retrieve player cleanly
-        player: wavelink.Player | None = cast(wavelink.Player, ctx.guild.voice_client)
+        player: CicadaPlayer | None = cast(CicadaPlayer, ctx.guild.voice_client)
         if not player:
             try:
-                player = await user_channel.connect(cls=wavelink.Player, timeout=25.0, self_deaf=True)
+                player = await user_channel.connect(cls=CicadaPlayer, timeout=25.0, self_deaf=True)
             except Exception as e:
                 await ctx.send_error(f"Could not connect to voice channel: `{e}`")
                 return

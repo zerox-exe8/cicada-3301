@@ -36,14 +36,12 @@ plugins:
       - "dzsearch:%QUERY%"
       - "scsearch:%QUERY%"
     sources:
-      spotify: true
-      applemusic: true
+      spotify: false
+      applemusic: false
       deezer: true
       yandexmusic: false
       flowerytts: false
       youtube: false
-    applemusic:
-      countryCode: "IN"
     deezer:
       masterDecryptionKey: "e82d39e68c7d79201632472d57d7fa45"
 

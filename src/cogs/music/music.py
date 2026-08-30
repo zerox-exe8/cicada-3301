@@ -172,11 +172,11 @@ class MusicControllerView(discord.ui.View):
 
         if not self.player.queue.is_empty:
             lines.append("\n**Up Next:**")
-            for i, track in enumerate(list(player.queue)[:10], 1):
+            for i, track in enumerate(list(self.player.queue)[:10], 1):
                 dur = format_duration(track.length) if track.length else "Live"
                 lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
             if self.player.queue.count > 10:
-                lines.append(f"-# ...and `{player.queue.count - 10}` more tracks")
+                lines.append(f"-# ...and `{self.player.queue.count - 10}` more tracks")
 
         container = CicadaContainer(accent_color=None)
         container.add_section(content="\n".join(lines))

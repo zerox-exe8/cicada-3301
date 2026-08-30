@@ -200,9 +200,9 @@ class Music(commands.Cog):
         self.bot.loop.create_task(self._ensure_node())
 
     async def _ensure_node(self) -> bool:
-        """Ensure dedicated Lavalink node is connected with auto-reconnection."""
+        """Ensure dedicated Lavalink node is connected with auto-reconnection and valid session."""
         for name, node in list(wavelink.Pool.nodes.items()):
-            if node.status == wavelink.NodeStatus.CONNECTED:
+            if node.status == wavelink.NodeStatus.CONNECTED and getattr(node, "session_id", None):
                 return True
             else:
                 try:
@@ -221,15 +221,15 @@ class Music(commands.Cog):
                 inactive_player_timeout=None,
             )
             await wavelink.Pool.connect(nodes=[node], client=self.bot, cache_capacity=100)
-            for _ in range(10):
-                if any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values()):
-                    logger.info("Connected to Dedicated Lavalink v4 node successfully!")
+            for _ in range(15):
+                if any(n.status == wavelink.NodeStatus.CONNECTED and getattr(n, "session_id", None) for n in wavelink.Pool.nodes.values()):
+                    logger.info("Connected to Dedicated Lavalink v4 node successfully with live session!")
                     return True
                 await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Error connecting to Lavalink node pool: {e}")
 
-        return any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values())
+        return any(n.status == wavelink.NodeStatus.CONNECTED and getattr(n, "session_id", None) for n in wavelink.Pool.nodes.values())
 
     # ─── WAVELINK EVENT LISTENERS ─────────────────────────────────────────────
 
@@ -584,7 +584,8 @@ class Music(commands.Cog):
                     status_str = getattr(n, "status", "UNKNOWN")
                     if hasattr(status_str, "name"):
                         status_str = status_str.name
-                    lines.append(f"• **Node [{nid}]:** `Status: {status_str}` | `URI: {getattr(n, 'uri', 'N/A')}`")
+                    sess_id = getattr(n, "session_id", None)
+                    lines.append(f"• **Node [{nid}]:** `Status: {status_str}` | `Session: {sess_id}`\n  `URI: {getattr(n, 'uri', 'N/A')}`")
 
             # 2. Local Voice Client
             vc = ctx.guild.voice_client

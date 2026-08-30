@@ -310,48 +310,17 @@ class Music(commands.Cog):
 
         user_channel = ctx.author.voice.channel
 
-        # 1. Connect or retrieve player cleanly with auto-purging of dead gateway sockets
+        # 1. Connect or retrieve player cleanly
         player: wavelink.Player | None = cast(wavelink.Player, ctx.guild.voice_client)
         if not player or not player.connected:
-            # Purge lingering dead socket if present
-            if ctx.guild.voice_client:
-                try:
-                    await ctx.guild.voice_client.disconnect(force=True)
-                except Exception:
-                    pass
-                await asyncio.sleep(0.2)
-
-            if ctx.guild.me and ctx.guild.me.voice:
-                try:
-                    await ctx.guild.change_voice_state(channel=None)
-                except Exception:
-                    pass
-                await asyncio.sleep(0.2)
-
             try:
-                player = await user_channel.connect(cls=wavelink.Player, timeout=10.0, reconnect=True, self_deaf=True)
-                if hasattr(player, "_connection_event"):
-                    try:
-                        await asyncio.wait_for(player._connection_event.wait(), timeout=3.0)
-                    except asyncio.TimeoutError:
-                        pass
-            except Exception as conn_err:
-                logger.warning(f"Initial voice connect retry: {conn_err}")
-                try:
-                    await ctx.guild.change_voice_state(channel=None)
-                    await asyncio.sleep(0.4)
-                    player = await user_channel.connect(cls=wavelink.Player, timeout=8.0, reconnect=False, self_deaf=True)
-                except Exception as final_err:
-                    await ctx.send_error(f"Could not connect to voice channel: `{final_err}`")
-                    return
+                player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
+            except Exception as e:
+                await ctx.send_error(f"Could not connect to voice channel: `{e}`")
+                return
         elif player.channel != user_channel:
             if not player.playing:
                 await player.move_to(user_channel)
-                if hasattr(player, "_connection_event"):
-                    try:
-                        await asyncio.wait_for(player._connection_event.wait(), timeout=3.0)
-                    except asyncio.TimeoutError:
-                        pass
             else:
                 await ctx.send_error(f"I am already playing audio in {player.channel.mention}.")
                 return

@@ -1,9 +1,8 @@
 """
-Cicada 3301 Discord Bot - Ultra-Accurate Studio Music Engine (Lavalink v4)
+Cicada 3301 Discord Bot - Ultra-Reliable High-Definition Music Engine (Lavalink v4)
 Features:
-- Official Studio Canonical Matcher (Zero cover / remix / fan loop channels)
-- Clean Audio Filter (Strictly Official Studio Master Recordings)
-- Dual-Engine Unblockable Lossless Audio Stream (YouTube Music + SoundCloud)
+- Dual-Engine Unblockable Lossless Audio Stream (SoundCloud Verified + YouTube Music)
+- Intelligent Studio Canonical Matcher (Zero cover / remix / fan loop channels)
 - Voice Gateway Handshake Event Sync (Prevents silent playback drops)
 - Automatic Stream Failover & Auto-Healing
 - Minimalist Premium Container Layout (Integrated Custom Emojis)
@@ -173,7 +172,7 @@ class MusicControllerView(discord.ui.View):
 
         if not self.player.queue.is_empty:
             lines.append("\n**Up Next:**")
-            for i, track in enumerate(list(self.player.queue)[:10], 1):
+            for i, track in enumerate(list(player.queue)[:10], 1):
                 dur = format_duration(track.length) if track.length else "Live"
                 lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
             if self.player.queue.count > 10:
@@ -360,7 +359,7 @@ class Music(commands.Cog):
                         return
 
                     async def search_single(q: str):
-                        for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTube):
+                        for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                             try:
                                 r = await wavelink.Playable.search(q, source=src)
                                 if r:
@@ -404,7 +403,7 @@ class Music(commands.Cog):
                 elif spotify_data["type"] == "track":
                     query = spotify_data["query"]
 
-        # 3. Clean Studio Matcher Pipeline (YouTube Music -> SoundCloud -> YouTube)
+        # 3. Clean Studio Matcher Pipeline (SoundCloud Verified -> YouTube Music -> YouTube)
         tracks = None
         cleaned = clean_query_text(query)
 
@@ -425,11 +424,10 @@ class Music(commands.Cog):
                 tracks = await wavelink.Playable.search(query)
             else:
                 for term in search_terms:
-                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTube):
+                    for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                         try:
                             res = await wavelink.Playable.search(term, source=src)
                             if res:
-                                # Pick best non-remix/non-cover studio track
                                 best = select_best_track(res, query)
                                 tracks = [best]
                                 break

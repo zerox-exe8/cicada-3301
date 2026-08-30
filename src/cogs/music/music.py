@@ -1,12 +1,12 @@
 """
-Cicada 3301 Discord Bot - Ultra Low-Latency Clean Music Engine (Lavalink v4)
+Cicada 3301 Discord Bot - Ultra-Reliable High-Performance Music Engine (Lavalink v4)
 Features:
-- Dedicated Spotify & YouTube / YouTube Music Audio Pipeline
-- Robust Voice Gateway Connection (Auto-recovery from stale sessions)
-- Full Spotify & YouTube URL + Playlist Support
-- Auto-Healing & Resilient Node Pool Connection
+- 100% Reliable Voice Gateway Connection (Zero False Disconnects)
+- Universal YouTube + SoundCloud Auto-Failover Search Pipeline
+- Native Spotify Track, Album & Playlist Support
+- Inactivity Protected (No Random Disconnections)
 - Minimalist Premium Container Layout (Integrated Custom Emojis)
-- Responsive Button Controller (Pause/Resume, Skip, Stop, Queue)
+- Interactive Controller (Pause/Resume, Skip, Stop, Queue)
 - 320kbps Lossless Audio Stream
 """
 
@@ -142,7 +142,7 @@ class MusicControllerView(discord.ui.View):
                 dur = format_duration(track.length) if track.length else "Live"
                 lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
             if self.player.queue.count > 10:
-                lines.append(f"-# ...and `{player.queue.count - 10}` more tracks")
+                lines.append(f"-# ...and `{self.player.queue.count - 10}` more tracks")
 
         container = CicadaContainer(accent_color=None)
         container.add_section(content="\n".join(lines))
@@ -159,7 +159,7 @@ class MusicControllerView(discord.ui.View):
 
 
 class Music(commands.Cog):
-    """High-Performance, Auto-Healing Music System."""
+    """High-Performance, Ultra-Reliable Music Cog."""
 
     def __init__(self, bot: CicadaBot) -> None:
         self.bot: CicadaBot = bot
@@ -178,7 +178,7 @@ class Music(commands.Cog):
                 identifier="Dedicated-Node",
                 uri=Config.LAVALINK_URI,
                 password=Config.LAVALINK_PASSWORD,
-                inactive_player_timeout=300,
+                inactive_player_timeout=None,  # No premature inactivity disconnects
             )
             await wavelink.Pool.connect(nodes=[node], client=self.bot, cache_capacity=100)
             for _ in range(8):
@@ -229,7 +229,7 @@ class Music(commands.Cog):
 
     @commands.Cog.listener()
     async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
-        """Fired when an error occurs during playback."""
+        """Fired when an error occurs during playback. Auto-skips to next song."""
         logger.error(f"Track exception on {payload.player}: {payload.exception}")
         player: wavelink.Player | None = payload.player
         if player and not player.queue.is_empty:
@@ -242,9 +242,9 @@ class Music(commands.Cog):
     # ─── MUSIC COMMANDS ───────────────────────────────────────────────────────
 
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song, Spotify link, or playlist in voice channel.")
-    @app_commands.describe(query="Song title, artist name, Spotify or YouTube link")
+    @app_commands.describe(query="Song title, artist name, Spotify, YouTube or SoundCloud link")
     async def play(self, ctx: CustomContext, *, query: str) -> None:
-        """Instant ultra low-latency music playback powered purely by Spotify and YouTube."""
+        """Instant ultra low-latency music playback."""
         if not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send_error("You must join a Voice Channel to play music.")
             return
@@ -259,20 +259,20 @@ class Music(commands.Cog):
 
         # 1. Connect or retrieve player cleanly
         player: wavelink.Player | None = cast(wavelink.Player, ctx.guild.voice_client)
-        if not player or not player.is_connected():
-            if ctx.guild.voice_client:
-                try:
-                    await ctx.guild.voice_client.disconnect(force=True)
-                    await asyncio.sleep(0.3)
-                except Exception:
-                    pass
+        if not player or not player.connected:
             try:
                 player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
             except Exception as e:
                 player = cast(wavelink.Player, ctx.guild.voice_client)
-                if not player:
-                    await ctx.send_error(f"Could not connect to voice channel: `{e}`")
-                    return
+                if not player or not player.connected:
+                    try:
+                        if ctx.guild.voice_client:
+                            await ctx.guild.voice_client.disconnect(force=True)
+                            await asyncio.sleep(0.3)
+                        player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
+                    except Exception as e2:
+                        await ctx.send_error(f"Could not connect to voice channel: `{e2}`")
+                        return
         elif player.channel != user_channel:
             if not player.playing:
                 await player.move_to(user_channel)
@@ -290,26 +290,28 @@ class Music(commands.Cog):
                         await ctx.send_error("Could not load tracks from this Spotify playlist.")
                         return
 
-                    first_res = await wavelink.Playable.search(track_queries[0], source=wavelink.TrackSource.YouTubeMusic)
-                    if not first_res:
-                        first_res = await wavelink.Playable.search(track_queries[0], source=wavelink.TrackSource.YouTube)
+                    async def search_single(q: str):
+                        for src in (wavelink.TrackSource.YouTube, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud):
+                            try:
+                                r = await wavelink.Playable.search(q, source=src)
+                                if r:
+                                    return r[0]
+                            except Exception:
+                                pass
+                        return None
 
-                    if first_res:
+                    first_track = await search_single(track_queries[0])
+                    if first_track:
                         if not player.playing:
-                            await player.play(first_res[0])
+                            await player.play(first_track)
                         else:
-                            await player.queue.put_wait(first_res[0])
+                            await player.queue.put_wait(first_track)
 
                     async def load_remaining():
                         for q in track_queries[1:]:
-                            try:
-                                t = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTubeMusic)
-                                if not t:
-                                    t = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTube)
-                                if t:
-                                    await player.queue.put_wait(t[0])
-                            except Exception:
-                                pass
+                            t = await search_single(q)
+                            if t:
+                                await player.queue.put_wait(t)
 
                     asyncio.create_task(load_remaining())
 
@@ -332,24 +334,29 @@ class Music(commands.Cog):
                 elif spotify_data["type"] == "track":
                     query = spotify_data["query"]
 
-        # 3. Direct Search: YouTube Music -> YouTube (Official Studio Master Tracks)
+        # 3. Multi-Engine Search with Automatic Failover: YouTube -> YouTubeMusic -> SoundCloud
         tracks = None
         try:
             if query.startswith("http://") or query.startswith("https://"):
                 tracks = await wavelink.Playable.search(query)
             else:
-                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
-                if not tracks:
-                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTube)
+                for src in (wavelink.TrackSource.YouTube, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud):
+                    try:
+                        res = await wavelink.Playable.search(query, source=src)
+                        if res:
+                            tracks = res
+                            break
+                    except Exception:
+                        pass
         except Exception as e:
             await ctx.send_error(f"Failed to find song: `{e}`")
             return
 
         if not tracks:
-            await ctx.send_error(f"No tracks found on YouTube / Spotify for `{query}`.")
+            await ctx.send_error(f"No tracks found for `{query}`.")
             return
 
-        # 4. Handle Standard Playlists (YouTube)
+        # 4. Handle Standard Playlists (YouTube / SoundCloud)
         if isinstance(tracks, wavelink.Playlist):
             added_count = len(tracks.tracks)
             if not player.playing:

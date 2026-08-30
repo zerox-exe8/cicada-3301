@@ -153,20 +153,6 @@ class DirectStreamResolver:
 
                 sorted_candidates = sorted(all_candidates, key=score_candidate, reverse=True)
 
-                # Prioritize High-Fidelity AAC (160k) and Opus over standard 128k MP3
-                def stream_codec_priority(t: Dict[str, Any]) -> int:
-                    preset = str(t.get("preset", "")).lower()
-                    mime = str(t.get("format", {}).get("mime_type", "")).lower()
-                    if "opus" in mime or "opus" in preset:
-                        return 0
-                    if "aac_160" in preset or "mp4a" in mime:
-                        return 1
-                    if "aac_96" in preset:
-                        return 2
-                    if "mp3" in mime or "mp3" in preset:
-                        return 3
-                    return 4
-
                 for item in sorted_candidates:
                     title = canonical_title or item.get("title")
                     author = canonical_author or item.get("user", {}).get("username", "Unknown Artist")
@@ -176,7 +162,11 @@ class DirectStreamResolver:
                     duration = item.get("duration", 0)
 
                     transcodings = item.get("media", {}).get("transcodings", [])
-                    sorted_trans = sorted(transcodings, key=stream_codec_priority)
+                    # Progressive MP3 stream is 100% stable, non-stalling, and seekable
+                    sorted_trans = sorted(
+                        transcodings,
+                        key=lambda x: 0 if x.get("format", {}).get("protocol") == "progressive" else 1
+                    )
 
                     for t in sorted_trans:
                         meta_url = t.get("url")

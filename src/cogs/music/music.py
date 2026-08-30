@@ -124,21 +124,6 @@ class Music(commands.Cog):
 
         # 3. Play Track or Add to Queue
         if not player.playing:
-            try:
-                # Apply Studio Master EQ (Boost bass & crystal-clear treble frequencies)
-                filters = wavelink.Filters()
-                filters.equalizer.set(bands=[
-                    {"band": 0, "gain": 0.15},
-                    {"band": 1, "gain": 0.12},
-                    {"band": 2, "gain": 0.08},
-                    {"band": 11, "gain": 0.10},
-                    {"band": 12, "gain": 0.12},
-                    {"band": 13, "gain": 0.15}
-                ])
-                await player.set_filters(filters)
-            except Exception:
-                pass
-
             await player.set_volume(100)
             await player.play(track, volume=100, paused=False)
             embed = discord.Embed(

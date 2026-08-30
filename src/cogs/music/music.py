@@ -483,6 +483,13 @@ class Music(commands.Cog):
         # 5. Handle Single Studio Track
         track: wavelink.Playable = tracks[0]
 
+        # Explicitly ensure voice gateway handshake is 100% complete before sending audio track
+        if hasattr(player, "_connection_event") and not player._connection_event.is_set():
+            try:
+                await asyncio.wait_for(player._connection_event.wait(), timeout=4.0)
+            except asyncio.TimeoutError:
+                pass
+
         if not player.playing:
             await player.set_volume(100)
             if player.paused:

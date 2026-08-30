@@ -109,9 +109,29 @@ class Music(commands.Cog):
         logger.info(f"Track started in guild {player.guild.name}: {track.title} by {track.author}")
 
     @commands.Cog.listener()
+    async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload) -> None:
+        """Fired when a track finishes. Plays next song in queue automatically."""
+        player: wavelink.Player | None = payload.player
+        if not player or not player.guild:
+            return
+        if not player.queue.is_empty:
+            try:
+                next_track = await player.queue.get_wait()
+                await player.play(next_track)
+            except Exception as e:
+                logger.error(f"Error playing next queued track: {e}")
+
+    @commands.Cog.listener()
     async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
         """Fired when an error occurs during track playback."""
         logger.error(f"Track exception on {payload.player}: {payload.exception}")
+        player: wavelink.Player | None = payload.player
+        if player and not player.queue.is_empty:
+            try:
+                next_track = await player.queue.get_wait()
+                await player.play(next_track)
+            except Exception:
+                pass
 
     # ─── MUSIC PLAY COMMANDS ──────────────────────────────────────────────────
 
@@ -335,6 +355,34 @@ class Music(commands.Cog):
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Streaming in {player.channel.name if player.channel else 'VC'}")
+        await send_container_response(ctx, container)
+
+    @commands.hybrid_command(name="queue", aliases=["q"], description="Display the current song queue.")
+    async def queue(self, ctx: CustomContext) -> None:
+        """Show list of upcoming songs in the queue."""
+        player: wavelink.Player = cast(wavelink.Player, ctx.guild.voice_client)
+        if not player or (not player.current and player.queue.is_empty):
+            await ctx.send_error("The queue is currently empty.")
+            return
+
+        arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
+        lines = []
+        if player.current:
+            cur_len = format_duration(player.current.length) if player.current.length else "Live"
+            lines.append(f"**Now Playing:**\n{arrow} **[{player.current.title}]({player.current.uri})** (`{cur_len}`)")
+
+        if not player.queue.is_empty:
+            lines.append("\n**Up Next:**")
+            for i, track in enumerate(list(player.queue)[:10], 1):
+                dur = format_duration(track.length) if track.length else "Live"
+                lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
+            if player.queue.count > 10:
+                lines.append(f"-# ...and `{player.queue.count - 10}` more songs")
+
+        container = CicadaContainer(accent_color=0x5865F2)
+        container.add_section(content="\n".join(lines))
+        container.add_separator(divider=True)
+        container.add_text(f"-# Total in Queue: {player.queue.count} tracks")
         await send_container_response(ctx, container)
 
 

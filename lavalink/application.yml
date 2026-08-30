@@ -9,7 +9,7 @@ lavalink:
   server:
     password: "NfJXUsGSO4tVI1LDl7v3XPYZ"
     sources:
-      youtube: true
+      youtube: false
       bandcamp: true
       soundcloud: true
       twitch: true

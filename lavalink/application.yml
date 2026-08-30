@@ -4,6 +4,8 @@ server:
 
 lavalink:
   plugins:
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.3.0"
+      repository: "https://maven.lavalink.dev/releases"
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
       repository: "https://maven.lavalink.dev/releases"
   server:
@@ -28,6 +30,23 @@ lavalink:
     gc-warnings: false
 
 plugins:
+  lavasrc:
+    providers:
+      - "dzisrc:%ISRC%"
+      - "dzsearch:%QUERY%"
+      - "scsearch:%QUERY%"
+    sources:
+      spotify: true
+      applemusic: true
+      deezer: true
+      yandexmusic: false
+      flowerytts: false
+      youtube: false
+    applemusic:
+      countryCode: "IN"
+    deezer:
+      masterDecryptionKey: "e82d39e68c7d79201632472d57d7fa45"
+
   youtube:
     enabled: true
     allowSearch: true
@@ -38,4 +57,4 @@ plugins:
       - MUSIC
     oauth:
       enabled: true
-      skipInitialization: false
+      skipInitialization: true

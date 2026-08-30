@@ -104,24 +104,33 @@ class Music(commands.Cog):
             except Exception:
                 pass
 
-        # 1. Unblocked Direct Studio Stream Engine (100% Reliable Audio Delivery)
+        # 1. Primary: Deezer HiFi 320kbps Official Studio Audio via LavaSrc
         try:
-            resolved = await DirectStreamResolver.resolve(query)
-            if resolved and resolved.get("stream_url"):
-                search_res = await wavelink.Playable.search(resolved["stream_url"])
-                if search_res:
-                    track = search_res[0] if isinstance(search_res, list) else search_res
-                    if resolved.get("title"):
-                        track._title = resolved["title"]
-                    if resolved.get("author"):
-                        track._author = resolved["author"]
-                    if resolved.get("artwork"):
-                        track._artwork = resolved["artwork"]
-        except Exception as e:
-            logger.warning(f"Direct stream resolve failed: {e}")
+            dz_res = await wavelink.Playable.search(f"dzsearch:{clean_q}")
+            if dz_res:
+                track = dz_res[0] if isinstance(dz_res, list) else dz_res
+        except Exception:
             track = None
 
-        # 2. Raw URL Fallback (for direct .mp3 / .wav audio links)
+        # 2. Secondary: Direct Unblocked Cloudflare Stream Engine
+        if not track:
+            try:
+                resolved = await DirectStreamResolver.resolve(query)
+                if resolved and resolved.get("stream_url"):
+                    search_res = await wavelink.Playable.search(resolved["stream_url"])
+                    if search_res:
+                        track = search_res[0] if isinstance(search_res, list) else search_res
+                        if resolved.get("title"):
+                            track._title = resolved["title"]
+                        if resolved.get("author"):
+                            track._author = resolved["author"]
+                        if resolved.get("artwork"):
+                            track._artwork = resolved["artwork"]
+            except Exception as e:
+                logger.warning(f"Direct stream resolve fallback failed: {e}")
+                track = None
+
+        # 3. Direct Audio URL Fallback
         if not track and (query.startswith("http://") or query.startswith("https://")):
             try:
                 search_res = await wavelink.Playable.search(query)

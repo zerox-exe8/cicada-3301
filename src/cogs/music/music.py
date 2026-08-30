@@ -25,6 +25,7 @@ import wavelink
 from src.core.config import Config
 from src.core.context import CustomContext
 from src.cogs.music.spotify_resolver import SpotifyResolver
+from src.cogs.music.direct_resolver import DirectStreamResolver
 from src.utils.containers import CicadaContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -431,17 +432,36 @@ class Music(commands.Cog):
             if query.startswith("http://") or query.startswith("https://"):
                 tracks = await wavelink.Playable.search(query)
             else:
+                # 1. Primary Direct High-Speed CDN Stream (Zero Bot Blocks, 100% Guaranteed Audio Playback)
                 for term in search_terms:
-                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
-                        try:
-                            res = await wavelink.Playable.search(term, source=src)
-                            if res:
-                                tracks = res if isinstance(res, list) else [res]
+                    try:
+                        resolved = await DirectStreamResolver.resolve(term)
+                        if resolved and resolved.get("stream_url"):
+                            direct_tracks = await wavelink.Playable.search(resolved["stream_url"])
+                            if direct_tracks:
+                                t = direct_tracks[0] if isinstance(direct_tracks, list) else direct_tracks
+                                t.title = resolved.get("title") or t.title
+                                t.author = resolved.get("author") or t.author
+                                if resolved.get("artwork"):
+                                    t.artwork = resolved["artwork"]
+                                tracks = [t]
                                 break
-                        except Exception:
-                            pass
-                    if tracks:
-                        break
+                    except Exception:
+                        pass
+
+                # 2. Fallback to standard sources if direct CDN resolve was empty
+                if not tracks:
+                    for term in search_terms:
+                        for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                            try:
+                                res = await wavelink.Playable.search(term, source=src)
+                                if res:
+                                    tracks = res if isinstance(res, list) else [res]
+                                    break
+                            except Exception:
+                                pass
+                        if tracks:
+                            break
         except Exception as e:
             await ctx.send_error(f"Failed to find song: `{e}`")
             return

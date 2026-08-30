@@ -479,7 +479,7 @@ class Music(commands.Cog):
             await player.set_volume(100)
             if player.paused:
                 await player.pause(False)
-            await player.play(track, volume=100, paused=False)
+            await player.play(track, replace=True, volume=100, paused=False)
             container = build_now_playing_container(track, player, ctx.author, bot=self.bot)
             view = MusicControllerView(self.bot, player, ctx.author.id)
             await send_container_response(ctx, container, view=view)

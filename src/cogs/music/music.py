@@ -96,14 +96,14 @@ def build_now_playing_container(track: wavelink.Playable, player: wavelink.Playe
         content=(
             f"**{playing_icon}Now Playing**\n"
             f"> **Title:** **[{track.title}]({track.uri})**\n"
-            f"> **Artist:** `{track.author}` • **Duration:** `{duration_str}`"
+            f"> **Artist:** `{track.author}` â€¢ **Duration:** `{duration_str}`"
         ),
         accessory=accessory,
     )
     container.add_separator(divider=True)
     container.add_text(
-        f"• **Channel:** `{channel_name}` | **Bitrate:** `320 kbps (HD)`\n"
-        f"• **Requested By:** {author.mention}"
+        f"â€¢ **Channel:** `{channel_name}` | **Bitrate:** `320 kbps (HD)`\n"
+        f"â€¢ **Requested By:** {author.mention}"
     )
     return container
 
@@ -192,61 +192,6 @@ class MusicControllerView(discord.ui.View):
         await interaction.response.send_message("Playback stopped and left voice channel.", ephemeral=False)
 
 
-class CicadaPlayer(wavelink.Player):
-    """Custom resilient Wavelink player that handles out-of-order Discord voice events and prevents stale teardown."""
-
-    async def on_voice_state_update(self, data: dict, /) -> None:
-        logger.debug("CicadaPlayer on_voice_state_update for %s: %s", self.guild, data)
-        channel_id = data.get("channel_id")
-        if not channel_id:
-            if not self._connected:
-                logger.debug("Ignoring stale disconnect for %s during pending connection.", self.guild)
-                return
-            await self._destroy()
-            return
-
-        self._voice_state["voice"]["session_id"] = data.get("session_id")
-        self._voice_state["channel_id"] = str(channel_id)
-        if self.client and channel_id:
-            self.channel = self.client.get_channel(int(channel_id))  # type: ignore
-
-        # If server credentials already arrived, finalize handshake now
-        if self._voice_state["voice"].get("token") and self._voice_state["voice"].get("endpoint"):
-            await self._dispatch_voice_update()
-
-    async def on_voice_server_update(self, data: dict, /) -> None:
-        logger.debug("CicadaPlayer on_voice_server_update for %s: %s", self.guild, data)
-        self._voice_state["voice"]["token"] = data.get("token")
-        self._voice_state["voice"]["endpoint"] = data.get("endpoint")
-        await self._dispatch_voice_update()
-
-    async def _dispatch_voice_update(self) -> None:
-        if not self.guild:
-            return
-        data = self._voice_state["voice"]
-        session_id = data.get("session_id")
-        token = data.get("token")
-        endpoint = data.get("endpoint")
-        channel_id = self._voice_state.get("channel_id")
-
-        if not session_id or not token or not endpoint:
-            logger.debug("Waiting for all voice credentials (session=%s, token=%s, endpoint=%s)", bool(session_id), bool(token), bool(endpoint))
-            return
-
-        request = {
-            "voice": {"sessionId": session_id, "token": token, "endpoint": endpoint, "channelId": channel_id}
-        }
-
-        try:
-            await self.node._update_player(self.guild.id, data=request)
-        except Exception as e:
-            logger.error("Error updating player voice state on Lavalink: %s", e)
-        finally:
-            self._connected = True
-            self._connection_event.set()
-            logger.info("Voice connection handshake finalized for guild %s (%s)", self.guild.name, self.guild.id)
-
-
 class Music(commands.Cog):
     """High-Performance, Ultra-Reliable Music Cog."""
 
@@ -255,9 +200,9 @@ class Music(commands.Cog):
         self.bot.loop.create_task(self._ensure_node())
 
     async def _ensure_node(self) -> bool:
-        """Ensure dedicated Lavalink node is connected with auto-reconnection and valid session."""
+        """Ensure dedicated Lavalink node is connected with auto-reconnection."""
         for name, node in list(wavelink.Pool.nodes.items()):
-            if node.status == wavelink.NodeStatus.CONNECTED and getattr(node, "session_id", None):
+            if node.status == wavelink.NodeStatus.CONNECTED:
                 return True
             else:
                 try:
@@ -276,17 +221,17 @@ class Music(commands.Cog):
                 inactive_player_timeout=None,
             )
             await wavelink.Pool.connect(nodes=[node], client=self.bot, cache_capacity=100)
-            for _ in range(15):
-                if any(n.status == wavelink.NodeStatus.CONNECTED and getattr(n, "session_id", None) for n in wavelink.Pool.nodes.values()):
-                    logger.info("Connected to Dedicated Lavalink v4 node successfully with live session!")
+            for _ in range(10):
+                if any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values()):
+                    logger.info("Connected to Dedicated Lavalink v4 node successfully!")
                     return True
                 await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Error connecting to Lavalink node pool: {e}")
 
-        return any(n.status == wavelink.NodeStatus.CONNECTED and getattr(n, "session_id", None) for n in wavelink.Pool.nodes.values())
+        return any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values())
 
-    # ─── WAVELINK EVENT LISTENERS ─────────────────────────────────────────────
+    # â”€â”€â”€ WAVELINK EVENT LISTENERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @commands.Cog.listener()
     async def on_wavelink_node_ready(self, payload: wavelink.NodeReadyEventPayload) -> None:
@@ -339,7 +284,15 @@ class Music(commands.Cog):
             except Exception as e:
                 logger.error(f"Error playing next queued track: {e}")
 
-    # ─── MUSIC COMMANDS ───────────────────────────────────────────────────────
+        if not player.queue.is_empty:
+            try:
+                next_track = await player.queue.get_wait()
+                await player.set_volume(100)
+                await player.play(next_track, volume=100, paused=False)
+            except Exception:
+                pass
+
+    # â”€â”€â”€ MUSIC COMMANDS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song, Spotify link, or playlist in voice channel.")
     @app_commands.describe(query="Song title, artist name, Spotify, SoundCloud or YouTube link")
@@ -357,17 +310,40 @@ class Music(commands.Cog):
 
         user_channel = ctx.author.voice.channel
 
-        # 1. Connect or retrieve player cleanly
-        player: CicadaPlayer | None = cast(CicadaPlayer, ctx.guild.voice_client)
-        if not player:
+        # 1. Connect or retrieve player cleanly with voice gateway event synchronization
+        player: wavelink.Player | None = cast(wavelink.Player, ctx.guild.voice_client)
+        if not player or not player.connected:
             try:
-                player = await user_channel.connect(cls=CicadaPlayer, timeout=25.0, self_deaf=True)
-            except Exception as e:
-                await ctx.send_error(f"Could not connect to voice channel: `{e}`")
-                return
+                player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
+                if hasattr(player, "_connection_event"):
+                    try:
+                        await asyncio.wait_for(player._connection_event.wait(), timeout=4.0)
+                    except asyncio.TimeoutError:
+                        pass
+            except Exception:
+                player = cast(wavelink.Player, ctx.guild.voice_client)
+                if not player or not player.connected:
+                    try:
+                        if ctx.guild.voice_client:
+                            await ctx.guild.voice_client.disconnect(force=True)
+                            await asyncio.sleep(0.3)
+                        player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
+                        if hasattr(player, "_connection_event"):
+                            try:
+                                await asyncio.wait_for(player._connection_event.wait(), timeout=4.0)
+                            except asyncio.TimeoutError:
+                                pass
+                    except Exception as e2:
+                        await ctx.send_error(f"Could not connect to voice channel: `{e2}`")
+                        return
         elif player.channel != user_channel:
             if not player.playing:
                 await player.move_to(user_channel)
+                if hasattr(player, "_connection_event"):
+                    try:
+                        await asyncio.wait_for(player._connection_event.wait(), timeout=3.0)
+                    except asyncio.TimeoutError:
+                        pass
             else:
                 await ctx.send_error(f"I am already playing audio in {player.channel.mention}.")
                 return
@@ -383,7 +359,7 @@ class Music(commands.Cog):
                         return
 
                     async def search_single(q: str):
-                        for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                        for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                             try:
                                 r = await wavelink.Playable.search(q, source=src)
                                 if r:
@@ -418,8 +394,8 @@ class Music(commands.Cog):
                     )
                     container.add_separator(divider=True)
                     container.add_text(
-                        f"• **Channel:** `{user_channel.name}` | **Bitrate:** `320 kbps (HD)`\n"
-                        f"• **Requested By:** {ctx.author.mention}"
+                        f"â€¢ **Channel:** `{user_channel.name}` | **Bitrate:** `320 kbps (HD)`\n"
+                        f"â€¢ **Requested By:** {ctx.author.mention}"
                     )
                     view = MusicControllerView(self.bot, player, ctx.author.id)
                     await send_container_response(ctx, container, view=view)
@@ -427,7 +403,7 @@ class Music(commands.Cog):
                 elif spotify_data["type"] == "track":
                     query = spotify_data["query"]
 
-        # 3. Clean Studio Matcher Pipeline (YouTube Music -> YouTube)
+        # 3. Clean Studio Matcher Pipeline (SoundCloud Verified -> YouTube Music -> YouTube)
         tracks = None
         cleaned = clean_query_text(query)
 
@@ -448,7 +424,7 @@ class Music(commands.Cog):
                 tracks = await wavelink.Playable.search(query)
             else:
                 for term in search_terms:
-                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTube):
                         try:
                             res = await wavelink.Playable.search(term, source=src)
                             if res:
@@ -489,8 +465,8 @@ class Music(commands.Cog):
             )
             container.add_separator(divider=True)
             container.add_text(
-                f"• **Channel:** `{user_channel.name}` | **Bitrate:** `320 kbps (HD)`\n"
-                f"• **Requested By:** {ctx.author.mention}"
+                f"â€¢ **Channel:** `{user_channel.name}` | **Bitrate:** `320 kbps (HD)`\n"
+                f"â€¢ **Requested By:** {ctx.author.mention}"
             )
             view = MusicControllerView(self.bot, player, ctx.author.id)
             await send_container_response(ctx, container, view=view)
@@ -498,13 +474,6 @@ class Music(commands.Cog):
 
         # 5. Handle Single Studio Track
         track: wavelink.Playable = tracks[0]
-
-        # Explicitly ensure voice gateway handshake is 100% complete before sending audio track
-        if hasattr(player, "_connection_event") and not player._connection_event.is_set():
-            try:
-                await asyncio.wait_for(player._connection_event.wait(), timeout=4.0)
-            except asyncio.TimeoutError:
-                pass
 
         if not player.playing:
             await player.set_volume(100)
@@ -523,13 +492,13 @@ class Music(commands.Cog):
                 content=(
                     f"**Track Queued (Position #{player.queue.count})**\n"
                     f"> **Title:** **[{track.title}]({track.uri})**\n"
-                    f"> **Artist:** `{track.author}` • **Duration:** `{duration_str}`"
+                    f"> **Artist:** `{track.author}` â€¢ **Duration:** `{duration_str}`"
                 )
             )
             container.add_separator(divider=True)
             container.add_text(
-                f"• **Queue Length:** `{player.queue.count} tracks` | **Bitrate:** `320 kbps`\n"
-                f"• **Requested By:** {ctx.author.mention}"
+                f"â€¢ **Queue Length:** `{player.queue.count} tracks` | **Bitrate:** `320 kbps`\n"
+                f"â€¢ **Requested By:** {ctx.author.mention}"
             )
             await send_container_response(ctx, container)
 
@@ -633,33 +602,32 @@ class Music(commands.Cog):
         try:
             # 1. Node status
             if not wavelink.Pool.nodes:
-                lines.append("• **Nodes:** `No nodes in pool`")
+                lines.append("â€¢ **Nodes:** `No nodes in pool`")
             else:
                 for nid, n in wavelink.Pool.nodes.items():
                     status_str = getattr(n, "status", "UNKNOWN")
                     if hasattr(status_str, "name"):
                         status_str = status_str.name
-                    sess_id = getattr(n, "session_id", None)
-                    lines.append(f"• **Node [{nid}]:** `Status: {status_str}` | `Session: {sess_id}`\n  `URI: {getattr(n, 'uri', 'N/A')}`")
+                    lines.append(f"â€¢ **Node [{nid}]:** `Status: {status_str}` | `URI: {getattr(n, 'uri', 'N/A')}`")
 
             # 2. Local Voice Client
             vc = ctx.guild.voice_client
             if not vc:
-                lines.append("• **Voice Client:** `None (Not connected in guild)`")
+                lines.append("â€¢ **Voice Client:** `None (Not connected in guild)`")
             else:
                 is_conn = getattr(vc, "connected", None)
                 if is_conn is None:
                     is_conn = getattr(vc, "is_connected", lambda: False)()
-                lines.append(f"• **Voice Client:** `Type: {type(vc).__name__}` | `Connected: {is_conn}` | `Channel: {getattr(vc, 'channel', 'N/A')}`")
+                lines.append(f"â€¢ **Voice Client:** `Type: {type(vc).__name__}` | `Connected: {is_conn}` | `Channel: {getattr(vc, 'channel', 'N/A')}`")
 
             # 3. Wavelink Player
             player = cast(wavelink.Player, vc) if isinstance(vc, wavelink.Player) else None
             if player:
-                lines.append(f"• **Player State:** `Playing: {getattr(player, 'playing', False)}` | `Paused: {getattr(player, 'paused', False)}` | `Volume: {getattr(player, 'volume', 100)}` | `Position: {getattr(player, 'position', 0)}ms`")
+                lines.append(f"â€¢ **Player State:** `Playing: {getattr(player, 'playing', False)}` | `Paused: {getattr(player, 'paused', False)}` | `Volume: {getattr(player, 'volume', 100)}` | `Position: {getattr(player, 'position', 0)}ms`")
                 if player.current:
-                    lines.append(f"• **Current Track:** `Title: {getattr(player.current, 'title', 'N/A')}` | `Author: {getattr(player.current, 'author', 'N/A')}` | `Source: {getattr(player.current, 'source', 'N/A')}`")
+                    lines.append(f"â€¢ **Current Track:** `Title: {getattr(player.current, 'title', 'N/A')}` | `Author: {getattr(player.current, 'author', 'N/A')}` | `Source: {getattr(player.current, 'source', 'N/A')}`")
                 else:
-                    lines.append("• **Current Track:** `None`")
+                    lines.append("â€¢ **Current Track:** `None`")
 
                 # 4. Lavalink Remote Player Info via Node API
                 if getattr(player, "node", None):

@@ -11,7 +11,7 @@ lavalink:
     sources:
       youtube: false
       bandcamp: true
-      soundcloud: false
+      soundcloud: true
       twitch: true
       vimeo: true
       http: true
@@ -24,7 +24,7 @@ lavalink:
     useSeekGhosting: true
     playerUpdateInterval: 5
     youtubeSearchEnabled: true
-    soundcloudSearchEnabled: false
+    soundcloudSearchEnabled: true
     gc-warnings: true
 
 plugins:
@@ -34,9 +34,8 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
-      - TVHTML5EMBEDDED
-      - ANDROID_TESTSUITE
       - MUSIC
-    oauth:
-      enabled: true
-      skipInitialization: false
+      - ANDROID_TESTSUITE
+      - WEB
+      - ANDROID
+      - IOS

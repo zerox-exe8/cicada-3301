@@ -16,16 +16,16 @@ lavalink:
       vimeo: true
       http: true
       local: false
-    bufferDurationMs: 1500
-    frameBufferDurationMs: 4000
-    opusEncodingQuality: 7
-    resamplingQuality: MEDIUM
+    bufferDurationMs: 4000
+    frameBufferDurationMs: 8000
+    opusEncodingQuality: 10
+    resamplingQuality: HIGH
     trackStuckThresholdMs: 10000
     useSeekGhosting: true
     playerUpdateInterval: 5
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
-    gc-warnings: true
+    gc-warnings: false
 
 plugins:
   youtube:

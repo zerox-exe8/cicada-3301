@@ -92,6 +92,8 @@ class DirectStreamResolver:
                         title = item.get("title")
                         author = item.get("user", {}).get("username", "Unknown Artist")
                         artwork = item.get("artwork_url") or item.get("user", {}).get("avatar_url")
+                        if artwork and "-large." in artwork:
+                            artwork = artwork.replace("-large.", "-t500x500.")
                         duration = item.get("duration", 0)
                         for t in item.get("media", {}).get("transcodings", []):
                             protocol = t.get("format", {}).get("protocol")

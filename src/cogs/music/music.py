@@ -1,8 +1,8 @@
 """
 Cicada 3301 Discord Bot - Ultra Low-Latency Clean Music Engine (Lavalink v4)
 Features:
+- Auto-Healing & Resilient Node Pool Connection
 - Instant 0-Delay Playback (<300ms execution)
-- Concurrent Search & Voice Connect (No lag, no timeout)
 - Minimalist Premium Container Layout (No noisy emojis)
 - Responsive Button Controller (Pause/Resume, Skip, Stop, Queue)
 - 320kbps Lossless Audio Stream
@@ -137,36 +137,37 @@ class MusicControllerView(discord.ui.View):
 
 
 class Music(commands.Cog):
-    """High-Performance, Low-Latency Music System."""
+    """High-Performance, Auto-Healing Music System."""
 
     def __init__(self, bot: CicadaBot) -> None:
         self.bot: CicadaBot = bot
-        self._connected: bool = False
-        self.bot.loop.create_task(self._connect_nodes())
+        self.bot.loop.create_task(self._ensure_node())
 
-    async def _connect_nodes(self) -> None:
-        """Connect to dedicated Lavalink node pool once bot is ready."""
-        await self.bot.wait_until_ready()
-        if self._connected:
-            return
-        self._connected = True
+    async def _ensure_node(self) -> bool:
+        """Ensure dedicated Lavalink node is connected with auto-reconnection."""
+        if wavelink.Pool.nodes and any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values()):
+            return True
 
-        nodes: list[wavelink.Node] = []
-        if Config.LAVALINK_URI:
-            nodes.append(
-                wavelink.Node(
-                    identifier="Dedicated-Node",
-                    uri=Config.LAVALINK_URI,
-                    password=Config.LAVALINK_PASSWORD,
-                    inactive_player_timeout=300,
-                )
-            )
+        if not Config.LAVALINK_URI:
+            return False
 
         try:
-            await wavelink.Pool.connect(nodes=nodes, client=self.bot, cache_capacity=100)
-            logger.info("Connected to Dedicated Lavalink v4 node successfully!")
+            node = wavelink.Node(
+                identifier="Dedicated-Node",
+                uri=Config.LAVALINK_URI,
+                password=Config.LAVALINK_PASSWORD,
+                inactive_player_timeout=300,
+            )
+            await wavelink.Pool.connect(nodes=[node], client=self.bot, cache_capacity=100)
+            for _ in range(8):
+                if any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values()):
+                    logger.info("Connected to Dedicated Lavalink v4 node successfully!")
+                    return True
+                await asyncio.sleep(0.5)
         except Exception as e:
-            logger.error(f"Error during Wavelink pool connection: {e}")
+            logger.error(f"Error connecting to Lavalink node pool: {e}")
+
+        return any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values())
 
     # ─── WAVELINK EVENT LISTENERS ─────────────────────────────────────────────
 
@@ -177,8 +178,10 @@ class Music(commands.Cog):
 
     @commands.Cog.listener()
     async def on_wavelink_node_closed(self, payload: wavelink.NodeClosedEventPayload) -> None:
-        """Fired when Lavalink node disconnects."""
-        logger.warning(f"Lavalink Node [{payload.node.identifier}] closed. Code: {payload.code}")
+        """Fired when Lavalink node disconnects. Automatically reconnects."""
+        logger.warning(f"Lavalink Node [{payload.node.identifier}] closed. Reconnecting...")
+        await asyncio.sleep(2)
+        await self._ensure_node()
 
     @commands.Cog.listener()
     async def on_wavelink_track_start(self, payload: wavelink.TrackStartEventPayload) -> None:
@@ -222,6 +225,12 @@ class Music(commands.Cog):
         """Instant ultra low-latency music playback."""
         if not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send_error("You must join a Voice Channel to play music.")
+            return
+
+        # Ensure node is connected
+        connected = await self._ensure_node()
+        if not connected:
+            await ctx.send_error("Audio node is initializing. Please retry in a few seconds.")
             return
 
         user_channel = ctx.author.voice.channel

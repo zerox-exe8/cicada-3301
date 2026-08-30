@@ -432,16 +432,6 @@ class Music(commands.Cog):
                 tracks = await wavelink.Playable.search(query)
             else:
                 for term in search_terms:
-                    # 1. Try Deezer 320kbps High-Fidelity Lossless (Zero Bot Block)
-                    try:
-                        res = await wavelink.Playable.search(term, source="dzsearch")
-                        if res:
-                            tracks = res if isinstance(res, list) else [res]
-                            break
-                    except Exception:
-                        pass
-
-                    # 2. YouTube Music & YouTube fallback
                     for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                         try:
                             res = await wavelink.Playable.search(term, source=src)

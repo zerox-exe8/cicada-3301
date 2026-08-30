@@ -1,10 +1,10 @@
 """
-Cicada 3301 Discord Bot - Ultra-Reliable High-Performance Music Engine (Lavalink v4)
+Cicada 3301 Discord Bot - Ultra-Accurate Studio Music Engine (Lavalink v4)
 Features:
-- 100% Reliable Voice Gateway Connection (Zero False Disconnects)
-- Universal YouTube + SoundCloud Auto-Failover Search Pipeline
-- Native Spotify Track, Album & Playlist Support
-- Inactivity Protected (No Random Disconnections)
+- Official Studio Canonical Match (No random lyrics/cover channels)
+- Pure Spotify & YouTube Music Direct Pipeline
+- Multi-Engine Auto-Failover (YouTubeMusic -> YouTube -> SoundCloud)
+- Zero Stale Disconnects & Auto-Recovery
 - Minimalist Premium Container Layout (Integrated Custom Emojis)
 - Interactive Controller (Pause/Resume, Skip, Stop, Queue)
 - 320kbps Lossless Audio Stream
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING, cast
 
 import discord
@@ -40,6 +41,15 @@ def format_duration(ms: int) -> str:
     if hours > 0:
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     return f"{minutes:02d}:{seconds:02d}"
+
+
+def clean_query_text(q: str) -> str:
+    """Remove conversational filler words like 'song', 'gaana' for razor-sharp studio matching."""
+    if q.startswith("http://") or q.startswith("https://"):
+        return q
+    cleaned = re.sub(r'\b(song|songs|gaana|gana|audio|video|mp3|full song|track)\b', '', q, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned if len(cleaned) > 1 else q
 
 
 def build_now_playing_container(track: wavelink.Playable, player: wavelink.Player, author: discord.Member | discord.User, bot: CicadaBot | None = None) -> CicadaContainer:
@@ -178,7 +188,7 @@ class Music(commands.Cog):
                 identifier="Dedicated-Node",
                 uri=Config.LAVALINK_URI,
                 password=Config.LAVALINK_PASSWORD,
-                inactive_player_timeout=None,  # No premature inactivity disconnects
+                inactive_player_timeout=None,
             )
             await wavelink.Pool.connect(nodes=[node], client=self.bot, cache_capacity=100)
             for _ in range(8):
@@ -262,7 +272,7 @@ class Music(commands.Cog):
         if not player or not player.connected:
             try:
                 player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
-            except Exception as e:
+            except Exception:
                 player = cast(wavelink.Player, ctx.guild.voice_client)
                 if not player or not player.connected:
                     try:
@@ -291,7 +301,7 @@ class Music(commands.Cog):
                         return
 
                     async def search_single(q: str):
-                        for src in (wavelink.TrackSource.YouTube, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud):
+                        for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube, wavelink.TrackSource.SoundCloud):
                             try:
                                 r = await wavelink.Playable.search(q, source=src)
                                 if r:
@@ -334,20 +344,34 @@ class Music(commands.Cog):
                 elif spotify_data["type"] == "track":
                     query = spotify_data["query"]
 
-        # 3. Multi-Engine Search with Automatic Failover: YouTube -> YouTubeMusic -> SoundCloud
+        # 3. Canonical Studio Match & Multi-Engine Search
         tracks = None
+        cleaned = clean_query_text(query)
+
+        # First try Canonical match if not a direct URL
+        search_terms = [query]
+        if not (query.startswith("http://") or query.startswith("https://")):
+            canonical = await SpotifyResolver.resolve_canonical(cleaned)
+            if canonical and canonical.lower() != query.lower():
+                search_terms = [canonical, cleaned, query]
+            else:
+                search_terms = [cleaned, query]
+
         try:
             if query.startswith("http://") or query.startswith("https://"):
                 tracks = await wavelink.Playable.search(query)
             else:
-                for src in (wavelink.TrackSource.YouTube, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud):
-                    try:
-                        res = await wavelink.Playable.search(query, source=src)
-                        if res:
-                            tracks = res
-                            break
-                    except Exception:
-                        pass
+                for term in search_terms:
+                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube, wavelink.TrackSource.SoundCloud):
+                        try:
+                            res = await wavelink.Playable.search(term, source=src)
+                            if res:
+                                tracks = res
+                                break
+                        except Exception:
+                            pass
+                    if tracks:
+                        break
         except Exception as e:
             await ctx.send_error(f"Failed to find song: `{e}`")
             return

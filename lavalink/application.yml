@@ -6,8 +6,6 @@ lavalink:
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
       repository: "https://maven.lavalink.dev/releases"
-    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.4.1"
-      repository: "https://maven.lavalink.dev/releases"
   server:
     password: "NfJXUsGSO4tVI1LDl7v3XPYZ"
     sources:
@@ -41,14 +39,3 @@ plugins:
       - MUSIC
       - ANDROID_TESTSUITE
       - IOS
-  lavasrc:
-    providers:
-      - "ytsearch:\"%ISRC%\""
-      - "ytsearch:%QUERY%"
-      - "scsearch:%QUERY%"
-    sources:
-      spotify: true
-      applemusic: true
-      deezer: true
-    spotify:
-      countryCode: "US"

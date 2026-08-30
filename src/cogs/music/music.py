@@ -104,38 +104,30 @@ class Music(commands.Cog):
             except Exception:
                 pass
 
-        # 1. Primary: 100% Official Studio Release via YouTube & YouTube Music
+        # 1. Unblocked Direct Studio Stream Engine (100% Reliable Audio Delivery)
         try:
-            yt_res = await wavelink.Playable.search(clean_q, source=wavelink.TrackSource.YouTube)
-            if yt_res:
-                track = yt_res[0] if isinstance(yt_res, list) else yt_res
-        except Exception:
+            resolved = await DirectStreamResolver.resolve(query)
+            if resolved and resolved.get("stream_url"):
+                search_res = await wavelink.Playable.search(resolved["stream_url"])
+                if search_res:
+                    track = search_res[0] if isinstance(search_res, list) else search_res
+                    if resolved.get("title"):
+                        track._title = resolved["title"]
+                    if resolved.get("author"):
+                        track._author = resolved["author"]
+                    if resolved.get("artwork"):
+                        track._artwork = resolved["artwork"]
+        except Exception as e:
+            logger.warning(f"Direct stream resolve failed: {e}")
             track = None
 
-        if not track:
+        # 2. Raw URL Fallback (for direct .mp3 / .wav audio links)
+        if not track and (query.startswith("http://") or query.startswith("https://")):
             try:
-                ytm_res = await wavelink.Playable.search(clean_q, source=wavelink.TrackSource.YouTubeMusic)
-                if ytm_res:
-                    track = ytm_res[0] if isinstance(ytm_res, list) else ytm_res
+                search_res = await wavelink.Playable.search(query)
+                if search_res:
+                    track = search_res[0] if isinstance(search_res, list) else search_res
             except Exception:
-                track = None
-
-        # 2. Fallback: Direct Cloudflare CDN Stream
-        if not track:
-            try:
-                resolved = await DirectStreamResolver.resolve(query)
-                if resolved and resolved.get("stream_url"):
-                    search_res = await wavelink.Playable.search(resolved["stream_url"])
-                    if search_res:
-                        track = search_res[0] if isinstance(search_res, list) else search_res
-                        if resolved.get("title"):
-                            track._title = resolved["title"]
-                        if resolved.get("author"):
-                            track._author = resolved["author"]
-                        if resolved.get("artwork"):
-                            track._artwork = resolved["artwork"]
-            except Exception as e:
-                logger.warning(f"Direct stream resolve fallback failed: {e}")
                 track = None
 
         if not track:

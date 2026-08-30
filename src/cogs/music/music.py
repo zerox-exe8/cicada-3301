@@ -201,8 +201,14 @@ class Music(commands.Cog):
 
     async def _ensure_node(self) -> bool:
         """Ensure dedicated Lavalink node is connected with auto-reconnection."""
-        if wavelink.Pool.nodes and any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values()):
-            return True
+        for name, node in list(wavelink.Pool.nodes.items()):
+            if node.status == wavelink.NodeStatus.CONNECTED:
+                return True
+            else:
+                try:
+                    await node.close(eject=True)
+                except Exception:
+                    pass
 
         if not Config.LAVALINK_URI:
             return False
@@ -215,7 +221,7 @@ class Music(commands.Cog):
                 inactive_player_timeout=None,
             )
             await wavelink.Pool.connect(nodes=[node], client=self.bot, cache_capacity=100)
-            for _ in range(8):
+            for _ in range(10):
                 if any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values()):
                     logger.info("Connected to Dedicated Lavalink v4 node successfully!")
                     return True
@@ -298,27 +304,12 @@ class Music(commands.Cog):
 
         # 1. Connect or retrieve player cleanly
         player: wavelink.Player | None = cast(wavelink.Player, ctx.guild.voice_client)
-        if not player or not player.connected:
-            if ctx.guild.me and ctx.guild.me.voice:
-                try:
-                    await ctx.guild.change_voice_state(channel=None)
-                    await asyncio.sleep(0.3)
-                except Exception:
-                    pass
-
+        if not player:
             try:
-                player = await user_channel.connect(cls=wavelink.Player, timeout=12.0, reconnect=True, self_deaf=True)
+                player = await user_channel.connect(cls=wavelink.Player, timeout=25.0, self_deaf=True)
             except Exception as e:
-                logger.warning(f"Initial voice connect failed: {e}. Retrying with clean disconnect...")
-                try:
-                    if ctx.guild.voice_client:
-                        await ctx.guild.voice_client.disconnect(force=True)
-                    await ctx.guild.change_voice_state(channel=None)
-                    await asyncio.sleep(0.5)
-                    player = await user_channel.connect(cls=wavelink.Player, timeout=10.0, reconnect=False, self_deaf=True)
-                except Exception as e2:
-                    await ctx.send_error(f"Could not connect to voice channel: `{e2}`")
-                    return
+                await ctx.send_error(f"Could not connect to voice channel: `{e}`")
+                return
         elif player.channel != user_channel:
             if not player.playing:
                 await player.move_to(user_channel)

@@ -6,6 +6,8 @@ lavalink:
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
       repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.4.1"
+      repository: "https://maven.lavalink.dev/releases"
   server:
     password: "NfJXUsGSO4tVI1LDl7v3XPYZ"
     sources:
@@ -39,3 +41,17 @@ plugins:
       - ANDROID_TESTSUITE
     oauth:
       enabled: true
+      skipInitialization: true
+  lavasrc:
+    providers:
+      - "dzisrc:%ISRC%"
+      - "dzsearch:%QUERY%"
+    sources:
+      spotify: false
+      applemusic: false
+      deezer: true
+      yandexmusic: false
+      flowerytts: false
+      youtube: false
+    deezer:
+      masterDecryptionKey: "e8c6d8e8d52439d33fc2a89468d62259"

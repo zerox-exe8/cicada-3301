@@ -80,3 +80,8 @@ class DirectStreamResolver:
         except Exception as e:
             logger.warning(f"100% Accurate stream extraction failed for '{query}': {e}")
         return None
+
+
+async def setup(bot: Any) -> None:
+    """Helper module entrypoint."""
+    pass

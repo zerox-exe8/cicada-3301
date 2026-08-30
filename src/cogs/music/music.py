@@ -223,7 +223,7 @@ class Music(commands.Cog):
         if not player.queue.is_empty:
             try:
                 next_track = await player.queue.get_wait()
-                await player.play(next_track)
+                await player.play(next_track, volume=100, paused=False)
             except Exception as e:
                 logger.error(f"Error auto-playing next track: {e}")
 
@@ -235,7 +235,7 @@ class Music(commands.Cog):
         if player and not player.queue.is_empty:
             try:
                 next_track = await player.queue.get_wait()
-                await player.play(next_track)
+                await player.play(next_track, volume=100, paused=False)
             except Exception:
                 pass
 
@@ -303,7 +303,7 @@ class Music(commands.Cog):
                     first_track = await search_single(track_queries[0])
                     if first_track:
                         if not player.playing:
-                            await player.play(first_track)
+                            await player.play(first_track, volume=100, paused=False)
                         else:
                             await player.queue.put_wait(first_track)
 
@@ -360,7 +360,7 @@ class Music(commands.Cog):
         if isinstance(tracks, wavelink.Playlist):
             added_count = len(tracks.tracks)
             if not player.playing:
-                await player.play(tracks.tracks[0])
+                await player.play(tracks.tracks[0], volume=100, paused=False)
                 for t in tracks.tracks[1:]:
                     await player.queue.put_wait(t)
             else:
@@ -388,7 +388,7 @@ class Music(commands.Cog):
         track: wavelink.Playable = tracks[0]
 
         if not player.playing:
-            await player.play(track)
+            await player.play(track, volume=100, paused=False)
             container = build_now_playing_container(track, player, ctx.author, bot=self.bot)
             view = MusicControllerView(self.bot, player, ctx.author.id)
             await send_container_response(ctx, container, view=view)

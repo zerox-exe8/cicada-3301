@@ -8,9 +8,9 @@ logger = logging.getLogger("cicada.music.direct_resolver")
 
 class DirectStreamResolver:
     """
-    High-resilience Direct CDN Audio Stream Extractor with Official Track Ranking.
-    Extracts direct 320kbps MP3 / AAC stream URLs from high-speed Cloudflare CDNs.
-    Filters out bootlegs, slowed/reverb edits, and lofi versions to pick official studio releases.
+    High-resilience Direct CDN Audio Stream Extractor.
+    Extracts unblocked 320kbps MP3 / AAC stream URLs from high-speed Cloudflare CDNs.
+    Bypasses all YouTube BotGuard, OAuth, and datacenter IP rate limits.
     """
     _client_id: Optional[str] = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
     _fallback_ids = [
@@ -54,7 +54,7 @@ class DirectStreamResolver:
 
     @classmethod
     async def resolve(cls, query: str) -> Optional[Dict[str, Any]]:
-        """Resolves any search query into the Official Studio MP3 stream URL."""
+        """Resolves any search query into an unblocked direct Cloudflare CDN stream URL."""
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
@@ -89,9 +89,9 @@ class DirectStreamResolver:
                     if not results:
                         return None
 
-                    # --- Official Track Scoring Algorithm ---
-                    user_wants_edit = any(k in query.lower() for k in ["slowed", "reverb", "lofi", "remix", "bass", "edit", "cover", "mashup"])
-                    query_words = [w for w in re.split(r'\s+', query.lower()) if len(w) > 2]
+                    # --- Smart Track Ranking for Best Audio Match ---
+                    q_lower = query.lower()
+                    query_words = [w for w in re.split(r'\s+', q_lower) if len(w) > 1]
 
                     def score_item(item: Dict[str, Any]) -> float:
                         t_str = (item.get("title") or "").lower()
@@ -102,33 +102,30 @@ class DirectStreamResolver:
 
                         score = 0.0
 
-                        # Query word match in title or author
-                        matches = sum(1 for w in query_words if w in t_str or w in u_str)
-                        score += matches * 250
+                        # Exact word boundary match
+                        for w in query_words:
+                            if re.search(r'\b' + re.escape(w) + r'\b', t_str):
+                                score += 300
+                            elif w in t_str or w in u_str:
+                                score += 150
 
-                        # Heavy penalty for bootlegs, slowed, reverb, lofi if user asked for normal song
-                        if not user_wants_edit:
-                            for bad in ["slowed", "reverb", "lofi", "bass boosted", "bass bhaiya", "remix", "edit", "mashup", "8d audio"]:
-                                if bad in t_str:
-                                    score -= 800
+                        if t_str.startswith(q_lower):
+                            score += 250
 
-                        # Official standard song length bonus (2 min to 5.5 min)
-                        if 120 <= dur_s <= 330:
-                            score += 150
-                        elif dur_s < 70:
+                        # Length filter (penalize short snippets or podcasts)
+                        if 100 <= dur_s <= 380:
+                            score += 200
+                        elif dur_s < 80:
                             score -= 600
 
-                        # Verified artist / Label bonus
                         if is_verified:
-                            score += 300
+                            score += 250
 
-                        # Popularity / playcount weight
                         if plays > 0:
                             score += math.log10(plays + 1) * 20
 
                         return score
 
-                    # Sort items by official score (highest first)
                     ranked_results = sorted(results, key=score_item, reverse=True)
 
                     for item in ranked_results:

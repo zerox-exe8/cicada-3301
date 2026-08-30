@@ -432,12 +432,14 @@ class Music(commands.Cog):
                 tracks = await wavelink.Playable.search(query)
             else:
                 for term in search_terms:
-                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTube):
+                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                         try:
                             res = await wavelink.Playable.search(term, source=src)
                             if res:
-                                best = select_best_track(res, query)
-                                tracks = [best]
+                                if isinstance(res, list):
+                                    tracks = res
+                                else:
+                                    tracks = [res]
                                 break
                         except Exception:
                             pass

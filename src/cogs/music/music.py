@@ -200,15 +200,23 @@ class Music(commands.Cog):
         self.bot.loop.create_task(self._ensure_node())
 
     async def _ensure_node(self) -> bool:
-        """Ensure dedicated Lavalink node is connected with auto-reconnection."""
-        for name, node in list(wavelink.Pool.nodes.items()):
-            if node.status == wavelink.NodeStatus.CONNECTED:
-                return True
-            else:
+        """Ensure dedicated Lavalink node is connected with live, verified session."""
+        for n in list(wavelink.Pool.nodes.values()):
+            if n.status == wavelink.NodeStatus.CONNECTED and getattr(n, "session_id", None):
+                # Verify session is alive on Lavalink server
                 try:
-                    await node.close(eject=True)
+                    if self.bot.session:
+                        url = f"{n.uri}/v4/sessions/{n.session_id}/players"
+                        async with self.bot.session.get(url, headers=n.headers, timeout=aiohttp.ClientTimeout(total=2.0)) as r:
+                            if r.status in (200, 204):
+                                return True
                 except Exception:
                     pass
+
+            try:
+                await n.close(eject=True)
+            except Exception:
+                pass
 
         if not Config.LAVALINK_URI:
             return False
@@ -221,9 +229,9 @@ class Music(commands.Cog):
                 inactive_player_timeout=None,
             )
             await wavelink.Pool.connect(nodes=[node], client=self.bot, cache_capacity=100)
-            for _ in range(10):
-                if any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool.nodes.values()):
-                    logger.info("Connected to Dedicated Lavalink v4 node successfully!")
+            for _ in range(12):
+                if any(n.status == wavelink.NodeStatus.CONNECTED and getattr(n, "session_id", None) for n in wavelink.Pool.nodes.values()):
+                    logger.info("Connected to Dedicated Lavalink v4 node successfully with verified live session!")
                     return True
                 await asyncio.sleep(0.5)
         except Exception as e:

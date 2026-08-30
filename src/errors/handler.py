@@ -89,7 +89,7 @@ class ErrorHandler(commands.Cog):
             container.add_section(
                 content=(
                     f"**{err_icon}Internal Error**\n"
-                    f"> An unexpected internal error occurred. The issue has been logged."
+                    f"> `{error}`"
                 )
             )
 

@@ -634,15 +634,14 @@ class Music(commands.Cog):
                     try:
                         p_info = await player.node.fetch_player_info(ctx.guild.id)
                         if p_info:
-                            raw = getattr(p_info, "raw_data", {})
-                            p_state = raw.get("state", {})
-                            p_voice = raw.get("voice", {})
-                            p_track = raw.get("track", {})
+                            st = p_info.state
+                            vs = p_info.voice_state
+                            tr = p_info.track
                             lines.append("\n**Lavalink Server Internal State:**")
-                            lines.append(f"> **UDP Connected:** `{p_state.get('connected')}` | **Voice Ping:** `{p_state.get('ping')}ms`")
-                            lines.append(f"> **Audio Position:** `{p_state.get('position')}ms`")
-                            lines.append(f"> **Endpoint:** `{p_voice.get('endpoint')}`")
-                            lines.append(f"> **Lavalink Track:** `{p_track.get('info', {}).get('title') if p_track else 'None'}`")
+                            lines.append(f"> **UDP Connected:** `{st.connected}` | **Voice Ping:** `{st.ping}ms`")
+                            lines.append(f"> **Audio Position:** `{st.position}ms`")
+                            lines.append(f"> **Endpoint:** `{vs.endpoint}`")
+                            lines.append(f"> **Lavalink Track:** `{tr.title if tr else 'None'}`")
                         else:
                             lines.append("\n> **Lavalink Player Info:** `None (No active player held on server)`")
                     except Exception as e:

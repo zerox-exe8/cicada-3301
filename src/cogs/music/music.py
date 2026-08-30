@@ -604,7 +604,8 @@ class Music(commands.Cog):
             lines.append("• **Nodes:** `No nodes in pool`")
         else:
             for nid, n in wavelink.Pool.nodes.items():
-                lines.append(f"• **Node [{nid}]:** `Status: {n.status.name}` | `Session: {n.session_id}` | `Heartbeat: {n.heartbeat}`")
+                status_str = n.status.name if hasattr(n.status, "name") else str(n.status)
+                lines.append(f"• **Node [{nid}]:** `Status: {status_str}` | `URI: {n.uri}`")
 
         # 2. Local Voice Client
         vc = ctx.guild.voice_client
@@ -616,34 +617,30 @@ class Music(commands.Cog):
         # 3. Wavelink Player
         player = cast(wavelink.Player, vc) if isinstance(vc, wavelink.Player) else None
         if player:
-            lines.append(f"• **Player:** `Playing: {player.playing}` | `Paused: {player.paused}` | `Volume: {player.volume}` | `Position: {player.position}ms`")
+            lines.append(f"• **Player State:** `Playing: {player.playing}` | `Paused: {player.paused}` | `Volume: {player.volume}` | `Position: {player.position}ms`")
             if player.current:
-                lines.append(f"• **Current Track:** `Title: {player.current.title}` | `URI: {player.current.uri}` | `Source: {player.current.source}`")
+                lines.append(f"• **Current Track:** `Title: {player.current.title}` | `Author: {player.current.author}` | `Source: {player.current.source}`")
             else:
                 lines.append("• **Current Track:** `None`")
 
-            # 4. Lavalink Remote Player via REST
-            if player.node and player.node.session_id:
+            # 4. Lavalink Remote Player Info via Node API
+            if player.node:
                 try:
-                    import aiohttp
-                    url = f"{player.node.uri}/v4/sessions/{player.node.session_id}/players/{ctx.guild.id}"
-                    headers = {"Authorization": player.node.password}
-                    async with aiohttp.ClientSession() as s:
-                        async with s.get(url, headers=headers) as r:
-                            if r.status == 200:
-                                p_data = await r.json()
-                                p_state = p_data.get("state", {})
-                                p_voice = p_data.get("voice", {})
-                                p_track = p_data.get("track", {})
-                                lines.append("\n**Lavalink Server Internal State:**")
-                                lines.append(f"> **UDP Connected:** `{p_state.get('connected')}` | **Voice Ping:** `{p_state.get('ping')}ms`")
-                                lines.append(f"> **Audio Position:** `{p_state.get('position')}ms`")
-                                lines.append(f"> **Endpoint:** `{p_voice.get('endpoint')}`")
-                                lines.append(f"> **Lavalink Track:** `{p_track.get('info', {}).get('title') if p_track else 'None'}`")
-                            else:
-                                lines.append(f"\n> **Lavalink REST Status:** `{r.status}`")
+                    p_info = await player.node.fetch_player_info(ctx.guild.id)
+                    if p_info:
+                        raw = p_info.raw_data
+                        p_state = raw.get("state", {})
+                        p_voice = raw.get("voice", {})
+                        p_track = raw.get("track", {})
+                        lines.append("\n**Lavalink Server Internal State:**")
+                        lines.append(f"> **UDP Connected:** `{p_state.get('connected')}` | **Voice Ping:** `{p_state.get('ping')}ms`")
+                        lines.append(f"> **Audio Position:** `{p_state.get('position')}ms`")
+                        lines.append(f"> **Endpoint:** `{p_voice.get('endpoint')}`")
+                        lines.append(f"> **Lavalink Track:** `{p_track.get('info', {}).get('title') if p_track else 'None'}`")
+                    else:
+                        lines.append("\n> **Lavalink Player Info:** `None (No active player held on server)`")
                 except Exception as e:
-                    lines.append(f"\n> **Lavalink REST Error:** `{e}`")
+                    lines.append(f"\n> **Lavalink Info Error:** `{e}`")
 
         container = CicadaContainer(accent_color=None)
         container.add_section(content="\n".join(lines))

@@ -594,6 +594,63 @@ class Music(commands.Cog):
         view = MusicControllerView(self.bot, player, ctx.author.id)
         await send_container_response(ctx, container, view=view)
 
+    @commands.hybrid_command(name="mdebug", description="Deep diagnostics of Voice Gateway and Lavalink state.")
+    async def mdebug(self, ctx: CustomContext) -> None:
+        """Inspect the exact internal state of Voice Gateway, Wavelink and Lavalink."""
+        lines = ["**Music System Diagnostics**\n"]
+
+        # 1. Node status
+        if not wavelink.Pool.nodes:
+            lines.append("• **Nodes:** `No nodes in pool`")
+        else:
+            for nid, n in wavelink.Pool.nodes.items():
+                lines.append(f"• **Node [{nid}]:** `Status: {n.status.name}` | `Session: {n.session_id}` | `Heartbeat: {n.heartbeat}`")
+
+        # 2. Local Voice Client
+        vc = ctx.guild.voice_client
+        if not vc:
+            lines.append("• **Voice Client:** `None (Not connected in guild)`")
+        else:
+            lines.append(f"• **Voice Client:** `Type: {type(vc).__name__}` | `Connected: {vc.is_connected()}` | `Channel: {vc.channel}`")
+
+        # 3. Wavelink Player
+        player = cast(wavelink.Player, vc) if isinstance(vc, wavelink.Player) else None
+        if player:
+            lines.append(f"• **Player:** `Playing: {player.playing}` | `Paused: {player.paused}` | `Volume: {player.volume}` | `Position: {player.position}ms`")
+            if player.current:
+                lines.append(f"• **Current Track:** `Title: {player.current.title}` | `URI: {player.current.uri}` | `Source: {player.current.source}`")
+            else:
+                lines.append("• **Current Track:** `None`")
+
+            # 4. Lavalink Remote Player via REST
+            if player.node and player.node.session_id:
+                try:
+                    import aiohttp
+                    url = f"{player.node.uri}/v4/sessions/{player.node.session_id}/players/{ctx.guild.id}"
+                    headers = {"Authorization": player.node.password}
+                    async with aiohttp.ClientSession() as s:
+                        async with s.get(url, headers=headers) as r:
+                            if r.status == 200:
+                                p_data = await r.json()
+                                p_state = p_data.get("state", {})
+                                p_voice = p_data.get("voice", {})
+                                p_track = p_data.get("track", {})
+                                lines.append("\n**Lavalink Server Internal State:**")
+                                lines.append(f"> **UDP Connected:** `{p_state.get('connected')}` | **Voice Ping:** `{p_state.get('ping')}ms`")
+                                lines.append(f"> **Audio Position:** `{p_state.get('position')}ms`")
+                                lines.append(f"> **Endpoint:** `{p_voice.get('endpoint')}`")
+                                lines.append(f"> **Lavalink Track:** `{p_track.get('info', {}).get('title') if p_track else 'None'}`")
+                            else:
+                                lines.append(f"\n> **Lavalink REST Status:** `{r.status}`")
+                except Exception as e:
+                    lines.append(f"\n> **Lavalink REST Error:** `{e}`")
+
+        container = CicadaContainer(accent_color=None)
+        container.add_section(content="\n".join(lines))
+        container.add_separator(divider=True)
+        container.add_text(f"-# Diagnostic timestamp: {discord.utils.utcnow().strftime('%H:%M:%S UTC')}")
+        await send_container_response(ctx, container)
+
 
 async def setup(bot: CicadaBot) -> None:
     """Load the Music Cog into Cicada 3301."""

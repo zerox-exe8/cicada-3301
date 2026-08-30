@@ -1,13 +1,15 @@
 server:
-  port: 2333
+  port: 26267
   address: 0.0.0.0
 
 lavalink:
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
       repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.4.1"
+      repository: "https://maven.lavalink.dev/releases"
   server:
-    password: "youshallnotpass"
+    password: "NfJXUsGSO4tVI1LDl7v3XPYZ"
     sources:
       youtube: false
       bandcamp: true
@@ -16,8 +18,8 @@ lavalink:
       vimeo: true
       http: true
       local: false
-    bufferDurationMs: 2500
-    frameBufferDurationMs: 6000
+    bufferDurationMs: 1500
+    frameBufferDurationMs: 4000
     opusEncodingQuality: 7
     resamplingQuality: MEDIUM
     trackStuckThresholdMs: 10000
@@ -30,24 +32,23 @@ lavalink:
 plugins:
   youtube:
     enabled: true
-    v2:
-      enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
     clients:
-      - MUSIC
+      - TVHTML5EMBEDDED
       - ANDROID_VR
-      - WEB
-
-metrics:
-  prometheus:
-    enabled: false
-
-sentry:
-  dsn: ""
-  environment: ""
-
-logging:
-  file:
-    path: ./logs/
-
-  level:
-    root: INFO
+      - MUSIC
+      - ANDROID_TESTSUITE
+      - IOS
+  lavasrc:
+    providers:
+      - "ytsearch:\"%ISRC%\""
+      - "ytsearch:%QUERY%"
+      - "scsearch:%QUERY%"
+    sources:
+      spotify: true
+      applemusic: true
+      deezer: true
+    spotify:
+      countryCode: "US"

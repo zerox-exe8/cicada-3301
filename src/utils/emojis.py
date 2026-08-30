@@ -53,33 +53,34 @@ class EmojiRegistry:
         asset_dirs = [
             Path(__file__).resolve().parent.parent.parent / "assets" / "emoji",
             Path(__file__).resolve().parent.parent.parent / "assets" / "emoji2",
+            Path(__file__).resolve().parent.parent.parent / "assets" / "music",
         ]
 
         for adir in asset_dirs:
             if not adir.exists():
                 continue
-            for img_file in sorted(adir.glob("*.png")):
-                # Clean name: alphanumeric + underscores only, 2-32 chars
-                raw_name = img_file.stem.lower()
-                clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", raw_name)
-                clean_name = clean_name.strip("_")[:32]
-                if len(clean_name) < 2:
-                    continue
+            for pattern in ("*.png", "*.gif"):
+                for img_file in sorted(adir.glob(pattern)):
+                    raw_name = img_file.stem.lower()
+                    clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", raw_name)
+                    clean_name = clean_name.strip("_")[:32]
+                    if len(clean_name) < 2:
+                        continue
 
-                if clean_name not in self._emojis and raw_name not in self._emojis:
-                    try:
-                        with open(img_file, "rb") as f:
-                            img_data = f.read()
-                        new_emoji = await self.bot.create_application_emoji(
-                            name=clean_name,
-                            image=img_data,
-                        )
-                        self._emojis[clean_name] = new_emoji
-                        self._emojis[raw_name] = new_emoji
-                        uploaded += 1
-                        logger.info(f"Uploaded application emoji: {clean_name}")
-                    except Exception as e:
-                        logger.debug(f"Could not upload emoji {clean_name}: {e}")
+                    if clean_name not in self._emojis and raw_name not in self._emojis:
+                        try:
+                            with open(img_file, "rb") as f:
+                                img_data = f.read()
+                            new_emoji = await self.bot.create_application_emoji(
+                                name=clean_name,
+                                image=img_data,
+                            )
+                            self._emojis[clean_name] = new_emoji
+                            self._emojis[raw_name] = new_emoji
+                            uploaded += 1
+                            logger.info(f"Uploaded application emoji: {clean_name}")
+                        except Exception as e:
+                            logger.debug(f"Could not upload emoji {clean_name}: {e}")
 
         return uploaded, len(self._emojis)
 

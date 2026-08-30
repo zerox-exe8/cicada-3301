@@ -40,10 +40,16 @@ def format_duration(ms: int) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
-def build_now_playing_container(track: wavelink.Playable, player: wavelink.Player, author: discord.Member | discord.User) -> CicadaContainer:
-    """Build a sleek, minimalist Now Playing Container card."""
+def build_now_playing_container(track: wavelink.Playable, player: wavelink.Player, author: discord.Member | discord.User, bot: CicadaBot | None = None) -> CicadaContainer:
+    """Build a sleek, minimalist Now Playing Container card with custom music icon."""
     duration_str = format_duration(track.length) if track.length else "Live Stream"
     channel_name = player.channel.name if player.channel else "Voice Channel"
+
+    playing_icon = ""
+    if bot and hasattr(bot, "custom_emojis"):
+        playing_icon = bot.custom_emojis.get("music_playing", bot.custom_emojis.get("a_musical_notes", bot.custom_emojis.get("music_music", "")))
+        if playing_icon:
+            playing_icon = f"{playing_icon} "
 
     accessory = None
     if track.artwork:
@@ -52,7 +58,7 @@ def build_now_playing_container(track: wavelink.Playable, player: wavelink.Playe
     container = CicadaContainer(accent_color=None)
     container.add_section(
         content=(
-            f"**Now Playing**\n"
+            f"**{playing_icon}Now Playing**\n"
             f"> **Title:** **[{track.title}]({track.uri})**\n"
             f"> **Artist:** `{track.author}` • **Duration:** `{duration_str}`"
         ),
@@ -74,6 +80,17 @@ class MusicControllerView(discord.ui.View):
         self.bot = bot
         self.player = player
         self.author_id = author_id
+
+        # Attach custom uploaded emojis if available
+        if hasattr(bot, "custom_emojis"):
+            if self.pause_resume_btn:
+                self.pause_resume_btn.emoji = bot.custom_emojis.get_emoji_obj("paused")
+            if self.skip_btn:
+                self.skip_btn.emoji = bot.custom_emojis.get_emoji_obj("skip")
+            if self.queue_btn:
+                self.queue_btn.emoji = bot.custom_emojis.get_emoji_obj("queue")
+            if self.stop_btn:
+                self.stop_btn.emoji = bot.custom_emojis.get_emoji_obj("icons_stop_button")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not interaction.user or not isinstance(interaction.user, discord.Member):
@@ -300,7 +317,7 @@ class Music(commands.Cog):
 
         if not player.playing:
             await player.play(track)
-            container = build_now_playing_container(track, player, ctx.author)
+            container = build_now_playing_container(track, player, ctx.author, bot=self.bot)
             view = MusicControllerView(self.bot, player, ctx.author.id)
             await send_container_response(ctx, container, view=view)
         else:
@@ -410,7 +427,7 @@ class Music(commands.Cog):
             await ctx.send_error("No track is currently playing.")
             return
 
-        container = build_now_playing_container(player.current, player, ctx.author)
+        container = build_now_playing_container(player.current, player, ctx.author, bot=self.bot)
         view = MusicControllerView(self.bot, player, ctx.author.id)
         await send_container_response(ctx, container, view=view)
 

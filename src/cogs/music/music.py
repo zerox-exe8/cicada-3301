@@ -2,7 +2,7 @@
 Cicada 3301 Discord Bot - Ultra Low-Latency Clean Music Engine (Lavalink v4)
 Features:
 - Dedicated Spotify & YouTube / YouTube Music Audio Pipeline
-- Parallel Execution (Instant <250ms Voice Join + Song Search)
+- Robust Voice Gateway Connection (Auto-recovery from stale sessions)
 - Full Spotify & YouTube URL + Playlist Support
 - Auto-Healing & Resilient Node Pool Connection
 - Minimalist Premium Container Layout (Integrated Custom Emojis)
@@ -142,7 +142,7 @@ class MusicControllerView(discord.ui.View):
                 dur = format_duration(track.length) if track.length else "Live"
                 lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
             if self.player.queue.count > 10:
-                lines.append(f"-# ...and `{self.player.queue.count - 10}` more tracks")
+                lines.append(f"-# ...and `{player.queue.count - 10}` more tracks")
 
         container = CicadaContainer(accent_color=None)
         container.add_section(content="\n".join(lines))
@@ -257,120 +257,99 @@ class Music(commands.Cog):
 
         user_channel = ctx.author.voice.channel
 
-        # Parallel Task 1: Connect to Voice Channel
-        async def connect_voice() -> wavelink.Player | None:
-            p = cast(wavelink.Player, ctx.guild.voice_client)
-            if not p:
+        # 1. Connect or retrieve player cleanly
+        player: wavelink.Player | None = cast(wavelink.Player, ctx.guild.voice_client)
+        if not player or not player.is_connected():
+            if ctx.guild.voice_client:
                 try:
-                    return await user_channel.connect(cls=wavelink.Player, self_deaf=True)
-                except Exception as e:
-                    logger.debug(f"Voice connect error: {e}")
-                    return None
-            elif p.channel != user_channel and not p.playing:
-                await p.move_to(user_channel)
-            return p
+                    await ctx.guild.voice_client.disconnect(force=True)
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+            try:
+                player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
+            except Exception as e:
+                player = cast(wavelink.Player, ctx.guild.voice_client)
+                if not player:
+                    await ctx.send_error(f"Could not connect to voice channel: `{e}`")
+                    return
+        elif player.channel != user_channel:
+            if not player.playing:
+                await player.move_to(user_channel)
+            else:
+                await ctx.send_error(f"I am already playing audio in {player.channel.mention}.")
+                return
 
-        # Parallel Task 2: Search Track via Spotify & YouTube
-        async def resolve_tracks():
-            # Check for Spotify URLs
-            if "spotify.com" in query.lower():
-                s_data = await SpotifyResolver.resolve_url(query)
-                if s_data:
-                    return ("spotify", s_data)
+        # 2. Check for Spotify URLs
+        if "spotify.com" in query.lower():
+            spotify_data = await SpotifyResolver.resolve_url(query)
+            if spotify_data:
+                if spotify_data["type"] in ("playlist", "album"):
+                    track_queries = spotify_data["tracks"]
+                    if not track_queries:
+                        await ctx.send_error("Could not load tracks from this Spotify playlist.")
+                        return
 
-            # Direct URLs (YouTube)
+                    first_res = await wavelink.Playable.search(track_queries[0], source=wavelink.TrackSource.YouTubeMusic)
+                    if not first_res:
+                        first_res = await wavelink.Playable.search(track_queries[0], source=wavelink.TrackSource.YouTube)
+
+                    if first_res:
+                        if not player.playing:
+                            await player.play(first_res[0])
+                        else:
+                            await player.queue.put_wait(first_res[0])
+
+                    async def load_remaining():
+                        for q in track_queries[1:]:
+                            try:
+                                t = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTubeMusic)
+                                if not t:
+                                    t = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTube)
+                                if t:
+                                    await player.queue.put_wait(t[0])
+                            except Exception:
+                                pass
+
+                    asyncio.create_task(load_remaining())
+
+                    container = CicadaContainer(accent_color=0x1DB954)
+                    container.add_section(
+                        content=(
+                            f"**Spotify {spotify_data['type'].capitalize()} Loaded**\n"
+                            f"> **Title:** **{spotify_data['name']}**\n"
+                            f"> **Tracks Loaded:** `{len(track_queries)}` songs"
+                        )
+                    )
+                    container.add_separator(divider=True)
+                    container.add_text(
+                        f"• **Channel:** `{user_channel.name}` | **Bitrate:** `320 kbps (HD)`\n"
+                        f"• **Requested By:** {ctx.author.mention}"
+                    )
+                    view = MusicControllerView(self.bot, player, ctx.author.id)
+                    await send_container_response(ctx, container, view=view)
+                    return
+                elif spotify_data["type"] == "track":
+                    query = spotify_data["query"]
+
+        # 3. Direct Search: YouTube Music -> YouTube (Official Studio Master Tracks)
+        tracks = None
+        try:
             if query.startswith("http://") or query.startswith("https://"):
-                res = await wavelink.Playable.search(query)
-                return ("wavelink", res)
-
-            # Direct Search: YouTube Music -> YouTube (Official Studio Master Tracks)
-            try:
-                res = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
-                if res:
-                    return ("wavelink", res)
-            except Exception:
-                pass
-
-            try:
-                res = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTube)
-                if res:
-                    return ("wavelink", res)
-            except Exception:
-                pass
-
-            return ("wavelink", None)
-
-        # Run connection and search in parallel (<250ms total)
-        results = await asyncio.gather(connect_voice(), resolve_tracks(), return_exceptions=True)
-
-        player = results[0] if not isinstance(results[0], Exception) else None
-        track_info = results[1] if not isinstance(results[1], Exception) else ("wavelink", None)
-
-        if not player:
-            await ctx.send_error("Could not connect to your voice channel. Please check bot permissions.")
+                tracks = await wavelink.Playable.search(query)
+            else:
+                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
+                if not tracks:
+                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTube)
+        except Exception as e:
+            await ctx.send_error(f"Failed to find song: `{e}`")
             return
 
-        mode, data = track_info
-
-        # Handle Spotify Playlists / Albums
-        if mode == "spotify" and data:
-            if data["type"] in ("playlist", "album"):
-                track_queries = data["tracks"]
-                if not track_queries:
-                    await ctx.send_error("Could not load tracks from this Spotify playlist.")
-                    return
-
-                first_res = await wavelink.Playable.search(track_queries[0], source=wavelink.TrackSource.YouTubeMusic)
-                if not first_res:
-                    first_res = await wavelink.Playable.search(track_queries[0], source=wavelink.TrackSource.YouTube)
-
-                if first_res:
-                    if not player.playing:
-                        await player.play(first_res[0])
-                    else:
-                        await player.queue.put_wait(first_res[0])
-
-                async def load_remaining():
-                    for q in track_queries[1:]:
-                        try:
-                            t = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTubeMusic)
-                            if not t:
-                                t = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTube)
-                            if t:
-                                await player.queue.put_wait(t[0])
-                        except Exception:
-                            pass
-
-                asyncio.create_task(load_remaining())
-
-                container = CicadaContainer(accent_color=0x1DB954)
-                container.add_section(
-                    content=(
-                        f"**Spotify {data['type'].capitalize()} Loaded**\n"
-                        f"> **Title:** **{data['name']}**\n"
-                        f"> **Tracks Loaded:** `{len(track_queries)}` songs"
-                    )
-                )
-                container.add_separator(divider=True)
-                container.add_text(
-                    f"• **Channel:** `{user_channel.name}` | **Bitrate:** `320 kbps (HD)`\n"
-                    f"• **Requested By:** {ctx.author.mention}"
-                )
-                view = MusicControllerView(self.bot, player, ctx.author.id)
-                await send_container_response(ctx, container, view=view)
-                return
-            elif data["type"] == "track":
-                res = await wavelink.Playable.search(data["query"], source=wavelink.TrackSource.YouTubeMusic)
-                if not res:
-                    res = await wavelink.Playable.search(data["query"], source=wavelink.TrackSource.YouTube)
-                data = res
-
-        tracks = data
         if not tracks:
             await ctx.send_error(f"No tracks found on YouTube / Spotify for `{query}`.")
             return
 
-        # Handle Standard Playlists (YouTube)
+        # 4. Handle Standard Playlists (YouTube)
         if isinstance(tracks, wavelink.Playlist):
             added_count = len(tracks.tracks)
             if not player.playing:
@@ -398,7 +377,7 @@ class Music(commands.Cog):
             await send_container_response(ctx, container, view=view)
             return
 
-        # Handle Single Track
+        # 5. Handle Single Track
         track: wavelink.Playable = tracks[0]
 
         if not player.playing:

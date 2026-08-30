@@ -624,7 +624,7 @@ class Music(commands.Cog):
     @commands.hybrid_command(name="mdebug", description="Deep diagnostics of Voice Gateway and Lavalink state.")
     async def mdebug(self, ctx: CustomContext) -> None:
         """Inspect the exact internal state of Voice Gateway, Wavelink and Lavalink."""
-        lines = ["**Music System Diagnostics** `[Build: 56c3d43 | LavaSrc HD Engine]`\n"]
+        lines = ["**Music System Diagnostics** `[Build: e2daa4f | Direct CDN Engine]`\n"]
 
         try:
             # 1. Node status

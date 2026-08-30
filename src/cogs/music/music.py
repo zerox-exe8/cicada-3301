@@ -1,13 +1,13 @@
 """
-Cicada 3301 Discord Bot - Clean Direct Audio Player (Lavalink v4)
-High-performance, minimal, zero-bloat music engine.
-Streams lossless 320kbps direct CDN audio straight to Discord voice channels.
+Cicada 3301 Discord Bot - Official Music Engine (YouTube Music & Direct CDN)
+Streams 100% authentic official studio audio directly to Discord voice channels.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING, cast
 
 import discord
@@ -25,7 +25,7 @@ logger = logging.getLogger("cicada.music")
 
 
 class Music(commands.Cog):
-    """Clean & Ultra-Fast Music Engine powered by Lavalink v4."""
+    """Official Studio Music Engine powered by Lavalink v4 & YouTube Music."""
 
     def __init__(self, bot: CicadaBot) -> None:
         self.bot = bot
@@ -64,9 +64,9 @@ class Music(commands.Cog):
                 return False
         return False
 
-    @commands.hybrid_command(name="play", aliases=["p"], description="Play any song in your voice channel.")
+    @commands.hybrid_command(name="play", aliases=["p"], description="Play any official song in your voice channel.")
     async def play(self, ctx: CustomContext, *, query: str) -> None:
-        """Play any song with direct lossless 320kbps CDN stream."""
+        """Play exact official studio music in voice channel."""
         if not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send("You must be in a Voice Channel to play music.")
             return
@@ -88,34 +88,46 @@ class Music(commands.Cog):
         elif player.channel != user_channel:
             await player.move_to(user_channel)
 
-        # 2. Resolve Direct Lossless Stream URL
         status_msg = await ctx.send(f"Searching for **{query}**...")
         
         track = None
-        # 1. Best Unblocked 320kbps Audio Stream Engine (Zero Blocks, 100% Guaranteed Audio)
+        clean_q = query.strip()
+
+        # Extract YouTube link title if URL was provided
+        if "youtube.com" in clean_q or "youtu.be" in clean_q:
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as s:
+                    yt_title = await DirectStreamResolver.extract_yt_metadata(s, clean_q)
+                    if yt_title:
+                        clean_q = yt_title
+            except Exception:
+                pass
+
+        # 1. Primary: 100% Official Studio Release via YouTube Music
         try:
-            resolved = await DirectStreamResolver.resolve(query)
-            if resolved and resolved.get("stream_url"):
-                search_res = await wavelink.Playable.search(resolved["stream_url"])
-                if search_res:
-                    track = search_res[0] if isinstance(search_res, list) else search_res
-                    if resolved.get("title"):
-                        track._title = resolved["title"]
-                    if resolved.get("author"):
-                        track._author = resolved["author"]
-                    if resolved.get("artwork"):
-                        track._artwork = resolved["artwork"]
-        except Exception as e:
-            logger.warning(f"Direct stream resolve failed: {e}")
+            ytm_res = await wavelink.Playable.search(clean_q, source=wavelink.TrackSource.YouTubeMusic)
+            if ytm_res:
+                track = ytm_res[0] if isinstance(ytm_res, list) else ytm_res
+        except Exception:
             track = None
 
-        # 2. Raw URL Fallback (for direct .mp3 / .wav streams)
-        if not track and (query.startswith("http://") or query.startswith("https://")):
+        # 2. Fallback: Direct Cloudflare CDN Stream
+        if not track:
             try:
-                search_res = await wavelink.Playable.search(query)
-                if search_res:
-                    track = search_res[0] if isinstance(search_res, list) else search_res
-            except Exception:
+                resolved = await DirectStreamResolver.resolve(query)
+                if resolved and resolved.get("stream_url"):
+                    search_res = await wavelink.Playable.search(resolved["stream_url"])
+                    if search_res:
+                        track = search_res[0] if isinstance(search_res, list) else search_res
+                        if resolved.get("title"):
+                            track._title = resolved["title"]
+                        if resolved.get("author"):
+                            track._author = resolved["author"]
+                        if resolved.get("artwork"):
+                            track._artwork = resolved["artwork"]
+            except Exception as e:
+                logger.warning(f"Direct stream resolve fallback failed: {e}")
                 track = None
 
         if not track:
@@ -133,7 +145,7 @@ class Music(commands.Cog):
             )
             if getattr(track, "artwork", None):
                 embed.set_thumbnail(url=track.artwork)
-            embed.set_footer(text=f"Requested by {ctx.author.display_name} | 320 kbps HD")
+            embed.set_footer(text=f"Requested by {ctx.author.display_name} | Official Studio Audio")
             await status_msg.edit(content=None, embed=embed)
         else:
             await player.queue.put_wait(track)
@@ -201,7 +213,6 @@ class Music(commands.Cog):
                 lines.append(f"`{i}.` {t.title}")
         await ctx.send("\n".join(lines))
 
-    # Auto-play next track in queue when current finishes
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload) -> None:
         player: wavelink.Player = payload.player

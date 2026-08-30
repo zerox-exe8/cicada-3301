@@ -39,4 +39,4 @@ plugins:
       - MUSIC
     oauth:
       enabled: true
-      skipInitialization: true
+      skipInitialization: false

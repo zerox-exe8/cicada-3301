@@ -440,14 +440,16 @@ class Music(commands.Cog):
                             direct_tracks = await wavelink.Playable.search(resolved["stream_url"])
                             if direct_tracks:
                                 t = direct_tracks[0] if isinstance(direct_tracks, list) else direct_tracks
-                                t.title = resolved.get("title") or t.title
-                                t.author = resolved.get("author") or t.author
+                                if resolved.get("title"):
+                                    t._title = resolved["title"]
+                                if resolved.get("author"):
+                                    t._author = resolved["author"]
                                 if resolved.get("artwork"):
-                                    t.artwork = resolved["artwork"]
+                                    t._artwork = resolved["artwork"]
                                 tracks = [t]
                                 break
-                    except Exception:
-                        pass
+                    except Exception as err:
+                        logger.warning(f"Direct stream load error for '{term}': {err}")
 
                 # 2. Fallback to standard sources if direct CDN resolve was empty
                 if not tracks:

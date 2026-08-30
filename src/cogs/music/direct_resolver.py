@@ -8,9 +8,9 @@ logger = logging.getLogger("cicada.music.direct_resolver")
 
 class DirectStreamResolver:
     """
-    High-resilience Direct CDN Audio Stream Extractor with Universal URL & Query Intelligence.
-    Accurately resolves YouTube links, Spotify queries, movie tracks, and keywords into
-    unblocked 320kbps MP3 / AAC streams from high-speed Cloudflare CDNs.
+    High-resilience Direct CDN Audio Stream Extractor with Canonical Music Graph.
+    Accurately resolves YouTube links, movie songs, and single-word keywords into
+    authentic, unblocked 320kbps MP3 / AAC audio streams from Cloudflare CDNs.
     """
     _client_id: Optional[str] = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
     _fallback_ids = [
@@ -54,7 +54,7 @@ class DirectStreamResolver:
 
     @classmethod
     async def extract_yt_metadata(cls, session: aiohttp.ClientSession, url: str) -> Optional[str]:
-        """Extracts clean song title from YouTube URL using fast oEmbed API."""
+        """Extracts clean song title from YouTube URL using official fast oEmbed."""
         try:
             oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
             async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=4, connect=2)) as r:
@@ -71,19 +71,19 @@ class DirectStreamResolver:
 
     @classmethod
     async def resolve(cls, query: str) -> Optional[Dict[str, Any]]:
-        """Resolves any query or link into an unblocked high-speed CDN audio stream."""
+        """Resolves any search query or link into an unblocked high-speed CDN audio stream."""
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
                 search_query = query.strip()
 
-                # 1. YouTube URL Intelligence
+                # 1. YouTube Link Resolution
                 if "youtube.com" in search_query or "youtu.be" in search_query:
                     yt_title = await cls.extract_yt_metadata(session, search_query)
                     if yt_title:
                         search_query = yt_title
 
-                # 2. Canonical Graph Search (Apple Music / iTunes Canonical Mapping)
+                # 2. Canonical Graph Search (Apple Music / iTunes)
                 canonical_title = None
                 canonical_author = None
                 canonical_artwork = None
@@ -104,7 +104,7 @@ class DirectStreamResolver:
                 except Exception:
                     pass
 
-                # 3. Generate Search Candidate Variations
+                # 3. Build Multi-Candidate Variations
                 candidates: List[str] = []
                 if canonical_title:
                     candidates.append(canonical_title)
@@ -113,7 +113,7 @@ class DirectStreamResolver:
                         candidates.append(f"{canonical_title} {first_artist}")
 
                 candidates.append(search_query)
-                simplified = re.sub(r'(?:song|video|audio|official|lyrics|full)', '', search_query, flags=re.IGNORECASE).strip()
+                simplified = re.sub(r'(?:song|video|audio|official|lyrics|full|movie)', '', search_query, flags=re.IGNORECASE).strip()
                 if simplified and simplified not in candidates:
                     candidates.append(simplified)
 
@@ -140,14 +140,19 @@ class DirectStreamResolver:
                 if not results:
                     return None
 
-                # 5. Score items to pick full-length audio
+                # 5. Smart Quality Scoring
+                target_word = (canonical_title or search_query).lower()
                 def score_item(item: Dict[str, Any]) -> float:
+                    t_str = (item.get("title") or "").lower()
                     dur_s = item.get("duration", 0) / 1000.0
                     plays = item.get("playback_count", 0) or 0
                     score = 0.0
-                    if 100 <= dur_s <= 380:
+
+                    if target_word in t_str:
+                        score += 300
+                    if 110 <= dur_s <= 380:
                         score += 200
-                    elif dur_s < 80:
+                    elif dur_s < 75:
                         score -= 500
                     if plays > 0:
                         score += math.log10(plays + 1) * 20

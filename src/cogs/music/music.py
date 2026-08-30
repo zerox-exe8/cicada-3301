@@ -1,8 +1,9 @@
 """
 Cicada 3301 Discord Bot - Ultra Low-Latency Clean Music Engine (Lavalink v4)
 Features:
-- Auto-Healing & Resilient Node Pool Connection
 - Instant 0-Delay Playback (<300ms execution)
+- High-Accuracy Search Engine (SoundCloud, Bandcamp, HTTP)
+- Auto-Healing & Resilient Node Pool Connection
 - Minimalist Premium Container Layout (No noisy emojis)
 - Responsive Button Controller (Pause/Resume, Skip, Stop, Queue)
 - 320kbps Lossless Audio Stream
@@ -220,7 +221,7 @@ class Music(commands.Cog):
     # ─── MUSIC COMMANDS ───────────────────────────────────────────────────────
 
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song or playlist in voice channel.")
-    @app_commands.describe(query="Song title, artist name, YouTube/Spotify link")
+    @app_commands.describe(query="Song title, artist name, SoundCloud/YouTube link")
     async def play(self, ctx: CustomContext, *, query: str) -> None:
         """Instant ultra low-latency music playback."""
         if not ctx.author.voice or not ctx.author.voice.channel:
@@ -250,14 +251,14 @@ class Music(commands.Cog):
                 await ctx.send_error(f"I am already playing audio in {player.channel.mention}.")
                 return
 
-        # 2. Fast single-pass track search
+        # 2. Fast universal track search
         try:
             if query.startswith("http://") or query.startswith("https://"):
                 tracks: wavelink.Search = await wavelink.Playable.search(query)
             else:
-                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTube)
+                tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
                 if not tracks:
-                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTubeMusic)
+                    tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.YouTube)
         except Exception as e:
             await ctx.send_error(f"Failed to find song: `{e}`")
             return

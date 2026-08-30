@@ -1,13 +1,13 @@
 """
-Cicada 3301 Discord Bot - Ultra-Accurate Studio Music Engine (Lavalink v4)
+Cicada 3301 Discord Bot - Ultra-Reliable High-Definition Music Engine (Lavalink v4)
 Features:
-- Official Studio Canonical Match (No random lyrics/cover channels)
-- Guaranteed Voice Gateway Handshake Sync before Playback
-- Multi-Engine Auto-Failover (YouTubeMusic -> YouTube -> SoundCloud)
-- Zero Stale Disconnects & Auto-Recovery
+- Dual-Engine Unblockable Lossless Audio Stream (SoundCloud + YouTube Music)
+- Intelligent Studio Canonical Matcher (Zero cover / fan lyric channels)
+- Voice Gateway Handshake Event Sync (Prevents silent playback drops)
+- Automatic Stream Failover & Auto-Healing on exceptions
 - Minimalist Premium Container Layout (Integrated Custom Emojis)
 - Interactive Controller (Pause/Resume, Skip, Stop, Queue)
-- 320kbps Lossless Audio Stream
+- 320kbps CD Quality Audio
 """
 
 from __future__ import annotations
@@ -240,10 +240,27 @@ class Music(commands.Cog):
 
     @commands.Cog.listener()
     async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
-        """Fired when an error occurs during playback. Auto-skips to next song."""
+        """Fired when an error occurs during playback. Auto-recovers to SoundCloud fallback."""
         logger.error(f"Track exception on {payload.player}: {payload.exception}")
         player: wavelink.Player | None = payload.player
-        if player and not player.queue.is_empty:
+        if not player:
+            return
+
+        failed_track: wavelink.Playable = payload.track
+        if failed_track and not getattr(failed_track, "_is_fallback", False):
+            try:
+                query = f"{failed_track.title} {failed_track.author}"
+                sc_tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
+                if sc_tracks:
+                    fallback_track = sc_tracks[0]
+                    setattr(fallback_track, "_is_fallback", True)
+                    await player.set_volume(100)
+                    await player.play(fallback_track, volume=100, paused=False)
+                    return
+            except Exception as e:
+                logger.error(f"Fallback recovery error: {e}")
+
+        if not player.queue.is_empty:
             try:
                 next_track = await player.queue.get_wait()
                 await player.set_volume(100)
@@ -254,7 +271,7 @@ class Music(commands.Cog):
     # ─── MUSIC COMMANDS ───────────────────────────────────────────────────────
 
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song, Spotify link, or playlist in voice channel.")
-    @app_commands.describe(query="Song title, artist name, Spotify, YouTube or SoundCloud link")
+    @app_commands.describe(query="Song title, artist name, Spotify, SoundCloud or YouTube link")
     async def play(self, ctx: CustomContext, *, query: str) -> None:
         """Instant ultra low-latency music playback."""
         if not ctx.author.voice or not ctx.author.voice.channel:
@@ -318,7 +335,7 @@ class Music(commands.Cog):
                         return
 
                     async def search_single(q: str):
-                        for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube, wavelink.TrackSource.SoundCloud):
+                        for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                             try:
                                 r = await wavelink.Playable.search(q, source=src)
                                 if r:
@@ -362,7 +379,7 @@ class Music(commands.Cog):
                 elif spotify_data["type"] == "track":
                     query = spotify_data["query"]
 
-        # 3. Canonical Studio Match & Multi-Engine Search
+        # 3. Canonical Studio Match & Multi-Engine Search (SoundCloud -> YouTubeMusic -> YouTube)
         tracks = None
         cleaned = clean_query_text(query)
 
@@ -383,7 +400,7 @@ class Music(commands.Cog):
                 tracks = await wavelink.Playable.search(query)
             else:
                 for term in search_terms:
-                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube, wavelink.TrackSource.SoundCloud):
+                    for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                         try:
                             res = await wavelink.Playable.search(term, source=src)
                             if res:
@@ -401,7 +418,7 @@ class Music(commands.Cog):
             await ctx.send_error(f"No tracks found for `{query}`.")
             return
 
-        # 4. Handle Standard Playlists (YouTube / SoundCloud)
+        # 4. Handle Standard Playlists
         if isinstance(tracks, wavelink.Playlist):
             added_count = len(tracks.tracks)
             if not player.playing:

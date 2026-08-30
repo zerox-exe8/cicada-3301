@@ -32,11 +32,14 @@ class Music(commands.Cog):
         self._node_lock = asyncio.Lock()
 
     async def _ensure_node(self) -> bool:
-        """Connects or verifies Lavalink Node connection."""
+        """Connects or verifies Lavalink Node connection with active readiness wait."""
         async with self._node_lock:
-            active_node = next((n for n in wavelink.Pool.nodes.values() if n.status == wavelink.NodeStatus.CONNECTED), None)
-            if active_node:
-                return True
+            # 1. Check if an existing node is already connected
+            for nid, n in list(wavelink.Pool.nodes.items()):
+                if n.status == wavelink.NodeStatus.CONNECTED:
+                    return True
+                elif n.status == wavelink.NodeStatus.DISCONNECTED:
+                    wavelink.Pool.nodes.pop(nid, None)
 
             try:
                 uri = Config.LAVALINK_URI
@@ -44,15 +47,22 @@ class Music(commands.Cog):
                 node = wavelink.Node(
                     uri=uri,
                     password=password,
-                    retries=5,
+                    retries=10,
                     inactive_player_timeout=300
                 )
                 await wavelink.Pool.connect(nodes=[node], client=self.bot)
-                logger.info(f"Connected to Lavalink Node at {uri}")
-                return True
+
+                # Wait up to 5 seconds for WebSocket handshake to reach CONNECTED state
+                for _ in range(25):
+                    for n in wavelink.Pool.nodes.values():
+                        if n.status == wavelink.NodeStatus.CONNECTED:
+                            logger.info(f"Connected to Lavalink Node at {uri}")
+                            return True
+                    await asyncio.sleep(0.2)
             except Exception as e:
                 logger.error(f"Failed to connect to Lavalink: {e}")
                 return False
+        return False
 
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song in your voice channel.")
     async def play(self, ctx: CustomContext, *, query: str) -> None:

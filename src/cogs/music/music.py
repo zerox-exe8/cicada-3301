@@ -193,22 +193,58 @@ class MusicControllerView(discord.ui.View):
 
 
 class CicadaPlayer(wavelink.Player):
-    """Custom resilient Wavelink player that prevents unexpected destruction during connection handshakes."""
+    """Custom resilient Wavelink player that handles out-of-order Discord voice events and prevents stale teardown."""
 
     async def on_voice_state_update(self, data: dict, /) -> None:
+        logger.debug("CicadaPlayer on_voice_state_update for %s: %s", self.guild, data)
         channel_id = data.get("channel_id")
         if not channel_id:
             if not self._connected:
-                logger.debug("Ignoring stale voice disconnect event for %s during pending connect.", self.guild)
+                logger.debug("Ignoring stale disconnect for %s during pending connection.", self.guild)
                 return
             await self._destroy()
             return
 
-        self._connected = True
-        self._voice_state["voice"]["session_id"] = data["session_id"]
+        self._voice_state["voice"]["session_id"] = data.get("session_id")
         self._voice_state["channel_id"] = str(channel_id)
         if self.client and channel_id:
             self.channel = self.client.get_channel(int(channel_id))  # type: ignore
+
+        # If server credentials already arrived, finalize handshake now
+        if self._voice_state["voice"].get("token") and self._voice_state["voice"].get("endpoint"):
+            await self._dispatch_voice_update()
+
+    async def on_voice_server_update(self, data: dict, /) -> None:
+        logger.debug("CicadaPlayer on_voice_server_update for %s: %s", self.guild, data)
+        self._voice_state["voice"]["token"] = data.get("token")
+        self._voice_state["voice"]["endpoint"] = data.get("endpoint")
+        await self._dispatch_voice_update()
+
+    async def _dispatch_voice_update(self) -> None:
+        if not self.guild:
+            return
+        data = self._voice_state["voice"]
+        session_id = data.get("session_id")
+        token = data.get("token")
+        endpoint = data.get("endpoint")
+        channel_id = self._voice_state.get("channel_id")
+
+        if not session_id or not token or not endpoint:
+            logger.debug("Waiting for all voice credentials (session=%s, token=%s, endpoint=%s)", bool(session_id), bool(token), bool(endpoint))
+            return
+
+        request = {
+            "voice": {"sessionId": session_id, "token": token, "endpoint": endpoint, "channelId": channel_id}
+        }
+
+        try:
+            await self.node._update_player(self.guild.id, data=request)
+        except Exception as e:
+            logger.error("Error updating player voice state on Lavalink: %s", e)
+        finally:
+            self._connected = True
+            self._connection_event.set()
+            logger.info("Voice connection handshake finalized for guild %s (%s)", self.guild.name, self.guild.id)
 
 
 class Music(commands.Cog):

@@ -245,10 +245,16 @@ class Music(commands.Cog):
 
         if not player:
             try:
-                player = await user_channel.connect(cls=wavelink.Player)
-            except Exception as e:
-                await ctx.send_error(f"Could not connect to voice channel: `{e}`")
-                return
+                player = await user_channel.connect(cls=wavelink.Player, self_deaf=True, timeout=15.0)
+            except Exception:
+                try:
+                    if ctx.guild.voice_client:
+                        await ctx.guild.voice_client.disconnect(force=True)
+                        await asyncio.sleep(0.5)
+                    player = await user_channel.connect(cls=wavelink.Player, self_deaf=True, timeout=15.0)
+                except Exception as e2:
+                    await ctx.send_error(f"Could not connect to voice channel: `{e2}`")
+                    return
         elif player.channel != user_channel:
             if not player.playing:
                 await player.move_to(user_channel)

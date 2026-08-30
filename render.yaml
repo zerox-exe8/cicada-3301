@@ -15,16 +15,6 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: LAVALINK_URI
-        sync: false
+        value: http://fi15.bot-hosting.net:26267
       - key: LAVALINK_PASSWORD
-        value: youshallnotpass
-
-  - type: web
-    name: cicada-lavalink-server
-    runtime: docker
-    dockerfilePath: lavalink/Dockerfile
-    dockerContext: lavalink
-    plan: free
-    envVars:
-      - key: PORT
-        value: 2333
+        value: NfJXUsGSO4tVI1LDl7v3XPYZ

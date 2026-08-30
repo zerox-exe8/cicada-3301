@@ -75,8 +75,8 @@ class Config:
     RAZORPAY_WEBHOOK_SECRET: str = os.getenv("RAZORPAY_WEBHOOK_SECRET", "").strip()
     
     # Lavalink / Audio Settings
-    LAVALINK_URI: str = os.getenv("LAVALINK_URI", "").strip()
-    LAVALINK_PASSWORD: str = os.getenv("LAVALINK_PASSWORD", "youshallnotpass").strip()
+    LAVALINK_URI: str = os.getenv("LAVALINK_URI", "http://fi15.bot-hosting.net:26267").strip()
+    LAVALINK_PASSWORD: str = os.getenv("LAVALINK_PASSWORD", "NfJXUsGSO4tVI1LDl7v3XPYZ").strip()
 
     # Aesthetics
     COLORS: ThemeColors = ThemeColors()

@@ -95,26 +95,30 @@ class DirectStreamResolver:
                         if artwork and "-large." in artwork:
                             artwork = artwork.replace("-large.", "-t500x500.")
                         duration = item.get("duration", 0)
-                        for t in item.get("media", {}).get("transcodings", []):
-                            protocol = t.get("format", {}).get("protocol")
-                            if protocol in ("progressive", "hls"):
-                                meta_url = t.get("url")
-                                async with session.get(
-                                    meta_url,
-                                    params={"client_id": cls._client_id or cid},
-                                    timeout=aiohttp.ClientTimeout(total=6, connect=3)
-                                ) as mr:
-                                    if mr.status == 200:
-                                        mdata = await mr.json()
-                                        direct_url = mdata.get("url")
-                                        if direct_url:
-                                            return {
-                                                "title": title,
-                                                "author": author,
-                                                "artwork": artwork,
-                                                "duration": duration,
-                                                "stream_url": direct_url
-                                            }
+
+                        transcodings = item.get("media", {}).get("transcodings", [])
+                        sorted_transcodings = sorted(
+                            transcodings,
+                            key=lambda x: 0 if x.get("format", {}).get("protocol") == "progressive" else 1
+                        )
+                        for t in sorted_transcodings:
+                            meta_url = t.get("url")
+                            async with session.get(
+                                meta_url,
+                                params={"client_id": cls._client_id or cid},
+                                timeout=aiohttp.ClientTimeout(total=6, connect=3)
+                            ) as mr:
+                                if mr.status == 200:
+                                    mdata = await mr.json()
+                                    direct_url = mdata.get("url")
+                                    if direct_url:
+                                        return {
+                                            "title": title,
+                                            "author": author,
+                                            "artwork": artwork,
+                                            "duration": duration,
+                                            "stream_url": direct_url
+                                        }
         except Exception as e:
             logger.warning(f"Direct stream resolution failed for '{query}': {e}")
         return None

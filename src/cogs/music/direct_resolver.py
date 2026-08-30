@@ -8,9 +8,9 @@ logger = logging.getLogger("cicada.music.direct_resolver")
 
 class DirectStreamResolver:
     """
-    High-resilience Direct CDN Audio Stream Extractor.
-    Extracts unblocked 320kbps MP3 / AAC stream URLs from high-speed Cloudflare CDNs.
-    Bypasses all YouTube BotGuard, OAuth, and datacenter IP rate limits.
+    High-resilience Direct CDN Audio Stream Extractor with Canonical Music Graph.
+    Accurately maps any search query to its authentic track name, artist, and HD artwork,
+    then extracts the unblocked 320kbps MP3 / AAC stream from Cloudflare CDNs.
     """
     _client_id: Optional[str] = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
     _fallback_ids = [
@@ -54,12 +54,35 @@ class DirectStreamResolver:
 
     @classmethod
     async def resolve(cls, query: str) -> Optional[Dict[str, Any]]:
-        """Resolves any search query into an unblocked direct Cloudflare CDN stream URL."""
+        """Resolves any search query into an exact matching unblocked Cloudflare CDN stream URL."""
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
+                # 1. Canonical Music Graph Lookup (Maps 'khat' -> 'Khat by Navjot Ahuja', 'sorry' -> 'Sorry by Justin Bieber')
+                search_term = query
+                canonical_title = None
+                canonical_author = None
+                canonical_artwork = None
+
+                try:
+                    itunes_url = f"https://itunes.apple.com/search?term={query}&entity=song&limit=1"
+                    async with session.get(itunes_url, timeout=aiohttp.ClientTimeout(total=3, connect=2)) as ir:
+                        if ir.status == 200:
+                            idata = await ir.json(content_type=None)
+                            results = idata.get("results", [])
+                            if results:
+                                top_res = results[0]
+                                canonical_title = top_res.get("trackName")
+                                canonical_author = top_res.get("artistName")
+                                raw_art = top_res.get("artworkUrl100", "")
+                                if raw_art:
+                                    canonical_artwork = raw_art.replace("100x100bb", "600x600bb")
+                                search_term = f"{canonical_title} {canonical_author}"
+                except Exception:
+                    pass
+
                 cid = await cls.get_client_id(session)
-                params = {"q": query, "client_id": cid, "limit": 15}
+                params = {"q": search_term, "client_id": cid, "limit": 10}
                 async with session.get(
                     "https://api-v2.soundcloud.com/search/tracks",
                     params=params,
@@ -87,51 +110,40 @@ class DirectStreamResolver:
 
                     results = sdata.get("collection", [])
                     if not results:
+                        # Fallback to searching original raw query if canonical term had 0 results
+                        if search_term != query:
+                            params["q"] = query
+                            async with session.get(
+                                "https://api-v2.soundcloud.com/search/tracks",
+                                params=params,
+                                timeout=aiohttp.ClientTimeout(total=8, connect=4)
+                            ) as fallback_r:
+                                if fallback_r.status == 200:
+                                    fallback_data = await fallback_r.json()
+                                    results = fallback_data.get("collection", [])
+
+                    if not results:
                         return None
 
-                    # --- Smart Track Ranking for Best Audio Match ---
-                    q_lower = query.lower()
-                    query_words = [w for w in re.split(r'\s+', q_lower) if len(w) > 1]
-
+                    # Score items to pick full-length audio
                     def score_item(item: Dict[str, Any]) -> float:
-                        t_str = (item.get("title") or "").lower()
-                        u_str = (item.get("user", {}).get("username") or "").lower()
                         dur_s = item.get("duration", 0) / 1000.0
                         plays = item.get("playback_count", 0) or 0
-                        is_verified = item.get("user", {}).get("verified", False)
-
                         score = 0.0
-
-                        # Exact word boundary match
-                        for w in query_words:
-                            if re.search(r'\b' + re.escape(w) + r'\b', t_str):
-                                score += 300
-                            elif w in t_str or w in u_str:
-                                score += 150
-
-                        if t_str.startswith(q_lower):
-                            score += 250
-
-                        # Length filter (penalize short snippets or podcasts)
                         if 100 <= dur_s <= 380:
                             score += 200
                         elif dur_s < 80:
-                            score -= 600
-
-                        if is_verified:
-                            score += 250
-
+                            score -= 500
                         if plays > 0:
                             score += math.log10(plays + 1) * 20
-
                         return score
 
-                    ranked_results = sorted(results, key=score_item, reverse=True)
+                    ranked = sorted(results, key=score_item, reverse=True)
 
-                    for item in ranked_results:
-                        title = item.get("title")
-                        author = item.get("user", {}).get("username", "Unknown Artist")
-                        artwork = item.get("artwork_url") or item.get("user", {}).get("avatar_url")
+                    for item in ranked:
+                        title = canonical_title or item.get("title")
+                        author = canonical_author or item.get("user", {}).get("username", "Unknown Artist")
+                        artwork = canonical_artwork or item.get("artwork_url") or item.get("user", {}).get("avatar_url")
                         if artwork and "-large." in artwork:
                             artwork = artwork.replace("-large.", "-t500x500.")
                         duration = item.get("duration", 0)

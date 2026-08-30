@@ -1,7 +1,7 @@
 """
 Cicada 3301 Discord Bot - High-Performance Clean Music Engine (Lavalink v4)
 Features:
-- Interactive Button Controller (Play/Pause, Skip, Stop, Queue, Volume)
+- Interactive Button Controller (Play/Pause, Skip, Stop, Queue)
 - Zero Chat Spam & Clean Container Cards
 - High-Accuracy YouTube & Spotify Search
 - Automatic Auto-Play Queue System
@@ -106,7 +106,7 @@ class MusicControllerView(discord.ui.View):
             arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
             container = build_now_playing_container(next_track, self.player, interaction.user, arrow)
             view = MusicControllerView(self.bot, self.player, interaction.user.id)
-            await interaction.response.send_message(content=container.render(), view=view)
+            await send_container_response(interaction, container, view=view)
         else:
             await self.player.skip(force=True)
             await interaction.response.send_message("⏭️ Skipped! Queue is now empty.", ephemeral=True)
@@ -142,7 +142,7 @@ class MusicControllerView(discord.ui.View):
         container.add_section(content="\n".join(lines))
         container.add_separator(divider=True)
         container.add_text(f"-# Total Queue: {self.player.queue.count} tracks")
-        await interaction.response.send_message(content=container.render(), ephemeral=True)
+        await send_container_response(interaction, container, ephemeral=True)
 
 
 class Music(commands.Cog):
@@ -262,9 +262,6 @@ class Music(commands.Cog):
                 await ctx.send_error(f"I am already playing audio in {player.channel.mention}.")
                 return
 
-        if ctx.interaction:
-            await ctx.defer()
-
         # Clean, accurate multi-source track search (YouTube Direct -> YouTubeMusic -> SoundCloud)
         try:
             if query.startswith("http://") or query.startswith("https://"):
@@ -307,10 +304,7 @@ class Music(commands.Cog):
             container.add_separator(divider=True)
             container.add_text(f"-# Streaming in {user_channel.name}")
             view = MusicControllerView(self.bot, player, ctx.author.id)
-            if ctx.interaction:
-                await ctx.interaction.followup.send(content=container.render(), view=view)
-            else:
-                await ctx.send(content=container.render(), view=view)
+            await send_container_response(ctx, container, view=view)
             return
 
         track: wavelink.Playable = tracks[0]
@@ -319,10 +313,7 @@ class Music(commands.Cog):
             await player.play(track)
             container = build_now_playing_container(track, player, ctx.author, arrow)
             view = MusicControllerView(self.bot, player, ctx.author.id)
-            if ctx.interaction:
-                await ctx.interaction.followup.send(content=container.render(), view=view)
-            else:
-                await ctx.send(content=container.render(), view=view)
+            await send_container_response(ctx, container, view=view)
         else:
             await player.queue.put_wait(track)
             duration_str = format_duration(track.length) if track.length else "Live Stream"
@@ -338,10 +329,7 @@ class Music(commands.Cog):
             )
             container.add_separator(divider=True)
             container.add_text(f"-# Queue size: {player.queue.count} tracks")
-            if ctx.interaction:
-                await ctx.interaction.followup.send(content=container.render())
-            else:
-                await ctx.send(content=container.render())
+            await send_container_response(ctx, container)
 
     @commands.hybrid_command(name="skip", aliases=["next", "s"], description="Skip the current track.")
     async def skip(self, ctx: CustomContext) -> None:
@@ -357,10 +345,7 @@ class Music(commands.Cog):
             arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
             container = build_now_playing_container(next_track, player, ctx.author, arrow)
             view = MusicControllerView(self.bot, player, ctx.author.id)
-            if ctx.interaction:
-                await ctx.interaction.response.send_message(content=container.render(), view=view)
-            else:
-                await ctx.send(content=container.render(), view=view)
+            await send_container_response(ctx, container, view=view)
         else:
             await player.skip(force=True)
             await ctx.send_success("Skipped! Queue is now empty.")
@@ -446,10 +431,7 @@ class Music(commands.Cog):
         arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
         container = build_now_playing_container(player.current, player, ctx.author, arrow)
         view = MusicControllerView(self.bot, player, ctx.author.id)
-        if ctx.interaction:
-            await ctx.interaction.response.send_message(content=container.render(), view=view)
-        else:
-            await ctx.send(content=container.render(), view=view)
+        await send_container_response(ctx, container, view=view)
 
 
 async def setup(bot: CicadaBot) -> None:

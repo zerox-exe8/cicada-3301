@@ -104,13 +104,21 @@ class Music(commands.Cog):
             except Exception:
                 pass
 
-        # 1. Primary: 100% Official Studio Release via YouTube Music
+        # 1. Primary: 100% Official Studio Release via YouTube & YouTube Music
         try:
-            ytm_res = await wavelink.Playable.search(clean_q, source=wavelink.TrackSource.YouTubeMusic)
-            if ytm_res:
-                track = ytm_res[0] if isinstance(ytm_res, list) else ytm_res
+            yt_res = await wavelink.Playable.search(clean_q, source=wavelink.TrackSource.YouTube)
+            if yt_res:
+                track = yt_res[0] if isinstance(yt_res, list) else yt_res
         except Exception:
             track = None
+
+        if not track:
+            try:
+                ytm_res = await wavelink.Playable.search(clean_q, source=wavelink.TrackSource.YouTubeMusic)
+                if ytm_res:
+                    track = ytm_res[0] if isinstance(ytm_res, list) else ytm_res
+            except Exception:
+                track = None
 
         # 2. Fallback: Direct Cloudflare CDN Stream
         if not track:

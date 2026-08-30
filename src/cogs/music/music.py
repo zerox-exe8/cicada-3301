@@ -682,7 +682,35 @@ class Music(commands.Cog):
         container.add_text(f"-# Diagnostic timestamp: {discord.utils.utcnow().strftime('%H:%M:%S UTC')}")
         await send_container_response(ctx, container)
 
+    # -------------------------------------------------------------
+    # WAVELINK TRACK LIFECYCLE EVENT LISTENERS
+    # -------------------------------------------------------------
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_start(self, payload: wavelink.TrackStartEventPayload) -> None:
+        """Fires when Lavalink begins decoding and streaming audio packets."""
+        logger.info(f"Track started on guild {payload.player.guild.id}: {payload.track.title}")
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload) -> None:
+        """Fires when track finishes. Automatically plays next song in queue."""
+        player: wavelink.Player = payload.player
+        logger.info(f"Track ended on guild {player.guild.id}: {payload.track.title} (Reason: {payload.reason})")
+
+        if not player.queue.is_empty:
+            next_track = await player.queue.get_wait()
+            await player.play(next_track, volume=100, paused=False)
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
+        """Fires if Lavalink encounters an error while decoding an audio stream."""
+        logger.error(f"Track exception on guild {payload.player.guild.id}: {payload.exception}")
+        if not payload.player.queue.is_empty:
+            next_track = await payload.player.queue.get_wait()
+            await payload.player.play(next_track, volume=100, paused=False)
+
 
 async def setup(bot: CicadaBot) -> None:
     """Load the Music Cog into Cicada 3301."""
     await bot.add_cog(Music(bot))
+

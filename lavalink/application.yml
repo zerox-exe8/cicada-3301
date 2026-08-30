@@ -11,7 +11,7 @@ lavalink:
     sources:
       youtube: false
       bandcamp: true
-      soundcloud: true
+      soundcloud: false
       twitch: true
       vimeo: true
       http: true
@@ -24,7 +24,7 @@ lavalink:
     useSeekGhosting: true
     playerUpdateInterval: 5
     youtubeSearchEnabled: true
-    soundcloudSearchEnabled: true
+    soundcloudSearchEnabled: false
     gc-warnings: true
 
 plugins:

@@ -264,33 +264,19 @@ class Music(commands.Cog):
 
     @commands.Cog.listener()
     async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
-        """Fired when an error occurs during playback. Auto-recovers to clean fallback."""
-        logger.error(f"Track exception on {payload.player}: {payload.exception}")
+        """Fired when an error occurs during playback."""
+        logger.error(f"Track playback exception: {payload.exception}")
         player: wavelink.Player | None = payload.player
         if not player:
             return
-
-        failed_track: wavelink.Playable = payload.track
-        if failed_track and not getattr(failed_track, "_is_fallback", False):
-            try:
-                query = f"{failed_track.title} {failed_track.author}"
-                sc_tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
-                if sc_tracks:
-                    fallback_track = select_best_track(sc_tracks, query)
-                    setattr(fallback_track, "_is_fallback", True)
-                    await player.set_volume(100)
-                    await player.play(fallback_track, volume=100, paused=False)
-                    return
-            except Exception as e:
-                logger.error(f"Fallback recovery error: {e}")
 
         if not player.queue.is_empty:
             try:
                 next_track = await player.queue.get_wait()
                 await player.set_volume(100)
                 await player.play(next_track, volume=100, paused=False)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"Error playing next queued track: {e}")
 
     # ─── MUSIC COMMANDS ───────────────────────────────────────────────────────
 
@@ -336,7 +322,7 @@ class Music(commands.Cog):
                         return
 
                     async def search_single(q: str):
-                        for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                        for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                             try:
                                 r = await wavelink.Playable.search(q, source=src)
                                 if r:
@@ -380,7 +366,7 @@ class Music(commands.Cog):
                 elif spotify_data["type"] == "track":
                     query = spotify_data["query"]
 
-        # 3. Clean Studio Matcher Pipeline (SoundCloud Verified -> YouTube Music -> YouTube)
+        # 3. Clean Studio Matcher Pipeline (YouTube Music -> YouTube)
         tracks = None
         cleaned = clean_query_text(query)
 
@@ -401,7 +387,7 @@ class Music(commands.Cog):
                 tracks = await wavelink.Playable.search(query)
             else:
                 for term in search_terms:
-                    for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                         try:
                             res = await wavelink.Playable.search(term, source=src)
                             if res:

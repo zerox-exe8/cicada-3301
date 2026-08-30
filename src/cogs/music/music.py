@@ -85,14 +85,16 @@ class MusicControllerView(discord.ui.View):
 
         # Attach custom uploaded emojis if available
         if hasattr(bot, "custom_emojis"):
-            if self.pause_resume_btn:
-                self.pause_resume_btn.emoji = bot.custom_emojis.get_emoji_obj("paused")
-            if self.skip_btn:
-                self.skip_btn.emoji = bot.custom_emojis.get_emoji_obj("skip")
-            if self.queue_btn:
-                self.queue_btn.emoji = bot.custom_emojis.get_emoji_obj("queue")
-            if self.stop_btn:
-                self.stop_btn.emoji = bot.custom_emojis.get_emoji_obj("icons_stop_button")
+            for child in self.children:
+                if isinstance(child, discord.ui.Button):
+                    if child.label in ("Pause", "Resume"):
+                        child.emoji = bot.custom_emojis.get_emoji_obj("paused")
+                    elif child.label == "Skip":
+                        child.emoji = bot.custom_emojis.get_emoji_obj("skip")
+                    elif child.label == "Queue":
+                        child.emoji = bot.custom_emojis.get_emoji_obj("queue")
+                    elif child.label == "Stop":
+                        child.emoji = bot.custom_emojis.get_emoji_obj("icons_stop_button")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not interaction.user or not isinstance(interaction.user, discord.Member):

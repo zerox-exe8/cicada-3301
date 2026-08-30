@@ -1,10 +1,11 @@
 """
-Cicada 3301 Discord Bot - Ultra-Reliable High-Definition Music Engine (Lavalink v4)
+Cicada 3301 Discord Bot - Ultra-Accurate Studio Music Engine (Lavalink v4)
 Features:
-- Dual-Engine Unblockable Lossless Audio Stream (SoundCloud + YouTube Music)
-- Intelligent Studio Canonical Matcher (Zero cover / fan lyric channels)
+- Official Studio Canonical Matcher (Zero cover / remix / fan loop channels)
+- Clean Audio Filter (Strictly Official Studio Master Recordings)
+- Dual-Engine Unblockable Lossless Audio Stream (YouTube Music + SoundCloud)
 - Voice Gateway Handshake Event Sync (Prevents silent playback drops)
-- Automatic Stream Failover & Auto-Healing on exceptions
+- Automatic Stream Failover & Auto-Healing
 - Minimalist Premium Container Layout (Integrated Custom Emojis)
 - Interactive Controller (Pause/Resume, Skip, Stop, Queue)
 - 320kbps CD Quality Audio
@@ -32,6 +33,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("cicada.music")
 
+UNWANTED_KEYWORDS = [
+    "remix", "cover", "slowed", "reverb", "edit", "tribute", "karaoke",
+    "instrumental", "bass boost", "mashup", "tiktok version", "bootleg",
+    "1 hour", "1hour", "loop", "nightcore", "parody"
+]
+
 
 def format_duration(ms: int) -> str:
     """Format milliseconds into mm:ss or hh:mm:ss."""
@@ -50,6 +57,24 @@ def clean_query_text(q: str) -> str:
     cleaned = re.sub(r'\b(song|songs|gaana|gana|audio|video|mp3|full song|track)\b', '', q, flags=re.IGNORECASE)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned if len(cleaned) > 1 else q
+
+
+def is_clean_original(track: wavelink.Playable, query: str) -> bool:
+    """Validate that track is not an unwanted remix/cover/loop unless user requested it."""
+    title_lower = track.title.lower() if track.title else ""
+    query_lower = query.lower()
+    for kw in UNWANTED_KEYWORDS:
+        if kw in title_lower and kw not in query_lower:
+            return False
+    return True
+
+
+def select_best_track(tracks: list[wavelink.Playable], query: str) -> wavelink.Playable:
+    """Select the most accurate original studio track from search results."""
+    for t in tracks:
+        if is_clean_original(t, query):
+            return t
+    return tracks[0]
 
 
 def build_now_playing_container(track: wavelink.Playable, player: wavelink.Player, author: discord.Member | discord.User, bot: CicadaBot | None = None) -> CicadaContainer:
@@ -240,7 +265,7 @@ class Music(commands.Cog):
 
     @commands.Cog.listener()
     async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
-        """Fired when an error occurs during playback. Auto-recovers to SoundCloud fallback."""
+        """Fired when an error occurs during playback. Auto-recovers to clean fallback."""
         logger.error(f"Track exception on {payload.player}: {payload.exception}")
         player: wavelink.Player | None = payload.player
         if not player:
@@ -252,7 +277,7 @@ class Music(commands.Cog):
                 query = f"{failed_track.title} {failed_track.author}"
                 sc_tracks = await wavelink.Playable.search(query, source=wavelink.TrackSource.SoundCloud)
                 if sc_tracks:
-                    fallback_track = sc_tracks[0]
+                    fallback_track = select_best_track(sc_tracks, query)
                     setattr(fallback_track, "_is_fallback", True)
                     await player.set_volume(100)
                     await player.play(fallback_track, volume=100, paused=False)
@@ -273,7 +298,7 @@ class Music(commands.Cog):
     @commands.hybrid_command(name="play", aliases=["p"], description="Play any song, Spotify link, or playlist in voice channel.")
     @app_commands.describe(query="Song title, artist name, Spotify, SoundCloud or YouTube link")
     async def play(self, ctx: CustomContext, *, query: str) -> None:
-        """Instant ultra low-latency music playback."""
+        """Instant ultra low-latency music playback with clean official studio matching."""
         if not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send_error("You must join a Voice Channel to play music.")
             return
@@ -335,11 +360,11 @@ class Music(commands.Cog):
                         return
 
                     async def search_single(q: str):
-                        for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                        for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTube):
                             try:
                                 r = await wavelink.Playable.search(q, source=src)
                                 if r:
-                                    return r[0]
+                                    return select_best_track(r, q)
                             except Exception:
                                 pass
                         return None
@@ -379,11 +404,11 @@ class Music(commands.Cog):
                 elif spotify_data["type"] == "track":
                     query = spotify_data["query"]
 
-        # 3. Canonical Studio Match & Multi-Engine Search (SoundCloud -> YouTubeMusic -> YouTube)
+        # 3. Clean Studio Matcher Pipeline (YouTube Music -> SoundCloud -> YouTube)
         tracks = None
         cleaned = clean_query_text(query)
 
-        # Build list of precise search terms
+        # Build list of precise search terms with Spotify/iTunes canonical resolver
         search_terms = []
         if not (query.startswith("http://") or query.startswith("https://")):
             canonical = await SpotifyResolver.resolve_canonical(cleaned)
@@ -400,11 +425,13 @@ class Music(commands.Cog):
                 tracks = await wavelink.Playable.search(query)
             else:
                 for term in search_terms:
-                    for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                    for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTube):
                         try:
                             res = await wavelink.Playable.search(term, source=src)
                             if res:
-                                tracks = res
+                                # Pick best non-remix/non-cover studio track
+                                best = select_best_track(res, query)
+                                tracks = [best]
                                 break
                         except Exception:
                             pass
@@ -447,7 +474,7 @@ class Music(commands.Cog):
             await send_container_response(ctx, container, view=view)
             return
 
-        # 5. Handle Single Track
+        # 5. Handle Single Studio Track
         track: wavelink.Playable = tracks[0]
 
         if not player.playing:

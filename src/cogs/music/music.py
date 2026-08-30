@@ -368,7 +368,22 @@ class Music(commands.Cog):
                         return
 
                     async def search_single(q: str):
-                        for src in (wavelink.TrackSource.SoundCloud, wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                        try:
+                            resolved = await DirectStreamResolver.resolve(q)
+                            if resolved and resolved.get("stream_url"):
+                                dt = await wavelink.Playable.search(resolved["stream_url"])
+                                if dt:
+                                    t = dt[0] if isinstance(dt, list) else dt
+                                    if resolved.get("title"):
+                                        t._title = resolved["title"]
+                                    if resolved.get("author"):
+                                        t._author = resolved["author"]
+                                    if resolved.get("artwork"):
+                                        t._artwork = resolved["artwork"]
+                                    return t
+                        except Exception:
+                            pass
+                        for src in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
                             try:
                                 r = await wavelink.Playable.search(q, source=src)
                                 if r:
@@ -697,7 +712,11 @@ class Music(commands.Cog):
     async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload) -> None:
         """Fires when track finishes. Automatically plays next song in queue."""
         player: wavelink.Player = payload.player
-        logger.info(f"Track ended on guild {player.guild.id}: {payload.track.title} (Reason: {payload.reason})")
+        reason_str = str(getattr(payload, "reason", "")).lower()
+        logger.info(f"Track ended on guild {player.guild.id}: {payload.track.title} (Reason: {reason_str})")
+
+        if "replaced" in reason_str:
+            return
 
         if not player.queue.is_empty:
             next_track = await player.queue.get_wait()

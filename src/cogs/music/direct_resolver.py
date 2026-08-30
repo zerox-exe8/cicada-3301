@@ -94,7 +94,8 @@ class DirectStreamResolver:
                         artwork = item.get("artwork_url") or item.get("user", {}).get("avatar_url")
                         duration = item.get("duration", 0)
                         for t in item.get("media", {}).get("transcodings", []):
-                            if t.get("format", {}).get("protocol") == "progressive":
+                            protocol = t.get("format", {}).get("protocol")
+                            if protocol in ("progressive", "hls"):
                                 meta_url = t.get("url")
                                 async with session.get(
                                     meta_url,

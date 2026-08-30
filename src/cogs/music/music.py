@@ -2,7 +2,7 @@
 Cicada 3301 Discord Bot - Ultra-Accurate Studio Music Engine (Lavalink v4)
 Features:
 - Official Studio Canonical Match (No random lyrics/cover channels)
-- Pure Spotify & YouTube Music Direct Pipeline
+- Guaranteed Voice Gateway Handshake Sync before Playback
 - Multi-Engine Auto-Failover (YouTubeMusic -> YouTube -> SoundCloud)
 - Zero Stale Disconnects & Auto-Recovery
 - Minimalist Premium Container Layout (Integrated Custom Emojis)
@@ -152,7 +152,7 @@ class MusicControllerView(discord.ui.View):
                 dur = format_duration(track.length) if track.length else "Live"
                 lines.append(f"`{i}.` **[{track.title}]({track.uri})** (`{dur}`)")
             if self.player.queue.count > 10:
-                lines.append(f"-# ...and `{self.player.queue.count - 10}` more tracks")
+                lines.append(f"-# ...and `{player.queue.count - 10}` more tracks")
 
         container = CicadaContainer(accent_color=None)
         container.add_section(content="\n".join(lines))
@@ -233,6 +233,7 @@ class Music(commands.Cog):
         if not player.queue.is_empty:
             try:
                 next_track = await player.queue.get_wait()
+                await player.set_volume(100)
                 await player.play(next_track, volume=100, paused=False)
             except Exception as e:
                 logger.error(f"Error auto-playing next track: {e}")
@@ -245,6 +246,7 @@ class Music(commands.Cog):
         if player and not player.queue.is_empty:
             try:
                 next_track = await player.queue.get_wait()
+                await player.set_volume(100)
                 await player.play(next_track, volume=100, paused=False)
             except Exception:
                 pass
@@ -267,11 +269,15 @@ class Music(commands.Cog):
 
         user_channel = ctx.author.voice.channel
 
-        # 1. Connect or retrieve player cleanly
+        # 1. Connect or retrieve player cleanly with handshake settlement
         player: wavelink.Player | None = cast(wavelink.Player, ctx.guild.voice_client)
         if not player or not player.connected:
             try:
                 player = await user_channel.connect(cls=wavelink.Player, self_deaf=True)
+                for _ in range(15):
+                    if player.connected and ctx.guild.voice_client:
+                        break
+                    await asyncio.sleep(0.2)
             except Exception:
                 player = cast(wavelink.Player, ctx.guild.voice_client)
                 if not player or not player.connected:
@@ -313,6 +319,7 @@ class Music(commands.Cog):
                     first_track = await search_single(track_queries[0])
                     if first_track:
                         if not player.playing:
+                            await player.set_volume(100)
                             await player.play(first_track, volume=100, paused=False)
                         else:
                             await player.queue.put_wait(first_track)
@@ -348,14 +355,17 @@ class Music(commands.Cog):
         tracks = None
         cleaned = clean_query_text(query)
 
-        # First try Canonical match if not a direct URL
-        search_terms = [query]
+        # Build list of precise search terms
+        search_terms = []
         if not (query.startswith("http://") or query.startswith("https://")):
             canonical = await SpotifyResolver.resolve_canonical(cleaned)
-            if canonical and canonical.lower() != query.lower():
-                search_terms = [canonical, cleaned, query]
-            else:
-                search_terms = [cleaned, query]
+            if canonical:
+                search_terms.append(canonical)
+            if cleaned != query:
+                search_terms.append(cleaned)
+            search_terms.append(query)
+        else:
+            search_terms = [query]
 
         try:
             if query.startswith("http://") or query.startswith("https://"):
@@ -384,6 +394,7 @@ class Music(commands.Cog):
         if isinstance(tracks, wavelink.Playlist):
             added_count = len(tracks.tracks)
             if not player.playing:
+                await player.set_volume(100)
                 await player.play(tracks.tracks[0], volume=100, paused=False)
                 for t in tracks.tracks[1:]:
                     await player.queue.put_wait(t)
@@ -412,6 +423,9 @@ class Music(commands.Cog):
         track: wavelink.Playable = tracks[0]
 
         if not player.playing:
+            await player.set_volume(100)
+            if player.paused:
+                await player.pause(False)
             await player.play(track, volume=100, paused=False)
             container = build_now_playing_container(track, player, ctx.author, bot=self.bot)
             view = MusicControllerView(self.bot, player, ctx.author.id)

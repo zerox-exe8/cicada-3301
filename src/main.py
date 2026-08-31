@@ -16,13 +16,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import discord
 from src.core.bot import CicadaBot
 from src.core.config import Config
+from src.core.server import HealthServer
 from src.utils.logger import setup_logger
 
 logger = setup_logger("Cicada")
 
+active_bot: CicadaBot | None = None
+
+
+def get_current_bot() -> CicadaBot | None:
+    return active_bot
+
 
 async def run_bot_loop() -> None:
     """Run bot with smart exponential backoff for Cloudflare / Discord 429 rate limits."""
+    global active_bot
+
     try:
         Config.validate()
     except ValueError as e:
@@ -34,6 +43,7 @@ async def run_bot_loop() -> None:
     while True:
         try:
             bot = CicadaBot()
+            active_bot = bot
             logger.info(f"Connecting {Config.BOT_NAME} in [{Config.ENVIRONMENT.upper()}] mode to Discord Gateway...")
             async with bot:
                 await bot.start(Config.TOKEN)
@@ -56,11 +66,21 @@ async def run_bot_loop() -> None:
         except Exception as e:
             logger.error(f"Connection glitch: {e}. Retrying in 10s...", exc_info=e)
             await asyncio.sleep(10)
+        finally:
+            active_bot = None
 
 
 async def main() -> None:
-    """Launch resilient bot loop."""
-    await run_bot_loop()
+    """Launch 24/7 Web Server and resilient bot loop."""
+    # 1. Start Web Server first so Render Port Scan passes immediately (<1s)
+    server = HealthServer(bot=None)  # type: ignore
+    await server.start()
+
+    # 2. Run bot loop
+    try:
+        await run_bot_loop()
+    finally:
+        await server.stop()
 
 
 if __name__ == "__main__":

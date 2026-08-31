@@ -47,11 +47,11 @@ class HealthServer:
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Detailed health check endpoint."""
-        ws_ping = round(self.bot.latency * 1000) if self.bot.latency else 0
+        ws_ping = round(self.bot.latency * 1000) if (self.bot and self.bot.latency) else 0
         data = {
             "status": "healthy",
             "bot": "Cicada 3301",
-            "guilds": len(self.bot.guilds),
+            "guilds": len(self.bot.guilds) if self.bot else 0,
             "ping_ms": ws_ping,
         }
         return web.json_response(data, status=200)

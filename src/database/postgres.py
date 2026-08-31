@@ -258,6 +258,31 @@ class PostgresDatabase(BaseDatabase):
                 total_tickets INT DEFAULT 0
             );
             """,
+            # User Music Taste & Listening History table
+            """
+            CREATE TABLE IF NOT EXISTS user_music_history (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                guild_id BIGINT,
+                track_title VARCHAR(255) NOT NULL,
+                artist VARCHAR(255) NOT NULL,
+                genre VARCHAR(100) DEFAULT 'general',
+                source VARCHAR(50) DEFAULT 'bot',
+                play_count INT DEFAULT 1,
+                last_played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, track_title, artist)
+            );
+            """,
+            # Guild Music & Autoplay Configuration table
+            """
+            CREATE TABLE IF NOT EXISTS guild_music_settings (
+                guild_id BIGINT PRIMARY KEY,
+                autoplay BOOLEAN DEFAULT FALSE,
+                autoplay_mode VARCHAR(20) DEFAULT 'smart',
+                default_volume INT DEFAULT 100,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
         ]
         async with self.pool.acquire() as conn:
             for query in queries:

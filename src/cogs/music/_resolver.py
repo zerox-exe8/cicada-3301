@@ -299,3 +299,95 @@ class MusicResolver:
             return track
 
         return None
+
+    @classmethod
+    async def recommend_next_track(
+        cls,
+        current_track: TrackItem,
+        top_artists: Optional[List[str]] = None,
+        played_urls: Optional[set[str]] = None,
+    ) -> Optional[TrackItem]:
+        """
+        AI Autoplay: Generate next best studio recommendation based on sound signature,
+        artist radio, and active voice listener tastes without repeating played songs.
+        """
+        played = played_urls or set()
+        candidate_queries: List[str] = []
+
+        # Candidate 1: Artist Radio (same artist hits)
+        if current_track.author and current_track.author not in ("Official Artist", "Direct Stream", "Unknown"):
+            candidate_queries.append(f"{current_track.author} top songs")
+            candidate_queries.append(f"{current_track.author} hit songs")
+
+        # Candidate 2: Listener Taste Mix (if active listeners have top artists)
+        if top_artists:
+            for artist in top_artists[:3]:
+                if artist and artist not in candidate_queries:
+                    candidate_queries.append(f"{artist} songs")
+
+        # Candidate 3: Sound Signature & Title Radio Mix
+        candidate_queries.append(f"{current_track.title} {current_track.author} radio")
+        candidate_queries.append("trending hit songs")
+
+        for q in candidate_queries:
+            try:
+                headers = {"User-Agent": "Mozilla/5.0"}
+                params = {
+                    "__call": "search.getResults",
+                    "_format": "json",
+                    "api_version": "4",
+                    "ctx": "web6dot0",
+                    "n": "10",
+                    "p": "1",
+                    "q": q,
+                }
+                async with aiohttp.ClientSession(headers=headers) as s:
+                    async with s.get("https://www.jiosaavn.com/api.php", params=params, timeout=aiohttp.ClientTimeout(total=4)) as r:
+                        if r.status == 200:
+                            data = json.loads(await r.text())
+                            results = data.get("results", [])
+                            for res in results:
+                                pid = res.get("id")
+                                if not pid:
+                                    continue
+                                dparams = {
+                                    "__call": "song.getDetails",
+                                    "cc": "in",
+                                    "_marker": "0",
+                                    "_format": "json",
+                                    "pids": pid,
+                                }
+                                async with s.get("https://www.jiosaavn.com/api.php", params=dparams, timeout=aiohttp.ClientTimeout(total=4)) as dr:
+                                    if dr.status == 200:
+                                        ddata = json.loads(await dr.text())
+                                        sinfo = ddata.get(pid, {})
+                                        enc_url = sinfo.get("encrypted_media_url")
+                                        stream_url = cls._decrypt_saavn_url(enc_url) if enc_url else None
+                                        web_url = sinfo.get("perma_url") or ""
+                                        raw_title = sinfo.get("song") or sinfo.get("title") or ""
+                                        clean_title = clean_track_title(raw_title)
+
+                                        # Skip if already played or identical to current track
+                                        if not stream_url or stream_url in played or web_url in played or clean_title.lower() == current_track.title.lower():
+                                            continue
+
+                                        author = html.unescape(sinfo.get("primary_artists") or sinfo.get("singers") or "Official Artist")
+                                        thumb = sinfo.get("image", "").replace("150x150", "500x500")
+                                        duration = int(sinfo.get("duration", 240))
+
+                                        track = TrackItem(
+                                            title=clean_title,
+                                            author=author,
+                                            duration=duration,
+                                            url=web_url,
+                                            stream_url=stream_url,
+                                            thumbnail=thumb,
+                                            requester="🤖 AI Autoplay",
+                                        )
+                                        logger.info(f"AI Autoplay selected next track: '{clean_title}' by '{author}'")
+                                        return track
+            except Exception as e:
+                logger.debug(f"Autoplay candidate evaluation notice: {e}")
+
+        # Fallback to general search
+        return await cls.resolve("top hits")

@@ -148,3 +148,19 @@ class MusicControlView(discord.ui.View):
                 lines.append(f"-# ...and {len(queue) - 10} more tracks in queue.")
 
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @discord.ui.button(
+        label="Autoplay",
+        style=discord.ButtonStyle.secondary,
+        custom_id="music:autoplay",
+        emoji="♾️",
+        row=1,
+    )
+    async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self._check_user_voice(interaction):
+            return
+        current = self.controller.get_autoplay(self.guild_id)
+        new_state = not current
+        self.controller.set_autoplay(self.guild_id, new_state)
+        state_str = "ENABLED (AI Smart Radio)" if new_state else "DISABLED"
+        await interaction.response.send_message(f"♾️ AI Autoplay is now **{state_str}**.", ephemeral=True)

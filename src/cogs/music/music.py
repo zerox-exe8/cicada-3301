@@ -1,12 +1,12 @@
 """
 Cicada 3301 Discord Bot - Music Cog
-Exposes High-Fidelity Music Commands with 100% Exact Matching and Components V2 Container Cards.
+Exposes High-Fidelity Music Commands with 100% Exact Matching, AI Autoplay, and Components V2 Container Cards.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord import app_commands
@@ -20,6 +20,7 @@ from src.cogs.music._commands.skip import handle_skip
 from src.cogs.music._commands.stop import handle_stop
 from src.cogs.music._commands.queue import handle_queue
 from src.cogs.music._commands.nowplaying import handle_nowplaying
+from src.cogs.music._commands.autoplay import handle_autoplay
 from src.cogs.music._commands.controls import (
     handle_loop,
     handle_shuffle,
@@ -51,6 +52,16 @@ class Music(commands.Cog):
     async def play(self, ctx: CustomContext, *, query: str) -> None:
         """Play high-fidelity music tracks in your voice channel."""
         await handle_play(ctx, self.controller, query)
+
+    @commands.hybrid_command(
+        name="autoplay",
+        aliases=["ap"],
+        description="Toggle AI Autoplay to automatically play continuous radio matching user tastes.",
+    )
+    @app_commands.describe(action="Action: on, off, status, or toggle")
+    async def autoplay(self, ctx: CustomContext, action: Optional[str] = None) -> None:
+        """Toggle AI Autoplay and view listener taste profile."""
+        await handle_autoplay(ctx, self.controller, action)
 
     @commands.hybrid_command(
         name="pause",
@@ -148,6 +159,26 @@ class Music(commands.Cog):
     async def volume(self, ctx: CustomContext, level: int = 100) -> None:
         """Adjust playback volume."""
         await handle_volume(ctx, self.controller, level)
+
+    # ==========================================
+    # Background Music Intelligence Listeners
+    # ==========================================
+
+    @commands.Cog.listener()
+    async def on_presence_update(self, before: discord.Member, after: discord.Member) -> None:
+        """Detect Spotify Rich Presence changes to build user music profile."""
+        if after.bot:
+            return
+        for act in after.activities:
+            if isinstance(act, discord.Spotify):
+                await self.controller.analytics.ingest_spotify_presence(after, act)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Analyze song plays triggered across other bots in the server."""
+        if message.author.bot or not message.guild:
+            return
+        await self.controller.analytics.ingest_message_activity(message)
 
 
 async def setup(bot: CicadaBot) -> None:

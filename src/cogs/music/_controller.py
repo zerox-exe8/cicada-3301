@@ -1,6 +1,6 @@
 """
 Cicada 3301 Discord Bot - Music Controller & State Manager
-Manages playback state, queues, loop modes, volume, and Type 17 Containers.
+Manages playback state, queues, loop modes, volume, AI Autoplay, and Type 17 Containers.
 """
 
 from __future__ import annotations
@@ -8,10 +8,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Set
 
 import discord
 
+from src.cogs.music._analytics import MusicAnalytics
+from src.cogs.music._resolver import MusicResolver
 from src.cogs.music._types import TrackItem, FFMPEG_OPTIONS, BufferedAudioSource
 from src.cogs.music._views import MusicControlView
 from src.utils.containers import CicadaContainer, send_container_response
@@ -28,11 +30,14 @@ class MusicController:
 
     def __init__(self, bot: CicadaBot) -> None:
         self.bot = bot
+        self.analytics = MusicAnalytics(bot)
         self.queues: Dict[int, List[TrackItem]] = {}
         self.current_tracks: Dict[int, TrackItem] = {}
         self.loops: Dict[int, str] = {}  # "off", "track", "queue"
         self.volumes: Dict[int, float] = {}
         self.active_contexts: Dict[int, CustomContext] = {}
+        self.autoplay_settings: Dict[int, bool] = {}
+        self.played_history: Dict[int, Set[str]] = {}
 
     def get_queue(self, guild_id: int) -> List[TrackItem]:
         if guild_id not in self.queues:
@@ -54,33 +59,48 @@ class MusicController:
     def set_volume(self, guild_id: int, vol: float) -> None:
         self.volumes[guild_id] = max(0.0, min(vol, 2.0))
 
+    def get_autoplay(self, guild_id: int) -> bool:
+        return self.autoplay_settings.get(guild_id, False)
+
+    def set_autoplay(self, guild_id: int, enabled: bool) -> None:
+        self.autoplay_settings[guild_id] = enabled
+        if guild_id not in self.played_history:
+            self.played_history[guild_id] = set()
+
+    def get_played_history(self, guild_id: int) -> Set[str]:
+        if guild_id not in self.played_history:
+            self.played_history[guild_id] = set()
+        return self.played_history[guild_id]
+
     def clear_guild(self, guild_id: int) -> None:
         self.queues.pop(guild_id, None)
         self.current_tracks.pop(guild_id, None)
         self.loops.pop(guild_id, None)
         self.volumes.pop(guild_id, None)
         self.active_contexts.pop(guild_id, None)
+        self.played_history.pop(guild_id, None)
 
     def build_now_playing_container(self, track: TrackItem, guild_id: int) -> CicadaContainer:
         """Create a signature Cicada Components V2 Container for the playing track."""
         e_reg = self.bot.custom_emojis
         music_icon = e_reg.get("Music_Playing", e_reg.get("music_music", "🎶"))
         note_icon = e_reg.get("a_musical_notes", "")
-        loop_icon = e_reg.get("icons_loop", "🔁")
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
         dur_m = track.duration // 60
         dur_s = track.duration % 60
         dur_str = f"{dur_m}:{dur_s:02d}" if track.duration > 0 else "Live / Unknown"
         loop_mode = self.get_loop(guild_id)
+        autoplay_str = "ENABLED (AI)" if self.get_autoplay(guild_id) else "DISABLED"
 
         container = CicadaContainer(accent_color=None)
         prefix_icon = f"{music_icon} " if music_icon else ""
         note_suffix = f" {note_icon}" if note_icon else ""
+        header_tag = " [♾️ Autoplay Radio]" if track.requester == "🤖 AI Autoplay" else ""
 
         container.add_section(
             content=(
-                f"**{prefix_icon}Now Playing{note_suffix}**\n"
+                f"**{prefix_icon}Now Playing{header_tag}{note_suffix}**\n"
                 f"> **[{track.title}]({track.url})**\n"
                 f"> Artist: `{track.author}`"
             ),
@@ -90,15 +110,15 @@ class MusicController:
 
         container.add_text(
             f"{dot} **Duration:** `{dur_str}`\n"
-            f"{dot} **Loop Mode:** `{loop_mode.upper()}`\n"
+            f"{dot} **Loop Mode:** `{loop_mode.upper()}`   {dot} **Autoplay:** `{autoplay_str}`\n"
             f"{dot} **Requested By:** `{track.requester or 'User'}`"
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Cicada 3301 High-Fidelity Audio Engine")
+        container.add_text(f"-# Cicada 3301 Studio CD Audio Engine • 320kbps Lossless")
         return container
 
     def _handle_track_finish(self, ctx: CustomContext, error: Optional[Exception]) -> None:
-        """Safe track finish callback to advance the queue."""
+        """Safe track finish callback to advance the queue or trigger AI Autoplay."""
         if error:
             logger.warning(f"Audio stream notice: {error}")
 
@@ -128,12 +148,32 @@ class MusicController:
             vol = self.get_volume(ctx.guild.id)
             source = discord.PCMVolumeTransformer(buffered_source, volume=vol)
             voice_client.play(source, after=lambda e: self._handle_track_finish(ctx, e))
+
+            # Record to played history to prevent Autoplay repetition
+            played = self.get_played_history(ctx.guild.id)
+            if track.stream_url:
+                played.add(track.stream_url)
+            if track.url:
+                played.add(track.url)
+
+            # Record listener analytics
+            if ctx.author and not ctx.author.bot:
+                asyncio.run_coroutine_threadsafe(
+                    self.analytics.record_play(
+                        user_id=ctx.author.id,
+                        guild_id=ctx.guild.id,
+                        track_title=track.title,
+                        artist=track.author,
+                        source="bot",
+                    ),
+                    self.bot.loop,
+                )
         except Exception as ex:
             logger.error(f"Error streaming track '{track.title}': {ex}", exc_info=ex)
             self.play_next(ctx)
 
     def play_next(self, ctx: CustomContext) -> None:
-        """Play the next track in the queue and publish the Now Playing card."""
+        """Play the next track in the queue or trigger AI Autoplay recommendation."""
         guild_id = ctx.guild.id
         voice_client: discord.VoiceClient = ctx.guild.voice_client
         if not voice_client or not voice_client.is_connected():
@@ -144,12 +184,7 @@ class MusicController:
             next_track = queue.pop(0)
             self.current_tracks[guild_id] = next_track
             try:
-                ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
-                raw_source = discord.FFmpegPCMAudio(next_track.stream_url, executable=ffmpeg_exe, **FFMPEG_OPTIONS)
-                buffered_source = BufferedAudioSource(raw_source, buffer_size=200)
-                vol = self.get_volume(guild_id)
-                source = discord.PCMVolumeTransformer(buffered_source, volume=vol)
-                voice_client.play(source, after=lambda e: self._handle_track_finish(ctx, e))
+                self._play_stream(ctx, next_track)
 
                 container = self.build_now_playing_container(next_track, guild_id)
                 view = MusicControlView(self.bot, self, guild_id)
@@ -160,5 +195,44 @@ class MusicController:
             except Exception as ex:
                 logger.error(f"Error starting next track: {ex}", exc_info=ex)
                 self.play_next(ctx)
+        elif self.get_autoplay(guild_id):
+            # Queue is empty and Autoplay is enabled -> Resolve personalized next track
+            last_track = self.current_tracks.get(guild_id)
+            if last_track:
+                asyncio.run_coroutine_threadsafe(
+                    self._trigger_autoplay_recommendation(ctx, last_track),
+                    self.bot.loop,
+                )
+            else:
+                self.current_tracks.pop(guild_id, None)
         else:
+            self.current_tracks.pop(guild_id, None)
+
+    async def _trigger_autoplay_recommendation(self, ctx: CustomContext, last_track: TrackItem) -> None:
+        """Asynchronously analyze voice listeners and stream next AI recommended track."""
+        guild_id = ctx.guild.id
+        voice_client: discord.VoiceClient = ctx.guild.voice_client
+        if not voice_client or not voice_client.is_connected() or not voice_client.channel:
+            return
+
+        # 1. Fetch active listeners in voice channel
+        listeners = [m.id for m in voice_client.channel.members if not m.bot]
+        top_artists = await self.analytics.get_top_artists(listeners, limit=5)
+        played = self.get_played_history(guild_id)
+
+        # 2. Get AI recommendation
+        next_track = await MusicResolver.recommend_next_track(
+            current_track=last_track,
+            top_artists=top_artists,
+            played_urls=played,
+        )
+
+        if next_track and voice_client.is_connected() and not voice_client.is_playing():
+            self.current_tracks[guild_id] = next_track
+            self._play_stream(ctx, next_track)
+
+            container = self.build_now_playing_container(next_track, guild_id)
+            view = MusicControlView(self.bot, self, guild_id)
+            await send_container_response(ctx, container, view=view)
+        elif not next_track:
             self.current_tracks.pop(guild_id, None)

@@ -87,7 +87,7 @@ class MusicResolver:
 
     @classmethod
     def _score_track(cls, query: str, res: dict) -> int:
-        """Calculate match confidence score (0-200) to rank best song candidate."""
+        """Calculate match confidence score (-50 to 200) to rank best song candidate."""
         q = query.lower().strip()
         raw_title = html.unescape(res.get("title") or res.get("song") or "").lower().strip()
         clean_title = re.sub(r"\(.*?\)|\[.*?\]", "", raw_title).strip()
@@ -103,38 +103,43 @@ class MusicResolver:
             artists.append(res["primary_artists"].lower())
         artist_str = " ".join(artists)
 
-        score = 0
+        combined_target = f"{clean_title} {artist_str} {raw_title}"
+        q_words = [w for w in re.findall(r"\w+", q) if len(w) > 1]
+        if not q_words:
+            return 0
+
+        # Calculate word coverage (percentage of query words found in song title + artist)
+        matched_words = [w for w in q_words if w in combined_target]
+        coverage = len(matched_words) / len(q_words)
+        score = int(coverage * 80)
 
         # Exact title match
         if clean_title == q:
             score += 100
-        elif clean_title.startswith(q) or q.startswith(clean_title):
-            score += 80
-        elif any(w in raw_title for w in q.split() if len(w) > 2):
-            score += 50
+        elif clean_title in q or q in clean_title:
+            ratio = min(len(clean_title), len(q)) / max(len(clean_title), len(q))
+            if ratio > 0.35:
+                score += int(ratio * 70)
 
-        # Unwanted variations penalty unless asked by user
+        # Penalize unwanted variations unless asked by user
         unwanted_keywords = ["remix", "live", "lofi", "cover", "slowed", "reverb", "acoustic", "mashup"]
         for u in unwanted_keywords:
             if u in raw_title and u not in q:
-                score -= 30
+                score -= 40
 
-        # Popularity bonus (official studio originals have higher play counts)
+        # Popularity bonus for verified originals
         try:
             plays = int(res.get("play_count", 0))
             if plays > 10_000_000:
-                score += 30
-            elif plays > 1_000_000:
                 score += 20
-            elif plays > 50_000:
+            elif plays > 1_000_000:
                 score += 10
         except Exception:
             pass
 
-        # Artist match bonus
-        for word in q.split():
-            if len(word) > 2 and word in artist_str:
-                score += 25
+        # For long queries (4+ words), require at least 40% word coverage
+        if len(q_words) >= 4 and coverage < 0.4:
+            score -= 60
 
         return score
 
@@ -224,42 +229,47 @@ class MusicResolver:
                                 scored.sort(key=lambda x: x[0], reverse=True)
                                 best_score, best_res = scored[0]
 
-                                pid = best_res.get("id")
-                                if pid:
-                                    dparams = {
-                                        "__call": "song.getDetails",
-                                        "cc": "in",
-                                        "_marker": "0",
-                                        "_format": "json",
-                                        "pids": pid,
-                                    }
-                                    async with s.get("https://www.jiosaavn.com/api.php", params=dparams, timeout=aiohttp.ClientTimeout(total=4)) as dr:
-                                        if dr.status == 200:
-                                            ddata = json.loads(await dr.text())
-                                            sinfo = ddata.get(pid, {})
-                                            enc_url = sinfo.get("encrypted_media_url")
-                                            stream_url = cls._decrypt_saavn_url(enc_url) if enc_url else None
+                                # Only accept JioSaavn result if confident match
+                                q_word_count = len(search_query.split())
+                                min_required_score = 45 if q_word_count >= 4 else 20
 
-                                            if stream_url:
-                                                raw_title = sinfo.get("song") or sinfo.get("title") or search_query
-                                                clean_title = clean_track_title(raw_title)
-                                                author = html.unescape(sinfo.get("primary_artists") or sinfo.get("singers") or "Official Artist")
-                                                thumb = sinfo.get("image", "").replace("150x150", "500x500")
-                                                duration = int(sinfo.get("duration", 240))
-                                                web_url = sinfo.get("perma_url") or search_query
+                                if best_score >= min_required_score:
+                                    pid = best_res.get("id")
+                                    if pid:
+                                        dparams = {
+                                            "__call": "song.getDetails",
+                                            "cc": "in",
+                                            "_marker": "0",
+                                            "_format": "json",
+                                            "pids": pid,
+                                        }
+                                        async with s.get("https://www.jiosaavn.com/api.php", params=dparams, timeout=aiohttp.ClientTimeout(total=4)) as dr:
+                                            if dr.status == 200:
+                                                ddata = json.loads(await dr.text())
+                                                sinfo = ddata.get(pid, {})
+                                                enc_url = sinfo.get("encrypted_media_url")
+                                                stream_url = cls._decrypt_saavn_url(enc_url) if enc_url else None
 
-                                                track = TrackItem(
-                                                    title=clean_title,
-                                                    author=author,
-                                                    duration=duration,
-                                                    url=web_url,
-                                                    stream_url=stream_url,
-                                                    thumbnail=thumb,
-                                                    requester="",
-                                                )
-                                                cls._CACHE[cache_key] = track
-                                                logger.info(f"Resolved '{search_query}' -> '{clean_title}' by '{author}' (320kbps Studio Master)")
-                                                return track
+                                                if stream_url:
+                                                    raw_title = sinfo.get("song") or sinfo.get("title") or search_query
+                                                    clean_title = clean_track_title(raw_title)
+                                                    author = html.unescape(sinfo.get("primary_artists") or sinfo.get("singers") or "Official Artist")
+                                                    thumb = sinfo.get("image", "").replace("150x150", "500x500")
+                                                    duration = int(sinfo.get("duration", 240))
+                                                    web_url = sinfo.get("perma_url") or search_query
+
+                                                    track = TrackItem(
+                                                        title=clean_title,
+                                                        author=author,
+                                                        duration=duration,
+                                                        url=web_url,
+                                                        stream_url=stream_url,
+                                                        thumbnail=thumb,
+                                                        requester="",
+                                                    )
+                                                    cls._CACHE[cache_key] = track
+                                                    logger.info(f"Resolved '{search_query}' -> '{clean_title}' by '{author}' (Score: {best_score})")
+                                                    return track
             except Exception as e:
                 logger.debug(f"Official master search notice: {e}")
 

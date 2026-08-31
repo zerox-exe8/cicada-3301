@@ -58,9 +58,9 @@ class EmojiRegistry:
         uploaded = 0
 
         asset_dirs = [
+            Path(__file__).resolve().parent.parent.parent / "assets" / "music",
             Path(__file__).resolve().parent.parent.parent / "assets" / "emoji",
             Path(__file__).resolve().parent.parent.parent / "assets" / "emoji2",
-            Path(__file__).resolve().parent.parent.parent / "assets" / "music",
         ]
 
         for adir in asset_dirs:

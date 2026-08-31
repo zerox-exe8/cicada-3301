@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING
 import discord
 
+from src.cogs.music._controller import shorten_artist
 from src.cogs.music._resolver import MusicResolver
 from src.cogs.music._views import MusicControlView
 from src.utils.containers import CicadaContainer, send_container_response
@@ -89,13 +90,15 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         dur_m = track.duration // 60
         dur_s = track.duration % 60
         dur_str = f"{dur_m:02d}:{dur_s:02d}" if track.duration > 0 else "Live"
+        short_artist = shorten_artist(track.author)
 
         queued_container = CicadaContainer(accent_color=None)
         queued_container.add_section(
             content=(
                 f"**{queued_prefix}Track Queued**\n"
                 f"> **Title:** [{track.title}]({track.url})\n"
-                f"> **Artist:** `{track.author}` {dot} **Duration:** `{dur_str}`"
+                f"> **Artist:** `{short_artist}`\n"
+                f"> **Duration:** `{dur_str}`"
             ),
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
@@ -104,4 +107,6 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
             f"{dot} **Position in Queue:** `#{len(queue)}`\n"
             f"{dot} **Requested By:** {ctx.author.mention}"
         )
+        queued_container.add_separator(divider=True)
+        queued_container.add_text(f"-# Cicada 3301 Music Engine")
         await send_container_response(ctx, queued_container)

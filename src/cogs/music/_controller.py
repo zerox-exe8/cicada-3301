@@ -25,6 +25,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Cicada.Music.Controller")
 
 
+def shorten_artist(raw_author: str, max_len: int = 32) -> str:
+    """Shorten multi-artist credit list for compact mobile/desktop card readability."""
+    if not raw_author:
+        return "Official Artist"
+    parts = [p.strip() for p in raw_author.replace("&", ",").split(",") if p.strip()]
+    if len(parts) > 2:
+        short = f"{parts[0]}, {parts[1]}"
+    elif len(parts) == 2:
+        short = f"{parts[0]}, {parts[1]}"
+    else:
+        short = parts[0] if parts else raw_author
+    if len(short) > max_len:
+        short = short[:max_len].rstrip() + "..."
+    return short
+
+
 class MusicController:
     """Central Controller managing all music queues, playback state, and Components V2 cards."""
 
@@ -87,10 +103,9 @@ class MusicController:
         channel_name: Optional[str] = None,
         requester: Optional[str] = None,
     ) -> CicadaContainer:
-        """Create a compact, ultra-aesthetic Components V2 Container matching signature player card."""
+        """Create a compact, ultra-aesthetic Components V2 Container matching user requirements."""
         e_reg = self.bot.custom_emojis
         music_playing = e_reg.get("music_playing", "")
-        notes = e_reg.get("a_musical_notes", "")
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
         dur_m = track.duration // 60
@@ -99,28 +114,31 @@ class MusicController:
 
         req_str = requester or track.requester or "User"
         ch_str = f"`# {channel_name}`" if channel_name else "`Voice Channel`"
+        short_artist = shorten_artist(track.author)
 
         container = CicadaContainer(accent_color=None)
         prefix_icon = f"{music_playing} " if music_playing else ""
-        suffix_icon = f" {notes}" if notes else ""
         header_tag = " `[Autoplay]`" if "Autoplay" in str(track.requester) else ""
 
-        # Section with Thumbnail Accessory on the Right
+        # Section with Thumbnail Accessory on the Right (Music_Playing in front, no trailing emoji)
         container.add_section(
             content=(
-                f"**{prefix_icon}Now Playing{header_tag}{suffix_icon}**\n"
+                f"**{prefix_icon}Now Playing{header_tag}**\n"
                 f"> **Title:** [{track.title}]({track.url})\n"
-                f"> **Artist:** `{track.author}` {dot} **Duration:** `{dur_str}`"
+                f"> **Artist:** `{short_artist}`\n"
+                f"> **Duration:** `{dur_str}`"
             ),
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
         container.add_separator(divider=True)
 
-        # Meta Info (Channel, Bitrate, Requester)
+        # Meta Info (Channel, Requester - Bitrate removed)
         container.add_text(
-            f"{dot} **Channel:** {ch_str} | **Bitrate:** `320 kbps (HD)`\n"
+            f"{dot} **Channel:** {ch_str}\n"
             f"{dot} **Requested By:** {req_str}"
         )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Cicada 3301 Music Engine")
         return container
 
     def _handle_track_finish(self, ctx: CustomContext, error: Optional[Exception]) -> None:

@@ -7,6 +7,7 @@ from __future__ import annotations
 import discord
 from typing import TYPE_CHECKING
 
+from src.cogs.music._controller import shorten_artist
 from src.utils.containers import CicadaContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -15,13 +16,13 @@ if TYPE_CHECKING:
 
 
 async def handle_queue(ctx: CustomContext, controller: MusicController) -> None:
-    """Show current song queue."""
+    """Display current song queue with interactive pagination."""
     guild_id = ctx.guild.id
     current = controller.get_current(guild_id)
     queue = controller.get_queue(guild_id)
 
     if not current and not queue:
-        await ctx.send_warning("The music queue is currently empty. Play songs with `?play <song>`.")
+        await ctx.send_warning("The music queue is currently empty.")
         return
 
     e_reg = ctx.bot.custom_emojis
@@ -44,10 +45,12 @@ async def handle_queue(ctx: CustomContext, controller: MusicController) -> None:
         dur_m = current.duration // 60
         dur_s = current.duration % 60
         dur_str = f"{dur_m:02d}:{dur_s:02d}" if current.duration > 0 else "Live"
+        short_artist = shorten_artist(current.author)
         container.add_text(
             f"**Now Playing:**\n"
             f"> {music_prefix}**[{current.title}]({current.url})**\n"
-            f"> Artist: `{current.author}` {dot} Duration: `{dur_str}`"
+            f"> Artist: `{short_artist}`\n"
+            f"> Duration: `{dur_str}`"
         )
         container.add_separator(divider=True)
 

@@ -178,8 +178,9 @@ class CicadaBot(commands.Bot):
         cogs_dir = Path(__file__).resolve().parent.parent / "cogs"
 
         for file in cogs_dir.rglob("*.py"):
-            if file.name.startswith("_"):
-                continue  # Skip __init__.py and private files
+            # Skip any file that starts with '_' or is inside a directory starting with '_'
+            if any(part.startswith("_") for part in file.relative_to(cogs_dir).parts):
+                continue
 
             relative = file.relative_to(cogs_dir.parent.parent)
             module_name = ".".join(relative.with_suffix("").parts)

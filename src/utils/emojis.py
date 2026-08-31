@@ -26,9 +26,16 @@ class EmojiRegistry:
     async def load(self) -> None:
         """Fetch all application emojis from Discord API and cache them."""
         try:
-            emojis = await self.bot.fetch_application_emojis()
-            self._emojis = {e.name.lower(): e for e in emojis}
-            logger.info(f"Successfully cached {len(self._emojis)} custom Application Emoji(s).")
+            if not self.bot.application_id:
+                try:
+                    app_info = await self.bot.application_info()
+                    self.bot.application_id = app_info.id
+                except Exception:
+                    pass
+            if self.bot.application_id:
+                emojis = await self.bot.fetch_application_emojis()
+                self._emojis = {e.name.lower(): e for e in emojis}
+                logger.info(f"Successfully cached {len(self._emojis)} custom Application Emoji(s).")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 

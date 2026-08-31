@@ -1,12 +1,11 @@
 """
 Cicada 3301 Discord Bot - Music Interactive UI Views
-Interactive Components V2 Action Row Buttons for Now Playing Player Card.
+Essential Components V2 Action Row Buttons for Now Playing Player Card.
 """
 
 from __future__ import annotations
 
 import logging
-import random
 from typing import TYPE_CHECKING
 import discord
 
@@ -18,7 +17,7 @@ logger = logging.getLogger("Cicada.Music.Views")
 
 
 class MusicControlView(discord.ui.View):
-    """Interactive button row matching the signature Cicada Now Playing player design."""
+    """Essential, responsive music button controller."""
 
     def __init__(self, bot: CicadaBot, controller: MusicController, guild_id: int = 0) -> None:
         super().__init__(timeout=None)
@@ -30,26 +29,20 @@ class MusicControlView(discord.ui.View):
         e_reg = bot.custom_emojis
         pause_em = e_reg.get_emoji_obj("paused")
         skip_em = e_reg.get_emoji_obj("skip")
-        queue_em = e_reg.get_emoji_obj("queue")
+        voldn_em = e_reg.get_emoji_obj("volume_down")
+        volup_em = e_reg.get_emoji_obj("volume_up")
         stop_em = e_reg.get_emoji_obj("icons_stop_button")
-        loop_em = e_reg.get_emoji_obj("icons_loop")
-        shuffle_em = e_reg.get_emoji_obj("icons_shuffle")
-        autoplay_em = e_reg.get_emoji_obj("icons_loop") or e_reg.get_emoji_obj("music_playing")
 
         if pause_em:
             self.pause_button.emoji = pause_em
         if skip_em:
             self.skip_button.emoji = skip_em
-        if queue_em:
-            self.queue_button.emoji = queue_em
+        if voldn_em:
+            self.voldn_button.emoji = voldn_em
+        if volup_em:
+            self.volup_button.emoji = volup_em
         if stop_em:
             self.stop_button.emoji = stop_em
-        if loop_em:
-            self.loop_button.emoji = loop_em
-        if shuffle_em:
-            self.shuffle_button.emoji = shuffle_em
-        if autoplay_em:
-            self.autoplay_button.emoji = autoplay_em
 
     async def _check_user_voice(self, interaction: discord.Interaction) -> bool:
         """Ensure user is connected to the same voice channel as the bot."""
@@ -71,7 +64,6 @@ class MusicControlView(discord.ui.View):
 
         return True
 
-    # Row 0: Primary Controls (Pause, Skip, Queue, Stop)
     @discord.ui.button(
         label="Pause",
         style=discord.ButtonStyle.secondary,
@@ -130,37 +122,56 @@ class MusicControlView(discord.ui.View):
             await interaction.response.send_message(f"{prefix}Skipped track.", ephemeral=True)
 
     @discord.ui.button(
-        label="Queue",
+        label="Vol -",
         style=discord.ButtonStyle.secondary,
-        custom_id="music:queue",
+        custom_id="music:vol_down",
         row=0,
     )
-    async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        gid = interaction.guild_id or self.guild_id
-        queue = self.controller.get_queue(gid)
-        current = self.controller.get_current(gid)
-
-        if not current and not queue:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("The queue is currently empty.", ephemeral=True)
+    async def voldn_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self._check_user_voice(interaction):
             return
 
-        lines = []
-        if current:
-            dur_m = current.duration // 60
-            dur_s = current.duration % 60
-            lines.append(f"**Now Playing:** [{current.title}]({current.url}) (`{dur_m:02d}:{dur_s:02d}`)\n")
-        if queue:
-            lines.append(f"**Up Next ({len(queue)} tracks):**")
-            for i, t in enumerate(queue[:10], 1):
-                dm = t.duration // 60
-                ds = t.duration % 60
-                lines.append(f"`{i}.` [{t.title}]({t.url}) - `{dm:02d}:{ds:02d}`")
-            if len(queue) > 10:
-                lines.append(f"-# ...and {len(queue) - 10} more tracks in queue.")
+        gid = interaction.guild_id or self.guild_id
+        cur_vol = self.controller.get_volume(gid)
+        new_vol = max(0.0, round(cur_vol - 0.1, 2))
+        self.controller.set_volume(gid, new_vol)
 
+        vc = interaction.guild.voice_client if interaction.guild else None
+        if vc and vc.source and hasattr(vc.source, "volume"):
+            vc.source.volume = new_vol
+
+        e_reg = self.bot.custom_emojis
+        vol_icon = e_reg.get("volume_down", "")
+        prefix = f"{vol_icon} " if vol_icon else ""
+        pct = int(new_vol * 100)
         if not interaction.response.is_done():
-            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            await interaction.response.send_message(f"{prefix}Volume decreased to **{pct}%**.", ephemeral=True)
+
+    @discord.ui.button(
+        label="Vol +",
+        style=discord.ButtonStyle.secondary,
+        custom_id="music:vol_up",
+        row=0,
+    )
+    async def volup_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self._check_user_voice(interaction):
+            return
+
+        gid = interaction.guild_id or self.guild_id
+        cur_vol = self.controller.get_volume(gid)
+        new_vol = min(1.5, round(cur_vol + 0.1, 2))
+        self.controller.set_volume(gid, new_vol)
+
+        vc = interaction.guild.voice_client if interaction.guild else None
+        if vc and vc.source and hasattr(vc.source, "volume"):
+            vc.source.volume = new_vol
+
+        e_reg = self.bot.custom_emojis
+        vol_icon = e_reg.get("volume_up", "")
+        prefix = f"{vol_icon} " if vol_icon else ""
+        pct = int(new_vol * 100)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"{prefix}Volume increased to **{pct}%**.", ephemeral=True)
 
     @discord.ui.button(
         label="Stop",
@@ -185,69 +196,3 @@ class MusicControlView(discord.ui.View):
         prefix = f"{stop_icon} " if stop_icon else ""
         if not interaction.response.is_done():
             await interaction.response.send_message(f"{prefix}Playback stopped and disconnected.", ephemeral=True)
-
-    # Row 1: Extended Controls (Loop, Autoplay, Shuffle)
-    @discord.ui.button(
-        label="Loop",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music:loop",
-        row=1,
-    )
-    async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if not await self._check_user_voice(interaction):
-            return
-
-        gid = interaction.guild_id or self.guild_id
-        current = self.controller.get_loop(gid)
-        next_mode = "track" if current == "off" else ("queue" if current == "track" else "off")
-        self.controller.set_loop(gid, next_mode)
-        e_reg = self.bot.custom_emojis
-        loop_icon = e_reg.get("icons_loop", "")
-        prefix = f"{loop_icon} " if loop_icon else ""
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"{prefix}Loop mode set to **{next_mode.upper()}**.", ephemeral=True)
-
-    @discord.ui.button(
-        label="Autoplay",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music:autoplay",
-        row=1,
-    )
-    async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if not await self._check_user_voice(interaction):
-            return
-
-        gid = interaction.guild_id or self.guild_id
-        current = self.controller.get_autoplay(gid)
-        new_state = not current
-        self.controller.set_autoplay(gid, new_state)
-        state_str = "ENABLED (AI Smart Radio)" if new_state else "DISABLED"
-        e_reg = self.bot.custom_emojis
-        ap_icon = e_reg.get("icons_loop", e_reg.get("music_playing", ""))
-        prefix = f"{ap_icon} " if ap_icon else ""
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"{prefix}AI Autoplay is now **{state_str}**.", ephemeral=True)
-
-    @discord.ui.button(
-        label="Shuffle",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music:shuffle",
-        row=1,
-    )
-    async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if not await self._check_user_voice(interaction):
-            return
-
-        gid = interaction.guild_id or self.guild_id
-        queue = self.controller.get_queue(gid)
-        if len(queue) < 2:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("Need at least 2 tracks in queue to shuffle.", ephemeral=True)
-            return
-
-        random.shuffle(queue)
-        e_reg = self.bot.custom_emojis
-        shuf_icon = e_reg.get("icons_shuffle", "")
-        prefix = f"{shuf_icon} " if shuf_icon else ""
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"{prefix}Shuffled **{len(queue)}** upcoming tracks.", ephemeral=True)

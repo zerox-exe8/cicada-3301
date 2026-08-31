@@ -1,12 +1,11 @@
 """
 Cicada 3301 Discord Bot - Music Cog
-Exposes High-Fidelity Music Commands with 100% Exact Matching, AI Autoplay, and Components V2 Container Cards.
+Exposes High-Fidelity Music Commands with 100% Exact Matching, Smart Autoplay, and Components V2 Container Cards.
 """
 
 from __future__ import annotations
 
 import logging
-import random
 from typing import TYPE_CHECKING, Optional
 
 import discord
@@ -60,11 +59,11 @@ class Music(commands.Cog):
     @commands.hybrid_command(
         name="autoplay",
         aliases=["ap"],
-        description="Toggle AI Autoplay to automatically play continuous radio matching user tastes.",
+        description="Toggle Autoplay to automatically play continuous radio based on your played songs.",
     )
-    @app_commands.describe(action="Action: on, off, status, or toggle")
+    @app_commands.describe(action="Action: on, off, or toggle")
     async def autoplay(self, ctx: CustomContext, action: Optional[str] = None) -> None:
-        """Toggle AI Autoplay and view listener taste profile."""
+        """Toggle Autoplay mode and view status."""
         await handle_autoplay(ctx, self.controller, action)
 
     @commands.hybrid_command(
@@ -234,26 +233,29 @@ class Music(commands.Cog):
             if not interaction.response.is_done():
                 await interaction.response.send_message(f"{prefix}Skipped track.", ephemeral=True)
 
-        elif action == "queue":
-            queue = self.controller.get_queue(guild.id)
-            current = self.controller.get_current(guild.id)
-            if not current and not queue:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("The queue is currently empty.", ephemeral=True)
-                return
-            lines = []
-            if current:
-                dm = current.duration // 60
-                ds = current.duration % 60
-                lines.append(f"**Now Playing:** [{current.title}]({current.url}) (`{dm:02d}:{ds:02d}`)\n")
-            if queue:
-                lines.append(f"**Up Next ({len(queue)} tracks):**")
-                for i, t in enumerate(queue[:10], 1):
-                    dm = t.duration // 60
-                    ds = t.duration % 60
-                    lines.append(f"`{i}.` [{t.title}]({t.url}) - `{dm:02d}:{ds:02d}`")
+        elif action == "vol_down":
+            cur_vol = self.controller.get_volume(guild.id)
+            new_vol = max(0.0, round(cur_vol - 0.1, 2))
+            self.controller.set_volume(guild.id, new_vol)
+            if vc and vc.source and hasattr(vc.source, "volume"):
+                vc.source.volume = new_vol
+            vol_icon = e_reg.get("volume_down", "")
+            prefix = f"{vol_icon} " if vol_icon else ""
+            pct = int(new_vol * 100)
             if not interaction.response.is_done():
-                await interaction.response.send_message("\n".join(lines), ephemeral=True)
+                await interaction.response.send_message(f"{prefix}Volume decreased to **{pct}%**.", ephemeral=True)
+
+        elif action == "vol_up":
+            cur_vol = self.controller.get_volume(guild.id)
+            new_vol = min(1.5, round(cur_vol + 0.1, 2))
+            self.controller.set_volume(guild.id, new_vol)
+            if vc and vc.source and hasattr(vc.source, "volume"):
+                vc.source.volume = new_vol
+            vol_icon = e_reg.get("volume_up", "")
+            prefix = f"{vol_icon} " if vol_icon else ""
+            pct = int(new_vol * 100)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"{prefix}Volume increased to **{pct}%**.", ephemeral=True)
 
         elif action == "stop":
             if not vc:
@@ -266,57 +268,6 @@ class Music(commands.Cog):
             prefix = f"{stop_icon} " if stop_icon else ""
             if not interaction.response.is_done():
                 await interaction.response.send_message(f"{prefix}Playback stopped and disconnected.", ephemeral=True)
-
-        elif action == "loop":
-            current = self.controller.get_loop(guild.id)
-            next_mode = "track" if current == "off" else ("queue" if current == "track" else "off")
-            self.controller.set_loop(guild.id, next_mode)
-            loop_icon = e_reg.get("icons_loop", "")
-            prefix = f"{loop_icon} " if loop_icon else ""
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"{prefix}Loop mode set to **{next_mode.upper()}**.", ephemeral=True)
-
-        elif action == "autoplay":
-            current = self.controller.get_autoplay(guild.id)
-            new_state = not current
-            self.controller.set_autoplay(guild.id, new_state)
-            state_str = "ENABLED (AI Smart Radio)" if new_state else "DISABLED"
-            ap_icon = e_reg.get("icons_loop", e_reg.get("music_playing", ""))
-            prefix = f"{ap_icon} " if ap_icon else ""
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"{prefix}AI Autoplay is now **{state_str}**.", ephemeral=True)
-
-        elif action == "shuffle":
-            queue = self.controller.get_queue(guild.id)
-            if len(queue) < 2:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("Need at least 2 tracks in queue to shuffle.", ephemeral=True)
-                return
-            random.shuffle(queue)
-            shuf_icon = e_reg.get("icons_shuffle", "")
-            prefix = f"{shuf_icon} " if shuf_icon else ""
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"{prefix}Shuffled **{len(queue)}** upcoming tracks.", ephemeral=True)
-
-    # ==========================================
-    # Background Music Intelligence Listeners
-    # ==========================================
-
-    @commands.Cog.listener()
-    async def on_presence_update(self, before: discord.Member, after: discord.Member) -> None:
-        """Detect Spotify Rich Presence changes to build user music profile."""
-        if after.bot:
-            return
-        for act in after.activities:
-            if isinstance(act, discord.Spotify):
-                await self.controller.analytics.ingest_spotify_presence(after, act)
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message) -> None:
-        """Analyze song plays triggered across other bots in the server."""
-        if message.author.bot or not message.guild:
-            return
-        await self.controller.analytics.ingest_message_activity(message)
 
 
 async def setup(bot: CicadaBot) -> None:

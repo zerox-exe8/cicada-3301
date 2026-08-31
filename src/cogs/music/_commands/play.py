@@ -68,11 +68,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
     if not voice_client.is_playing() and not voice_client.is_paused():
         controller.current_tracks[guild_id] = track
         try:
-            ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
-            raw_source = discord.FFmpegPCMAudio(track.stream_url, executable=ffmpeg_exe, **FFMPEG_OPTIONS)
-            vol = controller.get_volume(guild_id)
-            source = discord.PCMVolumeTransformer(raw_source, volume=vol)
-            voice_client.play(source, after=lambda e: controller._handle_track_finish(ctx, e))
+            controller._play_stream(ctx, track)
 
             card = controller.build_now_playing_container(track, guild_id)
             view = MusicControlView(ctx.bot, controller, guild_id)

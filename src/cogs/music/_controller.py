@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 import discord
 
-from src.cogs.music._types import TrackItem, FFMPEG_OPTIONS
+from src.cogs.music._types import TrackItem, FFMPEG_OPTIONS, BufferedAudioSource
 from src.cogs.music._views import MusicControlView
 from src.utils.containers import CicadaContainer, send_container_response
 
@@ -117,15 +117,16 @@ class MusicController:
         self.play_next(ctx)
 
     def _play_stream(self, ctx: CustomContext, track: TrackItem) -> None:
-        """Internal helper to start audio stream."""
+        """Internal helper to start audio stream with in-memory jitter buffer."""
         voice_client: discord.VoiceClient = ctx.guild.voice_client
         if not voice_client or not voice_client.is_connected():
             return
         try:
             ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
             raw_source = discord.FFmpegPCMAudio(track.stream_url, executable=ffmpeg_exe, **FFMPEG_OPTIONS)
+            buffered_source = BufferedAudioSource(raw_source, buffer_size=200)
             vol = self.get_volume(ctx.guild.id)
-            source = discord.PCMVolumeTransformer(raw_source, volume=vol)
+            source = discord.PCMVolumeTransformer(buffered_source, volume=vol)
             voice_client.play(source, after=lambda e: self._handle_track_finish(ctx, e))
         except Exception as ex:
             logger.error(f"Error streaming track '{track.title}': {ex}", exc_info=ex)
@@ -145,8 +146,9 @@ class MusicController:
             try:
                 ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
                 raw_source = discord.FFmpegPCMAudio(next_track.stream_url, executable=ffmpeg_exe, **FFMPEG_OPTIONS)
+                buffered_source = BufferedAudioSource(raw_source, buffer_size=200)
                 vol = self.get_volume(guild_id)
-                source = discord.PCMVolumeTransformer(raw_source, volume=vol)
+                source = discord.PCMVolumeTransformer(buffered_source, volume=vol)
                 voice_client.play(source, after=lambda e: self._handle_track_finish(ctx, e))
 
                 container = self.build_now_playing_container(next_track, guild_id)

@@ -257,6 +257,7 @@ class MusicController:
         )
 
         if next_track and voice_client.is_connected() and not voice_client.is_playing():
+            next_track.requester = "Autoplay"
             self.current_tracks[guild_id] = next_track
             self._play_stream(ctx, next_track)
 
@@ -265,7 +266,7 @@ class MusicController:
                 next_track,
                 guild_id,
                 channel_name=ch_name,
-                requester="🤖 AI Autoplay",
+                requester="Autoplay",
             )
             view = MusicControlView(self.bot, self, guild_id)
             await send_container_response(ctx, container, view=view)

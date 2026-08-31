@@ -324,22 +324,31 @@ class MusicResolver:
         played_urls: Optional[set[str]] = None,
     ) -> Optional[TrackItem]:
         """
-        Autoplay: Generate next song recommendation based on current artist / track radio
-        without repeating played songs in the session.
+        Autoplay: Generate next song recommendation based strictly on the current song's
+        artist, genre, and related sound signature without repeating played songs.
         """
         played = played_urls or set()
+        clean_title = clean_track_title(current_track.title)
         candidate_queries: List[str] = []
 
-        if current_track.author and current_track.author not in ("Official Artist", "Direct Stream", "Unknown"):
-            candidate_queries.append(f"{current_track.author} top songs")
-            candidate_queries.append(f"{current_track.author} hit songs")
+        # 1. Related song mix for the specific track
+        candidate_queries.append(f"{clean_title} related mix")
+        candidate_queries.append(f"{clean_title} songs")
 
-        candidate_queries.append(f"{current_track.title} radio")
-        candidate_queries.append("trending hit songs")
+        # 2. Same artist / singer hits
+        if current_track.author and current_track.author not in ("Official Artist", "Direct Stream", "Unknown"):
+            candidate_queries.append(f"{current_track.author} hit songs")
+            candidate_queries.append(f"{current_track.author} songs")
 
         for q in candidate_queries:
             track = await cls.resolve(q)
-            if track and track.stream_url and track.stream_url not in played and track.title.lower() != current_track.title.lower():
+            if (
+                track
+                and track.stream_url
+                and track.stream_url not in played
+                and track.url not in played
+                and track.title.lower() != current_track.title.lower()
+            ):
                 return track
 
         return None

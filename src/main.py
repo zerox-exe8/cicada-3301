@@ -74,6 +74,7 @@ async def run_bot_loop() -> None:
         except discord.HTTPException as e:
             if e.status == 429:
                 retry_after = getattr(e, "retry_after", None)
+                response_text = getattr(e, "text", str(e))
                 if retry_after is None and hasattr(e, "response") and e.response is not None:
                     retry_header = getattr(e.response, "headers", {}).get("Retry-After")
                     if retry_header:
@@ -81,10 +82,10 @@ async def run_bot_loop() -> None:
                             retry_after = float(retry_header)
                         except ValueError:
                             pass
-                wait_time = max(retry_after if retry_after else delay, 15.0)
+                wait_time = max(retry_after if retry_after else delay, 45.0)
                 logger.warning(
-                    f"Discord 429 Rate Limit encountered (retry_after={retry_after}). "
-                    f"Cooling down for {wait_time:.0f}s before retrying..."
+                    f"Discord Gateway Rate Limit (429) active: {response_text}. "
+                    f"Cooling down for {wait_time:.0f}s before reconnecting to allow Discord rate-limit window to reset..."
                 )
                 await asyncio.sleep(wait_time)
                 delay = min(max(delay * 2.0, wait_time), 300.0)

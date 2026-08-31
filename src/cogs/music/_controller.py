@@ -73,7 +73,7 @@ class MusicController:
         return self.volumes.get(guild_id, 1.0)
 
     def set_volume(self, guild_id: int, vol: float) -> None:
-        self.volumes[guild_id] = max(0.0, min(vol, 2.0))
+        self.volumes[guild_id] = max(0.0, min(vol, 1.0))
 
     def get_autoplay(self, guild_id: int) -> bool:
         return self.autoplay_settings.get(guild_id, False)

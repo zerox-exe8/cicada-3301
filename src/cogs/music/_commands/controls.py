@@ -91,9 +91,9 @@ async def handle_remove(ctx: CustomContext, controller: MusicController, positio
 
 
 async def handle_volume(ctx: CustomContext, controller: MusicController, level: int) -> None:
-    """Adjust audio stream volume (0% to 150%)."""
-    if level < 0 or level > 150:
-        await ctx.send_warning("Volume level must be between `0` and `150` percent.")
+    """Adjust audio stream volume safely (0% to 100%)."""
+    if level < 0 or level > 100:
+        await ctx.send_warning("Volume level must be between `0` and `100` percent to prevent audio clipping.")
         return
 
     float_vol = level / 100.0

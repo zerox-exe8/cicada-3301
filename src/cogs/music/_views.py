@@ -159,7 +159,12 @@ class MusicControlView(discord.ui.View):
 
         gid = interaction.guild_id or self.guild_id
         cur_vol = self.controller.get_volume(gid)
-        new_vol = min(1.5, round(cur_vol + 0.1, 2))
+        if cur_vol >= 1.0:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Volume is already at maximum studio safe limit (**100%**).", ephemeral=True)
+            return
+
+        new_vol = min(1.0, round(cur_vol + 0.1, 2))
         self.controller.set_volume(gid, new_vol)
 
         vc = interaction.guild.voice_client if interaction.guild else None

@@ -22,7 +22,7 @@ class TrackItem:
     requester: str
 
 
-# Ultra-Armor Rock-Solid FFmpeg Streaming Options with Studio Dynamics Compressor
+# Ultra-Armor Rock-Solid FFmpeg Streaming Options with Studio Dynamics Compressor & Peak Limiter
 FFMPEG_OPTIONS = {
     "before_options": (
         "-reconnect 1 "
@@ -38,7 +38,7 @@ FFMPEG_OPTIONS = {
         "-b:a 320k "
         "-ar 48000 "
         "-ac 2 "
-        "-af acompressor=threshold=-14dB:ratio=2.5:attack=5:release=50"
+        "-af acompressor=threshold=-14dB:ratio=2.0:attack=5:release=50,alimiter=limit=-1.0dB:attack=5:release=50:level=disabled"
     ),
 }
 

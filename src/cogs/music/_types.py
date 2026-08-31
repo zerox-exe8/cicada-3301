@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Ultra-Armor Music Types & Streaming Constants
+Cicada 3301 Discord Bot - Music Types & Streaming Constants
 """
 
 from __future__ import annotations
@@ -18,29 +18,13 @@ class TrackItem:
     requester: str
 
 
-# Ultra-Armor Rock-Solid FFmpeg Streaming Options (Zero Buffering, 32MB Buffer, 48kHz Stereo)
+# Rock-Solid FFmpeg Audio Streaming Options
 FFMPEG_OPTIONS = {
-    'before_options': (
-        '-reconnect 1 '
-        '-reconnect_at_eof 1 '
-        '-reconnect_streamed 1 '
-        '-reconnect_delay_max 2 '
-        '-probesize 32M '
-        '-analyzeduration 0 '
-        '-thread_queue_size 8192'
-    ),
-    'options': (
-        '-vn '
-        '-b:a 320k '
-        '-ar 48000 '
-        '-ac 2 '
-        '-bufsize 32768k '
-        '-max_muxing_queue_size 8192 '
-        '-fflags +nobuffer+fastseek'
-    )
+    'before_options': '-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn -b:a 320k'
 }
 
-# 100% Authentic Multi-Client YouTube Studio Extractor Flags
+# 100% Authentic YouTube Studio Extractor (Android & iOS Clients - Zero Datacenter Blocks)
 YDL_OPTS = {
     'format': 'bestaudio/best',
     'quiet': True,
@@ -50,10 +34,9 @@ YDL_OPTS = {
     'nocheckcertificate': True,
     'ignoreerrors': False,
     'source_address': '0.0.0.0',
-    'socket_timeout': 8,
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'ios', 'web']
+            'player_client': ['android', 'ios']
         }
     }
 }

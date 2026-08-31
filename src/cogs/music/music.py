@@ -6,6 +6,7 @@ Exposes High-Fidelity Music Commands with 100% Exact Matching, AI Autoplay, and 
 from __future__ import annotations
 
 import logging
+import random
 from typing import TYPE_CHECKING, Optional
 
 import discord
@@ -14,6 +15,7 @@ from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.cogs.music._controller import MusicController
+from src.cogs.music._views import MusicControlView
 from src.cogs.music._commands.play import handle_play
 from src.cogs.music._commands.pause import handle_pause, handle_resume
 from src.cogs.music._commands.skip import handle_skip
@@ -42,6 +44,8 @@ class Music(commands.Cog):
     def __init__(self, bot: CicadaBot) -> None:
         self.bot = bot
         self.controller = MusicController(bot)
+        # Register persistent view so button interactions respond instantly across all servers
+        self.bot.add_view(MusicControlView(bot, self.controller))
 
     @commands.hybrid_command(
         name="play",
@@ -159,6 +163,140 @@ class Music(commands.Cog):
     async def volume(self, ctx: CustomContext, level: int = 100) -> None:
         """Adjust playback volume."""
         await handle_volume(ctx, self.controller, level)
+
+    # ==========================================
+    # Global Fallback Music Interaction Router
+    # ==========================================
+
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        """Fallback router for music component buttons across all card types."""
+        if interaction.type != discord.InteractionType.component or not interaction.data:
+            return
+
+        custom_id = interaction.data.get("custom_id", "")
+        if not custom_id.startswith("music:"):
+            return
+
+        if interaction.response.is_done():
+            return
+
+        guild = interaction.guild
+        if not guild:
+            return
+
+        # Voice Verification
+        if not interaction.user or not isinstance(interaction.user, discord.Member):
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Invalid user context.", ephemeral=True)
+            return
+
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("You must be in a Voice Channel to use music controls.", ephemeral=True)
+            return
+
+        vc = guild.voice_client
+        if vc and vc.channel != interaction.user.voice.channel:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("You must be in the same voice channel as the bot.", ephemeral=True)
+            return
+
+        action = custom_id.split(":")[-1]
+        e_reg = self.bot.custom_emojis
+
+        if action == "pause":
+            if not vc or (not vc.is_playing() and not vc.is_paused()):
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("No active audio stream.", ephemeral=True)
+                return
+            if vc.is_playing():
+                vc.pause()
+                pause_icon = e_reg.get("paused", "")
+                prefix = f"{pause_icon} " if pause_icon else ""
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(f"{prefix}Playback paused.", ephemeral=True)
+            elif vc.is_paused():
+                vc.resume()
+                play_icon = e_reg.get("music_playing", "")
+                prefix = f"{play_icon} " if play_icon else ""
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(f"{prefix}Playback resumed.", ephemeral=True)
+
+        elif action == "skip":
+            if not vc or (not vc.is_playing() and not vc.is_paused()):
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("No track is currently playing.", ephemeral=True)
+                return
+            vc.stop()
+            skip_icon = e_reg.get("skip", "")
+            prefix = f"{skip_icon} " if skip_icon else ""
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"{prefix}Skipped track.", ephemeral=True)
+
+        elif action == "queue":
+            queue = self.controller.get_queue(guild.id)
+            current = self.controller.get_current(guild.id)
+            if not current and not queue:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("The queue is currently empty.", ephemeral=True)
+                return
+            lines = []
+            if current:
+                dm = current.duration // 60
+                ds = current.duration % 60
+                lines.append(f"**Now Playing:** [{current.title}]({current.url}) (`{dm:02d}:{ds:02d}`)\n")
+            if queue:
+                lines.append(f"**Up Next ({len(queue)} tracks):**")
+                for i, t in enumerate(queue[:10], 1):
+                    dm = t.duration // 60
+                    ds = t.duration % 60
+                    lines.append(f"`{i}.` [{t.title}]({t.url}) - `{dm:02d}:{ds:02d}`")
+            if not interaction.response.is_done():
+                await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+        elif action == "stop":
+            if not vc:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("I am not connected to a voice channel.", ephemeral=True)
+                return
+            self.controller.clear_guild(guild.id)
+            await vc.disconnect()
+            stop_icon = e_reg.get("icons_stop_button", "")
+            prefix = f"{stop_icon} " if stop_icon else ""
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"{prefix}Playback stopped and disconnected.", ephemeral=True)
+
+        elif action == "loop":
+            current = self.controller.get_loop(guild.id)
+            next_mode = "track" if current == "off" else ("queue" if current == "track" else "off")
+            self.controller.set_loop(guild.id, next_mode)
+            loop_icon = e_reg.get("icons_loop", "")
+            prefix = f"{loop_icon} " if loop_icon else ""
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"{prefix}Loop mode set to **{next_mode.upper()}**.", ephemeral=True)
+
+        elif action == "autoplay":
+            current = self.controller.get_autoplay(guild.id)
+            new_state = not current
+            self.controller.set_autoplay(guild.id, new_state)
+            state_str = "ENABLED (AI Smart Radio)" if new_state else "DISABLED"
+            ap_icon = e_reg.get("icons_loop", e_reg.get("music_playing", ""))
+            prefix = f"{ap_icon} " if ap_icon else ""
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"{prefix}AI Autoplay is now **{state_str}**.", ephemeral=True)
+
+        elif action == "shuffle":
+            queue = self.controller.get_queue(guild.id)
+            if len(queue) < 2:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Need at least 2 tracks in queue to shuffle.", ephemeral=True)
+                return
+            random.shuffle(queue)
+            shuf_icon = e_reg.get("icons_shuffle", "")
+            prefix = f"{shuf_icon} " if shuf_icon else ""
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"{prefix}Shuffled **{len(queue)}** upcoming tracks.", ephemeral=True)
 
     # ==========================================
     # Background Music Intelligence Listeners

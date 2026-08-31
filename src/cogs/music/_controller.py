@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set
 import discord
 
 from src.core.context import CustomContext
-from src.core.components import CicadaContainer, send_container_response
+from src.utils.containers import CicadaContainer, send_container_response
 from src.cogs.music._types import TrackItem, FFMPEG_OPTIONS, BufferedAudioSource
 from src.cogs.music._views import MusicControlView
 from src.cogs.music._resolver import MusicResolver, clean_track_title

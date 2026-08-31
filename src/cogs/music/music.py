@@ -1,6 +1,6 @@
 """
-Cicada 3301 Discord Bot - Ultra-Resilient Studio Music Engine
-High-fidelity streaming, multi-tier search resolution, and unbreakable stream buffering.
+Cicada 3301 Discord Bot - Hyper-Fast Ultra-Resilient Music Engine
+Instant in-memory caching, multi-client parallel search, and unbreakable streaming buffers.
 """
 
 from __future__ import annotations
@@ -33,13 +33,15 @@ YDL_OPTS = {
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
+    'noplaylist': True,
     'nocheckcertificate': True,
     'ignoreerrors': False,
     'source_address': '0.0.0.0',
-    'socket_timeout': 8,
+    'socket_timeout': 6,
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'ios', 'web']
+            'player_client': ['android', 'ios'],
+            'skip': ['dash', 'hls', 'translated_subs']
         }
     }
 }
@@ -57,17 +59,32 @@ class TrackItem:
 
 
 class MusicResolver:
-    """Super-Strong Multi-Tier Stream Resolver."""
+    """Hyper-Fast Multi-Tier Stream Resolver with Instant RAM Caching."""
     _client_id = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
+    _CACHE: Dict[str, TrackItem] = {}
 
     @classmethod
     async def resolve(cls, query: str) -> Optional[TrackItem]:
         clean_q = query.strip()
+        cache_key = clean_q.lower()
 
-        # Step 1: Clean and prepare search variations
+        # Step 0: Instant 0ms RAM Cache Check
+        if cache_key in cls._CACHE:
+            cached = cls._CACHE[cache_key]
+            logger.info(f"Instant cache hit for '{clean_q}' (0ms)")
+            return TrackItem(
+                title=cached.title,
+                author=cached.author,
+                duration=cached.duration,
+                url=cached.url,
+                stream_url=cached.stream_url,
+                thumbnail=cached.thumbnail,
+                requester=""
+            )
+
         is_url = clean_q.startswith("http://") or clean_q.startswith("https://")
         
-        # Tier 1: yt-dlp with Android/iOS Studio Client
+        # Tier 1: yt-dlp Android Fast Studio Client
         loop = asyncio.get_event_loop()
         def _yt_extract():
             target = clean_q if is_url else f"ytsearch1:{clean_q}"
@@ -87,7 +104,7 @@ class MusicResolver:
             raw_title = entry.get('title', clean_q)
             clean_t = re.sub(r'\(Full Video\)|\[Official Video\]|\(Official Audio\)|\|.*$', '', raw_title, flags=re.IGNORECASE).strip()
             author = entry.get('uploader') or entry.get('artist') or entry.get('channel') or 'Official Artist'
-            return TrackItem(
+            track = TrackItem(
                 title=clean_t or raw_title,
                 author=author,
                 duration=int(entry.get('duration', 0)),
@@ -96,6 +113,8 @@ class MusicResolver:
                 thumbnail=entry.get('thumbnail', ''),
                 requester=""
             )
+            cls._CACHE[cache_key] = track
+            return track
 
         # Tier 2: Apple Music / iTunes Canonical Resolution + High-Speed Direct Stream
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -105,10 +124,9 @@ class MusicResolver:
             canonical_art = ""
             duration_s = 240
             
-            # 1. Canonical metadata lookup
             try:
                 itunes_url = f"https://itunes.apple.com/search?term={clean_q}&entity=song&limit=1"
-                async with s.get(itunes_url, timeout=aiohttp.ClientTimeout(total=4)) as ir:
+                async with s.get(itunes_url, timeout=aiohttp.ClientTimeout(total=3)) as ir:
                     if ir.status == 200:
                         idata = await ir.json(content_type=None)
                         res = idata.get("results", [])
@@ -120,7 +138,7 @@ class MusicResolver:
             except Exception:
                 pass
 
-            # 2. Multi-Candidate Stream Search
+            # Multi-Candidate Fast Stream Search
             search_variations = [f"{canonical_t} {canonical_a}", canonical_t, clean_q]
             for term in search_variations:
                 params = {"q": term, "client_id": cls._client_id, "limit": 6}
@@ -128,7 +146,7 @@ class MusicResolver:
                     async with s.get(
                         "https://api-v2.soundcloud.com/search/tracks",
                         params=params,
-                        timeout=aiohttp.ClientTimeout(total=5)
+                        timeout=aiohttp.ClientTimeout(total=4)
                     ) as sr:
                         if sr.status == 200:
                             sdata = await sr.json()
@@ -142,12 +160,12 @@ class MusicResolver:
                                     )
                                     for t in sorted_trans:
                                         meta_url = t.get("url")
-                                        async with s.get(meta_url, params={"client_id": cls._client_id}, timeout=3) as mr:
+                                        async with s.get(meta_url, params={"client_id": cls._client_id}, timeout=2) as mr:
                                             if mr.status == 200:
                                                 mdata = await mr.json()
                                                 direct_url = mdata.get("url")
                                                 if direct_url:
-                                                    return TrackItem(
+                                                    track = TrackItem(
                                                         title=canonical_t,
                                                         author=canonical_a,
                                                         duration=duration_s,
@@ -156,6 +174,8 @@ class MusicResolver:
                                                         thumbnail=canonical_art or item.get("artwork_url", ""),
                                                         requester=""
                                                     )
+                                                    cls._CACHE[cache_key] = track
+                                                    return track
                 except Exception:
                     continue
         return None
@@ -202,9 +222,9 @@ class Music(commands.Cog):
         else:
             self.current_tracks.pop(guild_id, None)
 
-    @commands.hybrid_command(name="play", aliases=["p"], description="Play any song in your voice channel with ultra-strong connection.")
+    @commands.hybrid_command(name="play", aliases=["p"], description="Play any song in your voice channel with ultra-fast search.")
     async def play(self, ctx: CustomContext, *, query: str) -> None:
-        """Play exact music tracks with rock-solid streaming."""
+        """Play exact music tracks with hyper-fast search."""
         if not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send("You must be in a Voice Channel to play music.")
             return
@@ -224,7 +244,7 @@ class Music(commands.Cog):
 
         status_msg = await ctx.send(f"Searching for **{query}**...")
 
-        # 2. Resolve Track with Strong Multi-Tier Engine
+        # 2. Resolve Track with Hyper-Fast Multi-Tier Engine
         track = await MusicResolver.resolve(query)
         if not track or not track.stream_url:
             await status_msg.edit(content=f"No results found for **{query}**.")

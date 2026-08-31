@@ -89,7 +89,7 @@ class MusicController:
     ) -> CicadaContainer:
         """Create a compact, ultra-aesthetic Components V2 Container matching signature player card."""
         e_reg = self.bot.custom_emojis
-        music_playing = e_reg.get("Music_Playing", e_reg.get("music_music", "🎶"))
+        music_playing = e_reg.get("music_playing", "")
         notes = e_reg.get("a_musical_notes", "")
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
@@ -103,7 +103,7 @@ class MusicController:
         container = CicadaContainer(accent_color=None)
         prefix_icon = f"{music_playing} " if music_playing else ""
         suffix_icon = f" {notes}" if notes else ""
-        header_tag = " `[♾️ Autoplay]`" if track.requester == "🤖 AI Autoplay" else ""
+        header_tag = " `[Autoplay]`" if "Autoplay" in str(track.requester) else ""
 
         # Section with Thumbnail Accessory on the Right
         container.add_section(

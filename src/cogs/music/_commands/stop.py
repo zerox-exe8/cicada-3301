@@ -22,5 +22,6 @@ async def handle_stop(ctx: CustomContext, controller: MusicController) -> None:
     controller.clear_guild(ctx.guild.id)
     await voice_client.disconnect()
     e_reg = ctx.bot.custom_emojis
-    stop_icon = e_reg.get("icons_stop_button", "⏹️")
-    await ctx.send_success(f"{stop_icon} Stopped playback, cleared the queue, and disconnected from voice.", title="Disconnected")
+    stop_icon = e_reg.get("icons_stop_button", "")
+    prefix = f"{stop_icon} " if stop_icon else ""
+    await ctx.send_success(f"{prefix}Stopped playback, cleared the queue, and disconnected from voice.", title="Disconnected")

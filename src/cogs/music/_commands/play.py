@@ -39,10 +39,11 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         await voice_client.move_to(user_channel)
 
     e_reg = ctx.bot.custom_emojis
-    search_icon = e_reg.get("Music_Playing", e_reg.get("music_music", "🔎"))
+    search_icon = e_reg.get("music_playing", "")
+    search_prefix = f"{search_icon} " if search_icon else ""
 
     search_container = CicadaContainer(accent_color=None)
-    search_container.add_text(f"{search_icon} **Searching track:** `{query}`...")
+    search_container.add_text(f"{search_prefix}**Searching track:** `{query}`...")
     status_msg = await send_container_response(ctx, search_container)
 
     # 2. Resolve Track
@@ -82,7 +83,8 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
     else:
         queue.append(track)
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
-        queued_icon = e_reg.get("queue", "📜")
+        queued_icon = e_reg.get("queue", "")
+        queued_prefix = f"{queued_icon} " if queued_icon else ""
 
         dur_m = track.duration // 60
         dur_s = track.duration % 60
@@ -91,7 +93,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         queued_container = CicadaContainer(accent_color=None)
         queued_container.add_section(
             content=(
-                f"**{queued_icon} Track Queued**\n"
+                f"**{queued_prefix}Track Queued**\n"
                 f"> **Title:** [{track.title}]({track.url})\n"
                 f"> **Artist:** `{track.author}` {dot} **Duration:** `{dur_str}`"
             ),

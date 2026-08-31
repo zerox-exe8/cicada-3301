@@ -20,8 +20,9 @@ async def handle_pause(ctx: CustomContext, controller: MusicController) -> None:
         return
     voice_client.pause()
     e_reg = ctx.bot.custom_emojis
-    pause_icon = e_reg.get("Paused", "⏸️")
-    await ctx.send_success(f"{pause_icon} Playback paused. Use `{ctx.prefix}resume` to continue.", title="Paused")
+    pause_icon = e_reg.get("paused", "")
+    prefix = f"{pause_icon} " if pause_icon else ""
+    await ctx.send_success(f"{prefix}Playback paused. Use `{ctx.prefix}resume` to continue.", title="Paused")
 
 
 async def handle_resume(ctx: CustomContext, controller: MusicController) -> None:
@@ -32,5 +33,6 @@ async def handle_resume(ctx: CustomContext, controller: MusicController) -> None
         return
     voice_client.resume()
     e_reg = ctx.bot.custom_emojis
-    play_icon = e_reg.get("Music_Playing", "▶️")
-    await ctx.send_success(f"{play_icon} Resumed audio stream playback.", title="Resumed")
+    play_icon = e_reg.get("music_playing", "")
+    prefix = f"{play_icon} " if play_icon else ""
+    await ctx.send_success(f"{prefix}Resumed audio stream playback.", title="Resumed")

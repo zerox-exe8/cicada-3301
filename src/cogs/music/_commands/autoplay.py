@@ -20,7 +20,8 @@ async def handle_autoplay(ctx: CustomContext, controller: MusicController, actio
     """Handle the autoplay command and taste insights."""
     e_reg = ctx.bot.custom_emojis
     dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
-    autoplay_icon = "♾️"
+    autoplay_icon = e_reg.get("icons_loop", e_reg.get("music_playing", ""))
+    prefix_icon = f"{autoplay_icon} " if autoplay_icon else ""
 
     guild_id = ctx.guild.id
     current_state = controller.get_autoplay(guild_id)
@@ -58,7 +59,7 @@ async def handle_autoplay(ctx: CustomContext, controller: MusicController, actio
     container = CicadaContainer(accent_color=None)
     container.add_section(
         content=(
-            f"**{autoplay_icon} AI Autoplay Radio**\n"
+            f"**{prefix_icon}AI Autoplay Radio**\n"
             f"> **Status:** `{status_str}`\n"
             f"> {status_desc}"
         )

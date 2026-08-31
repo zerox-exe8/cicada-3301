@@ -18,23 +18,23 @@ async def handle_loop(ctx: CustomContext, controller: MusicController, mode: str
     guild_id = ctx.guild.id
     mode_clean = mode.lower().strip()
     e_reg = ctx.bot.custom_emojis
-    loop_icon = e_reg.get("icons_loop", "🔁")
+    loop_icon = e_reg.get("icons_loop", "")
+    prefix = f"{loop_icon} " if loop_icon else ""
 
     if mode_clean in ["track", "song", "1"]:
         controller.set_loop(guild_id, "track")
-        await ctx.send_success(f"{loop_icon} Loop mode set to **Single Track** (repeating current track).", title="Loop Mode")
+        await ctx.send_success(f"{prefix}Loop mode set to **Single Track** (repeating current track).", title="Loop Mode")
     elif mode_clean in ["queue", "all"]:
         controller.set_loop(guild_id, "queue")
-        await ctx.send_success(f"{loop_icon} Loop mode set to **Entire Queue** (repeating playlist).", title="Loop Mode")
+        await ctx.send_success(f"{prefix}Loop mode set to **Entire Queue** (repeating playlist).", title="Loop Mode")
     elif mode_clean in ["off", "disable", "stop"]:
         controller.set_loop(guild_id, "off")
-        await ctx.send_success(f"{loop_icon} Loop mode **Disabled**.", title="Loop Mode")
+        await ctx.send_success(f"{prefix}Loop mode **Disabled**.", title="Loop Mode")
     else:
-        # Toggle cycle: off -> track -> queue -> off
         current = controller.get_loop(guild_id)
         next_mode = "track" if current == "off" else ("queue" if current == "track" else "off")
         controller.set_loop(guild_id, next_mode)
-        await ctx.send_success(f"{loop_icon} Loop mode toggled to **{next_mode.upper()}**.", title="Loop Mode")
+        await ctx.send_success(f"{prefix}Loop mode toggled to **{next_mode.upper()}**.", title="Loop Mode")
 
 
 async def handle_shuffle(ctx: CustomContext, controller: MusicController) -> None:
@@ -48,8 +48,9 @@ async def handle_shuffle(ctx: CustomContext, controller: MusicController) -> Non
 
     random.shuffle(queue)
     e_reg = ctx.bot.custom_emojis
-    shuf_icon = e_reg.get("icons_shuffle", "🔀")
-    await ctx.send_success(f"{shuf_icon} Shuffled **{len(queue)}** upcoming tracks.", title="Queue Shuffled")
+    shuf_icon = e_reg.get("icons_shuffle", "")
+    prefix = f"{shuf_icon} " if shuf_icon else ""
+    await ctx.send_success(f"{prefix}Shuffled **{len(queue)}** upcoming tracks.", title="Queue Shuffled")
 
 
 async def handle_clear(ctx: CustomContext, controller: MusicController) -> None:
@@ -63,7 +64,10 @@ async def handle_clear(ctx: CustomContext, controller: MusicController) -> None:
 
     count = len(queue)
     queue.clear()
-    await ctx.send_success(f"Cleared **{count}** tracks from the upcoming queue.", title="Queue Cleared")
+    e_reg = ctx.bot.custom_emojis
+    clear_icon = e_reg.get("icons_stop_button", "")
+    prefix = f"{clear_icon} " if clear_icon else ""
+    await ctx.send_success(f"{prefix}Cleared **{count}** tracks from the upcoming queue.", title="Queue Cleared")
 
 
 async def handle_remove(ctx: CustomContext, controller: MusicController, position: int) -> None:
@@ -80,7 +84,10 @@ async def handle_remove(ctx: CustomContext, controller: MusicController, positio
         return
 
     removed = queue.pop(position - 1)
-    await ctx.send_success(f"Removed **[{removed.title}]({removed.url})** from queue position `#{position}`.", title="Track Removed")
+    e_reg = ctx.bot.custom_emojis
+    del_icon = e_reg.get("icon_delete", "")
+    prefix = f"{del_icon} " if del_icon else ""
+    await ctx.send_success(f"{prefix}Removed **[{removed.title}]({removed.url})** from queue position `#{position}`.", title="Track Removed")
 
 
 async def handle_volume(ctx: CustomContext, controller: MusicController, level: int) -> None:
@@ -97,5 +104,6 @@ async def handle_volume(ctx: CustomContext, controller: MusicController, level: 
         voice_client.source.volume = float_vol
 
     e_reg = ctx.bot.custom_emojis
-    vol_icon = e_reg.get("volume_up", "🔊") if level >= 50 else e_reg.get("volume_down", "🔉")
-    await ctx.send_success(f"{vol_icon} Playback volume set to **{level}%**.", title="Volume Adjusted")
+    vol_icon = e_reg.get("volume_up", "") if level >= 50 else e_reg.get("volume_down", "")
+    prefix = f"{vol_icon} " if vol_icon else ""
+    await ctx.send_success(f"{prefix}Playback volume set to **{level}%**.", title="Volume Adjusted")

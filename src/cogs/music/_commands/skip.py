@@ -24,5 +24,6 @@ async def handle_skip(ctx: CustomContext, controller: MusicController) -> None:
 
     voice_client.stop()
     e_reg = ctx.bot.custom_emojis
-    skip_icon = e_reg.get("skip", "⏭️")
-    await ctx.send_success(f"{skip_icon} Skipped **{current_title}** to next track in queue.", title="Track Skipped")
+    skip_icon = e_reg.get("skip", "")
+    prefix = f"{skip_icon} " if skip_icon else ""
+    await ctx.send_success(f"{prefix}Skipped **{current_title}** to next track in queue.", title="Track Skipped")

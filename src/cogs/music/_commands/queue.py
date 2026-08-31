@@ -25,14 +25,16 @@ async def handle_queue(ctx: CustomContext, controller: MusicController) -> None:
         return
 
     e_reg = ctx.bot.custom_emojis
-    q_icon = e_reg.get("queue", "📜")
-    music_icon = e_reg.get("Music_Playing", "🎶")
+    q_icon = e_reg.get("queue", "")
+    q_prefix = f"{q_icon} " if q_icon else ""
+    music_icon = e_reg.get("music_playing", "")
+    music_prefix = f"{music_icon} " if music_icon else ""
     dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
     container = CicadaContainer(accent_color=None)
     container.add_section(
         content=(
-            f"**{q_icon} Server Music Queue**\n"
+            f"**{q_prefix}Server Music Queue**\n"
             f"> Listing upcoming tracks for **{ctx.guild.name}**."
         )
     )
@@ -44,7 +46,7 @@ async def handle_queue(ctx: CustomContext, controller: MusicController) -> None:
         dur_str = f"{dur_m:02d}:{dur_s:02d}" if current.duration > 0 else "Live"
         container.add_text(
             f"**Now Playing:**\n"
-            f"> {music_icon} **[{current.title}]({current.url})**\n"
+            f"> {music_prefix}**[{current.title}]({current.url})**\n"
             f"> Artist: `{current.author}` {dot} Duration: `{dur_str}`"
         )
         container.add_separator(divider=True)

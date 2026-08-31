@@ -82,11 +82,6 @@ class CicadaBot(commands.Bot):
         self.ticket_mgr: TicketManager = TicketManager(self.db)
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
 
-        
-        # 24/7 Keep-Alive Web Server
-        from src.core.server import HealthServer
-        self.server: HealthServer = HealthServer(self)
-
         # Attach Global Command Guard
         self.add_check(self._global_command_check)
 
@@ -176,9 +171,6 @@ class CicadaBot(commands.Bot):
         # 5. Dynamically Load all Cogs
         await self._load_all_extensions()
 
-        # 6. Start 24/7 Keep-Alive Web Server
-        await self.server.start()
-
         logger.info("Setup hook completed successfully.")
 
     async def _load_all_extensions(self) -> None:
@@ -199,11 +191,8 @@ class CicadaBot(commands.Bot):
                 logger.error(f"Failed to load extension {module_name}: {e}", exc_info=e)
 
     async def close(self) -> None:
-        """Gracefully release database pools, servers, and network sessions."""
+        """Gracefully release database pools and network sessions."""
         logger.info("Shutting down Cicada 3301 Bot gracefully...")
-
-        if hasattr(self, "server"):
-            await self.server.stop()
 
         if self.session:
             await self.session.close()

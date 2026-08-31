@@ -11,7 +11,7 @@ import hmac
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 from aiohttp import web
 
 from src.core.config import Config
@@ -26,11 +26,26 @@ logger = logging.getLogger("Cicada.Server")
 class HealthServer:
     """Async web server for hosting health checks and Razorpay webhooks."""
 
-    def __init__(self, bot: CicadaBot) -> None:
-        self.bot = bot
+    def __init__(
+        self,
+        bot: CicadaBot | None = None,
+        bot_getter: Callable[[], CicadaBot | None] | None = None,
+    ) -> None:
+        self._bot = bot
+        self._bot_getter = bot_getter
         self.app = web.Application()
         self.runner: web.AppRunner | None = None
         self._setup_routes()
+
+    @property
+    def bot(self) -> CicadaBot | None:
+        if self._bot_getter:
+            return self._bot_getter()
+        return self._bot
+
+    @bot.setter
+    def bot(self, value: CicadaBot | None) -> None:
+        self._bot = value
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/", self._handle_home)
@@ -47,11 +62,12 @@ class HealthServer:
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Detailed health check endpoint."""
-        ws_ping = round(self.bot.latency * 1000) if (self.bot and self.bot.latency) else 0
+        bot = self.bot
+        ws_ping = round(bot.latency * 1000) if (bot and bot.latency) else 0
         data = {
             "status": "healthy",
             "bot": "Cicada 3301",
-            "guilds": len(self.bot.guilds) if self.bot else 0,
+            "guilds": len(bot.guilds) if bot else 0,
             "ping_ms": ws_ping,
         }
         return web.json_response(data, status=200)
@@ -157,6 +173,10 @@ class HealthServer:
 
         event = data.get("event", "")
         logger.info(f"Received verified Razorpay webhook event: {event}")
+
+        if not self.bot or not getattr(self.bot, "db", None):
+            logger.error("Razorpay webhook received but bot database is not ready.")
+            return web.Response(status=503, text="Bot database connecting")
 
         # 3. Handle Payment Captures & Link Paid Events
         if event in ["payment.captured", "payment_link.paid", "order.paid"]:

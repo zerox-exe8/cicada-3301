@@ -279,6 +279,17 @@ Cicada 3301/
 | `?prefix set <prefix>` | Admin | Administrator | Update custom command prefix for server |
 | `?prefix reset` | Admin | Administrator | Reset server prefix to default `?` |
 | `?sync [guild/global]` | Admin | Developer Only | Sync application slash commands with Discord API |
+| `?play <query>` | Music | Everyone | Play 320kbps CD Master / YouTube audio in voice channel |
+| `?pause` / `?resume` | Music | Everyone | Pause or resume current track playback |
+| `?skip` | Music | Everyone | Skip current track to next in queue |
+| `?stop` | Music | Everyone | Stop playback, clear queue and disconnect from voice |
+| `?queue` | Music | Everyone | View upcoming server playlist in Type 17 Container card |
+| `?nowplaying` | Music | Everyone | Display now playing card with interactive button controls |
+| `?loop [off/track/queue]` | Music | Everyone | Toggle repeating track or playlist |
+| `?shuffle` | Music | Everyone | Randomize upcoming playlist order |
+| `?clear` | Music | Everyone | Clear all upcoming songs from queue |
+| `?remove <pos>` | Music | Everyone | Remove a specific track from queue by position |
+| `?volume <0-150>` | Music | Everyone | Adjust stream playback volume |
 
 ---
 

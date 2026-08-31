@@ -90,6 +90,33 @@ class Prefix(commands.Cog):
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
+    @commands.hybrid_command(
+        name="prefix",
+        description="View the bot command prefix for this server.",
+    )
+    @commands.guild_only()
+    async def view_prefix(self, ctx: CustomContext) -> None:
+        """View the current command prefix for this server."""
+        current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
+
+        container = CicadaContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Server Command Prefix**\n"
+                f"> Current command prefix for **{ctx.guild.name}** is `{current_prefix}`"
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"{dot} **Prefix:** `{current_prefix}` | **Slash Commands:** `/`\n"
+            f"{dot} **Change Prefix:** `{current_prefix}setprefix <new_prefix>`"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Prefix(bot))

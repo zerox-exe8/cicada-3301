@@ -7,19 +7,41 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
 # Ensure project root is in sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+BASE_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR))
+
+# Ensure static FFmpeg binaries are registered on PATH
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+except ImportError:
+    pass
 
 import discord
+import discord.opus
 from src.core.bot import CicadaBot
 from src.core.config import Config
 from src.core.server import HealthServer
 from src.utils.logger import setup_logger
 
 logger = setup_logger("Cicada")
+
+# Ensure Opus DLL is loaded on Windows
+if not discord.opus.is_loaded():
+    for dll_name in ["opus.dll", "libopus-0.dll", "libopus.dll"]:
+        dll_path = BASE_DIR / dll_name
+        if dll_path.exists():
+            try:
+                discord.opus.load_opus(str(dll_path))
+                logger.debug(f"Loaded Opus library from {dll_path}")
+                break
+            except Exception as e:
+                logger.debug(f"Notice loading {dll_name}: {e}")
 
 active_bot: CicadaBot | None = None
 
@@ -51,9 +73,21 @@ async def run_bot_loop() -> None:
             await asyncio.sleep(5)
         except discord.HTTPException as e:
             if e.status == 429:
-                logger.warning(f"Discord 429 Rate Limit encountered. Cooling down for {delay:.0f}s before retrying...")
-                await asyncio.sleep(delay)
-                delay = min(delay * 2.0, 300.0)
+                retry_after = getattr(e, "retry_after", None)
+                if retry_after is None and hasattr(e, "response") and e.response is not None:
+                    retry_header = getattr(e.response, "headers", {}).get("Retry-After")
+                    if retry_header:
+                        try:
+                            retry_after = float(retry_header)
+                        except ValueError:
+                            pass
+                wait_time = max(retry_after if retry_after else delay, 15.0)
+                logger.warning(
+                    f"Discord 429 Rate Limit encountered (retry_after={retry_after}). "
+                    f"Cooling down for {wait_time:.0f}s before retrying..."
+                )
+                await asyncio.sleep(wait_time)
+                delay = min(max(delay * 2.0, wait_time), 300.0)
             else:
                 logger.error(f"Discord HTTP Exception ({e.status}): {e}. Retrying in 15s...")
                 await asyncio.sleep(15)
@@ -73,7 +107,7 @@ async def run_bot_loop() -> None:
 async def main() -> None:
     """Launch 24/7 Web Server and resilient bot loop."""
     # 1. Start Web Server first so Render Port Scan passes immediately (<1s)
-    server = HealthServer(bot=None)  # type: ignore
+    server = HealthServer(bot_getter=get_current_bot)
     await server.start()
 
     # 2. Run bot loop

@@ -1,7 +1,14 @@
-# Discord Core
-discord.py>=2.3.2
+# Discord Core & Voice
+discord.py[voice]>=2.3.2
+PyNaCl>=1.5.0
+davey>=0.1.6
 aiohttp>=3.9.0
 asyncpg>=0.29.0
+
+# Audio & Extraction
+yt-dlp>=2025.01.01
+pyDes>=2.0.1
+static-ffmpeg>=2.5
 
 # Configuration & Utilities
 python-dotenv>=1.0.0

@@ -71,6 +71,7 @@ class Help(commands.Cog):
         e_reg = self.bot.custom_emojis
         mapping = {
             "General": e_reg.get("icons_utility", e_reg.get("icons_generalinfo", "")),
+            "Music": e_reg.get("Music_Playing", e_reg.get("music_music", e_reg.get("a_musical_notes", ""))),
             "Utility": e_reg.get("icons_magicwand", e_reg.get("icons_utility", "")),
             "Settings": e_reg.get("icons_settings", ""),
             "Admin": e_reg.get("icons_staff", e_reg.get("icon_mod", "")),
@@ -86,6 +87,7 @@ class Help(commands.Cog):
         e_reg = self.bot.custom_emojis
         mapping = {
             "General": "icons_utility",
+            "Music": "music_music",
             "Utility": "icons_magicwand",
             "Settings": "icons_settings",
             "Admin": "icons_staff",

@@ -119,7 +119,10 @@ class MusicController:
         dur_s = track.duration % 60
         dur_str = f"{dur_m:02d}:{dur_s:02d}" if track.duration > 0 else "Live"
 
-        req_str = requester or track.requester or "User"
+        raw_req = requester or track.requester or "User"
+        if isinstance(raw_req, str) and raw_req.startswith("<@") and raw_req.endswith(">"):
+            raw_req = "User"
+        req_str = str(raw_req)
         ch_str = f"`# {channel_name}`" if channel_name else "`Voice Channel`"
         short_artist = shorten_artist(track.author)
 

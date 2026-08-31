@@ -59,7 +59,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         await ctx.send_warning(f"No results found for `{query}`.")
         return
 
-    track.requester = ctx.author.mention
+    track.requester = ctx.author.display_name
     guild_id = ctx.guild.id
     queue = controller.get_queue(guild_id)
     controller.active_contexts[guild_id] = ctx
@@ -74,7 +74,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
                 track,
                 guild_id,
                 channel_name=user_channel.name,
-                requester=ctx.author.mention,
+                requester=ctx.author.display_name,
             )
             view = MusicControlView(ctx.bot, controller, guild_id)
             await send_container_response(ctx, card, view=view)
@@ -105,7 +105,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         queued_container.add_separator(divider=True)
         queued_container.add_text(
             f"{dot} **Position in Queue:** `#{len(queue)}`\n"
-            f"{dot} **Requested By:** {ctx.author.mention}"
+            f"{dot} **Requested By:** {ctx.author.display_name}"
         )
         queued_container.add_separator(divider=True)
         queued_container.add_text(f"-# Cicada 3301 Music Engine")

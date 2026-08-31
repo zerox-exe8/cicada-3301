@@ -42,7 +42,7 @@ FFMPEG_OPTIONS = {
     ),
 }
 
-# YouTube Studio Extractor Options
+# YouTube Studio Extractor Options (Fast Android/Web Client Engine)
 YDL_OPTS = {
     "format": "bestaudio/best",
     "quiet": True,
@@ -52,10 +52,10 @@ YDL_OPTS = {
     "nocheckcertificate": True,
     "ignoreerrors": False,
     "source_address": "0.0.0.0",
-    "socket_timeout": 10,
+    "socket_timeout": 8,
     "extractor_args": {
         "youtube": {
-            "player_client": ["android", "ios", "web", "mweb"]
+            "player_client": ["android", "web"]
         }
     },
 }

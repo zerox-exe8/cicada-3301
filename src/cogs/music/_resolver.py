@@ -1,6 +1,6 @@
 """
 Cicada 3301 Discord Bot - Music Resolver
-100% Exact Song Matching + Studio Master 320kbps CD Audio Engine + YouTube Studio Fallback.
+100% Exact Song Matching + Multi-Candidate Ranking Engine + Studio Master + Smart Autoplay.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 from pyDes import des, ECB, PAD_PKCS5
@@ -22,7 +22,7 @@ from src.cogs.music._types import TrackItem, YDL_OPTS
 
 logger = logging.getLogger("Cicada.Music.Resolver")
 
-RESOLVER_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="MusicResolver")
+RESOLVER_POOL = ThreadPoolExecutor(max_workers=6, thread_name_prefix="MusicResolver")
 
 COMMON_TYPOS = {
     r"\btranding\b": "trending",
@@ -30,6 +30,7 @@ COMMON_TYPOS = {
     r"\bvedio\b": "video",
     r"\bvedios\b": "videos",
     r"\bsongg\b": "song",
+    r"\bsongs\b": "song",
     r"\bmuisc\b": "music",
 }
 
@@ -51,7 +52,7 @@ def clean_track_title(raw_title: str) -> str:
     t = re.sub(r"#([A-Za-z0-9_]+)", r"\1", t).strip()
     # Remove media tags in parentheses/brackets e.g. (Official Video), [Full Song]
     t = re.sub(
-        r"\s*[\(\[](?:Official|Full|HD|4K|Audio|Video|Music|Lyrical|Visualizer|Teaser|Status|Bhojpuri Hit Song)[^\)\]]*[\)\]]",
+        r"\s*[\(\[](?:Official|Full|HD|4K|Audio|Video|Music|Lyrical|Visualizer|Teaser|Status|Bhojpuri Hit Song|Bhojpuri Song)[^\)\]]*[\)\]]",
         "",
         t,
         flags=re.IGNORECASE,
@@ -67,7 +68,7 @@ def clean_track_title(raw_title: str) -> str:
 
 
 class MusicResolver:
-    """Smart Music Resolver with 0ms cache and multi-source resolution."""
+    """Smart Music Resolver with 0ms cache and multi-candidate ranked resolution."""
     _CACHE: Dict[str, TrackItem] = {}
 
     @classmethod
@@ -87,13 +88,12 @@ class MusicResolver:
         return None
 
     @classmethod
-    def _score_track(cls, query: str, res: dict) -> int:
-        """Calculate match confidence score (-50 to 200) to rank best song candidate."""
+    def _score_saavn_track(cls, query: str, res: dict) -> int:
+        """Calculate match confidence score for JioSaavn."""
         q = query.lower().strip()
         raw_title = html.unescape(res.get("title") or res.get("song") or "").lower().strip()
         clean_title = re.sub(r"\(.*?\)|\[.*?\]", "", raw_title).strip()
 
-        # Extract artists
         artists: List[str] = []
         more_info = res.get("more_info", {})
         artist_map = more_info.get("artistMap", {})
@@ -109,12 +109,10 @@ class MusicResolver:
         if not q_words:
             return 0
 
-        # Calculate word coverage
         matched_words = [w for w in q_words if w in combined_target]
         coverage = len(matched_words) / len(q_words)
         score = int(coverage * 80)
 
-        # Exact title match
         if clean_title == q:
             score += 100
         elif clean_title in q or q in clean_title:
@@ -122,24 +120,50 @@ class MusicResolver:
             if ratio > 0.35:
                 score += int(ratio * 70)
 
-        # Penalize unwanted variations unless asked by user
-        unwanted_keywords = ["remix", "live", "lofi", "cover", "slowed", "reverb", "acoustic", "mashup"]
-        for u in unwanted_keywords:
-            if u in raw_title and u not in q:
+        return score
+
+    @classmethod
+    def _score_yt_candidate(cls, query: str, entry: dict) -> int:
+        """Intelligent ranking score (-100 to 200) for YouTube search entries."""
+        q = query.lower().strip()
+        q_words = [w for w in re.findall(r"\w+", q) if len(w) > 1]
+        title = html.unescape(entry.get("title") or "").lower().strip()
+        uploader = html.unescape(entry.get("uploader") or "").lower().strip()
+        duration = entry.get("duration") or 0
+
+        # Discard shorts (<45s) and ultra-long compilations (>900s / 15 mins) unless queried
+        if duration > 0 and (duration < 45 or duration > 900):
+            if "1 hour" not in q and "loop" not in q and "full album" not in q:
+                return -100
+
+        target = f"{title} {uploader}"
+        if not q_words:
+            return 50
+
+        matched = [w for w in q_words if w in target]
+        coverage = len(matched) / len(q_words)
+        score = int(coverage * 100)
+
+        # Authority Channel Boost (Official Record Labels & Verified Artists)
+        official_keywords = [
+            "official", "vevo", "music", "series", "records", "zee",
+            "sony", "wave", "saregama", "tips", "yrf", "audio"
+        ]
+        if any(k in uploader for k in official_keywords):
+            score += 25
+
+        # Penalties for unwanted non-original formats unless explicitly queried
+        penalties = [
+            "slowed", "reverb", "lofi", "8d", "status", "reaction",
+            "dance cover", "tutorial", "karaoke", "instrumental", "teaser", "trailer"
+        ]
+        for bad in penalties:
+            if bad in title and bad not in q:
                 score -= 40
 
-        # Popularity bonus for verified originals
-        try:
-            plays = int(res.get("play_count", 0))
-            if plays > 10_000_000:
-                score += 20
-            elif plays > 1_000_000:
-                score += 10
-        except Exception:
-            pass
-
-        if len(q_words) >= 4 and coverage < 0.4:
-            score -= 60
+        # Duration sweet spot (2 to 6 minutes is typical studio track)
+        if 120 <= duration <= 360:
+            score += 15
 
         return score
 
@@ -160,25 +184,58 @@ class MusicResolver:
         return None
 
     @classmethod
-    async def _resolve_youtube(cls, search_query: str, is_url: bool, raw_q: str, cache_key: str) -> Optional[TrackItem]:
-        """Search YouTube Studio and extract best matching high-fidelity stream."""
+    async def _resolve_youtube_ranked(cls, search_query: str, is_url: bool, raw_q: str, cache_key: str) -> Optional[TrackItem]:
+        """Multi-candidate YouTube search + intelligent ranking + stream extraction."""
         loop = asyncio.get_event_loop()
-        target = search_query if is_url else f"ytsearch1:{search_query}"
 
-        def _yt_extract():
+        def _yt_search_and_extract():
             try:
-                with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-                    info = ydl.extract_info(target, download=False)
-                    if not info:
+                if is_url:
+                    with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+                        info = ydl.extract_info(search_query, download=False)
+                        if not info:
+                            return None
+                        if "entries" in info and info["entries"]:
+                            return info["entries"][0]
+                        return info
+
+                # 1. Fast Flat Search (5 candidates)
+                fast_opts = {
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noplaylist": True,
+                    "extract_flat": True,
+                    "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+                }
+                with yt_dlp.YoutubeDL(fast_opts) as ydl:
+                    info = ydl.extract_info(f"ytsearch5:{search_query}", download=False)
+                    if not info or "entries" not in info or not info["entries"]:
                         return None
-                    if "entries" in info and info["entries"]:
-                        return info["entries"][0]
-                    return info
+                    entries = [e for e in info["entries"] if e]
+
+                # 2. Score and Rank candidates
+                scored: List[Tuple[int, dict]] = [
+                    (cls._score_yt_candidate(search_query, e), e) for e in entries
+                ]
+                scored.sort(key=lambda x: x[0], reverse=True)
+                best_score, best_candidate = scored[0]
+
+                video_id = best_candidate.get("id")
+                if not video_id:
+                    video_url = best_candidate.get("url") or best_candidate.get("webpage_url")
+                else:
+                    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+                # 3. Extract audio stream for top candidate
+                with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+                    stream_info = ydl.extract_info(video_url, download=False)
+                    return stream_info
+
             except Exception as e:
-                logger.error(f"YouTube extraction error for '{target}': {e}")
+                logger.error(f"YouTube ranked extraction error for '{search_query}': {e}")
             return None
 
-        entry = await loop.run_in_executor(RESOLVER_POOL, _yt_extract)
+        entry = await loop.run_in_executor(RESOLVER_POOL, _yt_search_and_extract)
         if entry and entry.get("url"):
             raw_title = entry.get("title", search_query)
             clean_t = clean_track_title(raw_title)
@@ -193,7 +250,7 @@ class MusicResolver:
                 requester="",
             )
             cls._CACHE[cache_key] = track
-            logger.info(f"Resolved '{search_query}' via YouTube -> '{track.title}' by '{author}'")
+            logger.info(f"Resolved '{search_query}' -> '{track.title}' by '{author}'")
             return track
         return None
 
@@ -244,13 +301,13 @@ class MusicResolver:
         is_url = search_query.startswith("http://") or search_query.startswith("https://")
         word_count = len(search_query.split())
 
-        # For long queries (3+ words) or direct URLs, prioritize YouTube's 100% comprehensive catalog
+        # For multi-word queries (>=3 words) or URLs, run through YouTube Ranked Engine
         if is_url or word_count >= 3:
-            yt_track = await cls._resolve_youtube(search_query, is_url, raw_q, cache_key)
+            yt_track = await cls._resolve_youtube_ranked(search_query, is_url, raw_q, cache_key)
             if yt_track:
                 return yt_track
 
-        # For short / 1-2 word queries, check JioSaavn 320kbps CD Studio Master
+        # For 1-2 word queries, check JioSaavn 320kbps CD Studio Master
         if not is_url:
             try:
                 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -269,11 +326,11 @@ class MusicResolver:
                             data = json.loads(await r.text())
                             results = data.get("results", [])
                             if results:
-                                scored = [(cls._score_track(search_query, res), res) for res in results]
+                                scored = [(cls._score_saavn_track(search_query, res), res) for res in results]
                                 scored.sort(key=lambda x: x[0], reverse=True)
                                 best_score, best_res = scored[0]
 
-                                if best_score >= 40:
+                                if best_score >= 50:
                                     pid = best_res.get("id")
                                     if pid:
                                         dparams = {
@@ -313,8 +370,8 @@ class MusicResolver:
             except Exception as e:
                 logger.debug(f"Official master search notice: {e}")
 
-        # Fallback to YouTube
-        return await cls._resolve_youtube(search_query, is_url, raw_q, cache_key)
+        # Fallback to YouTube Ranked Engine
+        return await cls._resolve_youtube_ranked(search_query, is_url, raw_q, cache_key)
 
     @classmethod
     async def recommend_next_track(

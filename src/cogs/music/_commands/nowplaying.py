@@ -24,6 +24,13 @@ async def handle_nowplaying(ctx: CustomContext, controller: MusicController) -> 
         await ctx.send_warning("No track is currently playing.")
         return
 
-    container = controller.build_now_playing_container(current, guild_id)
+    vc = ctx.guild.voice_client
+    ch_name = vc.channel.name if vc and vc.channel else None
+    container = controller.build_now_playing_container(
+        current,
+        guild_id,
+        channel_name=ch_name,
+        requester=current.requester,
+    )
     view = MusicControlView(ctx.bot, controller, guild_id)
     await send_container_response(ctx, container, view=view)

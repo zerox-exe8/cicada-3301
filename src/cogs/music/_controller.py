@@ -1,6 +1,6 @@
 """
 Cicada 3301 Discord Bot - Music Controller & State Manager
-Manages playback state, queues, loop modes, volume, AI Autoplay, and Type 17 Containers.
+Manages playback state, queues, loop modes, volume, AI Autoplay, and Components V2 Container cards.
 """
 
 from __future__ import annotations
@@ -80,41 +80,47 @@ class MusicController:
         self.active_contexts.pop(guild_id, None)
         self.played_history.pop(guild_id, None)
 
-    def build_now_playing_container(self, track: TrackItem, guild_id: int) -> CicadaContainer:
-        """Create a signature Cicada Components V2 Container for the playing track."""
+    def build_now_playing_container(
+        self,
+        track: TrackItem,
+        guild_id: int,
+        channel_name: Optional[str] = None,
+        requester: Optional[str] = None,
+    ) -> CicadaContainer:
+        """Create a compact, ultra-aesthetic Components V2 Container matching signature player card."""
         e_reg = self.bot.custom_emojis
-        music_icon = e_reg.get("Music_Playing", e_reg.get("music_music", "🎶"))
-        note_icon = e_reg.get("a_musical_notes", "")
+        music_playing = e_reg.get("Music_Playing", e_reg.get("music_music", "🎶"))
+        notes = e_reg.get("a_musical_notes", "")
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
         dur_m = track.duration // 60
         dur_s = track.duration % 60
-        dur_str = f"{dur_m}:{dur_s:02d}" if track.duration > 0 else "Live / Unknown"
-        loop_mode = self.get_loop(guild_id)
-        autoplay_str = "ENABLED (AI)" if self.get_autoplay(guild_id) else "DISABLED"
+        dur_str = f"{dur_m:02d}:{dur_s:02d}" if track.duration > 0 else "Live"
+
+        req_str = requester or track.requester or "User"
+        ch_str = f"`# {channel_name}`" if channel_name else "`Voice Channel`"
 
         container = CicadaContainer(accent_color=None)
-        prefix_icon = f"{music_icon} " if music_icon else ""
-        note_suffix = f" {note_icon}" if note_icon else ""
-        header_tag = " [♾️ Autoplay Radio]" if track.requester == "🤖 AI Autoplay" else ""
+        prefix_icon = f"{music_playing} " if music_playing else ""
+        suffix_icon = f" {notes}" if notes else ""
+        header_tag = " `[♾️ Autoplay]`" if track.requester == "🤖 AI Autoplay" else ""
 
+        # Section with Thumbnail Accessory on the Right
         container.add_section(
             content=(
-                f"**{prefix_icon}Now Playing{header_tag}{note_suffix}**\n"
-                f"> **[{track.title}]({track.url})**\n"
-                f"> Artist: `{track.author}`"
+                f"**{prefix_icon}Now Playing{header_tag}{suffix_icon}**\n"
+                f"> **Title:** [{track.title}]({track.url})\n"
+                f"> **Artist:** `{track.author}` {dot} **Duration:** `{dur_str}`"
             ),
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
         container.add_separator(divider=True)
 
+        # Meta Info (Channel, Bitrate, Requester)
         container.add_text(
-            f"{dot} **Duration:** `{dur_str}`\n"
-            f"{dot} **Loop Mode:** `{loop_mode.upper()}`   {dot} **Autoplay:** `{autoplay_str}`\n"
-            f"{dot} **Requested By:** `{track.requester or 'User'}`"
+            f"{dot} **Channel:** {ch_str} | **Bitrate:** `320 kbps (HD)`\n"
+            f"{dot} **Requested By:** {req_str}"
         )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Cicada 3301 Studio CD Audio Engine • 320kbps Lossless")
         return container
 
     def _handle_track_finish(self, ctx: CustomContext, error: Optional[Exception]) -> None:
@@ -186,7 +192,13 @@ class MusicController:
             try:
                 self._play_stream(ctx, next_track)
 
-                container = self.build_now_playing_container(next_track, guild_id)
+                ch_name = voice_client.channel.name if voice_client.channel else None
+                container = self.build_now_playing_container(
+                    next_track,
+                    guild_id,
+                    channel_name=ch_name,
+                    requester=next_track.requester,
+                )
                 view = MusicControlView(self.bot, self, guild_id)
                 asyncio.run_coroutine_threadsafe(
                     send_container_response(ctx, container, view=view),
@@ -196,7 +208,6 @@ class MusicController:
                 logger.error(f"Error starting next track: {ex}", exc_info=ex)
                 self.play_next(ctx)
         elif self.get_autoplay(guild_id):
-            # Queue is empty and Autoplay is enabled -> Resolve personalized next track
             last_track = self.current_tracks.get(guild_id)
             if last_track:
                 asyncio.run_coroutine_threadsafe(
@@ -231,7 +242,13 @@ class MusicController:
             self.current_tracks[guild_id] = next_track
             self._play_stream(ctx, next_track)
 
-            container = self.build_now_playing_container(next_track, guild_id)
+            ch_name = voice_client.channel.name if voice_client.channel else None
+            container = self.build_now_playing_container(
+                next_track,
+                guild_id,
+                channel_name=ch_name,
+                requester="🤖 AI Autoplay",
+            )
             view = MusicControlView(self.bot, self, guild_id)
             await send_container_response(ctx, container, view=view)
         elif not next_track:

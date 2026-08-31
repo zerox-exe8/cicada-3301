@@ -48,9 +48,9 @@ async def handle_autoplay(ctx: CustomContext, controller: MusicController, actio
         listeners = [m.id for m in vc.channel.members if not m.bot]
         top_artists = await controller.analytics.get_top_artists(listeners, limit=5)
 
-    status_str = "ENABLED (AI Smart Taste)" if new_state else "DISABLED"
+    status_str = "ENABLED (AI Smart Radio)" if new_state else "DISABLED"
     status_desc = (
-        "Bot will automatically queue personalized tracks matching current listeners' taste when the queue ends."
+        "AI will automatically queue personalized tracks matching current listeners' taste when queue ends."
         if new_state
         else "Playback will stop once the current queue finishes."
     )
@@ -58,8 +58,8 @@ async def handle_autoplay(ctx: CustomContext, controller: MusicController, actio
     container = CicadaContainer(accent_color=None)
     container.add_section(
         content=(
-            f"**{autoplay_icon} AI Autoplay Configuration**\n"
-            f"> Status: `{status_str}`\n"
+            f"**{autoplay_icon} AI Autoplay Radio**\n"
+            f"> **Status:** `{status_str}`\n"
             f"> {status_desc}"
         )
     )
@@ -69,14 +69,12 @@ async def handle_autoplay(ctx: CustomContext, controller: MusicController, actio
         artists_formatted = ", ".join(f"`{a}`" for a in top_artists)
         container.add_text(
             f"{dot} **Active Listener Tastes:** {artists_formatted}\n"
-            f"{dot} **Recommendation Engine:** `JioSaavn Studio Master + YouTube Multi-Client`"
+            f"{dot} **Audio Engine:** `JioSaavn 320kbps CD Master + YouTube`"
         )
     else:
         container.add_text(
-            f"{dot} **Recommendation Engine:** `JioSaavn Studio Master + YouTube Multi-Client`\n"
-            f"-# Play songs or listen on Spotify to enrich your AI profile!"
+            f"{dot} **Audio Engine:** `JioSaavn 320kbps CD Master + YouTube`\n"
+            f"-# Listen on Spotify or play songs to enrich your AI profile!"
         )
 
-    container.add_separator(divider=True)
-    container.add_text("-# Cicada 3301 High-Fidelity Audio Engine")
     await send_container_response(ctx, container)

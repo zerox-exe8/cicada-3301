@@ -5,11 +5,9 @@ Cicada 3301 Discord Bot - Play Command Handler
 from __future__ import annotations
 
 import logging
-import shutil
 from typing import TYPE_CHECKING
 import discord
 
-from src.cogs.music._types import FFMPEG_OPTIONS
 from src.cogs.music._resolver import MusicResolver
 from src.cogs.music._views import MusicControlView
 from src.utils.containers import CicadaContainer, send_container_response
@@ -22,7 +20,7 @@ logger = logging.getLogger("Cicada.Music.Cmd.Play")
 
 
 async def handle_play(ctx: CustomContext, controller: MusicController, query: str) -> None:
-    """Execute the play command."""
+    """Execute the play command with signature Components V2 player card."""
     if not ctx.author.voice or not ctx.author.voice.channel:
         await ctx.send_warning("You must be connected to a Voice Channel to play music.")
         return
@@ -44,7 +42,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
     search_icon = e_reg.get("Music_Playing", e_reg.get("music_music", "🔎"))
 
     search_container = CicadaContainer(accent_color=None)
-    search_container.add_text(f"{search_icon} **Searching for track:** `{query}`...")
+    search_container.add_text(f"{search_icon} **Searching track:** `{query}`...")
     status_msg = await send_container_response(ctx, search_container)
 
     # 2. Resolve Track
@@ -59,7 +57,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         await ctx.send_warning(f"No results found for `{query}`.")
         return
 
-    track.requester = ctx.author.display_name
+    track.requester = ctx.author.mention
     guild_id = ctx.guild.id
     queue = controller.get_queue(guild_id)
     controller.active_contexts[guild_id] = ctx
@@ -70,7 +68,12 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         try:
             controller._play_stream(ctx, track)
 
-            card = controller.build_now_playing_container(track, guild_id)
+            card = controller.build_now_playing_container(
+                track,
+                guild_id,
+                channel_name=user_channel.name,
+                requester=ctx.author.mention,
+            )
             view = MusicControlView(ctx.bot, controller, guild_id)
             await send_container_response(ctx, card, view=view)
         except Exception as e:
@@ -83,23 +86,20 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
 
         dur_m = track.duration // 60
         dur_s = track.duration % 60
-        dur_str = f"{dur_m}:{dur_s:02d}" if track.duration > 0 else "Live"
+        dur_str = f"{dur_m:02d}:{dur_s:02d}" if track.duration > 0 else "Live"
 
         queued_container = CicadaContainer(accent_color=None)
         queued_container.add_section(
             content=(
                 f"**{queued_icon} Track Queued**\n"
-                f"> **[{track.title}]({track.url})**\n"
-                f"> Artist: `{track.author}`"
+                f"> **Title:** [{track.title}]({track.url})\n"
+                f"> **Artist:** `{track.author}` {dot} **Duration:** `{dur_str}`"
             ),
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
         queued_container.add_separator(divider=True)
         queued_container.add_text(
             f"{dot} **Position in Queue:** `#{len(queue)}`\n"
-            f"{dot} **Duration:** `{dur_str}`\n"
-            f"{dot} **Requested By:** `{track.requester}`"
+            f"{dot} **Requested By:** {ctx.author.mention}"
         )
-        queued_container.add_separator(divider=True)
-        queued_container.add_text(f"-# Use ?queue to view the full upcoming playlist.")
         await send_container_response(ctx, queued_container)

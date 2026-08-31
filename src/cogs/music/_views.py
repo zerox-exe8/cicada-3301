@@ -6,6 +6,7 @@ Interactive Components V2 Action Row Buttons for Now Playing Player Card.
 from __future__ import annotations
 
 import logging
+import random
 from typing import TYPE_CHECKING
 import discord
 
@@ -17,7 +18,7 @@ logger = logging.getLogger("Cicada.Music.Views")
 
 
 class MusicControlView(discord.ui.View):
-    """Interactive button row for Now Playing player container."""
+    """Interactive button row matching the signature Cicada Now Playing player design."""
 
     def __init__(self, bot: CicadaBot, controller: MusicController, guild_id: int) -> None:
         super().__init__(timeout=None)
@@ -42,13 +43,15 @@ class MusicControlView(discord.ui.View):
 
         return True
 
+    # Row 0: Primary Controls (Pause, Skip, Queue, Stop)
     @discord.ui.button(
-        label="Pause / Resume",
+        label="Pause",
         style=discord.ButtonStyle.secondary,
-        custom_id="music:pause_resume",
-        emoji="⏯️",
+        custom_id="music:pause",
+        emoji="⏸️",
+        row=0,
     )
-    async def pause_resume_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._check_user_voice(interaction):
             return
 
@@ -60,9 +63,13 @@ class MusicControlView(discord.ui.View):
         vc: discord.VoiceClient = guild.voice_client
         if vc.is_playing():
             vc.pause()
+            button.label = "Resume"
+            button.emoji = "▶️"
             await interaction.response.send_message("⏸️ Playback paused.", ephemeral=True)
         elif vc.is_paused():
             vc.resume()
+            button.label = "Pause"
+            button.emoji = "⏸️"
             await interaction.response.send_message("▶️ Playback resumed.", ephemeral=True)
         else:
             await interaction.response.send_message("No active audio stream.", ephemeral=True)
@@ -72,6 +79,7 @@ class MusicControlView(discord.ui.View):
         style=discord.ButtonStyle.secondary,
         custom_id="music:skip",
         emoji="⏭️",
+        row=0,
     )
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._check_user_voice(interaction):
@@ -86,10 +94,42 @@ class MusicControlView(discord.ui.View):
         await interaction.response.send_message("⏭️ Skipped track.", ephemeral=True)
 
     @discord.ui.button(
+        label="Queue",
+        style=discord.ButtonStyle.secondary,
+        custom_id="music:queue",
+        emoji="📜",
+        row=0,
+    )
+    async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        queue = self.controller.get_queue(self.guild_id)
+        current = self.controller.get_current(self.guild_id)
+
+        if not current and not queue:
+            await interaction.response.send_message("The queue is currently empty.", ephemeral=True)
+            return
+
+        lines = []
+        if current:
+            dur_m = current.duration // 60
+            dur_s = current.duration % 60
+            lines.append(f"**Now Playing:** [{current.title}]({current.url}) (`{dur_m:02d}:{dur_s:02d}`)\n")
+        if queue:
+            lines.append(f"**Up Next ({len(queue)} tracks):**")
+            for i, t in enumerate(queue[:10], 1):
+                dm = t.duration // 60
+                ds = t.duration % 60
+                lines.append(f"`{i}.` [{t.title}]({t.url}) - `{dm:02d}:{ds:02d}`")
+            if len(queue) > 10:
+                lines.append(f"-# ...and {len(queue) - 10} more tracks in queue.")
+
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @discord.ui.button(
         label="Stop",
         style=discord.ButtonStyle.danger,
         custom_id="music:stop",
         emoji="⏹️",
+        row=0,
     )
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._check_user_voice(interaction):
@@ -104,11 +144,13 @@ class MusicControlView(discord.ui.View):
         await guild.voice_client.disconnect()
         await interaction.response.send_message("⏹️ Playback stopped and disconnected.", ephemeral=True)
 
+    # Row 1: Extended Controls (Loop, Autoplay, Shuffle)
     @discord.ui.button(
         label="Loop",
         style=discord.ButtonStyle.secondary,
         custom_id="music:loop",
         emoji="🔁",
+        row=1,
     )
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._check_user_voice(interaction):
@@ -120,36 +162,6 @@ class MusicControlView(discord.ui.View):
         await interaction.response.send_message(f"🔁 Loop mode set to **{next_mode.upper()}**.", ephemeral=True)
 
     @discord.ui.button(
-        label="Queue",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music:queue",
-        emoji="📜",
-    )
-    async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        queue = self.controller.get_queue(self.guild_id)
-        current = self.controller.get_current(self.guild_id)
-
-        if not current and not queue:
-            await interaction.response.send_message("The queue is currently empty.", ephemeral=True)
-            return
-
-        lines = []
-        if current:
-            dur_m = current.duration // 60
-            dur_s = current.duration % 60
-            lines.append(f"**Now Playing:** [{current.title}]({current.url}) (`{dur_m}:{dur_s:02d}`)\n")
-        if queue:
-            lines.append(f"**Up Next ({len(queue)} tracks):**")
-            for i, t in enumerate(queue[:10], 1):
-                dm = t.duration // 60
-                ds = t.duration % 60
-                lines.append(f"`{i}.` [{t.title}]({t.url}) - `{dm}:{ds:02d}`")
-            if len(queue) > 10:
-                lines.append(f"-# ...and {len(queue) - 10} more tracks in queue.")
-
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
-
-    @discord.ui.button(
         label="Autoplay",
         style=discord.ButtonStyle.secondary,
         custom_id="music:autoplay",
@@ -159,8 +171,28 @@ class MusicControlView(discord.ui.View):
     async def autoplay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._check_user_voice(interaction):
             return
+
         current = self.controller.get_autoplay(self.guild_id)
         new_state = not current
         self.controller.set_autoplay(self.guild_id, new_state)
         state_str = "ENABLED (AI Smart Radio)" if new_state else "DISABLED"
         await interaction.response.send_message(f"♾️ AI Autoplay is now **{state_str}**.", ephemeral=True)
+
+    @discord.ui.button(
+        label="Shuffle",
+        style=discord.ButtonStyle.secondary,
+        custom_id="music:shuffle",
+        emoji="🔀",
+        row=1,
+    )
+    async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await self._check_user_voice(interaction):
+            return
+
+        queue = self.controller.get_queue(self.guild_id)
+        if len(queue) < 2:
+            await interaction.response.send_message("Need at least 2 tracks in queue to shuffle.", ephemeral=True)
+            return
+
+        random.shuffle(queue)
+        await interaction.response.send_message(f"🔀 Shuffled **{len(queue)}** upcoming tracks.", ephemeral=True)

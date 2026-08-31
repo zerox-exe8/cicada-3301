@@ -41,30 +41,31 @@ async def handle_queue(ctx: CustomContext, controller: MusicController) -> None:
     if current:
         dur_m = current.duration // 60
         dur_s = current.duration % 60
-        dur_str = f"{dur_m}:{dur_s:02d}" if current.duration > 0 else "Live"
+        dur_str = f"{dur_m:02d}:{dur_s:02d}" if current.duration > 0 else "Live"
         container.add_text(
             f"**Now Playing:**\n"
-            f"{music_icon} **[{current.title}]({current.url})** (`{dur_str}`)\n"
-            f"> Requested by: `{current.requester or 'User'}`"
+            f"> {music_icon} **[{current.title}]({current.url})**\n"
+            f"> Artist: `{current.author}` {dot} Duration: `{dur_str}`"
         )
         container.add_separator(divider=True)
 
     if queue:
         lines = []
-        for i, t in enumerate(queue[:12], 1):
+        for i, t in enumerate(queue[:10], 1):
             dur_m = t.duration // 60
             dur_s = t.duration % 60
-            dur_str = f"{dur_m}:{dur_s:02d}" if t.duration > 0 else "Live"
-            lines.append(f"`{i}.` **[{t.title}]({t.url})** — `{dur_str}` (Req: `{t.requester or 'User'}`)")
+            dur_str = f"{dur_m:02d}:{dur_s:02d}" if t.duration > 0 else "Live"
+            lines.append(f"`{i}.` **[{t.title}]({t.url})** — `{dur_str}`")
 
-        if len(queue) > 12:
-            lines.append(f"\n*...and {len(queue) - 12} more track(s) in queue.*")
+        if len(queue) > 10:
+            lines.append(f"-# ...and {len(queue) - 10} more track(s) in queue.")
 
         container.add_text("**Up Next:**\n" + "\n".join(lines))
         container.add_separator(divider=True)
 
     loop_mode = controller.get_loop(guild_id)
+    ap_mode = "ON" if controller.get_autoplay(guild_id) else "OFF"
     total_tracks = len(queue) + (1 if current else 0)
-    container.add_text(f"-# Loop: {loop_mode.upper()} • Total Tracks: {total_tracks} • Requested by {ctx.author.display_name}")
+    container.add_text(f"-# Loop: {loop_mode.upper()} • Autoplay: {ap_mode} • Total Tracks: {total_tracks}")
 
     await send_container_response(ctx, container)

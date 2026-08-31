@@ -24,6 +24,46 @@ logger = logging.getLogger("Cicada.Music.Resolver")
 
 RESOLVER_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="MusicResolver")
 
+COMMON_TYPOS = {
+    r"\btranding\b": "trending",
+    r"\bbhojuri\b": "bhojpuri",
+    r"\bvedio\b": "video",
+    r"\bvedios\b": "videos",
+    r"\bsongg\b": "song",
+    r"\bsongs\b": "song",
+    r"\bmuisc\b": "music",
+}
+
+
+def normalize_query(query: str) -> str:
+    """Correct common phonetic typos and clean search query."""
+    q = query.strip()
+    for typo, correction in COMMON_TYPOS.items():
+        q = re.sub(typo, correction, q, flags=re.IGNORECASE)
+    return q.strip()
+
+
+def clean_track_title(raw_title: str) -> str:
+    """Clean video titles by removing hashtags and promotional noise."""
+    t = html.unescape(raw_title).strip()
+    # Remove leading hashtag markers e.g. #Video | or #Audio -
+    t = re.sub(r"^#[A-Za-z0-9_]+\s*[-|:]\s*", "", t, flags=re.IGNORECASE).strip()
+    # Remove media tags in parentheses/brackets e.g. (Official Video), [Full Song]
+    t = re.sub(
+        r"\s*[\(\[](?:Official|Full|HD|4K|Audio|Video|Music|Lyrical|Visualizer|Teaser|Status)[^\)\]]*[\)\]]",
+        "",
+        t,
+        flags=re.IGNORECASE,
+    ).strip()
+    # Remove trailing record label stamps e.g. | T-Series, | Sony Music
+    t = re.sub(
+        r"\s*\|\s*(?:T-Series|Zee Music|Sony Music|Speed Records|YRF|Tips|Wave Music|Worldwide Records|Saregama)[^|]*$",
+        "",
+        t,
+        flags=re.IGNORECASE,
+    ).strip()
+    return t if len(t) >= 2 else raw_title
+
 
 class MusicResolver:
     """Smart Music Resolver with 0ms cache and multi-source resolution."""
@@ -47,7 +87,7 @@ class MusicResolver:
 
     @classmethod
     def _score_track(cls, query: str, res: dict) -> int:
-        """Calculate match confidence score (0-200) to guarantee original official song."""
+        """Calculate match confidence score (0-200) to rank best song candidate."""
         q = query.lower().strip()
         raw_title = html.unescape(res.get("title") or res.get("song") or "").lower().strip()
         clean_title = re.sub(r"\(.*?\)|\[.*?\]", "", raw_title).strip()
@@ -70,14 +110,14 @@ class MusicResolver:
             score += 100
         elif clean_title.startswith(q) or q.startswith(clean_title):
             score += 80
-        elif all(w in raw_title for w in q.split()):
-            score += 60
+        elif any(w in raw_title for w in q.split() if len(w) > 2):
+            score += 50
 
-        # Unwanted variations penalty (remix/live/lofi/cover) unless asked by user
+        # Unwanted variations penalty unless asked by user
         unwanted_keywords = ["remix", "live", "lofi", "cover", "slowed", "reverb", "acoustic", "mashup"]
         for u in unwanted_keywords:
             if u in raw_title and u not in q:
-                score -= 40
+                score -= 30
 
         # Popularity bonus (official studio originals have higher play counts)
         try:
@@ -86,7 +126,7 @@ class MusicResolver:
                 score += 30
             elif plays > 1_000_000:
                 score += 20
-            elif plays > 100_000:
+            elif plays > 50_000:
                 score += 10
         except Exception:
             pass
@@ -152,15 +192,15 @@ class MusicResolver:
                     return track
 
         # Spotify URL detection
-        search_query = raw_q
+        search_query = normalize_query(raw_q)
         if "spotify.com" in raw_q:
             spotify_title = await cls.extract_spotify_title(raw_q)
             if spotify_title:
-                search_query = spotify_title
+                search_query = normalize_query(spotify_title)
 
         is_url = search_query.startswith("http://") or search_query.startswith("https://")
 
-        # Step 1: Official 320kbps CD Studio Master Engine with Smart Scoring
+        # Step 1: Official 320kbps CD Studio Master Engine with Smart Ranking
         if not is_url:
             try:
                 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -184,9 +224,8 @@ class MusicResolver:
                                 scored.sort(key=lambda x: x[0], reverse=True)
                                 best_score, best_res = scored[0]
 
-                                # If we have a confident match (score >= 30)
-                                if best_score >= 30:
-                                    pid = best_res.get("id")
+                                pid = best_res.get("id")
+                                if pid:
                                     dparams = {
                                         "__call": "song.getDetails",
                                         "cc": "in",
@@ -203,7 +242,7 @@ class MusicResolver:
 
                                             if stream_url:
                                                 raw_title = sinfo.get("song") or sinfo.get("title") or search_query
-                                                clean_title = html.unescape(raw_title)
+                                                clean_title = clean_track_title(raw_title)
                                                 author = html.unescape(sinfo.get("primary_artists") or sinfo.get("singers") or "Official Artist")
                                                 thumb = sinfo.get("image", "").replace("150x150", "500x500")
                                                 duration = int(sinfo.get("duration", 240))
@@ -224,7 +263,7 @@ class MusicResolver:
             except Exception as e:
                 logger.debug(f"Official master search notice: {e}")
 
-        # Step 2: YouTube Studio Extractor (iOS/Android Studio Clients)
+        # Step 2: YouTube Studio Extractor (iOS/Android/Web Clients)
         loop = asyncio.get_event_loop()
         target = search_query if is_url else f"ytsearch1:{search_query}"
 
@@ -244,12 +283,7 @@ class MusicResolver:
         entry = await loop.run_in_executor(RESOLVER_POOL, _yt_extract)
         if entry and entry.get("url"):
             raw_title = entry.get("title", search_query)
-            clean_t = re.sub(
-                r"\(Full Video\)|\[Official Video\]|\(Official Audio\)|\|.*$",
-                "",
-                raw_title,
-                flags=re.IGNORECASE,
-            ).strip()
+            clean_t = clean_track_title(raw_title)
             author = entry.get("uploader") or entry.get("artist") or entry.get("channel") or "Official Artist"
             track = TrackItem(
                 title=clean_t or raw_title,
@@ -261,7 +295,7 @@ class MusicResolver:
                 requester="",
             )
             cls._CACHE[cache_key] = track
-            logger.info(f"Resolved '{search_query}' via YouTube Studio -> '{track.title}' by '{author}'")
+            logger.info(f"Resolved '{search_query}' via YouTube -> '{track.title}' by '{author}'")
             return track
 
         return None

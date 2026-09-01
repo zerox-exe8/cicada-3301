@@ -110,16 +110,33 @@ class Music(commands.Cog):
 
     @commands.Cog.listener()
     async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
-        """Fired when a track fails to decode or stream from source."""
+        """Fired when a track fails to decode or stream from source (e.g. YouTube 403 block)."""
         player: KyroPlayer = payload.player  # type: ignore
+        if not player or not payload.track:
+            return
+
         logger.warning(f"Track exception for '{payload.track.title}' in guild {player.guild.id}: {payload.exception}")
-        if player and player.home_channel:
-            try:
-                await player.home_channel.send(
-                    f"⚠️ Track **{payload.track.title}** could not be decoded. Skipping to next song..."
+
+        # Intelligent Auto-Recovery: Try resolving and playing via unblocked Deezer/SoundCloud stream
+        try:
+            from src.cogs.music._resolver import MusicResolver, clean_track_title
+            clean_t = clean_track_title(payload.track.title or "")
+            clean_a = payload.track.author or ""
+            fallback_query = f"{clean_t} {clean_a}".strip()
+
+            recovered = await MusicResolver.resolve(fallback_query)
+            if recovered:
+                rec_track = recovered[0] if isinstance(recovered, list) else (
+                    recovered.tracks[0] if isinstance(recovered, wavelink.Playlist) else recovered
                 )
-            except Exception:
-                pass
+                if rec_track and rec_track.uri != payload.track.uri:
+                    logger.info(f"Auto-Recovered stream for '{payload.track.title}' via {rec_track.source}: '{rec_track.title}'")
+                    await player.play(rec_track)
+                    return
+        except Exception as ex:
+            logger.debug(f"Auto-recovery notice: {ex}")
+
+        # If recovery also failed, skip cleanly
         if player:
             await player.skip(force=True)
 

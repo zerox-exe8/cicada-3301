@@ -129,8 +129,8 @@ class EmojiRegistry:
                 "icons_staff": ["icon_mod", "icon_support", "icons_supportteam"],
                 "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
                 # Music Emojis
-                "music_playing": ["music_music", "lbop_music", "icon_music", "a_musical_notes"],
-                "a_musical_notes": ["music_playing", "music_music", "lbop_music", "icon_music"],
+                "music_playing": ["music_music", "a_musical_notes", "lbop_music"],
+                "a_musical_notes": ["music_playing", "music_music", "lbop_music"],
                 "paused": ["icons_pause", "icon_clear"],
                 "icons_pause": ["paused"],
                 "skip": ["icons_rightarrow", "icon_arrow_left", "icons_arrow"],
@@ -138,7 +138,7 @@ class EmojiRegistry:
                 "icons_stop_button": ["icon_delete", "icon_x", "icons_wrong"],
                 "icons_loop": ["ub_refresh_icon", "icons_update"],
                 "icons_shuffle": ["icons_magicwand", "icons_splash"],
-                "volume_up": ["volume_down", "icon_music"],
+                "volume_up": ["volume_down"],
                 "volume_down": ["room_icon_mute", "volume_up"],
                 "room_icon_mute": ["volume_down", "icons_micmute"],
             }
@@ -176,8 +176,8 @@ class EmojiRegistry:
                 "icons_staff": ["icon_mod", "icon_support", "icons_supportteam"],
                 "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
                 # Music Emojis
-                "music_playing": ["music_music", "lbop_music", "icon_music", "a_musical_notes"],
-                "a_musical_notes": ["music_playing", "music_music", "lbop_music", "icon_music"],
+                "music_playing": ["music_music", "a_musical_notes", "lbop_music"],
+                "a_musical_notes": ["music_playing", "music_music", "lbop_music"],
                 "paused": ["icons_pause", "icon_clear"],
                 "icons_pause": ["paused"],
                 "skip": ["icons_rightarrow", "icon_arrow_left", "icons_arrow"],
@@ -185,7 +185,7 @@ class EmojiRegistry:
                 "icons_stop_button": ["icon_delete", "icon_x", "icons_wrong"],
                 "icons_loop": ["ub_refresh_icon", "icons_update"],
                 "icons_shuffle": ["icons_magicwand", "icons_splash"],
-                "volume_up": ["volume_down", "icon_music"],
+                "volume_up": ["volume_down"],
                 "volume_down": ["room_icon_mute", "volume_up"],
                 "room_icon_mute": ["volume_down", "icons_micmute"],
             }

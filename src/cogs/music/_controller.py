@@ -147,7 +147,7 @@ class MusicController:
             f"{dot} **Requested By:** {req_str}"
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Cicada 3301 Music Engine")
+        container.add_text(f"-# Kyro Music Engine")
         return container
 
     def _handle_track_finish(self, ctx: CustomContext, error: Optional[Exception]) -> None:
@@ -320,7 +320,7 @@ class MusicController:
             f"Use `?autoplay on` for non-stop continuous playback."
         )
         container.add_separator(divider=True)
-        container.add_text("-# Cicada 3301 Music Engine")
+        container.add_text("-# Kyro Music Engine")
         try:
             await send_container_response(ctx, container)
         except Exception as e:

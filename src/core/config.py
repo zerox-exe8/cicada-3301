@@ -57,7 +57,8 @@ class Config:
     ).strip()
     CLIENT_ID: int = int(os.getenv("CLIENT_ID", "0"))
     
-    # Prefixes
+    # Prefixes & Identity
+    BOT_NAME: str = os.getenv("BOT_NAME", "Kyro")
     DEFAULT_PREFIX: str = os.getenv("BOT_PREFIX", "?")
     
     # Environment & Dev Settings

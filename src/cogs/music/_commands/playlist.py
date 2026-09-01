@@ -102,7 +102,7 @@ async def handle_playlist(
             "`?like`, `?playlist add <name>`, `?playlist play <name>`, `?playlist list`, `?playlist view <name>`, `?playlist delete <name>`"
         )
         container.add_separator(divider=True)
-        container.add_text("-# Cicada 3301 Music Engine")
+        container.add_text("-# Kyro Music Engine")
         await send_container_response(ctx, container)
         return
 

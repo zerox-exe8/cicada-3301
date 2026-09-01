@@ -23,7 +23,7 @@ class Ping(commands.Cog):
     @commands.hybrid_command(
         name="ping",
         aliases=["pong", "pung", "latency"],
-        description="Check Cicada 3301 Bot's websocket, latency, and database response speed.",
+        description="Check Kyro Bot's websocket, latency, and database response speed.",
     )
     async def ping(self, ctx: CustomContext) -> None:
         """Measure websocket latency, database roundtrip time, and uptime."""
@@ -51,7 +51,7 @@ class Ping(commands.Cog):
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Cicada 3301 Latency**\n"
+                f"**Kyro Latency**\n"
                 f"> Current gateway latency, database response speed, and system uptime."
             )
         )

@@ -62,9 +62,6 @@ async def handle_like(ctx: CustomContext, controller: MusicController) -> None:
         current.url,
     )
 
-    e_reg = ctx.bot.custom_emojis
-    dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
-
     container = CicadaContainer(accent_color=None)
     container.add_section(
         content=(
@@ -76,8 +73,7 @@ async def handle_like(ctx: CustomContext, controller: MusicController) -> None:
     )
     container.add_separator(divider=True)
     container.add_text(
-        f"{dot} **Playlist:** `Favorites`\n"
-        f"{dot} **Saved By:** {ctx.author.display_name}"
+        f"**Playlist:** `Favorites` | **Saved By:** `{ctx.author.display_name}`"
     )
     container.add_separator(divider=True)
     container.add_text("-# Use ?playlist play Favorites to play your liked songs.")
@@ -94,23 +90,16 @@ async def handle_playlist(
 ) -> None:
     """Manage custom user playlists: add, play, list, view, delete."""
     if not action or action.lower() in ("help", "guide"):
-        e_reg = ctx.bot.custom_emojis
-        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Music Playlist Manager**\n"
-                "> Save your favorite songs into custom playlists and play them anytime."
+                "> Save your favorite tracks and play your personal music collections anytime."
             )
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} `?like` : Save current playing song to Favorites\n"
-            f"{dot} `?playlist add <name>` : Add current song to a playlist\n"
-            f"{dot} `?playlist play <name>` : Play an entire saved playlist\n"
-            f"{dot} `?playlist list` : View all your saved playlists\n"
-            f"{dot} `?playlist view <name>` : View tracks inside a playlist\n"
-            f"{dot} `?playlist delete <name>` : Delete a saved playlist"
+            "`?like`, `?playlist add <name>`, `?playlist play <name>`, `?playlist list`, `?playlist view <name>`, `?playlist delete <name>`"
         )
         container.add_separator(divider=True)
         container.add_text("-# Cicada 3301 Music Engine")
@@ -137,8 +126,6 @@ async def handle_playlist(
             await ctx.send_warning("You do not have any saved playlists yet. Use `?like` or `?playlist add <name>` to create one.")
             return
 
-        e_reg = ctx.bot.custom_emojis
-        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
         lines = []
         for i, pl in enumerate(playlists, 1):
             lines.append(f"`{i}.` **{pl['playlist_name']}** ({pl['track_count']} songs)")
@@ -151,7 +138,7 @@ async def handle_playlist(
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"{dot} Use `?playlist play <name>` to start listening.")
+        container.add_text(f"Use `?playlist play <name>` to start listening.")
         await send_container_response(ctx, container)
 
     elif act == "add":
@@ -197,8 +184,6 @@ async def handle_playlist(
             target_track.url,
         )
 
-        e_reg = ctx.bot.custom_emojis
-        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
@@ -208,7 +193,7 @@ async def handle_playlist(
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"{dot} Use `?playlist play {clean_pl_name}` to play this playlist.")
+        container.add_text(f"Use `?playlist play {clean_pl_name}` to play this playlist.")
         await send_container_response(ctx, container)
 
     elif act == "play":
@@ -255,7 +240,6 @@ async def handle_playlist(
         queue = controller.get_queue(ctx.guild.id)
         controller.active_contexts[ctx.guild.id] = ctx
 
-        # Resolve first track for instant play
         first_resolved = False
         loaded_count = 0
 
@@ -271,8 +255,6 @@ async def handle_playlist(
                     queue.append(track)
                 loaded_count += 1
 
-        e_reg = ctx.bot.custom_emojis
-        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
         container = CicadaContainer(accent_color=None)
         container.add_section(
             content=(
@@ -282,8 +264,7 @@ async def handle_playlist(
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Channel:** `#{user_channel.name}`\n"
-            f"{dot} **Requested By:** {ctx.author.display_name}"
+            f"**Channel:** `#{user_channel.name}` | **Requested By:** `{ctx.author.display_name}`"
         )
         await send_container_response(ctx, container)
 

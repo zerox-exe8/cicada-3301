@@ -1,6 +1,6 @@
 """
-Kyro Discord Bot - Native Stream Extractor
-High-performance async extractor utilizing multi-client yt-dlp and SoundCloud fallbacks.
+Kyro Discord Bot - Native Stream Extractor & Unbreakable Search Engine
+Multi-tier phonetic typo resolver with YouTube, SoundCloud, and Spotify fallbacks.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ YDL_OPTIONS = {
     "noplaylist": True,
     "quiet": True,
     "no_warnings": True,
-    "default_search": "ytsearch1:",
     "extract_flat": False,
     "youtube_include_dash_manifest": False,
     "extractor_args": {
@@ -34,7 +33,7 @@ YDL_OPTIONS = {
 }
 
 CONVERSATIONAL_INTENT_PATTERN = re.compile(
-    r"\b(?:play|sunao|chalao|bajao|lagao|gaana|song|suno|listen to|put on|music|track)\b",
+    r"\b(?:play|sunao|chalao|bajao|lagao|gaana|song|suno|listen to|put on|music|track|bhai|karo|pls|please|chal)\b",
     re.IGNORECASE,
 )
 
@@ -44,18 +43,29 @@ METADATA_NOISE_PATTERN = re.compile(
 )
 
 PHONETIC_TYPO_MAP = {
-    "mossewala": "moose wala",
-    "mosewala": "moose wala",
+    "mossewala": "sidhu moose wala",
+    "mosewala": "sidhu moose wala",
     "sidhu moosewala": "sidhu moose wala",
-    "diljeet": "diljit",
-    "arijith": "arijit",
-    "arjit": "arijit",
+    "diljeet": "diljit dosanjh",
+    "diljit dosanj": "diljit dosanjh",
+    "arijith": "arijit singh",
+    "arjit": "arijit singh",
+    "arijit sing": "arijit singh",
     "aniruth": "anirudh",
     "alan waker": "alan walker",
     "marshmellow": "marshmello",
     "eminum": "eminem",
     "post malon": "post malone",
-    "som help": "some help",
+    "billie ellish": "billie eilish",
+    "sabrina carptener": "sabrina carpenter",
+    "karan ojla": "karan aujla",
+    "ap dillon": "ap dhillon",
+    "shub": "shubh",
+    "badsha": "badshah",
+    "honeysingh": "yo yo honey singh",
+    "arman malik": "armaan malik",
+    "atif": "atif aslam",
+    "jubin": "jubin nautiyal",
 }
 
 
@@ -75,7 +85,7 @@ def clean_track_title(raw_title: str) -> str:
 
 
 def parse_and_clean_query(raw_query: str) -> str:
-    """Clean query by removing conversational intents and metadata noise."""
+    """Clean query by removing conversational intents, metadata noise, and fixing phonetic typos."""
     cleaned = html.unescape(raw_query).strip()
     no_intent = CONVERSATIONAL_INTENT_PATTERN.sub(" ", cleaned)
     core = METADATA_NOISE_PATTERN.sub(" ", no_intent)
@@ -88,7 +98,7 @@ def parse_and_clean_query(raw_query: str) -> str:
 
 
 class NativeExtractor:
-    """Async audio stream extractor for native Discord playback."""
+    """Unbreakable Multi-Tier Search Engine & Audio Stream Extractor."""
 
     @classmethod
     async def extract(
@@ -97,7 +107,7 @@ class NativeExtractor:
         requester: str = "DJ / AutoPlay",
         is_autoplay: bool = False,
     ) -> Optional[Track]:
-        """Extract a playable Track from query or URL."""
+        """Extract a playable Track from query or URL using 5-tier fallback cascade."""
         raw_q = query.strip()
         if not raw_q:
             return None
@@ -109,45 +119,42 @@ class NativeExtractor:
                 raw_q = spotify_title
 
         # 2. Extract in background thread to avoid blocking asyncio event loop
-        target = parse_and_clean_query(raw_q)
-        return await asyncio.to_thread(cls._sync_extract, target, requester, is_autoplay)
+        return await asyncio.to_thread(cls._sync_extract, raw_q, requester, is_autoplay)
 
     @classmethod
     def _sync_extract(
         cls,
-        query: str,
+        raw_query: str,
         requester: str,
         is_autoplay: bool,
     ) -> Optional[Track]:
-        """Synchronous yt-dlp extraction with fallback."""
-        # Check if direct URL vs search query
-        is_url = query.startswith(("http://", "https://"))
-        search_target = query if is_url else f"ytsearch1:{query}"
+        """Synchronous 5-tier multi-source search cascade."""
+        is_url = raw_query.startswith(("http://", "https://"))
+        cleaned_query = parse_and_clean_query(raw_query)
+
+        # Build prioritized search targets
+        if is_url:
+            search_targets = [raw_query]
+        else:
+            search_targets = [
+                f"ytsearch1:{cleaned_query}",
+                f"ytsearch1:{raw_query}",
+                f"scsearch1:{cleaned_query}",
+                f"scsearch1:{raw_query}",
+            ]
 
         entry = None
-        try:
-            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                info = ydl.extract_info(search_target, download=False)
-                if info:
-                    if "entries" in info and info["entries"]:
-                        entry = info["entries"][0]
-                    else:
-                        entry = info
-        except Exception as e:
-            logger.debug(f"Primary search notice for '{query}': {e}")
-
-        # Fallback to SoundCloud search if primary failed
-        if not entry and not is_url:
+        for target in search_targets:
             try:
                 with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-                    info = ydl.extract_info(f"scsearch1:{query}", download=False)
+                    info = ydl.extract_info(target, download=False)
                     if info:
-                        if "entries" in info and info["entries"]:
-                            entry = info["entries"][0]
-                        else:
-                            entry = info
+                        cand = info["entries"][0] if "entries" in info and info["entries"] else info
+                        if cand and cand.get("url"):
+                            entry = cand
+                            break
             except Exception as e:
-                logger.debug(f"SoundCloud fallback notice for '{query}': {e}")
+                logger.debug(f"Search target notice for '{target}': {e}")
 
         if not entry:
             return None

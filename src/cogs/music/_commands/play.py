@@ -5,7 +5,7 @@ Kyro Discord Bot - Native Play Command
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 import discord
 from discord.ext import commands
 
@@ -58,25 +58,35 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await send_container_response(ctx, container)
             return
 
-    # Extract track
-    async with ctx.typing():
-        track = await NativeExtractor.extract(query, requester=ctx.author.display_name)
+    # 1. Send Searching Track card first
+    search_container = KyroContainer(accent_color=None)
+    search_container.add_text(f"**Searching track:** `{query}`...")
+    search_msg = await send_container_response(ctx, search_container)
+
+    # 2. Extract track in background
+    track = await NativeExtractor.extract(query, requester=ctx.author.display_name)
 
     if not track:
-        container = KyroContainer(accent_color=None)
-        container.add_text(f"❌ **No results found for:** `{query}`")
-        await send_container_response(ctx, container)
+        err_container = KyroContainer(accent_color=None)
+        err_container.add_text(f"❌ **No results found for:** `{query}`")
+        if search_msg and isinstance(search_msg, discord.Message):
+            try:
+                await search_msg.edit(embed=err_container.to_embed())
+                return
+            except Exception:
+                pass
+        await send_container_response(ctx, err_container)
         return
 
-    # If nothing is currently playing, start immediately
+    # 3. If nothing is currently playing, start playback
     if not player.is_playing and not player.is_paused:
         await player.play_track(track)
     else:
         # Add to queue
         player.queue.append(track)
         pos = len(player.queue)
-        container = KyroContainer(accent_color=None)
-        container.add_section(
+        queue_container = KyroContainer(accent_color=None)
+        queue_container.add_section(
             content=(
                 f"**📥 Added to Queue [Position #{pos}]**\n"
                 f"> **Track:** [{track.title}]({track.url})\n"
@@ -86,4 +96,4 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             ),
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
-        await send_container_response(ctx, container)
+        await send_container_response(ctx, queue_container)

@@ -107,7 +107,7 @@ class GuildPlayer:
 
         self.voice_client = await channel.connect(self_deaf=True, timeout=20.0, reconnect=True)
 
-    async def play_track(self, track: Track) -> None:
+    async def play_track(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:
         """Stream track through native FFmpeg with volume normalization."""
         if not self.voice_client or not self.voice_client.is_connected():
             vc = self.guild.voice_client
@@ -162,7 +162,7 @@ class GuildPlayer:
             asyncio.run_coroutine_threadsafe(self._handle_track_finish(), self.bot.loop)
 
         self.voice_client.play(volume_source, after=_after_callback)
-        await self.send_now_playing_card(track)
+        await self.send_now_playing_card(track, message_to_edit=message_to_edit)
 
     async def _handle_track_finish(self) -> None:
         """Fired automatically when a track finishes naturally."""
@@ -229,47 +229,37 @@ class GuildPlayer:
             self.voice_client = None
 
     def build_now_playing_container(self, track: Track) -> KyroContainer:
-        """Build signature Discord Components V2 Type 17 cyber card."""
+        """Build exact signature card matching user reference."""
         e_reg = self.bot.custom_emojis
-        music_icon = e_reg.get("music_playing", "")
+        music_icon = e_reg.get("Music_Playing", e_reg.get("music_playing", e_reg.get("music_music", "")))
         play_prefix = f"{music_icon} " if music_icon else ""
-        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
         short_artist_name = shorten_artist(track.author)
-        is_autoplay = track.is_autoplay or "autoplay" in str(track.requester).lower()
-        title_header = f"**{play_prefix}Now Playing `[⚡ Smart Autoplay Radio]`**" if is_autoplay else f"**{play_prefix}Now Playing Studio Master**"
-
         channel_name = self.voice_client.channel.name if (self.voice_client and self.voice_client.channel) else "Voice Channel"
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"{title_header}\n"
-                f"> **Title:** [{track.title}]({track.url})\n"
-                f"> **Artist:** `{short_artist_name}`\n"
-                f"> **Duration:** `{track.formatted_duration}`"
+                f"**{play_prefix}Now Playing**\n"
+                f"**Title:** [{track.title}]({track.url})\n"
+                f"**Artist:** `{short_artist_name}`\n"
+                f"**Duration:** `{track.formatted_duration}`"
             ),
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
 
         container.add_separator(divider=True)
 
-        loop_text = self.loop_mode.upper()
-        ap_text = "ON" if self.smart_autoplay else "OFF"
-        vol_text = int(self.volume * 100)
-
         container.add_text(
-            f"{dot} **Channel:** `#{channel_name}` • **Bitrate:** `320kbps Direct Master`\n"
-            f"{dot} **Requested By:** `{track.requester}`\n"
-            f"{dot} **Loop:** `{loop_text}` • **AutoPlay:** `{ap_text}` • **Volume:** `{vol_text}%`"
+            f"• **Channel:** `#{channel_name}`\n"
+            f"• **Requested By: {track.requester}**\n\n"
+            f"-# Kyro Music Engine"
         )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Kyro Native Engine • Direct High-Fidelity Audio")
 
         return container
 
-    async def send_now_playing_card(self, track: Track) -> None:
-        """Send Now Playing Card directly to home channel."""
+    async def send_now_playing_card(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:
+        """Send Now Playing Card directly or edit searching message to prevent duplicate embeds."""
         if not self.home_channel:
             return
 
@@ -277,6 +267,15 @@ class GuildPlayer:
 
         container = self.build_now_playing_container(track)
         view = MusicControlView(self.bot, self, self.guild.id)
+
+        # If we have an existing search message to edit into Now Playing
+        if message_to_edit and isinstance(message_to_edit, discord.Message):
+            try:
+                await message_to_edit.edit(embed=container.to_embed(), view=view)
+                self.now_playing_message = message_to_edit
+                return
+            except Exception:
+                pass
 
         try:
             self.now_playing_message = await send_container_response(

@@ -8,8 +8,6 @@ import logging
 from typing import TYPE_CHECKING, Optional
 import discord
 
-from src.utils.containers import edit_container_response
-
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
     from src.cogs.music._player import GuildPlayer
@@ -18,7 +16,7 @@ logger = logging.getLogger("Kyro.Music.Views")
 
 
 class MusicControlView(discord.ui.View):
-    """Interactive media control row for the Now Playing card."""
+    """Interactive media control row matching exact screenshot design."""
 
     def __init__(self, bot: KyroBot, player: Optional[GuildPlayer] = None, guild_id: Optional[int] = None) -> None:
         super().__init__(timeout=None)
@@ -35,7 +33,8 @@ class MusicControlView(discord.ui.View):
         return None
 
     @discord.ui.button(
-        label="Pause / Resume",
+        label="Pause",
+        emoji="⏸️",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:music:playpause",
     )
@@ -47,9 +46,13 @@ class MusicControlView(discord.ui.View):
 
         if player.is_paused:
             player.resume()
+            button.label = "Pause"
+            button.emoji = "⏸️"
             state = "Resumed"
         elif player.is_playing:
             player.pause()
+            button.label = "Resume"
+            button.emoji = "▶️"
             state = "Paused"
         else:
             state = "Idle"
@@ -58,6 +61,7 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(
         label="Skip",
+        emoji="⏭️",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:music:skip",
     )
@@ -72,6 +76,7 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(
         label="Vol -",
+        emoji="🔉",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:music:voldown",
     )
@@ -87,6 +92,7 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(
         label="Vol +",
+        emoji="🔊",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:music:volup",
     )
@@ -102,6 +108,7 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(
         label="Stop",
+        emoji="⏹️",
         style=discord.ButtonStyle.danger,
         custom_id="kyro:music:stop",
     )

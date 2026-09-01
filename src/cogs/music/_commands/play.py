@@ -39,12 +39,8 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
     elif voice_client.channel != user_channel:
         await voice_client.move_to(user_channel)
 
-    e_reg = ctx.bot.custom_emojis
-    search_icon = e_reg.get("music_playing", "")
-    search_prefix = f"{search_icon} " if search_icon else ""
-
     search_container = CicadaContainer(accent_color=None)
-    search_container.add_text(f"{search_prefix}**Searching track:** `{query}`...")
+    search_container.add_text(f"**Searching track:** `{query}`...")
     status_msg = await send_container_response(ctx, search_container)
 
     # 2. Resolve Track

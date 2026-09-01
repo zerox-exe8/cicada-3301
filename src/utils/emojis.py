@@ -129,8 +129,6 @@ class EmojiRegistry:
                 "icons_staff": ["icon_mod", "icon_support", "icons_supportteam"],
                 "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
                 # Music Emojis
-                "music_playing": ["music_music", "a_musical_notes", "lbop_music"],
-                "a_musical_notes": ["music_playing", "music_music", "lbop_music"],
                 "paused": ["icons_pause", "icon_clear"],
                 "icons_pause": ["paused"],
                 "skip": ["icons_rightarrow", "icon_arrow_left", "icons_arrow"],
@@ -176,8 +174,6 @@ class EmojiRegistry:
                 "icons_staff": ["icon_mod", "icon_support", "icons_supportteam"],
                 "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
                 # Music Emojis
-                "music_playing": ["music_music", "a_musical_notes", "lbop_music"],
-                "a_musical_notes": ["music_playing", "music_music", "lbop_music"],
                 "paused": ["icons_pause", "icon_clear"],
                 "icons_pause": ["paused"],
                 "skip": ["icons_rightarrow", "icon_arrow_left", "icons_arrow"],

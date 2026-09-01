@@ -78,7 +78,7 @@ class Sync(commands.Cog):
     @is_developer()
     async def sync_emojis(self, ctx: CustomContext) -> None:
         """Sync custom emojis from assets folder directly to Discord Application Emojis."""
-        status_msg = await ctx.send("⏳ Scanning assets and uploading application emojis...")
+        status_msg = await ctx.send("Scanning assets and uploading application emojis...")
         uploaded, total = await self.bot.custom_emojis.sync_from_assets()
 
         container = KyroContainer(accent_color=None)

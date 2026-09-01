@@ -57,6 +57,7 @@ class MusicController:
         self.autoplay_settings: Dict[int, bool] = {}
         self.played_history: Dict[int, Set[str]] = {}
         self.prefetched_autoplay: Dict[int, TrackItem] = {}
+        self.stream_generation: Dict[int, int] = {}
 
     def get_queue(self, guild_id: int) -> List[TrackItem]:
         if guild_id not in self.queues:
@@ -150,16 +151,22 @@ class MusicController:
         container.add_text(f"-# Kyro Music Engine")
         return container
 
-    def _handle_track_finish(self, ctx: CustomContext, error: Optional[Exception]) -> None:
+    def _handle_track_finish(self, ctx: CustomContext, error: Optional[Exception], gen: int) -> None:
         """Safe track finish callback dispatched to asyncio event loop."""
+        guild_id = ctx.guild.id
+        if gen != self.stream_generation.get(guild_id):
+            return  # Stale finish event from previously interrupted track
         if error:
             logger.warning(f"Audio stream notice: {error}")
-        asyncio.run_coroutine_threadsafe(self._advance_queue_safely(ctx), self.bot.loop)
+        asyncio.run_coroutine_threadsafe(self._advance_queue_safely(ctx, gen), self.bot.loop)
 
-    async def _advance_queue_safely(self, ctx: CustomContext) -> None:
+    async def _advance_queue_safely(self, ctx: CustomContext, gen: int) -> None:
         """Asynchronously advance queue after 150ms buffer for audio thread release."""
         await asyncio.sleep(0.15)
         guild_id = ctx.guild.id
+        if gen != self.stream_generation.get(guild_id):
+            return  # Prevent skipping new song if another track started during sleep
+
         loop_mode = self.get_loop(guild_id)
         current = self.current_tracks.get(guild_id)
 
@@ -179,7 +186,11 @@ class MusicController:
         if not voice_client or not voice_client.is_connected():
             return
         try:
-            vol = self.get_volume(ctx.guild.id)
+            guild_id = ctx.guild.id
+            self.stream_generation[guild_id] = self.stream_generation.get(guild_id, 0) + 1
+            current_gen = self.stream_generation[guild_id]
+
+            vol = self.get_volume(guild_id)
             ffmpeg_opts = get_ffmpeg_options(vol)
             ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
             raw_source = discord.FFmpegPCMAudio(track.stream_url, executable=ffmpeg_exe, **ffmpeg_opts)
@@ -188,7 +199,7 @@ class MusicController:
             if voice_client.is_playing() or voice_client.is_paused():
                 voice_client.stop()
 
-            voice_client.play(buffered_source, after=lambda e: self._handle_track_finish(ctx, e))
+            voice_client.play(buffered_source, after=lambda e, g=current_gen: self._handle_track_finish(ctx, e, g))
 
             # Record to played history to prevent Autoplay repetition
             played = self.get_played_history(ctx.guild.id)

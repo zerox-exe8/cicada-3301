@@ -31,16 +31,16 @@ class KyroCard(KyroContainer):
         if title or description:
             body = []
             if title:
-                formatted_title = title if title.startswith("#") else f"### ◈ {title.upper()}"
+                formatted_title = title if title.startswith("#") else f"### {title.upper()}"
                 body.append(formatted_title)
             if description:
-                body.append(f"> ⌁ {description}" if not description.startswith(">") else description)
+                body.append(f"> {description}" if not description.startswith(">") else description)
             self.add_text("\n".join(body))
 
         if author:
             self.add_separator(divider=True)
             self.add_footer(
-                f"◈ Kyro Protocol • Initiated by {author.display_name}",
+                f"Kyro Protocol • Initiated by {author.display_name}",
                 icon_url=str(author.display_avatar.url),
             )
 
@@ -64,7 +64,7 @@ class KyroCard(KyroContainer):
     ) -> KyroCard:
         """Create a success container card."""
         return cls(
-            title=f"🟢 {title}",
+            title=title,
             description=message,
             accent_color=None,
             author=author,
@@ -79,7 +79,7 @@ class KyroCard(KyroContainer):
     ) -> KyroCard:
         """Create an error container card."""
         return cls(
-            title=f"🔴 {title}",
+            title=title,
             description=message,
             accent_color=None,
             author=author,
@@ -94,7 +94,7 @@ class KyroCard(KyroContainer):
     ) -> KyroCard:
         """Create a warning container card."""
         return cls(
-            title=f"🟡 {title}",
+            title=title,
             description=message,
             accent_color=None,
             author=author,
@@ -109,7 +109,7 @@ class KyroCard(KyroContainer):
     ) -> KyroCard:
         """Create an informational container card."""
         return cls(
-            title=f"🌐 {title}",
+            title=title,
             description=message,
             accent_color=None,
             author=author,

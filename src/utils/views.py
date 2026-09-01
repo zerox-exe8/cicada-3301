@@ -19,13 +19,13 @@ class ConfirmView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
             await interaction.response.send_message(
-                "❌ You are not authorized to interact with this prompt.",
+                "You are not authorized to interact with this prompt.",
                 ephemeral=True,
             )
             return False
         return True
 
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.success, emoji="✅")
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.success)
     async def confirm_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
@@ -33,7 +33,7 @@ class ConfirmView(discord.ui.View):
         self.stop()
         await interaction.response.defer()
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, emoji="✖️")
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
     async def cancel_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:

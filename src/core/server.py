@@ -55,7 +55,7 @@ class HealthServer:
     async def _handle_home(self, request: web.Request) -> web.Response:
         """Root endpoint returning basic status."""
         return web.Response(
-            text="⚡ Kyro Discord Bot is Online & Running 24/7!",
+            text="Kyro Discord Bot is Online & Running 24/7!",
             content_type="text/plain",
             status=200,
         )

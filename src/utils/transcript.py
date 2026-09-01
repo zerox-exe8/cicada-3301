@@ -51,7 +51,7 @@ async def generate_html_transcript(
                 )
             else:
                 attachments_html.append(
-                    f'<div class="attachment file"><a href="{att_url}" target="_blank">📎 {att_name}</a></div>'
+                    f'<div class="attachment file"><a href="{att_url}" target="_blank">{att_name}</a></div>'
                 )
 
         # Embeds representation

@@ -32,11 +32,12 @@ class CustomContext(commands.Context):
     ) -> Any:
         """Send a formatted success container card."""
         e_reg = getattr(self.bot, "custom_emojis", None)
-        icon = e_reg.get("icons_correct", "✅") if e_reg else "✅"
+        icon = e_reg.get("icons_correct", "") if e_reg else ""
+        icon_str = f"{icon} " if icon else ""
 
         container = KyroContainer(accent_color=None)
         container.add_text(
-            f"{icon} **{title}**\n"
+            f"{icon_str}**{title}**\n"
             f"> {message}"
         )
         container.add_separator(divider=True)
@@ -51,11 +52,12 @@ class CustomContext(commands.Context):
     ) -> Any:
         """Send a formatted error container card."""
         e_reg = getattr(self.bot, "custom_emojis", None)
-        icon = e_reg.get("icons_wrong", e_reg.get("icon_x", "❌")) if e_reg else "❌"
+        icon = e_reg.get("icons_wrong", e_reg.get("icon_x", "")) if e_reg else ""
+        icon_str = f"{icon} " if icon else ""
 
         container = KyroContainer(accent_color=None)
         container.add_text(
-            f"{icon} **{title}**\n"
+            f"{icon_str}**{title}**\n"
             f"> {message}"
         )
         container.add_separator(divider=True)
@@ -70,11 +72,12 @@ class CustomContext(commands.Context):
     ) -> Any:
         """Send a formatted warning container card."""
         e_reg = getattr(self.bot, "custom_emojis", None)
-        icon = e_reg.get("icons_warning", e_reg.get("icon_warning", "⚠️")) if e_reg else "⚠️"
+        icon = e_reg.get("icons_warning", e_reg.get("icon_warning", "")) if e_reg else ""
+        icon_str = f"{icon} " if icon else ""
 
         container = KyroContainer(accent_color=None)
         container.add_text(
-            f"{icon} **{title}**\n"
+            f"{icon_str}**{title}**\n"
             f"> {message}"
         )
         container.add_separator(divider=True)

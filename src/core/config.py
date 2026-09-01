@@ -30,19 +30,19 @@ class ThemeColors:
 
 @dataclass(frozen=True)
 class ThemeEmojis:
-    """Standardized system emojis for Kyro cryptographic embeds."""
-    SUCCESS: str = "🟢"
-    ERROR: str = "🔴"
-    WARNING: str = "🟡"
-    INFO: str = "🌐"
-    LOADING: str = "⏳"
-    SHIELD: str = "🛡️"
-    SPARKLES: str = "⚡"
-    SETTINGS: str = "⚙️"
-    PING: str = "📡"
-    DATABASE: str = "🗄️"
-    BOT: str = "🤖"
-    KYRO: str = "◈"
+    """Standardized system emojis for Kyro embeds."""
+    SUCCESS: str = ""
+    ERROR: str = ""
+    WARNING: str = ""
+    INFO: str = ""
+    LOADING: str = ""
+    SHIELD: str = ""
+    SPARKLES: str = ""
+    SETTINGS: str = ""
+    PING: str = ""
+    DATABASE: str = ""
+    BOT: str = ""
+    KYRO: str = ""
 
 
 class Config:

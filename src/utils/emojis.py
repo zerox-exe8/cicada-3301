@@ -74,7 +74,20 @@ class EmojiRegistry:
                     if len(clean_name) < 2:
                         continue
 
-                    if clean_name not in self._emojis and raw_name not in self._emojis:
+                    is_gif = img_file.suffix.lower() == ".gif"
+                    existing = self._emojis.get(clean_name) or self._emojis.get(raw_name)
+
+                    if existing and is_gif and not getattr(existing, "animated", False):
+                        try:
+                            await existing.delete()
+                            logger.info(f"Replacing static emoji {clean_name} with animated GIF.")
+                            self._emojis.pop(clean_name, None)
+                            self._emojis.pop(raw_name, None)
+                            existing = None
+                        except Exception as e:
+                            logger.debug(f"Could not delete static emoji {clean_name}: {e}")
+
+                    if not existing:
                         try:
                             with open(img_file, "rb") as f:
                                 img_data = f.read()
@@ -85,7 +98,7 @@ class EmojiRegistry:
                             self._emojis[clean_name] = new_emoji
                             self._emojis[raw_name] = new_emoji
                             uploaded += 1
-                            logger.info(f"Uploaded application emoji: {clean_name}")
+                            logger.info(f"Uploaded application emoji: {clean_name} (animated={getattr(new_emoji, 'animated', False)})")
                         except Exception as e:
                             logger.debug(f"Could not upload emoji {clean_name}: {e}")
 

@@ -111,7 +111,7 @@ class MusicController:
     ) -> CicadaContainer:
         """Create a compact, ultra-aesthetic Components V2 Container matching user requirements."""
         e_reg = self.bot.custom_emojis
-        music_playing = e_reg.get("music_playing", "")
+        music_playing = e_reg.get("music_playing", e_reg.get("music_music", e_reg.get("a_musical_notes", e_reg.get("lbop_music", ""))))
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
         dur_m = track.duration // 60

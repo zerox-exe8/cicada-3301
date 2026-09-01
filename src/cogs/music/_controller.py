@@ -292,8 +292,39 @@ class MusicController:
                     )
                 else:
                     self.current_tracks.pop(guild_id, None)
+                    asyncio.run_coroutine_threadsafe(
+                        self._notify_queue_ended(ctx),
+                        self.bot.loop,
+                    )
         else:
             self.current_tracks.pop(guild_id, None)
+            asyncio.run_coroutine_threadsafe(
+                self._notify_queue_ended(ctx),
+                self.bot.loop,
+            )
+
+    async def _notify_queue_ended(self, ctx: CustomContext) -> None:
+        """Send an aesthetic 'Queue Concluded' container card when all tracks have finished playing."""
+        if not ctx or not ctx.channel:
+            return
+        container = CicadaContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Queue Concluded**\n"
+                "> All queued songs have finished playing. The player is now idle."
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"Use `?play <song>` or `?playlist play <name>` to play more tracks.\n"
+            f"Use `?autoplay on` for non-stop continuous playback."
+        )
+        container.add_separator(divider=True)
+        container.add_text("-# Cicada 3301 Music Engine")
+        try:
+            await send_container_response(ctx, container)
+        except Exception as e:
+            logger.debug(f"Could not send queue ended notification: {e}")
 
     async def _trigger_autoplay_recommendation(self, ctx: CustomContext, last_track: TrackItem) -> None:
         """Fetch and stream next related track if prefetch was not available."""
@@ -326,3 +357,4 @@ class MusicController:
             await send_container_response(ctx, container, view=view)
         elif not next_track:
             self.current_tracks.pop(guild_id, None)
+            await self._notify_queue_ended(ctx)

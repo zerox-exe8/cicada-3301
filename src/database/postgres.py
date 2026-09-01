@@ -283,6 +283,28 @@ class PostgresDatabase(BaseDatabase):
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
+            # User Custom Playlists & Liked Songs table
+            """
+            CREATE TABLE IF NOT EXISTS user_playlists (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                playlist_name VARCHAR(100) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, playlist_name)
+            );
+            """,
+            # User Playlist Tracks table
+            """
+            CREATE TABLE IF NOT EXISTS user_playlist_tracks (
+                id SERIAL PRIMARY KEY,
+                playlist_id INT REFERENCES user_playlists(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL,
+                author VARCHAR(255) NOT NULL,
+                duration INT DEFAULT 0,
+                url TEXT NOT NULL,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
         ]
         async with self.pool.acquire() as conn:
             for query in queries:

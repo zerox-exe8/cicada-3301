@@ -29,6 +29,7 @@ from src.cogs.music._commands.controls import (
     handle_remove,
     handle_volume,
 )
+from src.cogs.music._commands.playlist import handle_playlist, handle_like
 
 if TYPE_CHECKING:
     from src.core.bot import CicadaBot
@@ -156,12 +157,42 @@ class Music(commands.Cog):
     @commands.hybrid_command(
         name="volume",
         aliases=["vol"],
-        description="Adjust playback volume (0 to 150 percent).",
+        description="Adjust playback volume (0 to 100 percent).",
     )
-    @app_commands.describe(level="Volume level from 0 to 150")
+    @app_commands.describe(level="Volume level from 0 to 100")
     async def volume(self, ctx: CustomContext, level: int = 100) -> None:
         """Adjust playback volume."""
         await handle_volume(ctx, self.controller, level)
+
+    @commands.hybrid_command(
+        name="like",
+        aliases=["fav", "favorite"],
+        description="Save the currently playing song into your personal Favorites playlist.",
+    )
+    async def like(self, ctx: CustomContext) -> None:
+        """Save current song to Favorites playlist."""
+        await handle_like(ctx, self.controller)
+
+    @commands.hybrid_command(
+        name="playlist",
+        aliases=["pl"],
+        description="Manage, play, view, and save custom song playlists.",
+    )
+    @app_commands.describe(
+        action="Action: add, play, list, view, delete",
+        name="Playlist name",
+        query="Optional song title or URL (if adding a specific song)",
+    )
+    async def playlist(
+        self,
+        ctx: CustomContext,
+        action: Optional[str] = None,
+        name: Optional[str] = None,
+        *,
+        query: Optional[str] = None,
+    ) -> None:
+        """Manage custom user playlists."""
+        await handle_playlist(ctx, self.controller, action, name, query=query)
 
     # ==========================================
     # Global Fallback Music Interaction Router

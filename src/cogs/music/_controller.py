@@ -16,7 +16,7 @@ import discord
 
 from src.core.context import CustomContext
 from src.utils.containers import CicadaContainer, send_container_response
-from src.cogs.music._types import TrackItem, FFMPEG_OPTIONS, BufferedAudioSource
+from src.cogs.music._types import TrackItem, get_ffmpeg_options
 from src.cogs.music._views import MusicControlView
 from src.cogs.music._resolver import MusicResolver, clean_track_title
 from src.cogs.music._analytics import MusicAnalytics
@@ -32,7 +32,6 @@ def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
     if not raw_artist:
         return "Official Artist"
     clean = html.unescape(raw_artist).strip()
-    # Split by common separators e.g. ",", "&", "feat.", "ft.", "Feat"
     parts = re.split(r"[,/|]|\s+(?:feat\.?|ft\.?|and|&)\s+", clean, flags=re.IGNORECASE)
     parts = [p.strip() for p in parts if p.strip()]
     if len(parts) > 2:
@@ -130,7 +129,7 @@ class MusicController:
         prefix_icon = f"{music_playing} " if music_playing else ""
         header_tag = " `[Autoplay]`" if "Autoplay" in str(track.requester) else ""
 
-        # Section with Thumbnail Accessory on the Right (Music_Playing in front, no trailing emoji)
+        # Section with Thumbnail Accessory on the Right
         container.add_section(
             content=(
                 f"**{prefix_icon}Now Playing{header_tag}**\n"
@@ -142,7 +141,7 @@ class MusicController:
         )
         container.add_separator(divider=True)
 
-        # Meta Info (Channel, Requester - Bitrate removed)
+        # Meta Info
         container.add_text(
             f"{dot} **Channel:** {ch_str}\n"
             f"{dot} **Requested By:** {req_str}"
@@ -152,10 +151,14 @@ class MusicController:
         return container
 
     def _handle_track_finish(self, ctx: CustomContext, error: Optional[Exception]) -> None:
-        """Safe track finish callback to advance the queue or trigger Autoplay."""
+        """Safe track finish callback dispatched to asyncio event loop."""
         if error:
             logger.warning(f"Audio stream notice: {error}")
+        asyncio.run_coroutine_threadsafe(self._advance_queue_safely(ctx), self.bot.loop)
 
+    async def _advance_queue_safely(self, ctx: CustomContext) -> None:
+        """Asynchronously advance queue after 150ms buffer for audio thread release."""
+        await asyncio.sleep(0.15)
         guild_id = ctx.guild.id
         loop_mode = self.get_loop(guild_id)
         current = self.current_tracks.get(guild_id)
@@ -171,16 +174,22 @@ class MusicController:
         self.play_next(ctx)
 
     def _play_stream(self, ctx: CustomContext, track: TrackItem) -> None:
-        """Internal helper to start audio stream with in-memory jitter buffer and background pre-fetching."""
+        """Internal helper to stream C-level hardware Opus audio with background pre-fetching."""
         voice_client: discord.VoiceClient = ctx.guild.voice_client
         if not voice_client or not voice_client.is_connected():
             return
         try:
-            ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
-            raw_source = discord.FFmpegPCMAudio(track.stream_url, executable=ffmpeg_exe, **FFMPEG_OPTIONS)
-            buffered_source = BufferedAudioSource(raw_source, buffer_size=200)
             vol = self.get_volume(ctx.guild.id)
-            source = discord.PCMVolumeTransformer(buffered_source, volume=vol)
+            ffmpeg_opts = get_ffmpeg_options(vol)
+            ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
+            try:
+                source = discord.FFmpegOpusAudio(track.stream_url, executable=ffmpeg_exe, **ffmpeg_opts)
+            except Exception:
+                source = discord.FFmpegPCMAudio(track.stream_url, executable=ffmpeg_exe, **ffmpeg_opts)
+
+            if voice_client.is_playing() or voice_client.is_paused():
+                voice_client.stop()
+
             voice_client.play(source, after=lambda e: self._handle_track_finish(ctx, e))
 
             # Record to played history to prevent Autoplay repetition

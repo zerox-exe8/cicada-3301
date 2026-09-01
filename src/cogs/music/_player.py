@@ -60,6 +60,24 @@ class KyroPlayer(wavelink.Player):
         self._prefetch_lock = asyncio.Lock()
         self._prefetch_task: Optional[asyncio.Task] = None
 
+    async def on_voice_server_update(self, data: dict, /) -> None:
+        """Handle Discord voice server update and dispatch to Lavalink."""
+        logger.debug(f"KyroPlayer {self.guild.id} on_voice_server_update: {data.get('endpoint')}")
+        await super().on_voice_server_update(data)
+        # Ensure dispatch runs if session_id is already available
+        voice_data = self._voice_state.get("voice", {})
+        if voice_data.get("session_id") and voice_data.get("token") and voice_data.get("endpoint"):
+            await self._dispatch_voice_update()
+
+    async def on_voice_state_update(self, data: dict, /) -> None:
+        """Handle Discord voice state update and guarantee Lavalink voice connection."""
+        logger.debug(f"KyroPlayer {self.guild.id} on_voice_state_update: channel={data.get('channel_id')}")
+        await super().on_voice_state_update(data)
+        # Fix race condition: If VOICE_SERVER_UPDATE arrived before VOICE_STATE_UPDATE, dispatch now!
+        voice_data = self._voice_state.get("voice", {})
+        if voice_data.get("session_id") and voice_data.get("token") and voice_data.get("endpoint"):
+            await self._dispatch_voice_update()
+
     def set_loop_mode(self, mode: str) -> str:
         """Set loop mode: 'off', 'track' (single song), 'queue' (all songs)."""
         mode = mode.lower().strip()

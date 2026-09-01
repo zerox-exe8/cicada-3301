@@ -50,6 +50,36 @@ def get_current_bot() -> KyroBot | None:
     return active_bot
 
 
+def ensure_local_lavalink() -> None:
+    """Ensure local Lavalink V4 node is active with 0ms ping & open UDP."""
+    if "127.0.0.1" in Config.LAVALINK_URI or "localhost" in Config.LAVALINK_URI:
+        import socket
+        import subprocess
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.0)
+        try:
+            s.connect(("127.0.0.1", 2333))
+            s.close()
+            logger.info("Local Lavalink V4 Node is already running and listening on port 2333.")
+            return
+        except Exception:
+            pass
+
+        jar_path = BASE_DIR / "lavalink" / "Lavalink.jar"
+        if jar_path.exists():
+            logger.info("Launching local Lavalink V4 node daemon on port 2333...")
+            try:
+                subprocess.Popen(
+                    ["java", "-jar", "Lavalink.jar"],
+                    cwd=str(jar_path.parent),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+            except Exception as e:
+                logger.warning(f"Could not auto-start local Lavalink: {e}")
+
+
 async def run_bot_loop() -> None:
     """Run bot with smart exponential backoff for Cloudflare / Discord 429 rate limits."""
     global active_bot
@@ -59,6 +89,8 @@ async def run_bot_loop() -> None:
     except ValueError as e:
         logger.critical(f"Configuration error: {e}")
         return
+
+    ensure_local_lavalink()
 
     delay = 15.0
 

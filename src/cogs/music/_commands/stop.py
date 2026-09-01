@@ -1,29 +1,27 @@
 """
-Kyro Discord Bot - Stop Command Handler (Lavalink V4)
+Kyro Discord Bot - Native Stop Command
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-import wavelink
+from discord.ext import commands
+
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
-    from src.cogs.music._controller import MusicController
-    from src.cogs.music._player import KyroPlayer
-    from src.core.context import CustomContext
+    from src.cogs.music.music import Music
 
 
-async def handle_stop(ctx: CustomContext, controller: MusicController) -> None:
-    """Stop music, clear queue and leave voice."""
-    player: KyroPlayer = ctx.guild.voice_client  # type: ignore
-    if not player or not player.connected:
-        await ctx.send_warning("I am not connected to a voice channel.")
+async def execute_stop(cog: Music, ctx: commands.Context) -> None:
+    player = cog.controller.get_player(ctx.guild.id)
+    if not player or not player.is_connected:
+        container = KyroContainer(accent_color=None)
+        container.add_text("❌ **No active player found in this server.**")
+        await send_container_response(ctx, container)
         return
 
-    player.queue.clear()
-    await player.disconnect()
-
-    e_reg = ctx.bot.custom_emojis
-    stop_icon = e_reg.get("icons_stop_button", "")
-    prefix = f"{stop_icon} " if stop_icon else ""
-    await ctx.send_success(f"{prefix}Stopped playback, cleared the queue, and disconnected from voice.", title="Disconnected")
+    await player.stop()
+    container = KyroContainer(accent_color=None)
+    container.add_text("⏹️ **Player stopped, queue cleared and disconnected from voice.**")
+    await send_container_response(ctx, container)

@@ -1,7 +1,7 @@
 """
-Kyro Discord Bot - Custom Lavalink V4 Player
-Subclasses wavelink.Player to provide Components V2 UI, gapless streaming,
-Smart Autoplay background pre-fetching, and race-condition protected queue controls.
+Kyro Discord Bot - Native Discord Guild Audio Player
+Pure Python Discord VoiceClient controller with volume transformers, loop modes,
+Smart Autoplay AI, and Components V2 Cyber Container UI.
 """
 
 from __future__ import annotations
@@ -10,11 +10,13 @@ import asyncio
 import html
 import logging
 import re
-from typing import TYPE_CHECKING, Optional, Set
+from typing import TYPE_CHECKING, List, Optional, Set
 
 import discord
-import wavelink
+import imageio_ffmpeg
 
+from src.cogs.music._models import Track
+from src.cogs.music._autoplay import NativeSmartAutoplay, clean_track_title
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -24,7 +26,7 @@ logger = logging.getLogger("Kyro.Music.Player")
 
 
 def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
-    """Shorten multi-artist strings to prevent card layout breaking."""
+    """Shorten multi-artist strings."""
     if not raw_artist:
         return "Official Artist"
     clean = html.unescape(raw_artist).strip()
@@ -39,179 +41,221 @@ def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
     return clean
 
 
-class KyroPlayer(wavelink.Player):
-    """Production-grade Lavalink V4 player for Kyro with Smart Autoplay."""
+class GuildPlayer:
+    """Guild audio player using native Discord.py VoiceClient & FFmpeg."""
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, bot: KyroBot, guild: discord.Guild) -> None:
+        self.bot = bot
+        self.guild = guild
+        self.voice_client: Optional[discord.VoiceClient] = None
         self.home_channel: Optional[discord.abc.Messageable] = None
         self.now_playing_message: Optional[discord.Message] = None
-        
-        # AutoPlayMode.partial allows Wavelink to cleanly auto-advance player.queue without double-play race conditions
-        self.autoplay: wavelink.AutoPlayMode = wavelink.AutoPlayMode.partial
+
+        self.queue: List[Track] = []
+        self.current: Optional[Track] = None
+        self.loop_mode: str = "off"  # "off", "track", "queue"
+        self.volume: float = 1.0     # 100%
         self.smart_autoplay: bool = False
-        self._loop_state: str = "off"  # "off", "track", "queue"
         
-        # Smart Autoplay Session Memory & Pre-fetch Cache
         self.played_history: Set[str] = set()
-        self.prefetched_autoplay_track: Optional[wavelink.Playable] = None
         self.consecutive_same_artist: int = 0
         self.last_artist: str = ""
-        self._prefetch_lock = asyncio.Lock()
-        self._prefetch_task: Optional[asyncio.Task] = None
 
-    async def on_voice_server_update(self, data: dict, /) -> None:
-        """Handle Discord voice server update and dispatch to Lavalink."""
-        logger.debug(f"KyroPlayer {self.guild.id} on_voice_server_update: {data.get('endpoint')}")
-        await super().on_voice_server_update(data)
-        # Ensure dispatch runs if session_id is already available
-        voice_data = self._voice_state.get("voice", {})
-        if voice_data.get("session_id") and voice_data.get("token") and voice_data.get("endpoint"):
-            await self._dispatch_voice_update()
+        self._lock = asyncio.Lock()
+        self._disconnect_timer: Optional[asyncio.TimerHandle] = None
 
-    async def on_voice_state_update(self, data: dict, /) -> None:
-        """Handle Discord voice state update and guarantee Lavalink voice connection."""
-        logger.debug(f"KyroPlayer {self.guild.id} on_voice_state_update: channel={data.get('channel_id')}")
-        await super().on_voice_state_update(data)
-        # Fix race condition: If VOICE_SERVER_UPDATE arrived before VOICE_STATE_UPDATE, dispatch now!
-        voice_data = self._voice_state.get("voice", {})
-        if voice_data.get("session_id") and voice_data.get("token") and voice_data.get("endpoint"):
-            await self._dispatch_voice_update()
+    @property
+    def is_playing(self) -> bool:
+        return bool(self.voice_client and self.voice_client.is_playing())
+
+    @property
+    def is_paused(self) -> bool:
+        return bool(self.voice_client and self.voice_client.is_paused())
+
+    @property
+    def is_connected(self) -> bool:
+        return bool(self.voice_client and self.voice_client.is_connected())
 
     def set_loop_mode(self, mode: str) -> str:
         """Set loop mode: 'off', 'track' (single song), 'queue' (all songs)."""
-        mode = mode.lower().strip()
-        if mode in ("track", "song", "1"):
-            self.queue.mode = wavelink.QueueMode.loop
-            self._loop_state = "track"
-        elif mode in ("queue", "all"):
-            self.queue.mode = wavelink.QueueMode.loop_all
-            self._loop_state = "queue"
+        m = mode.lower().strip()
+        if m in ("track", "song", "1"):
+            self.loop_mode = "track"
+        elif m in ("queue", "all"):
+            self.loop_mode = "queue"
         else:
-            self.queue.mode = wavelink.QueueMode.normal
-            self._loop_state = "off"
-        return self._loop_state
+            self.loop_mode = "off"
+        return self.loop_mode
 
-    def get_loop_mode(self) -> str:
-        """Get current loop state."""
-        if self.queue.mode == wavelink.QueueMode.loop:
-            return "track"
-        elif self.queue.mode == wavelink.QueueMode.loop_all:
-            return "queue"
-        return "off"
+    def set_volume(self, vol_pct: int) -> int:
+        """Set player volume (0 to 200%)."""
+        clamped = max(0, min(200, vol_pct))
+        self.volume = clamped / 100.0
+        if self.voice_client and self.voice_client.source:
+            if isinstance(self.voice_client.source, discord.PCMVolumeTransformer):
+                self.voice_client.source.volume = self.volume
+        return clamped
 
-    def record_track_start(self, track: wavelink.Playable) -> None:
-        """Record track in session history and trigger background Autoplay pre-fetch."""
-        if not track:
+    async def connect_voice(self, channel: discord.VoiceChannel) -> None:
+        """Connect or move to voice channel."""
+        if not self.voice_client or not self.voice_client.is_connected():
+            self.voice_client = await channel.connect(self_deaf=True, timeout=20.0, reconnect=True)
+        elif self.voice_client.channel != channel:
+            await self.voice_client.move_to(channel)
+
+    async def play_track(self, track: Track) -> None:
+        """Stream track through native FFmpeg with volume normalization."""
+        if not self.voice_client or not self.voice_client.is_connected():
             return
 
-        # Record title & URI in history set
-        if track.title:
-            self.played_history.add(track.title.lower().strip())
-        if track.uri:
-            self.played_history.add(track.uri.lower().strip())
+        self.current = track
+        clean_t = clean_track_title(track.title).lower()
+        self.played_history.add(clean_t)
 
-        # Track consecutive artist counter for anti-fatigue
-        author_clean = (track.author or "").lower().strip()
-        if author_clean and author_clean == self.last_artist:
+        # Anti-fatigue artist tracking
+        art_clean = (track.author or "").lower().strip()
+        if art_clean and art_clean == self.last_artist:
             self.consecutive_same_artist += 1
         else:
             self.consecutive_same_artist = 1
-            self.last_artist = author_clean
+            self.last_artist = art_clean
 
-        # Trigger background pre-fetch for 0ms gapless Autoplay transition
-        if self.smart_autoplay:
-            if self._prefetch_task and not self._prefetch_task.done():
-                self._prefetch_task.cancel()
-            self._prefetch_task = asyncio.create_task(self._async_prefetch(track))
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        before_args = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
+        ffmpeg_args = "-vn -b:a 320k"
 
-    async def _async_prefetch(self, track: wavelink.Playable) -> None:
-        """Background coroutine to pre-resolve next recommended track in RAM."""
-        async with self._prefetch_lock:
-            try:
-                from src.cogs.music._autoplay import SmartAutoplayEngine
-                next_track = await SmartAutoplayEngine.get_next_track(
-                    current_track=track,
+        audio_source = discord.FFmpegPCMAudio(
+            track.stream_url,
+            executable=ffmpeg_exe,
+            before_options=before_args,
+            options=ffmpeg_args,
+        )
+        volume_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
+
+        if self.voice_client.is_playing() or self.voice_client.is_paused():
+            self.voice_client.stop()
+
+        def _after_callback(error):
+            if error:
+                logger.error(f"Voice playback error in guild {self.guild.id}: {error}")
+            asyncio.run_coroutine_threadsafe(self._handle_track_finish(), self.bot.loop)
+
+        self.voice_client.play(volume_source, after=_after_callback)
+        await self.send_now_playing_card(track)
+
+    async def _handle_track_finish(self) -> None:
+        """Fired automatically when a track finishes naturally."""
+        async with self._lock:
+            # 1. Loop Track
+            if self.loop_mode == "track" and self.current:
+                await self.play_track(self.current)
+                return
+
+            # 2. Loop Queue (push finished track to end)
+            if self.loop_mode == "queue" and self.current:
+                self.queue.append(self.current)
+
+            # 3. Next Track in Queue
+            if self.queue:
+                next_track = self.queue.pop(0)
+                await self.play_track(next_track)
+                return
+
+            # 4. Smart Autoplay Radio
+            if self.smart_autoplay and self.current:
+                next_track = await NativeSmartAutoplay.get_next_track(
+                    current_track=self.current,
                     played_history=self.played_history,
                     consecutive_same_artist=self.consecutive_same_artist,
                 )
                 if next_track:
-                    self.prefetched_autoplay_track = next_track
-                    logger.info(f"Autoplay Pre-fetched in RAM: '{next_track.title}' for guild {self.guild.id}")
-            except Exception as e:
-                logger.debug(f"Autoplay pre-fetch notice: {e}")
+                    await self.play_track(next_track)
+                    return
 
-    def build_now_playing_container(
-        self,
-        track: wavelink.Playable,
-        requester: Optional[str] = None,
-    ) -> KyroContainer:
-        """Build signature Discord Components V2 Type 17 cyber container for active track."""
-        bot: KyroBot = self.client  # type: ignore
-        e_reg = bot.custom_emojis
+            # 5. Queue Ended
+            self.current = None
+
+    async def skip(self) -> None:
+        """Skip current track."""
+        if self.voice_client and (self.voice_client.is_playing() or self.voice_client.is_paused()):
+            self.voice_client.stop()
+
+    def pause(self) -> bool:
+        """Pause current playback."""
+        if self.voice_client and self.voice_client.is_playing():
+            self.voice_client.pause()
+            return True
+        return False
+
+    def resume(self) -> bool:
+        """Resume paused playback."""
+        if self.voice_client and self.voice_client.is_paused():
+            self.voice_client.resume()
+            return True
+        return False
+
+    async def stop(self) -> None:
+        """Clear queue and disconnect."""
+        self.queue.clear()
+        self.current = None
+        if self.voice_client:
+            if self.voice_client.is_playing() or self.voice_client.is_paused():
+                self.voice_client.stop()
+            try:
+                await self.voice_client.disconnect(force=True)
+            except Exception:
+                pass
+            self.voice_client = None
+
+    def build_now_playing_container(self, track: Track) -> KyroContainer:
+        """Build signature Discord Components V2 Type 17 cyber card."""
+        e_reg = self.bot.custom_emojis
         music_icon = e_reg.get("music_playing", "")
         play_prefix = f"{music_icon} " if music_icon else ""
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
-        # Calculate duration
-        duration_ms = track.length if track.length else 0
-        duration_sec = duration_ms // 1000
-        dur_m = duration_sec // 60
-        dur_s = duration_sec % 60
-        dur_str = f"{dur_m:02d}:{dur_s:02d}" if duration_sec > 0 else "Live Stream"
+        short_artist_name = shorten_artist(track.author)
+        is_autoplay = track.is_autoplay or "autoplay" in str(track.requester).lower()
+        title_header = f"**{play_prefix}Now Playing `[⚡ Smart Autoplay Radio]`**" if is_autoplay else f"**{play_prefix}Now Playing Studio Master**"
 
-        short_artist = shorten_artist(track.author or "Official Artist")
-        track_url = track.uri or "https://discord.com"
-        thumbnail_url = track.artwork
-
-        # Extract requester from track extras or argument
-        req_name = requester
-        if not req_name and hasattr(track, "extras") and hasattr(track.extras, "requester"):
-            req_name = track.extras.requester
-        if not req_name:
-            req_name = "DJ / AutoPlay"
-
-        is_autoplay = "autoplay" in str(req_name).lower() or "smart autoplay" in str(req_name).lower()
-        title_prefix = f"**{play_prefix}Now Playing `[⚡ Smart Autoplay Radio]`**" if is_autoplay else f"**{play_prefix}Now Playing Studio Master**"
-
-        channel_name = self.channel.name if self.channel else "Voice Channel"
+        channel_name = self.voice_client.channel.name if (self.voice_client and self.voice_client.channel) else "Voice Channel"
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"{title_prefix}\n"
-                f"> **Title:** [{track.title}]({track_url})\n"
-                f"> **Artist:** `{short_artist}`\n"
-                f"> **Duration:** `{dur_str}`"
+                f"{title_header}\n"
+                f"> **Title:** [{track.title}]({track.url})\n"
+                f"> **Artist:** `{short_artist_name}`\n"
+                f"> **Duration:** `{track.formatted_duration}`"
             ),
-            accessory={"type": 11, "media": {"url": thumbnail_url}} if thumbnail_url else None,
+            accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
 
         container.add_separator(divider=True)
 
-        loop_mode = self.get_loop_mode().upper()
-        ap_mode = "ON" if self.smart_autoplay else "OFF"
-        vol_pct = int(self.volume)
+        loop_text = self.loop_mode.upper()
+        ap_text = "ON" if self.smart_autoplay else "OFF"
+        vol_text = int(self.volume * 100)
 
         container.add_text(
-            f"{dot} **Channel:** `{channel_name}` • **Bitrate:** `320kbps CD Master`\n"
-            f"{dot} **Requested By:** {req_name}\n"
-            f"{dot} **Loop:** `{loop_mode}` • **AutoPlay:** `{ap_mode}` • **Volume:** `{vol_pct}%`"
+            f"{dot} **Channel:** `#{channel_name}` • **Bitrate:** `320kbps Direct Master`\n"
+            f"{dot} **Requested By:** `{track.requester}`\n"
+            f"{dot} **Loop:** `{loop_text}` • **AutoPlay:** `{ap_text}` • **Volume:** `{vol_text}%`"
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Kyro Studio Engine • Lavalink V4 Zero-Lag Stream")
+        container.add_text(f"-# Kyro Native Engine • Direct High-Fidelity Audio")
 
         return container
 
-    async def update_now_playing(self, track: wavelink.Playable) -> None:
-        """Send or update now playing card with interactive view."""
+    async def send_now_playing_card(self, track: Track) -> None:
+        """Send Now Playing Card directly to home channel."""
         if not self.home_channel:
             return
 
         from src.cogs.music._views import MusicControlView
 
         container = self.build_now_playing_container(track)
-        view = MusicControlView(self.client, self, self.guild.id)  # type: ignore
+        view = MusicControlView(self.bot, self, self.guild.id)
 
         try:
             self.now_playing_message = await send_container_response(
@@ -220,4 +264,4 @@ class KyroPlayer(wavelink.Player):
                 view=view,
             )
         except Exception as e:
-            logger.debug(f"Could not send now playing container: {e}")
+            logger.debug(f"Now playing card send notice: {e}")

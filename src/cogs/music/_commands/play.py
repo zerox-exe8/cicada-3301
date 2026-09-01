@@ -1,6 +1,5 @@
 """
-Kyro Discord Bot - Play Command Handler (Lavalink V4)
-Clean single-message dispatcher with zero webhook spam and instant playback.
+Kyro Discord Bot - Native Play Command
 """
 
 from __future__ import annotations
@@ -8,112 +7,65 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 import discord
-import wavelink
+from discord.ext import commands
 
-from src.cogs.music._player import KyroPlayer, shorten_artist
-from src.cogs.music._resolver import MusicResolver
+from src.cogs.music._extractor import NativeExtractor
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
-    from src.cogs.music._controller import MusicController
-    from src.core.context import CustomContext
+    from src.cogs.music.music import Music
 
-logger = logging.getLogger("Kyro.Music.Cmd.Play")
+logger = logging.getLogger("Kyro.Music.Play")
 
 
-async def handle_play(ctx: CustomContext, controller: MusicController, query: str) -> None:
-    """Execute the play command cleanly without duplicate embeds or webhooks."""
+async def execute_play(cog: Music, ctx: commands.Context, query: str) -> None:
+    """Execute native play command."""
     if not ctx.author.voice or not ctx.author.voice.channel:
-        await ctx.send_warning("You must be connected to a Voice Channel to play music.")
+        container = KyroContainer(accent_color=None)
+        container.add_text("❌ **You must be in a voice channel to play music.**")
+        await send_container_response(ctx, container)
         return
 
-    e_reg = ctx.bot.custom_emojis
-    user_channel = ctx.author.voice.channel
-    player: KyroPlayer = ctx.guild.voice_client  # type: ignore
-
-    # 1. Connect or Move Voice Client via KyroPlayer
-    if not player or not player.connected:
-        try:
-            player = await user_channel.connect(cls=KyroPlayer, self_deaf=True, timeout=20.0, reconnect=True)
-        except Exception as e:
-            await ctx.send_error(f"Could not connect to voice channel: `{e}`")
-            return
-    elif player.channel != user_channel:
-        await player.move_to(user_channel)
-
+    voice_channel = ctx.author.voice.channel
+    player = cog.controller.get_or_create_player(ctx.guild)
     player.home_channel = ctx.channel
 
-    # 2. Resolve Track with Multi-Tier Anti-Block Fallback (using discord typing instead of extra message)
+    # Connect to voice
+    try:
+        await player.connect_voice(voice_channel)
+    except Exception as e:
+        logger.error(f"Voice connect error: {e}")
+        container = KyroContainer(accent_color=None)
+        container.add_text(f"❌ **Failed to connect to voice channel:** `{e}`")
+        await send_container_response(ctx, container)
+        return
+
+    # Extract track
     async with ctx.typing():
-        try:
-            result = await MusicResolver.resolve(query, requester=ctx.author.display_name)
-        except Exception as ex:
-            logger.error(f"Resolver error for '{query}': {ex}", exc_info=ex)
-            await ctx.send_error(f"Failed to search for **{query}**: `{ex}`")
-            return
+        track = await NativeExtractor.extract(query, requester=ctx.author.display_name)
 
-    if not result:
-        await ctx.send_warning(f"No results found for `{query}`.")
+    if not track:
+        container = KyroContainer(accent_color=None)
+        container.add_text(f"❌ **No results found for:** `{query}`")
+        await send_container_response(ctx, container)
         return
 
-    # 3. Handle Playlist vs Single Track
-    if isinstance(result, wavelink.Playlist):
-        added_count = 0
-        for track in result.tracks:
-            track.extras = wavelink.ExtrasNamespace(requester=ctx.author.display_name)
-            player.queue.put(track)
-            added_count += 1
-
-        if not player.playing and not player.queue.is_empty:
-            await player.play(player.queue.get())
-
-        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
-        playlist_container = KyroContainer(accent_color=None)
-        playlist_container.add_section(
-            content=(
-                f"**Queued Playlist: {result.name or 'Collection'}**\n"
-                f"> **Tracks Loaded:** `{added_count}`\n"
-                f"> **Requested By:** `{ctx.author.display_name}`"
-            )
-        )
-        playlist_container.add_separator(divider=True)
-        playlist_container.add_text(f"{dot} **Queue Status:** `{len(player.queue)}` tracks waiting.")
-        playlist_container.add_separator(divider=True)
-        playlist_container.add_text("-# Kyro Music Engine • Lavalink V4")
-        await send_container_response(ctx, playlist_container)
-        return
-
-    track: wavelink.Playable = result
-
-    # 4. Play or Queue Track
-    if not player.playing:
-        # Playing track triggers on_wavelink_track_start, which renders the single Now Playing card
-        await player.play(track)
+    # If nothing is currently playing, start immediately
+    if not player.is_playing and not player.is_paused:
+        await player.play_track(track)
     else:
-        player.queue.put(track)
-        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
-        queued_icon = e_reg.get("queue", "")
-        queued_prefix = f"{queued_icon} " if queued_icon else ""
-
-        dur_s = (track.length // 1000) if track.length else 0
-        dur_str = f"{dur_s // 60:02d}:{dur_s % 60:02d}" if dur_s > 0 else "Live"
-        short_artist_name = shorten_artist(track.author or "Official Artist")
-
-        queued_container = KyroContainer(accent_color=None)
-        queued_container.add_section(
+        # Add to queue
+        player.queue.append(track)
+        pos = len(player.queue)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
             content=(
-                f"**{queued_prefix}Track Queued**\n"
-                f"> **Title:** [{track.title}]({track.uri})\n"
-                f"> **Artist:** `{short_artist_name}`\n"
-                f"> **Duration:** `{dur_str}`"
+                f"**📥 Added to Queue [Position #{pos}]**\n"
+                f"> **Track:** [{track.title}]({track.url})\n"
+                f"> **Artist:** `{track.author}`\n"
+                f"> **Duration:** `{track.formatted_duration}`\n"
+                f"> **Requested By:** `{track.requester}`"
             ),
-            accessory={"type": 11, "media": {"url": track.artwork}} if track.artwork else None,
+            accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
-        queued_container.add_separator(divider=True)
-        queued_container.add_text(
-            f"{dot} **Position in Queue:** `#{len(player.queue)}`\n"
-            f"{dot} **Requested By:** {ctx.author.display_name}"
-        )
-        queued_container.add_separator(divider=True)
-        queued_container.add_text(f"-# Kyro Music Engine • Lavalink V4")
-        await send_container_response(ctx, queued_container)
+        await send_container_response(ctx, container)

@@ -1,29 +1,28 @@
 """
-Kyro Discord Bot - Skip Command Handler (Lavalink V4)
+Kyro Discord Bot - Native Skip Command
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-import wavelink
+from discord.ext import commands
+
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
-    from src.cogs.music._controller import MusicController
-    from src.cogs.music._player import KyroPlayer
-    from src.core.context import CustomContext
+    from src.cogs.music.music import Music
 
 
-async def handle_skip(ctx: CustomContext, controller: MusicController) -> None:
-    """Skip currently playing track."""
-    player: KyroPlayer = ctx.guild.voice_client  # type: ignore
-    if not player or not player.current:
-        await ctx.send_warning("No track is currently playing.")
+async def execute_skip(cog: Music, ctx: commands.Context) -> None:
+    player = cog.controller.get_player(ctx.guild.id)
+    if not player or not player.is_connected or not player.current:
+        container = KyroContainer(accent_color=None)
+        container.add_text("❌ **Nothing is currently playing to skip.**")
+        await send_container_response(ctx, container)
         return
 
-    current_title = player.current.title or "current track"
-    await player.skip(force=True)
-
-    e_reg = ctx.bot.custom_emojis
-    skip_icon = e_reg.get("skip", "")
-    prefix = f"{skip_icon} " if skip_icon else ""
-    await ctx.send_success(f"{prefix}Skipped **{current_title}** to next track in queue.", title="Track Skipped")
+    old_title = player.current.title
+    await player.skip()
+    container = KyroContainer(accent_color=None)
+    container.add_text(f"⏭️ **Skipped:** `{old_title}`")
+    await send_container_response(ctx, container)

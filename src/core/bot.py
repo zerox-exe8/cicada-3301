@@ -11,7 +11,6 @@ from pathlib import Path
 import aiohttp
 import discord
 from discord.ext import commands, tasks
-import wavelink
 
 from src.core.config import Config
 from src.core.context import CustomContext
@@ -169,19 +168,7 @@ class KyroBot(commands.Bot):
         # 4. Load Error Handler
         await self.load_extension("src.errors.handler")
 
-        # 5. Connect to Dedicated Lavalink Node
-        try:
-            node = wavelink.Node(
-                uri=Config.LAVALINK_URI,
-                password=Config.LAVALINK_PASSWORD,
-                inactive_player_timeout=180,
-            )
-            await wavelink.Pool.connect(nodes=[node], client=self, cache_capacity=100)
-            logger.info("Initiated connection to Lavalink V4 node.")
-        except Exception as e:
-            logger.error(f"Failed to connect to Lavalink node: {e}", exc_info=e)
-
-        # 6. Dynamically Load all Cogs
+        # 5. Dynamically Load all Cogs
         await self._load_all_extensions()
 
         logger.info("Setup hook completed successfully.")
@@ -207,11 +194,6 @@ class KyroBot(commands.Bot):
     async def close(self) -> None:
         """Gracefully release database pools and network sessions."""
         logger.info("Shutting down Kyro Bot gracefully...")
-
-        try:
-            await wavelink.Pool.close()
-        except Exception:
-            pass
 
         if self.session:
             await self.session.close()

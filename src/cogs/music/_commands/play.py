@@ -65,6 +65,12 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
     controller.active_contexts[guild_id] = ctx
 
     # 3. Play or Queue Track
+    if status_msg:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
     if not voice_client.is_playing() and not voice_client.is_paused():
         controller.current_tracks[guild_id] = track
         try:

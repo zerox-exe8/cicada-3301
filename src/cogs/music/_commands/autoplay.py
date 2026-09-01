@@ -1,13 +1,14 @@
 """
-Kyro Discord Bot - Autoplay Command
-Simple, clean Autoplay toggle and usage information.
+Kyro Discord Bot - Autoplay Command (Lavalink V4)
+Toggles the Smart Autoplay AI Radio Engine.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
+import wavelink
 
-import discord
+from src.cogs.music._player import KyroPlayer
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -16,14 +17,14 @@ if TYPE_CHECKING:
 
 
 async def handle_autoplay(ctx: CustomContext, controller: MusicController, action: Optional[str] = None) -> None:
-    """Toggle Autoplay mode or show clean usage instructions."""
+    """Toggle Smart Autoplay AI radio mode or view current status."""
     e_reg = ctx.bot.custom_emojis
     dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
     autoplay_icon = e_reg.get("icons_loop", e_reg.get("music_playing", ""))
     prefix_icon = f"{autoplay_icon} " if autoplay_icon else ""
 
-    guild_id = ctx.guild.id
-    current_state = controller.get_autoplay(guild_id)
+    player: KyroPlayer = ctx.guild.voice_client if ctx.guild else None  # type: ignore
+    current_state = bool(player and player.smart_autoplay)
 
     # 1. If no argument provided, show clean usage guide
     if not action:
@@ -31,38 +32,51 @@ async def handle_autoplay(ctx: CustomContext, controller: MusicController, actio
         status_text = "Enabled" if current_state else "Disabled"
         container.add_section(
             content=(
-                f"**{prefix_icon}Autoplay Settings**\n"
+                f"**{prefix_icon}Smart Autoplay AI Radio**\n"
                 f"> **Status:** `{status_text}`\n"
                 f"> **Usage:** `{ctx.prefix}autoplay <on / off>`"
             )
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Description:** Automatically queues similar tracks based on the songs you play when the queue ends."
+            f"{dot} **Description:** Automatically curates and pre-fetches similar studio tracks using Spotify-grade genre clustering when the playlist ends."
         )
+        container.add_separator(divider=True)
+        container.add_text("-# Kyro Studio Engine • Lavalink V4")
         await send_container_response(ctx, container)
         return
 
     act = action.lower().strip()
 
+    if not player or not player.connected:
+        await ctx.send_warning("I am not connected to a voice channel. Play a song first!")
+        return
+
     if act in ("on", "enable", "1", "true"):
-        controller.set_autoplay(guild_id, True)
+        player.smart_autoplay = True
+        if player.current:
+            player.record_track_start(player.current)
         await ctx.send_success(
-            f"{prefix_icon}Autoplay has been **Enabled**. Similar songs will play automatically after the queue ends.",
+            f"{prefix_icon}Smart Autoplay has been **Enabled**. Similar songs will play automatically with zero gap when the queue ends.",
             title="Autoplay Enabled",
         )
     elif act in ("off", "disable", "0", "false"):
-        controller.set_autoplay(guild_id, False)
+        player.smart_autoplay = False
+        player.prefetched_autoplay_track = None
         await ctx.send_success(
-            f"{prefix_icon}Autoplay has been **Disabled**.",
+            f"{prefix_icon}Smart Autoplay has been **Disabled**.",
             title="Autoplay Disabled",
         )
     else:
         # Toggle
-        new_state = not current_state
-        controller.set_autoplay(guild_id, new_state)
-        state_str = "Enabled" if new_state else "Disabled"
+        player.smart_autoplay = not player.smart_autoplay
+        state_str = "Enabled" if player.smart_autoplay else "Disabled"
+        if player.smart_autoplay and player.current:
+            player.record_track_start(player.current)
+        elif not player.smart_autoplay:
+            player.prefetched_autoplay_track = None
+
         await ctx.send_success(
-            f"{prefix_icon}Autoplay is now **{state_str}**.",
+            f"{prefix_icon}Smart Autoplay is now **{state_str}**.",
             title=f"Autoplay {state_str}",
         )

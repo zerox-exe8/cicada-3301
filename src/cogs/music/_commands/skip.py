@@ -1,28 +1,28 @@
 """
-Kyro Discord Bot - Skip Command Handler
+Kyro Discord Bot - Skip Command Handler (Lavalink V4)
 """
 
 from __future__ import annotations
 
-import discord
 from typing import TYPE_CHECKING
+import wavelink
 
 if TYPE_CHECKING:
     from src.cogs.music._controller import MusicController
+    from src.cogs.music._player import KyroPlayer
     from src.core.context import CustomContext
 
 
 async def handle_skip(ctx: CustomContext, controller: MusicController) -> None:
     """Skip currently playing track."""
-    voice_client: discord.VoiceClient = ctx.guild.voice_client
-    if not voice_client or (not voice_client.is_playing() and not voice_client.is_paused()):
+    player: KyroPlayer = ctx.guild.voice_client  # type: ignore
+    if not player or not player.current:
         await ctx.send_warning("No track is currently playing.")
         return
 
-    current = controller.get_current(ctx.guild.id)
-    current_title = current.title if current else "current track"
+    current_title = player.current.title or "current track"
+    await player.skip(force=True)
 
-    voice_client.stop()
     e_reg = ctx.bot.custom_emojis
     skip_icon = e_reg.get("skip", "")
     prefix = f"{skip_icon} " if skip_icon else ""

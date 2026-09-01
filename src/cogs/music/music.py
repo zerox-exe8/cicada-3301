@@ -1,6 +1,6 @@
 """
 Kyro Discord Bot - Music Cog
-Exposes High-Fidelity Music Commands with 100% Exact Matching, Smart Autoplay, and Components V2 Container Cards.
+Exposes High-Fidelity Music Commands powered by dedicated Lavalink V4 with Zero-Lag Streaming.
 """
 
 from __future__ import annotations
@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING, Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
+import wavelink
 
 from src.core.context import CustomContext
+from src.cogs.music._player import KyroPlayer
 from src.cogs.music._controller import MusicController
 from src.cogs.music._views import MusicControlView
 from src.cogs.music._commands.play import handle_play
@@ -38,14 +40,104 @@ logger = logging.getLogger("Kyro.Music")
 
 
 class Music(commands.Cog):
-    """High-Performance Discord Studio Audio & Music Engine."""
+    """High-Performance Discord Studio Audio & Music Engine (Lavalink V4)."""
     category: str = "Music"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
         self.controller = MusicController(bot)
         # Register persistent view so button interactions respond instantly across all servers
-        self.bot.add_view(MusicControlView(bot, self.controller))
+        self.bot.add_view(MusicControlView(bot, None))
+
+    # ==========================================
+    # Wavelink V3 Event Listeners
+    # ==========================================
+
+    @commands.Cog.listener()
+    async def on_wavelink_node_ready(self, payload: wavelink.NodeReadyEventPayload) -> None:
+        """Fired when Lavalink V4 node is connected and ready."""
+        logger.info(f"Lavalink V4 Node '{payload.node.identifier}' is ready and connected! Resumed: {payload.resumed}")
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_start(self, payload: wavelink.TrackStartEventPayload) -> None:
+        """Fired when any track begins playback across any server."""
+        player: KyroPlayer = payload.player  # type: ignore
+        if not player or not payload.track:
+            return
+
+        logger.info(f"Started playback: '{payload.track.title}' in guild {player.guild.id}")
+
+        # Update session memory and pre-fetch next recommendation in background
+        player.record_track_start(payload.track)
+
+        # Send/Update Now Playing card in the active command channel
+        if player.home_channel:
+            await player.update_now_playing(payload.track)
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload) -> None:
+        """Fired when a track finishes playback."""
+        player: KyroPlayer = payload.player  # type: ignore
+        if not player:
+            return
+
+        # CRITICAL ANTI-CASCADE GUARD:
+        # Ignore 'replaced', 'stopped', 'cleanup', 'loadFailed' to prevent rapid-fire skip loops!
+        if payload.reason != "finished":
+            logger.debug(f"Ignoring track end event with reason='{payload.reason}'")
+            return
+
+        # If queue has tracks, Wavelink's AutoPlayMode.partial automatically advances player.queue smoothly.
+        if not player.queue.is_empty:
+            return
+
+        # If queue is completely empty AND Smart Autoplay is enabled, seamlessly transition to next curated track
+        if player.smart_autoplay:
+            next_track = player.prefetched_autoplay_track
+            player.prefetched_autoplay_track = None
+
+            if not next_track:
+                from src.cogs.music._autoplay import SmartAutoplayEngine
+                next_track = await SmartAutoplayEngine.get_next_track(
+                    current_track=payload.track,
+                    played_history=player.played_history,
+                    consecutive_same_artist=player.consecutive_same_artist,
+                )
+
+            if next_track:
+                logger.info(f"Smart Autoplay seamlessly playing next track: '{next_track.title}'")
+                await player.play(next_track)
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_exception(self, payload: wavelink.TrackExceptionEventPayload) -> None:
+        """Fired when a track fails to decode or stream from source."""
+        player: KyroPlayer = payload.player  # type: ignore
+        logger.warning(f"Track exception for '{payload.track.title}' in guild {player.guild.id}: {payload.exception}")
+        if player and player.home_channel:
+            try:
+                await player.home_channel.send(
+                    f"⚠️ Track **{payload.track.title}** could not be decoded. Skipping to next song..."
+                )
+            except Exception:
+                pass
+        if player:
+            await player.skip(force=True)
+
+    @commands.Cog.listener()
+    async def on_wavelink_inactive_player(self, player: KyroPlayer) -> None:
+        """Fired when a player has been inactive in voice channel."""
+        logger.info(f"Disconnecting inactive player in guild {player.guild.id}")
+        try:
+            if player.home_channel:
+                await player.home_channel.send("-# Disconnected due to inactivity in voice channel.")
+            player.queue.clear()
+            await player.disconnect()
+        except Exception as e:
+            logger.debug(f"Inactive player disconnect notice: {e}")
+
+    # ==========================================
+    # Commands
+    # ==========================================
 
     @commands.hybrid_command(
         name="play",
@@ -193,116 +285,6 @@ class Music(commands.Cog):
     ) -> None:
         """Manage custom user playlists."""
         await handle_playlist(ctx, self.controller, action, name, query=query)
-
-    # ==========================================
-    # Global Fallback Music Interaction Router
-    # ==========================================
-
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction) -> None:
-        """Fallback router for music component buttons across all card types."""
-        if interaction.type != discord.InteractionType.component or not interaction.data:
-            return
-
-        custom_id = interaction.data.get("custom_id", "")
-        if not custom_id.startswith("music:"):
-            return
-
-        if interaction.response.is_done():
-            return
-
-        guild = interaction.guild
-        if not guild:
-            return
-
-        # Voice Verification
-        if not interaction.user or not isinstance(interaction.user, discord.Member):
-            if not interaction.response.is_done():
-                await interaction.response.send_message("Invalid user context.", ephemeral=True)
-            return
-
-        if not interaction.user.voice or not interaction.user.voice.channel:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("You must be in a Voice Channel to use music controls.", ephemeral=True)
-            return
-
-        vc = guild.voice_client
-        if vc and vc.channel != interaction.user.voice.channel:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("You must be in the same voice channel as the bot.", ephemeral=True)
-            return
-
-        action = custom_id.split(":")[-1]
-        e_reg = self.bot.custom_emojis
-
-        if action == "pause":
-            if not vc or (not vc.is_playing() and not vc.is_paused()):
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("No active audio stream.", ephemeral=True)
-                return
-            if vc.is_playing():
-                vc.pause()
-                pause_icon = e_reg.get("paused", "")
-                prefix = f"{pause_icon} " if pause_icon else ""
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(f"{prefix}Playback paused.", ephemeral=True)
-            elif vc.is_paused():
-                vc.resume()
-                play_icon = e_reg.get("music_playing", "")
-                prefix = f"{play_icon} " if play_icon else ""
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(f"{prefix}Playback resumed.", ephemeral=True)
-
-        elif action == "skip":
-            if not vc or (not vc.is_playing() and not vc.is_paused()):
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("No track is currently playing.", ephemeral=True)
-                return
-            vc.stop()
-            skip_icon = e_reg.get("skip", "")
-            prefix = f"{skip_icon} " if skip_icon else ""
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"{prefix}Skipped track.", ephemeral=True)
-
-        elif action == "vol_down":
-            cur_vol = self.controller.get_volume(guild.id)
-            new_vol = max(0.0, round(cur_vol - 0.1, 2))
-            self.controller.set_volume(guild.id, new_vol)
-            if vc and vc.source and hasattr(vc.source, "volume"):
-                vc.source.volume = new_vol
-            vol_icon = e_reg.get("volume_down", "")
-            prefix = f"{vol_icon} " if vol_icon else ""
-            pct = int(new_vol * 100)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"{prefix}Volume decreased to **{pct}%**.", ephemeral=True)
-
-        elif action == "vol_up":
-            cur_vol = self.controller.get_volume(guild.id)
-            if cur_vol >= 1.0:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("Volume is already at maximum studio safe limit (**100%**).", ephemeral=True)
-                return
-            new_vol = min(1.0, round(cur_vol + 0.1, 2))
-            self.controller.set_volume(guild.id, new_vol)
-            if vc and vc.source and hasattr(vc.source, "volume"):
-                vc.source.volume = new_vol
-            vol_icon = e_reg.get("volume_up", "")
-            prefix = f"{vol_icon} " if vol_icon else ""
-            pct = int(new_vol * 100)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"{prefix}Volume increased to **{pct}%**.", ephemeral=True)
-
-        elif action == "stop":
-            if not vc:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("I am not connected to a voice channel.", ephemeral=True)
-                return
-            self.controller.clear_guild(guild.id)
-            await vc.disconnect()
-            stop_icon = e_reg.get("icons_stop_button", "")
-            prefix = f"{stop_icon} " if stop_icon else ""
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"{prefix}Playback stopped and disconnected.", ephemeral=True)
 
 
 async def setup(bot: KyroBot) -> None:

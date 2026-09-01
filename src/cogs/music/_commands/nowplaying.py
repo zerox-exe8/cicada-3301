@@ -1,12 +1,13 @@
 """
-Kyro Discord Bot - Now Playing Command Handler
+Kyro Discord Bot - Now Playing Command Handler (Lavalink V4)
 """
 
 from __future__ import annotations
 
-import discord
 from typing import TYPE_CHECKING
+import wavelink
 
+from src.cogs.music._player import KyroPlayer
 from src.cogs.music._views import MusicControlView
 from src.utils.containers import send_container_response
 
@@ -17,20 +18,16 @@ if TYPE_CHECKING:
 
 async def handle_nowplaying(ctx: CustomContext, controller: MusicController) -> None:
     """Show details of the currently playing track."""
-    guild_id = ctx.guild.id
-    current = controller.get_current(guild_id)
+    player: KyroPlayer = ctx.guild.voice_client  # type: ignore
 
-    if not current:
+    if not player or not player.current:
         await ctx.send_warning("No track is currently playing.")
         return
 
-    vc = ctx.guild.voice_client
-    ch_name = vc.channel.name if vc and vc.channel else None
-    container = controller.build_now_playing_container(
-        current,
-        guild_id,
-        channel_name=ch_name,
-        requester=current.requester,
-    )
-    view = MusicControlView(ctx.bot, controller, guild_id)
+    req = None
+    if hasattr(player.current, "extras") and hasattr(player.current.extras, "requester"):
+        req = player.current.extras.requester
+
+    container = player.build_now_playing_container(player.current, requester=req)
+    view = MusicControlView(ctx.bot, player, ctx.guild.id)
     await send_container_response(ctx, container, view=view)

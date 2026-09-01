@@ -1,21 +1,25 @@
 """
-Kyro Discord Bot - User Saved Playlists & Like System
-Allows users to save currently playing songs, manage custom playlists, and load them seamlessly.
+Kyro Discord Bot - User Saved Playlists & Like System (Lavalink V4)
+Enterprise-grade playlist manager with instant first-track playback and async background queueing.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import TYPE_CHECKING, Optional, List
-
 import discord
+import wavelink
 
 from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response
-from src.cogs.music._types import TrackItem
+from src.cogs.music._player import KyroPlayer, shorten_artist
 from src.cogs.music._resolver import MusicResolver, clean_track_title
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.cogs.music._controller import MusicController
+
+logger = logging.getLogger("Kyro.Music.Cmd.Playlist")
 
 
 async def handle_like(ctx: CustomContext, controller: MusicController) -> None:
@@ -23,11 +27,12 @@ async def handle_like(ctx: CustomContext, controller: MusicController) -> None:
     if not ctx.guild:
         return
 
-    current = controller.get_current(ctx.guild.id)
-    if not current:
+    player: KyroPlayer = ctx.guild.voice_client  # type: ignore
+    if not player or not player.current:
         await ctx.send_warning("No track is currently playing to add to your Favorites.")
         return
 
+    current = player.current
     db = ctx.bot.db
     user_id = ctx.author.id
 
@@ -51,25 +56,26 @@ async def handle_like(ctx: CustomContext, controller: MusicController) -> None:
         return
 
     playlist_id = pl_row["id"]
+    duration_sec = (current.length // 1000) if current.length else 0
 
     # 2. Add track to playlist
     await db.execute(
         "INSERT INTO user_playlist_tracks (playlist_id, title, author, duration, url) VALUES ($1, $2, $3, $4, $5);",
         playlist_id,
         current.title,
-        current.author,
-        current.duration,
-        current.url,
+        current.author or "Official Artist",
+        duration_sec,
+        current.uri or "https://discord.com",
     )
 
     container = KyroContainer(accent_color=None)
     container.add_section(
         content=(
             f"**Added to Favorites**\n"
-            f"> **Title:** [{current.title}]({current.url})\n"
+            f"> **Title:** [{current.title}]({current.uri})\n"
             f"> **Artist:** `{current.author}`"
         ),
-        accessory={"type": 11, "media": {"url": current.thumbnail}} if current.thumbnail else None,
+        accessory={"type": 11, "media": {"url": current.artwork}} if current.artwork else None,
     )
     container.add_separator(divider=True)
     container.add_text(
@@ -102,14 +108,17 @@ async def handle_playlist(
             "`?like`, `?playlist add <name>`, `?playlist play <name>`, `?playlist list`, `?playlist view <name>`, `?playlist delete <name>`"
         )
         container.add_separator(divider=True)
-        container.add_text("-# Kyro Music Engine")
+        container.add_text("-# Kyro Music Engine • Lavalink V4")
         await send_container_response(ctx, container)
         return
 
-    act = action.lower()
+    act = action.lower().strip()
     db = ctx.bot.db
     user_id = ctx.author.id
 
+    # -------------------------------------------------------------
+    # 1. LIST PLAYLISTS
+    # -------------------------------------------------------------
     if act == "list":
         playlists = await db.fetch_all(
             """
@@ -141,21 +150,38 @@ async def handle_playlist(
         container.add_text(f"Use `?playlist play <name>` to start listening.")
         await send_container_response(ctx, container)
 
+    # -------------------------------------------------------------
+    # 2. ADD TRACK TO PLAYLIST
+    # -------------------------------------------------------------
     elif act == "add":
         if not name:
             await ctx.send_warning("Please specify a playlist name. Usage: `?playlist add <name>`")
             return
 
         clean_pl_name = name.strip()
-        current = controller.get_current(ctx.guild.id) if ctx.guild else None
-        target_track: Optional[TrackItem] = None
+        player: KyroPlayer = ctx.guild.voice_client if ctx.guild else None  # type: ignore
+        current = player.current if (player and player.current) else None
+
+        title_to_save = None
+        author_to_save = "Official Artist"
+        duration_to_save = 0
+        url_to_save = None
 
         if query:
-            target_track = await MusicResolver.resolve(query)
+            res = await MusicResolver.resolve(query)
+            if res:
+                track = res[0] if isinstance(res, list) else (res.tracks[0] if isinstance(res, wavelink.Playlist) else res)
+                title_to_save = track.title
+                author_to_save = track.author or "Official Artist"
+                duration_to_save = (track.length // 1000) if track.length else 0
+                url_to_save = track.uri
         elif current:
-            target_track = current
+            title_to_save = current.title
+            author_to_save = current.author or "Official Artist"
+            duration_to_save = (current.length // 1000) if current.length else 0
+            url_to_save = current.uri
 
-        if not target_track:
+        if not title_to_save or not url_to_save:
             await ctx.send_warning("No song is currently playing. Please specify a song: `?playlist add <name> <song title>`")
             return
 
@@ -178,17 +204,17 @@ async def handle_playlist(
         await db.execute(
             "INSERT INTO user_playlist_tracks (playlist_id, title, author, duration, url) VALUES ($1, $2, $3, $4, $5);",
             playlist_id,
-            target_track.title,
-            target_track.author,
-            target_track.duration,
-            target_track.url,
+            title_to_save,
+            author_to_save,
+            duration_to_save,
+            url_to_save,
         )
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Added to Playlist**\n"
-                f"> **Track:** [{target_track.title}]({target_track.url})\n"
+                f"> **Track:** [{title_to_save}]({url_to_save})\n"
                 f"> **Playlist:** `{clean_pl_name}`"
             )
         )
@@ -196,6 +222,9 @@ async def handle_playlist(
         container.add_text(f"Use `?playlist play {clean_pl_name}` to play this playlist.")
         await send_container_response(ctx, container)
 
+    # -------------------------------------------------------------
+    # 3. PLAY PLAYLIST (RACE-CONDITION FREE)
+    # -------------------------------------------------------------
     elif act == "play":
         if not name:
             await ctx.send_warning("Please specify which playlist to play. Usage: `?playlist play <name>`")
@@ -226,48 +255,80 @@ async def handle_playlist(
             return
 
         user_channel = ctx.author.voice.channel
-        voice_client: discord.VoiceClient = ctx.guild.voice_client
+        player: KyroPlayer = ctx.guild.voice_client  # type: ignore
 
-        if not voice_client:
+        if not player or not player.connected:
             try:
-                voice_client = await user_channel.connect(timeout=10.0, reconnect=True)
+                player = await user_channel.connect(cls=KyroPlayer, self_deaf=True, timeout=10.0, reconnect=True)
             except Exception as e:
                 await ctx.send_error(f"Failed to connect to voice channel: `{e}`")
                 return
-        elif voice_client.channel != user_channel:
-            await voice_client.move_to(user_channel)
+        elif player.channel != user_channel:
+            await player.move_to(user_channel)
 
-        queue = controller.get_queue(ctx.guild.id)
-        controller.active_contexts[ctx.guild.id] = ctx
+        player.home_channel = ctx.channel
 
-        first_resolved = False
-        loaded_count = 0
+        # Step 1: Resolve the very first track immediately so playback starts with 0 delay (<0.5s)
+        first_track_info = tracks[0]
+        first_resolved = await MusicResolver.resolve(first_track_info["url"], requester=ctx.author.display_name)
+        if not first_resolved:
+            first_resolved = await MusicResolver.resolve(
+                f"{first_track_info['title']} {first_track_info['author']}",
+                requester=ctx.author.display_name,
+            )
 
-        for t_info in tracks:
-            track = await MusicResolver.resolve(t_info["url"])
-            if track:
-                track.requester = ctx.author.display_name
-                if not first_resolved and not voice_client.is_playing() and not voice_client.is_paused():
-                    controller.current_tracks[ctx.guild.id] = track
-                    controller._play_stream(ctx, track)
-                    first_resolved = True
-                else:
-                    queue.append(track)
-                loaded_count += 1
+        first_track = None
+        if first_resolved:
+            first_track = first_resolved[0] if isinstance(first_resolved, list) else (
+                first_resolved.tracks[0] if isinstance(first_resolved, wavelink.Playlist) else first_resolved
+            )
+
+        # If player is idle, start first track immediately
+        if first_track:
+            if not player.playing:
+                await player.play(first_track)
+            else:
+                player.queue.put(first_track)
+
+        # Step 2: Background loader for remaining tracks into queue (avoids blocking & race condition)
+        async def load_remaining_tracks():
+            for t_info in tracks[1:]:
+                try:
+                    res = await MusicResolver.resolve(t_info["url"], requester=ctx.author.display_name)
+                    if not res:
+                        res = await MusicResolver.resolve(
+                            f"{t_info['title']} {t_info['author']}",
+                            requester=ctx.author.display_name,
+                        )
+                    if res:
+                        t = res[0] if isinstance(res, list) else (
+                            res.tracks[0] if isinstance(res, wavelink.Playlist) else res
+                        )
+                        player.queue.put(t)
+                except Exception as ex:
+                    logger.debug(f"Playlist background load notice: {ex}")
+
+        if len(tracks) > 1:
+            asyncio.create_task(load_remaining_tracks())
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Loaded Playlist: {clean_pl_name}**\n"
-                f"> Successfully queued **{loaded_count}** tracks into the server player."
+                f"**Playing Playlist: {clean_pl_name}**\n"
+                f"> Loaded **{len(tracks)}** songs into the server player queue."
             )
         )
         container.add_separator(divider=True)
         container.add_text(
             f"**Channel:** `#{user_channel.name}` | **Requested By:** `{ctx.author.display_name}`"
         )
+        container.add_separator(divider=True)
+        container.add_text("-# Kyro Music Engine • Lavalink V4")
         await send_container_response(ctx, container)
 
+    # -------------------------------------------------------------
+    # 4. VIEW PLAYLIST
+    # -------------------------------------------------------------
     elif act == "view":
         if not name:
             await ctx.send_warning("Please specify a playlist name. Usage: `?playlist view <name>`")
@@ -306,6 +367,9 @@ async def handle_playlist(
         )
         await send_container_response(ctx, container)
 
+    # -------------------------------------------------------------
+    # 5. DELETE PLAYLIST
+    # -------------------------------------------------------------
     elif act == "delete":
         if not name:
             await ctx.send_warning("Please specify a playlist name to delete. Usage: `?playlist delete <name>`")

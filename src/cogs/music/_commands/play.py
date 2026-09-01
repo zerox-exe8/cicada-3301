@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Kyro.Music.Play")
 
 
-async def execute_play(cog: Music, ctx: commands.Context, query: str) -> None:
+async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] = None) -> None:
     """Execute native play command."""
     if not ctx.author.voice or not ctx.author.voice.channel:
         container = KyroContainer(accent_color=None)
@@ -39,6 +39,24 @@ async def execute_play(cog: Music, ctx: commands.Context, query: str) -> None:
         container.add_text(f"❌ **Failed to connect to voice channel:** `{e}`")
         await send_container_response(ctx, container)
         return
+
+    # Handle empty query
+    if not query or not query.strip():
+        if player.is_paused:
+            player.resume()
+            container = KyroContainer(accent_color=None)
+            container.add_text("▶️ **Resumed playback.**")
+            await send_container_response(ctx, container)
+            return
+        elif player.queue and not player.is_playing:
+            next_track = player.queue.pop(0)
+            await player.play_track(next_track)
+            return
+        else:
+            container = KyroContainer(accent_color=None)
+            container.add_text("❌ **Please provide a song title or URL.**\n> Usage: `?play <song title or URL>`")
+            await send_container_response(ctx, container)
+            return
 
     # Extract track
     async with ctx.typing():

@@ -83,7 +83,7 @@ class Music(commands.Cog):
         description="Play high-fidelity music tracks directly in your voice channel.",
     )
     @app_commands.describe(query="Song title, artist name, Spotify or YouTube URL")
-    async def play(self, ctx: CustomContext, *, query: str) -> None:
+    async def play(self, ctx: CustomContext, *, query: Optional[str] = None) -> None:
         """Play high-fidelity music tracks in your voice channel."""
         await execute_play(self, ctx, query)
 

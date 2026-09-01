@@ -97,16 +97,37 @@ class GuildPlayer:
         return clamped
 
     async def connect_voice(self, channel: discord.VoiceChannel) -> None:
-        """Connect or move to voice channel."""
-        if not self.voice_client or not self.voice_client.is_connected():
-            self.voice_client = await channel.connect(self_deaf=True, timeout=20.0, reconnect=True)
-        elif self.voice_client.channel != channel:
-            await self.voice_client.move_to(channel)
+        """Connect or move to voice channel safely."""
+        vc = self.guild.voice_client
+        if vc and vc.is_connected():
+            self.voice_client = vc
+            if self.voice_client.channel != channel:
+                await self.voice_client.move_to(channel)
+            return
+
+        self.voice_client = await channel.connect(self_deaf=True, timeout=20.0, reconnect=True)
 
     async def play_track(self, track: Track) -> None:
         """Stream track through native FFmpeg with volume normalization."""
         if not self.voice_client or not self.voice_client.is_connected():
-            return
+            vc = self.guild.voice_client
+            if vc and vc.is_connected():
+                self.voice_client = vc
+            else:
+                return
+
+        # Ensure Opus DLL is loaded on Windows
+        if not discord.opus.is_loaded():
+            from pathlib import Path
+            base_d = Path(__file__).resolve().parent.parent.parent.parent
+            for dll_name in ["opus.dll", "libopus-0.dll", "libopus.dll"]:
+                dll_path = base_d / dll_name
+                if dll_path.exists():
+                    try:
+                        discord.opus.load_opus(str(dll_path))
+                        break
+                    except Exception:
+                        pass
 
         self.current = track
         clean_t = clean_track_title(track.title).lower()

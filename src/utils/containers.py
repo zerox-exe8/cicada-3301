@@ -268,7 +268,7 @@ async def send_container_response(
                             pass
 
                     if not wh:
-                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "kyro 3301")
+                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "Kyro")
                         wh = await obj.create_webhook(
                             name=str(uname),
                             avatar=avatar_bytes,
@@ -287,7 +287,7 @@ async def send_container_response(
                     wh_payload = dict(payload)
                     # Clean username and avatar to avoid Discord 400 Bad Request
                     if bot_user:
-                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "kyro 3301")
+                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "Kyro")
                         wh_payload["username"] = str(uname)
                         avatar = getattr(bot_user, "display_avatar", None)
                         if avatar:

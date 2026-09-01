@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: cicada-3301-discord-bot
+    name: kyro-discord-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python src/main.py

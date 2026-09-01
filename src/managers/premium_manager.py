@@ -230,7 +230,7 @@ class PremiumManager:
         """Generate a cryptographically secure, unique license key."""
         part1 = secrets.token_hex(2).upper()
         part2 = secrets.token_hex(2).upper()
-        key = f"CICADA_3301-PRO-{part1}-{part2}"
+        key = f"KYRO-PRO-{part1}-{part2}"
 
         await self.db.execute(
             """

@@ -85,7 +85,7 @@ class Config:
     
     # Bot Branding
     BOT_NAME: str = "Kyro"
-    FOOTER_TEXT: str = "◈ CICADA 3301 • Cryptographic Autonomous System"
+    FOOTER_TEXT: str = "◈ KYRO • Autonomous Studio System"
 
     @classmethod
     def validate(cls) -> None:

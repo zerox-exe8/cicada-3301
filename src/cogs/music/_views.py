@@ -16,13 +16,35 @@ logger = logging.getLogger("Kyro.Music.Views")
 
 
 class MusicControlView(discord.ui.View):
-    """Interactive media control row matching exact screenshot design."""
+    """Interactive media control row with zero unicode emojis (uses custom application emojis)."""
 
     def __init__(self, bot: KyroBot, player: Optional[GuildPlayer] = None, guild_id: Optional[int] = None) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.player = player
         self.guild_id = guild_id or (player.guild.id if player else 0)
+
+        # Apply custom emojis from assets if available
+        self._apply_custom_emojis()
+
+    def _apply_custom_emojis(self) -> None:
+        e_reg = getattr(self.bot, "custom_emojis", None)
+        if not e_reg:
+            return
+
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                cid = child.custom_id or ""
+                if "playpause" in cid:
+                    child.emoji = e_reg._emojis.get("paused")
+                elif "skip" in cid:
+                    child.emoji = e_reg._emojis.get("skip")
+                elif "voldown" in cid:
+                    child.emoji = e_reg._emojis.get("volume_down")
+                elif "volup" in cid:
+                    child.emoji = e_reg._emojis.get("volume_up")
+                elif "stop" in cid:
+                    child.emoji = e_reg._emojis.get("icons_stop_button")
 
     def _get_player(self, interaction: discord.Interaction) -> Optional[GuildPlayer]:
         if self.player:
@@ -34,89 +56,82 @@ class MusicControlView(discord.ui.View):
 
     @discord.ui.button(
         label="Pause",
-        emoji="⏸️",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:music:playpause",
     )
     async def btn_pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player or not player.is_connected:
-            await interaction.response.send_message("❌ Player is not connected to a voice channel.", ephemeral=True)
+            await interaction.response.send_message("Player is not connected to a voice channel.", ephemeral=True)
             return
 
         if player.is_paused:
             player.resume()
             button.label = "Pause"
-            button.emoji = "⏸️"
             state = "Resumed"
         elif player.is_playing:
             player.pause()
             button.label = "Resume"
-            button.emoji = "▶️"
             state = "Paused"
         else:
             state = "Idle"
 
-        await interaction.response.send_message(f"▶️ **{state}** playback.", ephemeral=True)
+        await interaction.response.send_message(f"**{state}** playback.", ephemeral=True)
 
     @discord.ui.button(
         label="Skip",
-        emoji="⏭️",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:music:skip",
     )
     async def btn_skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player or not player.is_connected:
-            await interaction.response.send_message("❌ Player is not connected.", ephemeral=True)
+            await interaction.response.send_message("Player is not connected.", ephemeral=True)
             return
 
         await player.skip()
-        await interaction.response.send_message("⏭️ **Skipped** to the next song.", ephemeral=True)
+        await interaction.response.send_message("**Skipped** to the next song.", ephemeral=True)
 
     @discord.ui.button(
         label="Vol -",
-        emoji="🔉",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:music:voldown",
     )
     async def btn_vol_down(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player:
-            await interaction.response.send_message("❌ Player not active.", ephemeral=True)
+            await interaction.response.send_message("Player not active.", ephemeral=True)
             return
 
         cur_vol = int(player.volume * 100)
         new_vol = player.set_volume(cur_vol - 10)
-        await interaction.response.send_message(f"🔉 Volume set to **{new_vol}%**", ephemeral=True)
+        await interaction.response.send_message(f"Volume set to **{new_vol}%**", ephemeral=True)
 
     @discord.ui.button(
         label="Vol +",
-        emoji="🔊",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:music:volup",
     )
     async def btn_vol_up(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player:
-            await interaction.response.send_message("❌ Player not active.", ephemeral=True)
+            await interaction.response.send_message("Player not active.", ephemeral=True)
             return
 
         cur_vol = int(player.volume * 100)
         new_vol = player.set_volume(cur_vol + 10)
-        await interaction.response.send_message(f"🔊 Volume set to **{new_vol}%**", ephemeral=True)
+        await interaction.response.send_message(f"Volume set to **{new_vol}%**", ephemeral=True)
 
     @discord.ui.button(
         label="Stop",
-        emoji="⏹️",
         style=discord.ButtonStyle.danger,
         custom_id="kyro:music:stop",
     )
     async def btn_stop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player:
-            await interaction.response.send_message("❌ Player not active.", ephemeral=True)
+            await interaction.response.send_message("Player not active.", ephemeral=True)
             return
 
         await player.stop()
-        await interaction.response.send_message("⏹️ Player **Stopped** and disconnected.", ephemeral=True)
+        await interaction.response.send_message("Player **Stopped** and disconnected.", ephemeral=True)

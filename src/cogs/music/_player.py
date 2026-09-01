@@ -1,7 +1,7 @@
 """
 Kyro Discord Bot - Native Discord Guild Audio Player
-Pure Python Discord VoiceClient controller with volume transformers, loop modes,
-Smart Autoplay AI, and Components V2 Cyber Container UI.
+Pure Python Discord VoiceClient controller with Zero-Stutter RAM pre-buffering,
+loop modes, Smart Autoplay AI, and Components V2 Cyber Container UI.
 """
 
 from __future__ import annotations
@@ -10,6 +10,9 @@ import asyncio
 import html
 import logging
 import re
+import subprocess
+import threading
+import time
 from typing import TYPE_CHECKING, List, Optional, Set
 
 import discord
@@ -23,6 +26,87 @@ if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
 logger = logging.getLogger("Kyro.Music.Player")
+
+
+class BufferedAudioSource(discord.AudioSource):
+    """
+    High-Performance RAM-Buffered Audio Source.
+    Pre-buffers audio in a background thread to prevent network jitter / voice cuts.
+    """
+    FRAME_SIZE = 3840  # 20ms of 48000Hz 16-bit stereo PCM
+
+    def __init__(self, stream_url: str) -> None:
+        self.stream_url = stream_url
+        self._buffer = bytearray()
+        self._lock = threading.Lock()
+        self._finished = False
+        self._process: Optional[subprocess.Popen] = None
+        self._thread: Optional[threading.Thread] = None
+
+        self._start_ffmpeg()
+
+    def _start_ffmpeg(self) -> None:
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        cmd = [
+            ffmpeg_exe,
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+            "-probesize", "32",
+            "-analyzeduration", "0",
+            "-i", self.stream_url,
+            "-f", "s16le",
+            "-ar", "48000",
+            "-ac", "2",
+            "-vn",
+            "-loglevel", "error",
+            "pipe:1",
+        ]
+        self._process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=1024 * 1024,
+        )
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._thread.start()
+
+    def _reader_loop(self) -> None:
+        while self._process and self._process.poll() is None:
+            data = self._process.stdout.read(65536)
+            if not data:
+                break
+            with self._lock:
+                self._buffer.extend(data)
+                # Keep up to 10 seconds of audio pre-buffered in RAM (~1.9MB)
+                while len(self._buffer) > 1920000:
+                    time.sleep(0.05)
+        self._finished = True
+
+    def read(self) -> bytes:
+        with self._lock:
+            if len(self._buffer) >= self.FRAME_SIZE:
+                chunk = bytes(self._buffer[:self.FRAME_SIZE])
+                del self._buffer[:self.FRAME_SIZE]
+                return chunk
+            elif self._finished and len(self._buffer) > 0:
+                chunk = bytes(self._buffer).ljust(self.FRAME_SIZE, b"\x00")
+                self._buffer.clear()
+                return chunk
+            elif self._finished:
+                return b""
+            else:
+                return b"\x00" * self.FRAME_SIZE
+
+    def cleanup(self) -> None:
+        if self._process:
+            try:
+                self._process.kill()
+            except Exception:
+                pass
+            self._process = None
+        with self._lock:
+            self._buffer.clear()
 
 
 def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
@@ -42,7 +126,7 @@ def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
 
 
 class GuildPlayer:
-    """Guild audio player using native Discord.py VoiceClient & FFmpeg."""
+    """Guild audio player using native Discord.py VoiceClient & BufferedAudioSource."""
 
     def __init__(self, bot: KyroBot, guild: discord.Guild) -> None:
         self.bot = bot
@@ -62,7 +146,6 @@ class GuildPlayer:
         self.last_artist: str = ""
 
         self._lock = asyncio.Lock()
-        self._disconnect_timer: Optional[asyncio.TimerHandle] = None
 
     @property
     def is_playing(self) -> bool:
@@ -108,7 +191,7 @@ class GuildPlayer:
         self.voice_client = await channel.connect(self_deaf=True, timeout=20.0, reconnect=True)
 
     async def play_track(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:
-        """Stream track through native FFmpeg with volume normalization."""
+        """Stream track through RAM-buffered audio source with 0 cuts."""
         if not self.voice_client or not self.voice_client.is_connected():
             vc = self.guild.voice_client
             if vc and vc.is_connected():
@@ -141,17 +224,9 @@ class GuildPlayer:
             self.consecutive_same_artist = 1
             self.last_artist = art_clean
 
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        before_args = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
-        ffmpeg_args = "-vn -b:a 320k"
-
-        audio_source = discord.FFmpegPCMAudio(
-            track.stream_url,
-            executable=ffmpeg_exe,
-            before_options=before_args,
-            options=ffmpeg_args,
-        )
-        volume_source = discord.PCMVolumeTransformer(audio_source, volume=self.volume)
+        # Create zero-stutter RAM buffered source
+        raw_source = BufferedAudioSource(track.stream_url)
+        volume_source = discord.PCMVolumeTransformer(raw_source, volume=self.volume)
 
         if self.voice_client.is_playing() or self.voice_client.is_paused():
             self.voice_client.stop()

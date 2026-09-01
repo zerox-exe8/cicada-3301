@@ -22,7 +22,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     """Execute native play command."""
     if not ctx.author.voice or not ctx.author.voice.channel:
         container = KyroContainer(accent_color=None)
-        container.add_text("❌ **You must be in a voice channel to play music.**")
+        container.add_text("**You must be in a voice channel to play music.**")
         await send_container_response(ctx, container)
         return
 
@@ -36,7 +36,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     except Exception as e:
         logger.error(f"Voice connect error: {e}")
         container = KyroContainer(accent_color=None)
-        container.add_text(f"❌ **Failed to connect to voice channel:** `{e}`")
+        container.add_text(f"**Failed to connect to voice channel:** `{e}`")
         await send_container_response(ctx, container)
         return
 
@@ -45,7 +45,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         if player.is_paused:
             player.resume()
             container = KyroContainer(accent_color=None)
-            container.add_text("▶️ **Resumed playback.**")
+            container.add_text("**Resumed playback.**")
             await send_container_response(ctx, container)
             return
         elif player.queue and not player.is_playing:
@@ -54,7 +54,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             return
         else:
             container = KyroContainer(accent_color=None)
-            container.add_text("❌ **Please provide a song title or URL.**\n> Usage: `?play <song title or URL>`")
+            container.add_text("**Please provide a song title or URL.**\n> Usage: `?play <song title or URL>`")
             await send_container_response(ctx, container)
             return
 
@@ -68,7 +68,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     if not track:
         err_container = KyroContainer(accent_color=None)
-        err_container.add_text(f"❌ **No results found for:** `{query}`")
+        err_container.add_text(f"**No results found for:** `{query}`")
         if search_msg and isinstance(search_msg, discord.Message):
             try:
                 await search_msg.edit(embed=err_container.to_embed())
@@ -88,7 +88,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         queue_container = KyroContainer(accent_color=None)
         queue_container.add_section(
             content=(
-                f"**📥 Added to Queue [Position #{pos}]**\n"
+                f"**Added to Queue [Position #{pos}]**\n"
                 f"> **Track:** [{track.title}]({track.url})\n"
                 f"> **Artist:** `{track.author}`\n"
                 f"> **Duration:** `{track.formatted_duration}`\n"

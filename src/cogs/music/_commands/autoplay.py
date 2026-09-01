@@ -17,7 +17,7 @@ async def execute_autoplay(cog: Music, ctx: commands.Context, state: str = "") -
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected:
         container = KyroContainer(accent_color=None)
-        container.add_text("❌ **No active player found in this server.** Play a song first with `?play <song>`.")
+        container.add_text("**No active player found in this server.** Play a song first with `?play <song>`.")
         await send_container_response(ctx, container)
         return
 
@@ -29,7 +29,7 @@ async def execute_autoplay(cog: Music, ctx: commands.Context, state: str = "") -
     else:
         player.smart_autoplay = not player.smart_autoplay
 
-    status_str = "ENABLED (Continuous Radio On)" if player.smart_autoplay else "DISABLED"
+    status_str = "ENABLED" if player.smart_autoplay else "DISABLED"
     container = KyroContainer(accent_color=None)
-    container.add_text(f"⚡ **Smart Autoplay is now:** `{status_str}`")
+    container.add_text(f"**Smart Autoplay is now:** `{status_str}`")
     await send_container_response(ctx, container)

@@ -17,22 +17,22 @@ async def execute_queue(cog: Music, ctx: commands.Context, page: int = 1) -> Non
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected or not player.current:
         container = KyroContainer(accent_color=None)
-        container.add_text("❌ **No active queue found in this server.**")
+        container.add_text("**No active queue found in this server.**")
         await send_container_response(ctx, container)
         return
 
     container = KyroContainer(accent_color=None)
     container.add_text(
-        f"**🎵 Live Player Queue — {ctx.guild.name}**\n"
+        f"**Live Player Queue — {ctx.guild.name}**\n"
         f"**Now Playing:** [{player.current.title}]({player.current.url}) `[{player.current.formatted_duration}]`"
     )
     container.add_separator(divider=True)
 
     if not player.queue:
-        ap_status = "ON (Continuous Radio)" if player.smart_autoplay else "OFF"
+        ap_status = "ON" if player.smart_autoplay else "OFF"
         container.add_text(
             f"Queue is empty.\n"
-            f"-# ⚡ Smart Autoplay: **{ap_status}** • Loop: **{player.loop_mode.upper()}**"
+            f"-# Autoplay: **{ap_status}** • Loop: **{player.loop_mode.upper()}**"
         )
     else:
         per_page = 10

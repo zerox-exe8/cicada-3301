@@ -17,17 +17,17 @@ async def execute_pause(cog: Music, ctx: commands.Context) -> None:
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected:
         container = KyroContainer(accent_color=None)
-        container.add_text("❌ **No active player found in this server.**")
+        container.add_text("**No active player found in this server.**")
         await send_container_response(ctx, container)
         return
 
     if player.pause():
         container = KyroContainer(accent_color=None)
-        container.add_text("⏸️ **Playback paused.** Type `?resume` to continue.")
+        container.add_text("**Playback paused.** Type `?resume` to continue.")
         await send_container_response(ctx, container)
     else:
         container = KyroContainer(accent_color=None)
-        container.add_text("⚠️ **Player is not playing or already paused.**")
+        container.add_text("**Player is not playing or already paused.**")
         await send_container_response(ctx, container)
 
 
@@ -35,15 +35,15 @@ async def execute_resume(cog: Music, ctx: commands.Context) -> None:
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected:
         container = KyroContainer(accent_color=None)
-        container.add_text("❌ **No active player found in this server.**")
+        container.add_text("**No active player found in this server.**")
         await send_container_response(ctx, container)
         return
 
     if player.resume():
         container = KyroContainer(accent_color=None)
-        container.add_text("▶️ **Playback resumed.**")
+        container.add_text("**Playback resumed.**")
         await send_container_response(ctx, container)
     else:
         container = KyroContainer(accent_color=None)
-        container.add_text("⚠️ **Player is not paused.**")
+        container.add_text("**Player is not paused.**")
         await send_container_response(ctx, container)

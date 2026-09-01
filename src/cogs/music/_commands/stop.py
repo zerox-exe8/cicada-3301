@@ -17,11 +17,11 @@ async def execute_stop(cog: Music, ctx: commands.Context) -> None:
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected:
         container = KyroContainer(accent_color=None)
-        container.add_text("❌ **No active player found in this server.**")
+        container.add_text("**No active player found in this server.**")
         await send_container_response(ctx, container)
         return
 
     await player.stop()
     container = KyroContainer(accent_color=None)
-    container.add_text("⏹️ **Player stopped, queue cleared and disconnected from voice.**")
+    container.add_text("**Player stopped, queue cleared and disconnected from voice.**")
     await send_container_response(ctx, container)

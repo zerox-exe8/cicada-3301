@@ -383,29 +383,161 @@ class MusicResolver:
         """
         Autoplay: Generate next song recommendation based strictly on the current song's
         artist, genre, and related sound signature without repeating played songs.
+        Uses fast multi-candidate flat search to guarantee continuous endless radio.
         """
-        played = played_urls or set()
-        clean_title = clean_track_title(current_track.title)
-        candidate_queries: List[str] = []
+        played = {p.lower() for p in (played_urls or set()) if isinstance(p, str)}
+        clean_title = clean_track_title(current_track.title).lower().strip()
+        played.add(clean_title)
 
-        # 1. Related song mix for the specific track
-        candidate_queries.append(f"{clean_title} related mix")
-        candidate_queries.append(f"{clean_title} songs")
+        author = current_track.author.strip() if current_track.author else ""
+        if author in ("Official Artist", "Direct Stream", "Unknown"):
+            author = ""
 
-        # 2. Same artist / singer hits
-        if current_track.author and current_track.author not in ("Official Artist", "Direct Stream", "Unknown"):
-            candidate_queries.append(f"{current_track.author} hit songs")
-            candidate_queries.append(f"{current_track.author} songs")
+        search_query = f"{author} songs" if author else f"{clean_title} songs"
 
-        for q in candidate_queries:
-            track = await cls.resolve(q)
-            if (
-                track
-                and track.stream_url
-                and track.stream_url not in played
-                and track.url not in played
-                and track.title.lower() != current_track.title.lower()
-            ):
-                return track
+        # 1. Fast JioSaavn Check (10 candidates in ~100ms)
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            params = {
+                "__call": "search.getResults",
+                "_format": "json",
+                "api_version": "4",
+                "ctx": "web6dot0",
+                "n": "15",
+                "p": "1",
+                "q": search_query,
+            }
+            async with aiohttp.ClientSession(headers=headers) as s:
+                async with s.get("https://www.jiosaavn.com/api.php", params=params, timeout=aiohttp.ClientTimeout(total=3)) as r:
+                    if r.status == 200:
+                        data = json.loads(await r.text())
+                        results = data.get("results", [])
+                        for res in results:
+                            raw_t = html.unescape(res.get("title") or res.get("song") or "").strip()
+                            clean_t = clean_track_title(raw_t)
+                            clean_t_lower = clean_t.lower()
+                            pid = res.get("id", "")
+                            perma = res.get("perma_url", "").lower()
+
+                            # Check if already played
+                            if (
+                                clean_t_lower in played
+                                or pid in played
+                                or perma in played
+                                or clean_t_lower == clean_title
+                            ):
+                                continue
+
+                            # Found an unplayed candidate, fetch details
+                            dparams = {
+                                "__call": "song.getDetails",
+                                "cc": "in",
+                                "_marker": "0",
+                                "_format": "json",
+                                "pids": pid,
+                            }
+                            async with s.get("https://www.jiosaavn.com/api.php", params=dparams, timeout=aiohttp.ClientTimeout(total=3)) as dr:
+                                if dr.status == 200:
+                                    ddata = json.loads(await dr.text())
+                                    sinfo = ddata.get(pid, {})
+                                    enc_url = sinfo.get("encrypted_media_url")
+                                    stream_url = cls._decrypt_saavn_url(enc_url) if enc_url else None
+
+                                    if stream_url:
+                                        art = html.unescape(sinfo.get("primary_artists") or sinfo.get("singers") or "Official Artist")
+                                        thumb = sinfo.get("image", "").replace("150x150", "500x500")
+                                        duration = int(sinfo.get("duration", 240))
+                                        web_url = sinfo.get("perma_url") or f"https://www.jiosaavn.com/song/{pid}"
+
+                                        rec_track = TrackItem(
+                                            title=clean_t,
+                                            author=art,
+                                            duration=duration,
+                                            url=web_url,
+                                            stream_url=stream_url,
+                                            thumbnail=thumb,
+                                            requester="Autoplay",
+                                        )
+                                        logger.info(f"Autoplay resolved via JioSaavn: '{clean_t}' by '{art}'")
+                                        return rec_track
+        except Exception as e:
+            logger.debug(f"Autoplay JioSaavn fast check notice: {e}")
+
+        # 2. Fast Multi-Candidate YouTube Ranked Search (15 candidates in ~300ms)
+        loop = asyncio.get_event_loop()
+
+        def _yt_autoplay_search():
+            try:
+                fast_opts = {
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noplaylist": True,
+                    "extract_flat": True,
+                    "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+                }
+                with yt_dlp.YoutubeDL(fast_opts) as ydl:
+                    info = ydl.extract_info(f"ytsearch15:{search_query}", download=False)
+                    if not info or "entries" not in info or not info["entries"]:
+                        return None
+                    entries = [e for e in info["entries"] if e]
+
+                # Filter out all previously played candidates
+                unplayed_entries = []
+                for e in entries:
+                    e_id = (e.get("id") or "").lower()
+                    e_url = (e.get("url") or e.get("webpage_url") or "").lower()
+                    raw_e_title = html.unescape(e.get("title") or "").strip()
+                    clean_e_title = clean_track_title(raw_e_title).lower()
+
+                    if (
+                        e_id in played
+                        or e_url in played
+                        or clean_e_title in played
+                        or clean_e_title == clean_title
+                    ):
+                        continue
+                    unplayed_entries.append(e)
+
+                if not unplayed_entries:
+                    return None
+
+                # Score unplayed candidates
+                scored: List[Tuple[int, dict]] = [
+                    (cls._score_yt_candidate(search_query, e), e) for e in unplayed_entries
+                ]
+                scored.sort(key=lambda x: x[0], reverse=True)
+                best_score, best_candidate = scored[0]
+
+                video_id = best_candidate.get("id")
+                if not video_id:
+                    video_url = best_candidate.get("url") or best_candidate.get("webpage_url")
+                else:
+                    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+                # Extract stream info for best candidate
+                with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
+                    return ydl.extract_info(video_url, download=False)
+
+            except Exception as ex:
+                logger.error(f"YouTube autoplay search error: {ex}")
+            return None
+
+        entry = await loop.run_in_executor(RESOLVER_POOL, _yt_autoplay_search)
+        if entry and entry.get("url"):
+            raw_title = entry.get("title", search_query)
+            clean_t = clean_track_title(raw_title)
+            art = entry.get("uploader") or entry.get("artist") or entry.get("channel") or "Official Artist"
+            rec_track = TrackItem(
+                title=clean_t or raw_title,
+                author=art,
+                duration=int(entry.get("duration", 0)),
+                url=entry.get("webpage_url") or f"https://www.youtube.com/watch?v={entry.get('id', '')}",
+                stream_url=entry.get("url"),
+                thumbnail=entry.get("thumbnail", ""),
+                requester="Autoplay",
+            )
+            logger.info(f"Autoplay resolved via YouTube: '{rec_track.title}' by '{art}'")
+            return rec_track
 
         return None
+

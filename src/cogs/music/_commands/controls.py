@@ -5,7 +5,7 @@ Kyro Discord Bot - Music Extra Controls (Loop, Shuffle, Clear, Remove, Volume)
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 import discord
 
 if TYPE_CHECKING:
@@ -90,20 +90,35 @@ async def handle_remove(ctx: CustomContext, controller: MusicController, positio
     await ctx.send_success(f"{prefix}Removed **[{removed.title}]({removed.url})** from queue position `#{position}`.", title="Track Removed")
 
 
-async def handle_volume(ctx: CustomContext, controller: MusicController, level: int) -> None:
-    """Adjust audio stream volume safely (0% to 100%)."""
+async def handle_volume(ctx: CustomContext, controller: MusicController, level: Optional[int] = None) -> None:
+    """View current volume or adjust audio stream volume (0% to 100%)."""
+    guild_id = ctx.guild.id
+    e_reg = ctx.bot.custom_emojis
+    cur_vol = controller.get_volume(guild_id)
+    cur_pct = int(round(cur_vol * 100))
+
+    # If no level is provided, display current volume
+    if level is None:
+        vol_icon = e_reg.get("volume_up", "") if cur_pct >= 50 else e_reg.get("volume_down", "")
+        prefix = f"{vol_icon} " if vol_icon else ""
+        await ctx.send_success(
+            f"{prefix}Current playback volume is **{cur_pct}%**.\nUse `{ctx.prefix}volume <0-100>` (e.g. `{ctx.prefix}vol 90`) to change it.",
+            title="Playback Volume",
+        )
+        return
+
     if level < 0 or level > 100:
-        await ctx.send_warning("Volume level must be between `0` and `100` percent to prevent audio clipping.")
+        await ctx.send_warning("Volume level must be between `0` and `100` percent to prevent audio distortion.")
         return
 
     float_vol = level / 100.0
-    controller.set_volume(ctx.guild.id, float_vol)
+    controller.set_volume(guild_id, float_vol)
 
     voice_client: discord.VoiceClient = ctx.guild.voice_client
     if voice_client and voice_client.source and hasattr(voice_client.source, "volume"):
         voice_client.source.volume = float_vol
 
-    e_reg = ctx.bot.custom_emojis
     vol_icon = e_reg.get("volume_up", "") if level >= 50 else e_reg.get("volume_down", "")
     prefix = f"{vol_icon} " if vol_icon else ""
     await ctx.send_success(f"{prefix}Playback volume set to **{level}%**.", title="Volume Adjusted")
+

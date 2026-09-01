@@ -26,6 +26,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         await ctx.send_warning("You must be connected to a Voice Channel to play music.")
         return
 
+    e_reg = ctx.bot.custom_emojis
     user_channel = ctx.author.voice.channel
     voice_client: discord.VoiceClient = ctx.guild.voice_client
 

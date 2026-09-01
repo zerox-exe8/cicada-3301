@@ -157,11 +157,11 @@ class Music(commands.Cog):
     @commands.hybrid_command(
         name="volume",
         aliases=["vol"],
-        description="Adjust playback volume (0 to 100 percent).",
+        description="View current volume or adjust playback volume (0 to 100 percent).",
     )
-    @app_commands.describe(level="Volume level from 0 to 100")
-    async def volume(self, ctx: CustomContext, level: int = 100) -> None:
-        """Adjust playback volume."""
+    @app_commands.describe(level="Optional volume level from 0 to 100")
+    async def volume(self, ctx: CustomContext, level: Optional[int] = None) -> None:
+        """View or adjust playback volume."""
         await handle_volume(ctx, self.controller, level)
 
     @commands.hybrid_command(

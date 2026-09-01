@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Enterprise SaaS Help & Module Console
+Kyro Discord Bot - Enterprise SaaS Help & Module Console
 Dynamic permission-aware help menu powered by Discord Components V2 Container Cards.
 Filters commands so users only see actions they have permission to execute.
 """
@@ -13,17 +13,17 @@ from discord.ext import commands
 
 from src.core.config import Config
 from src.core.context import CustomContext
-from src.utils.containers import CicadaContainer, send_container_response, edit_container_response
+from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
 if TYPE_CHECKING:
-    from src.core.bot import CicadaBot
+    from src.core.bot import KyroBot
 
 
 class Help(commands.Cog):
     """Enterprise SaaS Help & Module Console with dynamic permission filtering."""
     category: str = "General"
 
-    def __init__(self, bot: CicadaBot) -> None:
+    def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
     async def _can_run_command(self, cmd: commands.Command, ctx: CustomContext) -> bool:
@@ -105,8 +105,8 @@ class Help(commands.Cog):
         visible_categories: dict[str, list[commands.Command]],
         custom_id_prefix: str,
         selected_val: str = "home",
-    ) -> CicadaContainer:
-        """Construct the Signature Cicada 3301 SaaS Overview Card with Default Accent."""
+    ) -> KyroContainer:
+        """Construct the Signature Kyro SaaS Overview Card with Default Accent."""
         guild = ctx.guild
         author = ctx.author
         current_prefix = self.bot.guild_mgr.get_prefix(guild.id if guild else None)
@@ -118,7 +118,7 @@ class Help(commands.Cog):
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
         # Default accent container (Dark Mode) - No avatar thumbnail
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Hey, I'm {Config.BOT_NAME.lower()}**\n"
@@ -176,14 +176,14 @@ class Help(commands.Cog):
         commands_list: list[commands.Command],
         visible_categories: dict[str, list[commands.Command]],
         custom_id_prefix: str,
-    ) -> CicadaContainer:
+    ) -> KyroContainer:
         """Construct category command card with default accent and folder emojis."""
         current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
         cat_icon = self._get_category_emoji(cat_name)
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         cat_icon_prefix = f"{cat_icon} " if cat_icon else ""
         container.add_section(
             content=(
@@ -235,7 +235,7 @@ class Help(commands.Cog):
     @commands.hybrid_command(
         name="help",
         aliases=["commands", "modules"],
-        description="Display the Cicada 3301 command directory tailored to your permissions.",
+        description="Display the Kyro command directory tailored to your permissions.",
     )
     async def help_command(self, ctx: CustomContext, *, command_or_module: str | None = None) -> None:
         """Interactive help menu filtered by user permissions."""
@@ -255,7 +255,7 @@ class Help(commands.Cog):
                 e_reg = self.bot.custom_emojis
                 dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
-                container = CicadaContainer(accent_color=None)
+                container = KyroContainer(accent_color=None)
                 cat_icon_prefix = f"{cat_icon} " if cat_icon else ""
                 container.add_section(
                     content=(
@@ -329,5 +329,5 @@ class Help(commands.Cog):
                 break
 
 
-async def setup(bot: CicadaBot) -> None:
+async def setup(bot: KyroBot) -> None:
     await bot.add_cog(Help(bot))

@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Tree Synchronization Command
+Kyro Discord Bot - Tree Synchronization Command
 Allows the bot owner to sync slash commands globally or clear duplicate guild-level commands.
 """
 
@@ -10,7 +10,7 @@ from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.managers.permission_manager import is_developer
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
 
 class Sync(commands.Cog):
@@ -58,7 +58,7 @@ class Sync(commands.Cog):
                 f"> Removed 2-2 duplicate guild commands in **{guild.name if guild else 'this server'}**."
             )
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Slash Commands Synchronized**\n"
@@ -81,7 +81,7 @@ class Sync(commands.Cog):
         status_msg = await ctx.send("⏳ Scanning assets and uploading application emojis...")
         uploaded, total = await self.bot.custom_emojis.sync_from_assets()
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Application Emojis Synchronized**\n"

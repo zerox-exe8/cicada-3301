@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Interactive UI Components (Views, Buttons, Modals)
+Kyro Discord Bot - Interactive UI Components (Views, Buttons, Modals)
 """
 
 from __future__ import annotations

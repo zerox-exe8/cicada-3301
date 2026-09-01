@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Dynamic Application Emoji Registry
+Kyro Discord Bot - Dynamic Application Emoji Registry
 Automatically caches all uploaded Discord Application Emojis and provides
 easy resolution for in-text mentions and Discord UI dropdown options.
 """
@@ -11,15 +11,15 @@ from typing import TYPE_CHECKING, Any
 import discord
 
 if TYPE_CHECKING:
-    from src.core.bot import CicadaBot
+    from src.core.bot import KyroBot
 
-logger = logging.getLogger("Cicada.Emojis")
+logger = logging.getLogger("Kyro.Emojis")
 
 
 class EmojiRegistry:
     """Central registry mapping emoji names to discord.Emoji objects."""
 
-    def __init__(self, bot: CicadaBot) -> None:
+    def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
         self._emojis: dict[str, discord.Emoji] = {}
 

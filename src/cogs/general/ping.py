@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Ping & Diagnostic Command
+Kyro Discord Bot - Ping & Diagnostic Command
 Uses Discord Components V2 Container card with sleek, compact typography.
 """
 
@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
 
 class Ping(commands.Cog):
@@ -48,7 +48,7 @@ class Ping(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Kyro Latency**\n"

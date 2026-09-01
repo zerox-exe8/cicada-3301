@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Global Error Handler
+Kyro Discord Bot - Global Error Handler
 Captures command exceptions and presents clean Components V2 Container cards with sleek typography.
 """
 
@@ -9,9 +9,9 @@ import logging
 import discord
 from discord.ext import commands
 
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
-logger = logging.getLogger("Cicada.ErrorHandler")
+logger = logging.getLogger("Kyro.ErrorHandler")
 
 
 class ErrorHandler(commands.Cog):
@@ -39,7 +39,7 @@ class ErrorHandler(commands.Cog):
         clock_icon = f"{e_reg.get('icons_clock', '')} " if e_reg else ""
         lock_icon = f"{e_reg.get('icons_locked', e_reg.get('icon_lock', ''))} " if e_reg else ""
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
 
         if isinstance(error, commands.MissingPermissions):
             missing_perms = ", ".join(f"`{p}`" for p in error.missing_permissions)

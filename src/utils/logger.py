@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Centralized Logging System
+Kyro Discord Bot - Centralized Logging System
 Provides colored terminal output and automatic rotating daily log files.
 """
 
@@ -11,7 +11,7 @@ from pathlib import Path
 import colorlog
 
 
-def setup_logger(name: str = "Cicada", log_level: int = logging.INFO) -> logging.Logger:
+def setup_logger(name: str = "Kyro", log_level: int = logging.INFO) -> logging.Logger:
     """Configures and returns a custom logger with color support and file rotation."""
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
@@ -42,7 +42,7 @@ def setup_logger(name: str = "Cicada", log_level: int = logging.INFO) -> logging
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     file_handler = TimedRotatingFileHandler(
-        filename=logs_dir / "cicada.log",
+        filename=logs_dir / "kyro.log",
         when="midnight",
         interval=1,
         backupCount=14,  # Keep logs for 14 days
@@ -59,4 +59,4 @@ def setup_logger(name: str = "Cicada", log_level: int = logging.INFO) -> logging
 
 
 # Global default logger instance
-logger = logging.getLogger("Cicada")
+logger = logging.getLogger("Kyro")

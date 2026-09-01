@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Modular Log Manager
+Kyro Discord Bot - Modular Log Manager
 Handles server audit log channel mapping and ultra-fast in-memory caching.
 """
 
@@ -12,7 +12,7 @@ import discord
 if TYPE_CHECKING:
     from src.database.base import BaseDatabase
 
-logger = logging.getLogger("Cicada.LogManager")
+logger = logging.getLogger("Kyro.LogManager")
 
 LOG_TYPES = ["all", "mod", "message", "member", "server", "voice"]
 

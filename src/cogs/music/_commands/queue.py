@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Queue Command Handler
+Kyro Discord Bot - Queue Command Handler
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ import discord
 from typing import TYPE_CHECKING
 
 from src.cogs.music._controller import shorten_artist
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.cogs.music._controller import MusicController
@@ -32,7 +32,7 @@ async def handle_queue(ctx: CustomContext, controller: MusicController) -> None:
     music_prefix = f"{music_icon} " if music_icon else ""
     dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))
 
-    container = CicadaContainer(accent_color=None)
+    container = KyroContainer(accent_color=None)
     container.add_section(
         content=(
             f"**{q_prefix}Server Music Queue**\n"

@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Main Entry Point
+Kyro Discord Bot - Main Entry Point
 Production Cloud Engine with 24/7 Web Server and Resilient Rate-Limit Backoff.
 """
 
@@ -24,12 +24,12 @@ except ImportError:
 
 import discord
 import discord.opus
-from src.core.bot import CicadaBot
+from src.core.bot import KyroBot
 from src.core.config import Config
 from src.core.server import HealthServer
 from src.utils.logger import setup_logger
 
-logger = setup_logger("Cicada")
+logger = setup_logger("Kyro")
 
 # Ensure Opus DLL is loaded on Windows
 if not discord.opus.is_loaded():
@@ -43,10 +43,10 @@ if not discord.opus.is_loaded():
             except Exception as e:
                 logger.debug(f"Notice loading {dll_name}: {e}")
 
-active_bot: CicadaBot | None = None
+active_bot: KyroBot | None = None
 
 
-def get_current_bot() -> CicadaBot | None:
+def get_current_bot() -> KyroBot | None:
     return active_bot
 
 
@@ -64,7 +64,7 @@ async def run_bot_loop() -> None:
 
     while True:
         try:
-            bot = CicadaBot()
+            bot = KyroBot()
             active_bot = bot
             logger.info(f"Connecting {Config.BOT_NAME} in [{Config.ENVIRONMENT.upper()}] mode to Discord Gateway...")
             async with bot:

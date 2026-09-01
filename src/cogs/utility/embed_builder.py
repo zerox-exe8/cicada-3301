@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Advanced Dual Embed & Card Builder
+Kyro Discord Bot - Advanced Dual Embed & Card Builder
 Top Container: Real-time Live Preview Card.
 Bottom Container: 5-Step Control Dashboard with full editing capabilities.
 Includes Discohook/JSON/HTML raw import, dynamic variable engine, FAQ dropdowns, and button rows.
@@ -16,16 +16,16 @@ from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.utils.containers import (
-    CicadaContainer,
+    KyroContainer,
     send_container_response,
     edit_container_response,
 )
 from src.utils.image_tools import create_slim_banner, download_image_bytes
 
 if TYPE_CHECKING:
-    from src.core.bot import CicadaBot
+    from src.core.bot import KyroBot
 
-logger = logging.getLogger("Cicada.EmbedBuilder")
+logger = logging.getLogger("Kyro.EmbedBuilder")
 
 
 # ─── Dynamic Variable Parser ──────────────────────────────────────────────────
@@ -35,7 +35,7 @@ def apply_placeholders(
     user: discord.Member | discord.User | None,
     guild: discord.Guild | None,
     channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None = None,
-    bot: CicadaBot | None = None,
+    bot: KyroBot | None = None,
 ) -> str:
     """Replace comprehensive dynamic template variables in text."""
     if not text:
@@ -211,7 +211,7 @@ class ContainerDraft:
         self.author_icon_url: str | None = None
         self.author_url: str | None = None
 
-        self.title: str | None = "Cicada 3301 Custom Card"
+        self.title: str | None = "Kyro Custom Card"
         self.title_url: str | None = None
 
         self.description: str | None = "This is your live Components V2 preview. Edit options below to customize."
@@ -246,12 +246,12 @@ class ContainerDraft:
         user: discord.Member | discord.User | None = None,
         guild: discord.Guild | None = None,
         channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None = None,
-        bot: CicadaBot | None = None,
+        bot: KyroBot | None = None,
         default_avatar: str | None = None,
         include_controls: bool = True,
-    ) -> CicadaContainer:
-        """Convert draft into a Discord Components V2 CicadaContainer with dynamic module page support."""
-        container = CicadaContainer(accent_color=self.get_accent_int())
+    ) -> KyroContainer:
+        """Convert draft into a Discord Components V2 KyroContainer with dynamic module page support."""
+        container = KyroContainer(accent_color=self.get_accent_int())
 
         def parse(t: str | None) -> str:
             if not t:
@@ -468,7 +468,7 @@ class ContainerDraft:
         user: discord.Member | discord.User | None = None,
         guild: discord.Guild | None = None,
         channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None = None,
-        bot: CicadaBot | None = None,
+        bot: KyroBot | None = None,
         default_avatar: str | None = None,
     ) -> discord.Embed:
         """Convert draft into a standard rich discord.Embed with full formatting."""
@@ -1190,13 +1190,13 @@ class EmbedBuilderView(discord.ui.View):
 
     def __init__(
         self,
-        bot: CicadaBot,
+        bot: KyroBot,
         author: discord.User | discord.Member,
         draft: ContainerDraft | None = None,
         template_name: str | None = None,
     ) -> None:
         super().__init__(timeout=900)
-        self.bot: CicadaBot = bot
+        self.bot: KyroBot = bot
         self.author: discord.User | discord.Member = author
         self.draft: ContainerDraft = draft or ContainerDraft()
         self.template_name: str | None = template_name
@@ -1228,7 +1228,7 @@ class EmbedBuilderView(discord.ui.View):
         self,
         guild: discord.Guild | None,
         channel: discord.abc.GuildChannel | discord.Thread | discord.abc.Messageable | None,
-    ) -> list[CicadaContainer]:
+    ) -> list[KyroContainer]:
         avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
 
         # Top Container: Live Preview Card
@@ -1243,7 +1243,7 @@ class EmbedBuilderView(discord.ui.View):
         )
 
         # Bottom Container: 5-Step Control Console
-        bottom_container = CicadaContainer(accent_color=None)
+        bottom_container = KyroContainer(accent_color=None)
         slide_key, slide_title, slide_desc = self.SLIDES[self.current_slide_idx]
 
         bottom_container.add_section(
@@ -1675,7 +1675,7 @@ class EmbedBuilder(commands.Cog):
     """Full-featured Discord Components V2 Embed & Container Builder."""
     category: str = "Utility"
 
-    def __init__(self, bot: CicadaBot) -> None:
+    def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
     @commands.Cog.listener()
@@ -1761,7 +1761,7 @@ class EmbedBuilder(commands.Cog):
         """Launch the embed manager dashboard."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
-        hub_container = CicadaContainer(accent_color=None)
+        hub_container = KyroContainer(accent_color=None)
         hub_container.add_section(
             content=(
                 "**Server Embed Manager**\n"
@@ -1956,7 +1956,7 @@ class EmbedBuilder(commands.Cog):
                 )
 
             ch_mention = getattr(target_channel, "mention", f"#{target_channel}")
-            resp_container = CicadaContainer(accent_color=None)
+            resp_container = KyroContainer(accent_color=None)
             resp_container.add_section(
                 content=(
                     "**Card Dispatched**\n"
@@ -1980,7 +1980,7 @@ class EmbedBuilder(commands.Cog):
         """Delete a saved template."""
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
         success = await self.bot.embed_mgr.delete_template(ctx.guild.id, clean_name)
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         if success:
             container.add_section(
                 content=(
@@ -2010,7 +2010,7 @@ class EmbedBuilder(commands.Cog):
         templates = await self.bot.embed_mgr.list_templates(ctx.guild.id)
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         if not templates:
-            container = CicadaContainer(accent_color=None)
+            container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
                     "**Saved Embed Templates**\n"
@@ -2022,7 +2022,7 @@ class EmbedBuilder(commands.Cog):
             await send_container_response(ctx, container)
             return
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Saved Embed Templates**\n"
@@ -2105,7 +2105,7 @@ class EmbedBuilder(commands.Cog):
         file = discord.File(banner_stream, filename="slim_banner.png")
 
         arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Seamless Widescreen Banner Generated**\n"
@@ -2123,5 +2123,5 @@ class EmbedBuilder(commands.Cog):
         await send_container_response(ctx, container)
 
 
-async def setup(bot: CicadaBot) -> None:
+async def setup(bot: KyroBot) -> None:
     await bot.add_cog(EmbedBuilder(bot))

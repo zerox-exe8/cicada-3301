@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Guild Manager
+Kyro Discord Bot - Guild Manager
 Handles per-server custom prefixes and settings with in-memory caching.
 """
 
@@ -12,7 +12,7 @@ from src.core.config import Config
 if TYPE_CHECKING:
     from src.database.base import BaseDatabase
 
-logger = logging.getLogger("Cicada.GuildManager")
+logger = logging.getLogger("Kyro.GuildManager")
 
 
 class GuildManager:

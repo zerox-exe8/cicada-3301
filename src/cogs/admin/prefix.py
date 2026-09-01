@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Prefix Management Command
+Kyro Discord Bot - Prefix Management Command
 Allows server administrators to set or reset custom server prefixes.
 Uses sleek, compact Components V2 Container Cards with clean proportions.
 """
@@ -11,7 +11,7 @@ from discord.ext import commands
 
 from src.core.config import Config
 from src.core.context import CustomContext
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
 
 class Prefix(commands.Cog):
@@ -33,7 +33,7 @@ class Prefix(commands.Cog):
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
         if len(new_prefix) > 5:
-            container = CicadaContainer(accent_color=None)
+            container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
                     "**Invalid Prefix**\n"
@@ -47,7 +47,7 @@ class Prefix(commands.Cog):
 
         await self.bot.guild_mgr.set_prefix(ctx.guild.id, new_prefix)
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Prefix Updated**\n"
@@ -75,7 +75,7 @@ class Prefix(commands.Cog):
 
         await self.bot.guild_mgr.reset_prefix(ctx.guild.id)
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Prefix Reset**\n"
@@ -101,7 +101,7 @@ class Prefix(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Server Command Prefix**\n"

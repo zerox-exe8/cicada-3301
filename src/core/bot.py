@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Core Bot Class
+Kyro Discord Bot - Core Bot Class
 Subclasses commands.AutoShardedBot for high scalability and lifecycle control.
 """
 
@@ -27,10 +27,10 @@ from src.managers.event_manager import EventManager
 from src.managers.ticket_manager import TicketManager
 from src.utils.emojis import EmojiRegistry
 
-logger = logging.getLogger("Cicada.Core")
+logger = logging.getLogger("Kyro.Core")
 
 
-async def get_prefix(bot: CicadaBot, message: discord.Message) -> list[str] | str:
+async def get_prefix(bot: KyroBot, message: discord.Message) -> list[str] | str:
     """
     Dynamic prefix resolver:
     - Bot Owner & Developers can use commands with NO prefix (e.g. 'ping', 'help') or normal prefixes.
@@ -46,8 +46,8 @@ async def get_prefix(bot: CicadaBot, message: discord.Message) -> list[str] | st
     return commands.when_mentioned_or(guild_prefix)(bot, message)
 
 
-class CicadaBot(commands.Bot):
-    """Production-grade custom Discord bot class for Cicada 3301."""
+class KyroBot(commands.Bot):
+    """Production-grade custom Discord bot class for Kyro."""
 
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -129,9 +129,9 @@ class CicadaBot(commands.Bot):
 
         # Check if message is purely mentioning the bot
         if self.user and message.content in [f"<@{self.user.id}>", f"<@!{self.user.id}>"]:
-            from src.utils.containers import CicadaContainer, send_container_response
+            from src.utils.containers import KyroContainer, send_container_response
             current_prefix = self.guild_mgr.get_prefix(message.guild.id if message.guild else None)
-            container = CicadaContainer(accent_color=None)
+            container = KyroContainer(accent_color=None)
             container.add_text(
                 f"**Hey, I'm {Config.BOT_NAME}**\n"
                 f"> Modular, high-performance Discord management system.\n\n"
@@ -193,7 +193,7 @@ class CicadaBot(commands.Bot):
 
     async def close(self) -> None:
         """Gracefully release database pools and network sessions."""
-        logger.info("Shutting down Cicada 3301 Bot gracefully...")
+        logger.info("Shutting down Kyro Bot gracefully...")
 
         if self.session:
             await self.session.close()
@@ -241,3 +241,7 @@ class CicadaBot(commands.Bot):
 
         # Automatically sync custom application emojis from assets in background
         asyncio.create_task(self.custom_emojis.sync_from_assets())
+
+
+# Backward Compatibility Alias
+KyroBot = KyroBot

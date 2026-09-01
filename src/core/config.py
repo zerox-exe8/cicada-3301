@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Configuration Module
+Kyro Discord Bot - Configuration Module
 Loads and validates environment variables and provides theme colors and emojis.
 """
 
@@ -17,8 +17,8 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 @dataclass(frozen=True)
 class ThemeColors:
-    """Standardized color palette for Cicada 3301 cryptographic cyber theme."""
-    PRIMARY: int = 0x00FF66      # Cyber Cicada Neon Green
+    """Standardized color palette for Kyro cryptographic cyber theme."""
+    PRIMARY: int = 0x00FF66      # Kyro Titanium Neon Green
     SUCCESS: int = 0x00E676      # Neon Emerald
     ERROR: int = 0xFF3366        # Laser Crimson
     WARNING: int = 0xFFB300      # Cyber Amber
@@ -30,7 +30,7 @@ class ThemeColors:
 
 @dataclass(frozen=True)
 class ThemeEmojis:
-    """Standardized system emojis for Cicada 3301 cryptographic embeds."""
+    """Standardized system emojis for Kyro cryptographic embeds."""
     SUCCESS: str = "🟢"
     ERROR: str = "🔴"
     WARNING: str = "🟡"
@@ -42,7 +42,7 @@ class ThemeEmojis:
     PING: str = "📡"
     DATABASE: str = "🗄️"
     BOT: str = "🤖"
-    CICADA: str = "◈"
+    KYRO: str = "◈"
 
 
 class Config:
@@ -84,7 +84,7 @@ class Config:
     EMOJIS: ThemeEmojis = ThemeEmojis()
     
     # Bot Branding
-    BOT_NAME: str = "Cicada 3301"
+    BOT_NAME: str = "Kyro"
     FOOTER_TEXT: str = "◈ CICADA 3301 • Cryptographic Autonomous System"
 
     @classmethod

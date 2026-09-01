@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - HTML Transcript Generator
+Kyro Discord Bot - HTML Transcript Generator
 Generates clean, responsive, dark-mode Discord chat transcripts in HTML format.
 """
 

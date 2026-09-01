@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Pause & Resume Command Handlers
+Kyro Discord Bot - Pause & Resume Command Handlers
 """
 
 from __future__ import annotations

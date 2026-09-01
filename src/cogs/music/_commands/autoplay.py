@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Autoplay Command
+Kyro Discord Bot - Autoplay Command
 Simple, clean Autoplay toggle and usage information.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 import discord
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.context import CustomContext
@@ -27,7 +27,7 @@ async def handle_autoplay(ctx: CustomContext, controller: MusicController, actio
 
     # 1. If no argument provided, show clean usage guide
     if not action:
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         status_text = "Enabled" if current_state else "Disabled"
         container.add_section(
             content=(

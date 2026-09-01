@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - 24/7 Keep-Alive Web Server & Razorpay Webhook Receiver
+Kyro Discord Bot - 24/7 Keep-Alive Web Server & Razorpay Webhook Receiver
 Provides HTTP endpoints for Render uptime health checks and automated payment webhook fulfillment.
 """
 
@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any, Callable
 from aiohttp import web
 
 from src.core.config import Config
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
-    from src.core.bot import CicadaBot
+    from src.core.bot import KyroBot
 
-logger = logging.getLogger("Cicada.Server")
+logger = logging.getLogger("Kyro.Server")
 
 
 class HealthServer:
@@ -28,8 +28,8 @@ class HealthServer:
 
     def __init__(
         self,
-        bot: CicadaBot | None = None,
-        bot_getter: Callable[[], CicadaBot | None] | None = None,
+        bot: KyroBot | None = None,
+        bot_getter: Callable[[], KyroBot | None] | None = None,
     ) -> None:
         self._bot = bot
         self._bot_getter = bot_getter
@@ -38,13 +38,13 @@ class HealthServer:
         self._setup_routes()
 
     @property
-    def bot(self) -> CicadaBot | None:
+    def bot(self) -> KyroBot | None:
         if self._bot_getter:
             return self._bot_getter()
         return self._bot
 
     @bot.setter
-    def bot(self, value: CicadaBot | None) -> None:
+    def bot(self, value: KyroBot | None) -> None:
         self._bot = value
 
     def _setup_routes(self) -> None:
@@ -55,7 +55,7 @@ class HealthServer:
     async def _handle_home(self, request: web.Request) -> web.Response:
         """Root endpoint returning basic status."""
         return web.Response(
-            text="⚡ Cicada 3301 Discord Bot is Online & Running 24/7!",
+            text="⚡ Kyro Discord Bot is Online & Running 24/7!",
             content_type="text/plain",
             status=200,
         )
@@ -66,7 +66,7 @@ class HealthServer:
         ws_ping = round(bot.latency * 1000) if (bot and bot.latency) else 0
         data = {
             "status": "healthy",
-            "bot": "Cicada 3301",
+            "bot": "Kyro",
             "guilds": len(bot.guilds) if bot else 0,
             "ping_ms": ws_ping,
         }
@@ -91,14 +91,14 @@ class HealthServer:
             dur_str = "Lifetime / Permanent" if duration_days == 0 else f"{duration_days} Days"
             amount_inr = amount_smallest // 100
 
-            container = CicadaContainer(accent_color=None)
+            container = KyroContainer(accent_color=None)
             e_reg = self.bot.custom_emojis
             sparkle = e_reg.get("icons_star", "")
             sparkle_prefix = f"{sparkle} " if sparkle else ""
 
             container.add_text(
-                f"{sparkle_prefix}**Payment Successful — Cicada Pro Activated!**\n\n"
-                f"> Thank you for upgrading **{guild_name}** to Cicada Pro.\n"
+                f"{sparkle_prefix}**Payment Successful — Kyro Pro Activated!**\n\n"
+                f"> Thank you for upgrading **{guild_name}** to Kyro Pro.\n"
                 f"> All enterprise superpowers and server protection features are now active!\n\n"
                 f"• **Target Server:** **{guild_name}**\n"
                 f"• **Duration:** `{dur_str}`\n"
@@ -107,7 +107,7 @@ class HealthServer:
                 f"• Your server's Pro status has been automatically updated in memory & database."
             )
             container.add_separator(divider=True)
-            container.add_text(f"-# Cicada 3301 Enterprise Subscription • Transaction ID: {payment_id}")
+            container.add_text(f"-# Kyro Enterprise Subscription • Transaction ID: {payment_id}")
 
             await send_container_response(user, container)
             logger.info(f"Payment receipt DM sent to user ID {user_id} for payment {payment_id}.")
@@ -124,15 +124,15 @@ class HealthServer:
             guild = self.bot.get_guild(guild_id)
             guild_name = guild.name if guild else f"Server ID {guild_id}"
 
-            container = CicadaContainer(accent_color=None)
+            container = KyroContainer(accent_color=None)
             container.add_text(
-                f"**Cicada Pro Subscription Refunded**\n\n"
+                f"**Kyro Pro Subscription Refunded**\n\n"
                 f"> A refund was processed for **{guild_name}** (Payment ID: `{payment_id}`).\n"
                 f"> The Pro superpowers for this server have been automatically revoked.\n"
                 f"> Core free features remain active and unaffected."
             )
             container.add_separator(divider=True)
-            container.add_text("-# Cicada 3301 Infrastructure")
+            container.add_text("-# Kyro Infrastructure")
 
             await send_container_response(user, container)
         except Exception as e:

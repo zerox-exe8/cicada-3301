@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Music Cog
+Kyro Discord Bot - Music Cog
 Exposes High-Fidelity Music Commands with 100% Exact Matching, Smart Autoplay, and Components V2 Container Cards.
 """
 
@@ -32,16 +32,16 @@ from src.cogs.music._commands.controls import (
 from src.cogs.music._commands.playlist import handle_playlist, handle_like
 
 if TYPE_CHECKING:
-    from src.core.bot import CicadaBot
+    from src.core.bot import KyroBot
 
-logger = logging.getLogger("Cicada.Music")
+logger = logging.getLogger("Kyro.Music")
 
 
 class Music(commands.Cog):
     """High-Performance Discord Studio Audio & Music Engine."""
     category: str = "Music"
 
-    def __init__(self, bot: CicadaBot) -> None:
+    def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
         self.controller = MusicController(bot)
         # Register persistent view so button interactions respond instantly across all servers
@@ -305,6 +305,6 @@ class Music(commands.Cog):
                 await interaction.response.send_message(f"{prefix}Playback stopped and disconnected.", ephemeral=True)
 
 
-async def setup(bot: CicadaBot) -> None:
-    """Load the Music Cog into CicadaBot."""
+async def setup(bot: KyroBot) -> None:
+    """Load the Music Cog into KyroBot."""
     await bot.add_cog(Music(bot))

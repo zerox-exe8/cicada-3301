@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - PostgreSQL / Supabase Database Driver
+Kyro Discord Bot - PostgreSQL / Supabase Database Driver
 High-performance asynchronous PostgreSQL database connector using asyncpg connection pool.
 """
 
@@ -11,7 +11,7 @@ import asyncpg
 
 from src.database.base import BaseDatabase
 
-logger = logging.getLogger("Cicada.Database.Postgres")
+logger = logging.getLogger("Kyro.Database.Postgres")
 
 
 class PostgresDatabase(BaseDatabase):
@@ -46,7 +46,7 @@ class PostgresDatabase(BaseDatabase):
             logger.info("PostgreSQL database connection pool closed.")
 
     async def initialize_tables(self) -> None:
-        """Initialize PostgreSQL schemas for Cicada 3301 modules."""
+        """Initialize PostgreSQL schemas for Kyro modules."""
         queries = [
             # Guild settings table
             """

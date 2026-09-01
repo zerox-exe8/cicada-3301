@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Music Resolver
+Kyro Discord Bot - Music Resolver
 100% Exact Song Matching + Multi-Candidate Ranking Engine + Studio Master + Smart Autoplay.
 """
 
@@ -20,7 +20,7 @@ import yt_dlp
 
 from src.cogs.music._types import TrackItem, YDL_OPTS
 
-logger = logging.getLogger("Cicada.Music.Resolver")
+logger = logging.getLogger("Kyro.Music.Resolver")
 
 RESOLVER_POOL = ThreadPoolExecutor(max_workers=6, thread_name_prefix="MusicResolver")
 

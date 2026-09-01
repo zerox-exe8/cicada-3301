@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Image Processing & Slim Banner Tools
+Kyro Discord Bot - Image Processing & Slim Banner Tools
 Converts tall / oversized images into slim, widescreen Discord header banners using transparent canvas fitting or smart cropping.
 """
 

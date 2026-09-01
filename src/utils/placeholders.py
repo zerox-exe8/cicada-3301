@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Universal Variable / Placeholder Engine
+Kyro Discord Bot - Universal Variable / Placeholder Engine
 Resolves dynamic variables ({user}, {server}, {count}, {avatar}, etc.) for
 Outer Ping Messages, Welcome/Leave/Boost events, and Embed Containers.
 """
@@ -27,7 +27,7 @@ def resolve_placeholders(
     guild: discord.Guild | None = None,
     extra: dict[str, Any] | None = None,
 ) -> str:
-    """Replace all standard Mimu/Cicada variables in a given string."""
+    """Replace all standard Mimu/Kyro variables in a given string."""
     if not text:
         return ""
 

@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Managers Package
+Kyro Discord Bot - Managers Package
 Centralized in-memory cache and state managers.
 """
 

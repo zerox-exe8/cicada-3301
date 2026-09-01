@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Ticket Manager
+Kyro Discord Bot - Ticket Manager
 Handles high-performance caching, database persistence, and lifecycle for ticket panels and active tickets.
 """
 
@@ -9,7 +9,7 @@ import logging
 from typing import Any
 from src.database.postgres import PostgresDatabase
 
-logger = logging.getLogger("Cicada.Managers.Ticket")
+logger = logging.getLogger("Kyro.Managers.Ticket")
 
 
 class TicketManager:

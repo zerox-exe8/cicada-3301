@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Music Types & Streaming Constants
+Kyro Discord Bot - Music Types & Streaming Constants
 Enterprise-Grade Zero-Overhead Streaming Configuration with Jitter-Proof RAM Ring Buffer.
 """
 

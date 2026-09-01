@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Music Analytics & User Taste Engine
+Kyro Discord Bot - Music Analytics & User Taste Engine
 Tracks listening habits, Spotify Rich Presence, and cross-bot activity to personalize AI Autoplay.
 """
 
@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, List, Optional
 import discord
 
 if TYPE_CHECKING:
-    from src.core.bot import CicadaBot
+    from src.core.bot import KyroBot
     from src.cogs.music._types import TrackItem
 
-logger = logging.getLogger("Cicada.Music.Analytics")
+logger = logging.getLogger("Kyro.Music.Analytics")
 
 MUSIC_BOT_PREFIXES = (
     "-p ", "-play ", "!play ", "!p ", ",play ", ",p ", ";play ", ";p ",
@@ -26,7 +26,7 @@ MUSIC_BOT_PREFIXES = (
 class MusicAnalytics:
     """Music analytics and taste profiler."""
 
-    def __init__(self, bot: CicadaBot) -> None:
+    def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
     async def record_play(

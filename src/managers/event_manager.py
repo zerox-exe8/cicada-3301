@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Server Auto-Events Manager
+Kyro Discord Bot - Server Auto-Events Manager
 Handles database persistence and in-memory caching for Welcome, Leave, and Boost event bindings.
 """
 
@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.database.postgres import PostgresDatabase
 
-logger = logging.getLogger("Cicada.EventManager")
+logger = logging.getLogger("Kyro.EventManager")
 
 
 class EventManager:

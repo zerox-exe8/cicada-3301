@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Custom Embed & Container Manager
+Kyro Discord Bot - Custom Embed & Container Manager
 Manages storing, retrieving, and serializing Components V2 Container templates per guild,
 along with live persistent interactive card state for dropdown page switchers.
 """
@@ -13,7 +13,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from src.database.base import BaseDatabase
 
-logger = logging.getLogger("Cicada.EmbedManager")
+logger = logging.getLogger("Kyro.EmbedManager")
 
 
 class EmbedManager:

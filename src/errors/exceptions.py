@@ -1,20 +1,20 @@
 """
-Cicada 3301 Discord Bot - Custom Exceptions
+Kyro Discord Bot - Custom Exceptions
 """
 
 from discord.ext import commands
 
 
-class CicadaException(commands.CommandError):
-    """Base exception class for Cicada 3301 Bot."""
+class KyroException(commands.CommandError):
+    """Base exception class for Kyro Bot."""
     pass
 
 
-class NotAuthorizedError(CicadaException):
+class NotAuthorizedError(KyroException):
     """Raised when user lacks high-level permission."""
     pass
 
 
-class DatabaseError(CicadaException):
+class DatabaseError(KyroException):
     """Raised when database query fails."""
     pass

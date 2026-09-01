@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Advanced Ticket System & Interactive Slide Dashboard
+Kyro Discord Bot - Advanced Ticket System & Interactive Slide Dashboard
 Seamlessly integrates with Embed Builder for custom visual panels and manages private ticket channels,
 roles, permission overrides, live claiming, and HTML transcript logging.
 """
@@ -15,13 +15,13 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from src.core.bot import CicadaBot
+from src.core.bot import KyroBot
 from src.core.context import CustomContext
-from src.utils.containers import CicadaContainer, send_container_response, edit_container_response, build_container_payload
+from src.utils.containers import KyroContainer, send_container_response, edit_container_response, build_container_payload
 from src.utils.transcript import generate_html_transcript
 from src.cogs.utility.embed_builder import ContainerDraft
 
-logger = logging.getLogger("Cicada.Cogs.Ticket")
+logger = logging.getLogger("Kyro.Cogs.Ticket")
 
 
 # ─── INSIDE-TICKET CONTROLS VIEW ──────────────────────────────────────────────
@@ -357,9 +357,9 @@ class TicketSetupWizard(discord.ui.View):
             btn_deploy.callback = self._on_deploy_clicked
             self.add_item(btn_deploy)
 
-    def get_dashboard_container(self, guild: discord.Guild | None) -> CicadaContainer:
+    def get_dashboard_container(self, guild: discord.Guild | None) -> KyroContainer:
         """Render the single sleek Components V2 Ticket Dashboard Container."""
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         slide_key, slide_title, slide_desc = self.SLIDES[self.current_slide_idx]
         arrow = self.bot.custom_emojis.get("icons_rightarrow", self.bot.custom_emojis.get("icons_arrow", "›"))
 
@@ -541,7 +541,7 @@ class TicketSetupWizard(discord.ui.View):
 
         # Success confirmation on dashboard
         arrow = self.bot.custom_emojis.get("icons_rightarrow", self.bot.custom_emojis.get("icons_arrow", "›"))
-        conf_container = CicadaContainer(accent_color=5763719)  # Green
+        conf_container = KyroContainer(accent_color=5763719)  # Green
         conf_container.add_section(
             content=(
                 "**Ticket Panel Deployed Successfully**\n"
@@ -563,7 +563,7 @@ class TicketSetupWizard(discord.ui.View):
 class TicketSystem(commands.Cog):
     """Enterprise Ticket System with Components V2 container panels and slide setup wizard."""
 
-    def __init__(self, bot: CicadaBot) -> None:
+    def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
         # Register persistent inside-ticket view
         self.bot.add_view(TicketInsideControlsView(self))
@@ -634,7 +634,7 @@ class TicketSystem(commands.Cog):
                 try:
                     category = await interaction.guild.create_category(
                         name="Tickets",
-                        reason="Cicada 3301 Support Tickets Category",
+                        reason="Kyro Support Tickets Category",
                     )
                 except Exception as cat_err:
                     logger.warning(f"Could not auto-create Tickets category (fallback to root): {cat_err}")
@@ -718,7 +718,7 @@ class TicketSystem(commands.Cog):
 
         # Send welcome card in ticket channel
         arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
-        welcome_container = CicadaContainer(accent_color=None)  # Sleek Dark Mode Default
+        welcome_container = KyroContainer(accent_color=None)  # Sleek Dark Mode Default
         welcome_container.add_section(
             content=(
                 f"**Ticket #{ticket_str} • {interaction.user.display_name}**\n"
@@ -747,7 +747,7 @@ class TicketSystem(commands.Cog):
         if log_channel_id:
             log_ch = interaction.guild.get_channel(log_channel_id)
             if isinstance(log_ch, discord.TextChannel):
-                log_c = CicadaContainer(accent_color=5763719)  # Green
+                log_c = KyroContainer(accent_color=5763719)  # Green
                 log_c.add_section(
                     content=(
                         f"**Ticket Opened • #{ticket_str}**\n"
@@ -802,7 +802,7 @@ class TicketSystem(commands.Cog):
                 user = guild.get_member(user_id) or await self.bot.fetch_user(user_id)
                 if user:
                     t_num_int = int(ticket_num) if str(ticket_num).isdigit() else 1
-                    dm_container = CicadaContainer(accent_color=15548997)  # Red
+                    dm_container = KyroContainer(accent_color=15548997)  # Red
                     dm_container.add_section(
                         content=(
                             f"**Ticket #{t_num_int:04d} Closed**\n"
@@ -824,7 +824,7 @@ class TicketSystem(commands.Cog):
                     # Re-generate transcript stream for log channel
                     t_file_2 = await generate_html_transcript(channel, ticket_data, bot=self.bot)
                     t_num_int = int(ticket_num) if str(ticket_num).isdigit() else 1
-                    log_c = CicadaContainer(accent_color=15548997)  # Red
+                    log_c = KyroContainer(accent_color=15548997)  # Red
                     log_c.add_section(
                         content=(
                             f"**Ticket Closed • #{t_num_int:04d}**\n"
@@ -861,7 +861,7 @@ class TicketSystem(commands.Cog):
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         panels = await self.bot.ticket_mgr.list_panels(ctx.guild.id)
 
-        hub_container = CicadaContainer(accent_color=None)
+        hub_container = KyroContainer(accent_color=None)
         hub_container.add_section(
             content=(
                 "**Ticket System Hub**\n"
@@ -1007,7 +1007,7 @@ class TicketSystem(commands.Cog):
             await ctx.send("No ticket panels configured yet. Use `?ticket setup` to create one.")
             return
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=f"**Configured Ticket Panels ({len(panels)})**\n> Server: **{ctx.guild.name}**"
         )
@@ -1054,5 +1054,5 @@ class TicketSystem(commands.Cog):
         await ctx.send(f"Ticket panel `{clean_name}` has been deleted.")
 
 
-async def setup(bot: CicadaBot) -> None:
+async def setup(bot: KyroBot) -> None:
     await bot.add_cog(TicketSystem(bot))

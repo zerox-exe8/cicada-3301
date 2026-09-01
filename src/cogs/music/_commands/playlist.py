@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - User Saved Playlists & Like System
+Kyro Discord Bot - User Saved Playlists & Like System
 Allows users to save currently playing songs, manage custom playlists, and load them seamlessly.
 """
 
@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Optional, List
 import discord
 
 from src.core.context import CustomContext
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 from src.cogs.music._types import TrackItem
 from src.cogs.music._resolver import MusicResolver, clean_track_title
 
@@ -62,7 +62,7 @@ async def handle_like(ctx: CustomContext, controller: MusicController) -> None:
         current.url,
     )
 
-    container = CicadaContainer(accent_color=None)
+    container = KyroContainer(accent_color=None)
     container.add_section(
         content=(
             f"**Added to Favorites**\n"
@@ -90,7 +90,7 @@ async def handle_playlist(
 ) -> None:
     """Manage custom user playlists: add, play, list, view, delete."""
     if not action or action.lower() in ("help", "guide"):
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Music Playlist Manager**\n"
@@ -130,7 +130,7 @@ async def handle_playlist(
         for i, pl in enumerate(playlists, 1):
             lines.append(f"`{i}.` **{pl['playlist_name']}** ({pl['track_count']} songs)")
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Your Saved Playlists ({len(playlists)})**\n"
@@ -184,7 +184,7 @@ async def handle_playlist(
             target_track.url,
         )
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Added to Playlist**\n"
@@ -255,7 +255,7 @@ async def handle_playlist(
                     queue.append(track)
                 loaded_count += 1
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Loaded Playlist: {clean_pl_name}**\n"
@@ -297,7 +297,7 @@ async def handle_playlist(
             ds = t["duration"] % 60
             lines.append(f"`{i}.` [{t['title']}]({t['url']}) (`{dm:02d}:{ds:02d}`)")
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Playlist: {clean_pl_name}**\n"

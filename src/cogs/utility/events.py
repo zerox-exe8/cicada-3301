@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Server Auto-Events (Welcome, Leave, Boost) Cog
+Kyro Discord Bot - Server Auto-Events (Welcome, Leave, Boost) Cog
 Binds saved named Components V2 container cards and outer ping messages with dynamic variables
 to member join, member leave, and server boost events.
 """
@@ -12,20 +12,20 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from src.core.bot import CicadaBot
+from src.core.bot import KyroBot
 from src.core.context import CustomContext
 from src.cogs.utility.embed_builder import ContainerDraft
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 from src.utils.placeholders import resolve_placeholders
 
-logger = logging.getLogger("Cicada.Events")
+logger = logging.getLogger("Kyro.Events")
 
 
 class AutoEvents(commands.Cog):
     """Automated Welcome, Farewell/Leave, and Boost Container Dispatcher."""
     category: str = "Utility"
 
-    def __init__(self, bot: CicadaBot) -> None:
+    def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
     async def _send_event_card(
@@ -104,7 +104,7 @@ class AutoEvents(commands.Cog):
 
         if not container:
             # Fallback container
-            container = CicadaContainer(accent_color=None)
+            container = KyroContainer(accent_color=None)
             if event_type == "welcome":
                 container.add_section(
                     content=(
@@ -230,7 +230,7 @@ class AutoEvents(commands.Cog):
         status_str = "`Enabled`" if (config and config.get("is_enabled", True)) else "`Disabled`"
         dm_str = f"`{config.get('dm_embed_name')}`" if (config and config.get("dm_enabled")) else "`Disabled`"
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Welcome Configuration**\n"
@@ -328,7 +328,7 @@ class AutoEvents(commands.Cog):
             await ctx.send("Failed to save welcome configuration. Please try again.")
             return
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Welcome System Configured**\n"
@@ -375,7 +375,7 @@ class AutoEvents(commands.Cog):
 
         success, err = await self._send_event_card("welcome", ctx.guild, ctx.author, test_channel=target_ch)
         if success:
-            resp = CicadaContainer(accent_color=0x00FF66)
+            resp = KyroContainer(accent_color=0x00FF66)
             resp.add_section(
                 content=(
                     f"**Welcome Test Card Dispatched**\n"
@@ -386,7 +386,7 @@ class AutoEvents(commands.Cog):
             resp.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, resp)
         else:
-            resp = CicadaContainer(accent_color=0xFF0033)
+            resp = KyroContainer(accent_color=0xFF0033)
             resp.add_section(
                 content=(
                     f"**Welcome Test Dispatch Failed**\n"
@@ -445,7 +445,7 @@ class AutoEvents(commands.Cog):
         msg_str = f"`{config.get('message_content')}`" if (config and config.get("message_content")) else "`None (Embed Only)`"
         status_str = "`Enabled`" if (config and config.get("is_enabled", True)) else "`Disabled`"
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Leave / Goodbye Configuration**\n"
@@ -543,7 +543,7 @@ class AutoEvents(commands.Cog):
             await ctx.send("Failed to save leave configuration.")
             return
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Leave System Configured**\n"
@@ -590,7 +590,7 @@ class AutoEvents(commands.Cog):
 
         success, err = await self._send_event_card("leave", ctx.guild, ctx.author, test_channel=target_ch)
         if success:
-            resp = CicadaContainer(accent_color=0x00FF66)
+            resp = KyroContainer(accent_color=0x00FF66)
             resp.add_section(
                 content=(
                     f"**Leave Test Card Dispatched**\n"
@@ -601,7 +601,7 @@ class AutoEvents(commands.Cog):
             resp.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, resp)
         else:
-            resp = CicadaContainer(accent_color=0xFF0033)
+            resp = KyroContainer(accent_color=0xFF0033)
             resp.add_section(
                 content=(
                     f"**Leave Test Dispatch Failed**\n"
@@ -659,7 +659,7 @@ class AutoEvents(commands.Cog):
         msg_str = f"`{config.get('message_content')}`" if (config and config.get("message_content")) else "`None (Embed Only)`"
         status_str = "`Enabled`" if (config and config.get("is_enabled", True)) else "`Disabled`"
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Server Boost Celebration Configuration**\n"
@@ -757,7 +757,7 @@ class AutoEvents(commands.Cog):
             await ctx.send("Failed to save boost configuration.")
             return
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Boost Celebration System Configured**\n"
@@ -809,7 +809,7 @@ class AutoEvents(commands.Cog):
         }
         success, err = await self._send_event_card("boost", ctx.guild, ctx.author, extra=extra, test_channel=target_ch)
         if success:
-            resp = CicadaContainer(accent_color=0x00FF66)
+            resp = KyroContainer(accent_color=0x00FF66)
             resp.add_section(
                 content=(
                     f"**Boost Test Card Dispatched**\n"
@@ -820,7 +820,7 @@ class AutoEvents(commands.Cog):
             resp.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, resp)
         else:
-            resp = CicadaContainer(accent_color=0xFF0033)
+            resp = KyroContainer(accent_color=0xFF0033)
             resp.add_section(
                 content=(
                     f"**Boost Test Dispatch Failed**\n"
@@ -859,5 +859,5 @@ class AutoEvents(commands.Cog):
         await ctx.send("Boost event configuration has been reset.")
 
 
-async def setup(bot: CicadaBot) -> None:
+async def setup(bot: KyroBot) -> None:
     await bot.add_cog(AutoEvents(bot))

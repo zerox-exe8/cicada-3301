@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Skip Command Handler
+Kyro Discord Bot - Skip Command Handler
 """
 
 from __future__ import annotations

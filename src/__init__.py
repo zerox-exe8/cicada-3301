@@ -1,3 +1,3 @@
 """
-Cicada 3301 Discord Bot Package
+Kyro Discord Bot Package
 """

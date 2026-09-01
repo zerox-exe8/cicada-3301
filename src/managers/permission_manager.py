@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Permission Manager
+Kyro Discord Bot - Permission Manager
 Handles Owner and Developer authorization levels and custom decorators.
 """
 
@@ -13,7 +13,7 @@ from discord.ext import commands
 if TYPE_CHECKING:
     from src.database.base import BaseDatabase
 
-logger = logging.getLogger("Cicada.PermissionManager")
+logger = logging.getLogger("Kyro.PermissionManager")
 
 
 class PermissionManager:

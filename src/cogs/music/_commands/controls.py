@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Music Extra Controls (Loop, Shuffle, Clear, Remove, Volume)
+Kyro Discord Bot - Music Extra Controls (Loop, Shuffle, Clear, Remove, Volume)
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Discord Components V2 (Container Layout) Utility
+Kyro Discord Bot - Discord Components V2 (Container Layout) Utility
 Implements Discord's new Container (type: 17) layout with embedded TextDisplays,
 Sections, Separators, and integrated Action Rows (Dropdowns/Buttons inside the card).
 """
@@ -13,17 +13,17 @@ from discord.ext import commands
 
 from src.core.config import Config
 
-logger = logging.getLogger("Cicada.Containers")
+logger = logging.getLogger("Kyro.Containers")
 
 
-class CicadaContainer:
+class KyroContainer:
     """Builder for Discord Components V2 Container cards."""
 
     def __init__(self, accent_color: int | None = None) -> None:
         self.accent_color = accent_color
         self.components: list[dict[str, Any]] = []
 
-    def add_text(self, content: str) -> CicadaContainer:
+    def add_text(self, content: str) -> KyroContainer:
         """Add a TextDisplay component (type: 10) inside the container."""
         self.components.append({
             "type": 10,
@@ -35,7 +35,7 @@ class CicadaContainer:
         self,
         content: str,
         accessory: dict[str, Any] | None = None,
-    ) -> CicadaContainer:
+    ) -> KyroContainer:
         """Add a Section component (type: 9) if accessory is present, otherwise TextDisplay (type: 10)."""
         if not accessory:
             return self.add_text(content)
@@ -53,7 +53,7 @@ class CicadaContainer:
         self.components.append(section_data)
         return self
 
-    def add_separator(self, divider: bool = True) -> CicadaContainer:
+    def add_separator(self, divider: bool = True) -> KyroContainer:
         """Add a visual Separator component (type: 14)."""
         self.components.append({
             "type": 14,
@@ -61,12 +61,12 @@ class CicadaContainer:
         })
         return self
 
-    def add_footer(self, text: str, icon_url: str | None = None) -> CicadaContainer:
+    def add_footer(self, text: str, icon_url: str | None = None) -> KyroContainer:
         """Add a footer."""
         self.add_text(f"{text}")
         return self
 
-    def add_action_row(self, items: list[dict[str, Any]]) -> CicadaContainer:
+    def add_action_row(self, items: list[dict[str, Any]]) -> KyroContainer:
         """Add an Action Row (type: 1) containing Select Menus or Buttons inside the container."""
         self.components.append({
             "type": 1,
@@ -126,7 +126,7 @@ class CicadaContainer:
         return data
 
 def build_container_payload(
-    container: CicadaContainer | list[CicadaContainer],
+    container: KyroContainer | list[KyroContainer],
     view: discord.ui.View | None = None,
     content: str | None = None,
     allowed_mentions: dict[str, Any] | None = None,
@@ -180,7 +180,7 @@ def build_container_payload(
 
 async def send_container_response(
     interaction_or_ctx: discord.Interaction | commands.Context | discord.abc.Messageable | discord.User | discord.Member,
-    container: CicadaContainer | list[CicadaContainer],
+    container: KyroContainer | list[KyroContainer],
     view: discord.ui.View | None = None,
     ephemeral: bool = False,
     content: str | None = None,
@@ -257,7 +257,7 @@ async def send_container_response(
                 if guild and guild.me and obj.permissions_for(guild.me).manage_webhooks:
                     webhooks = await obj.webhooks()
                     my_id = bot_user.id if bot_user else (guild.me.id if guild.me else None)
-                    wh = next((w for w in webhooks if w.token and (w.user and my_id and w.user.id == my_id or w.name == "Cicada Events")), None)
+                    wh = next((w for w in webhooks if w.token and (w.user and my_id and w.user.id == my_id or w.name == "Kyro Events")), None)
                     
                     # Fetch bot avatar bytes to assign directly to webhook
                     avatar_bytes = None
@@ -268,7 +268,7 @@ async def send_container_response(
                             pass
 
                     if not wh:
-                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "cicada 3301")
+                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "kyro 3301")
                         wh = await obj.create_webhook(
                             name=str(uname),
                             avatar=avatar_bytes,
@@ -287,7 +287,7 @@ async def send_container_response(
                     wh_payload = dict(payload)
                     # Clean username and avatar to avoid Discord 400 Bad Request
                     if bot_user:
-                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "cicada 3301")
+                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "kyro 3301")
                         wh_payload["username"] = str(uname)
                         avatar = getattr(bot_user, "display_avatar", None)
                         if avatar:
@@ -330,7 +330,7 @@ async def send_container_response(
         except Exception as e:
             logger.warning(f"Raw Components V2 HTTP request failed ({e}), attempting standard send fallback...")
             if hasattr(obj, "send"):
-                primary = container if isinstance(container, CicadaContainer) else container[0]
+                primary = container if isinstance(container, KyroContainer) else container[0]
                 
                 # Extract link buttons from container into a fallback View if no view is provided
                 fallback_view = view
@@ -362,7 +362,7 @@ async def send_container_response(
 
 async def edit_container_response(
     interaction: discord.Interaction,
-    container: CicadaContainer | list[CicadaContainer],
+    container: KyroContainer | list[KyroContainer],
     view: discord.ui.View | None = None,
 ) -> None:
     """Edit an existing Components V2 Container message safely with fallbacks."""
@@ -420,3 +420,7 @@ async def edit_container_response(
         logger.error(f"Fallback channel message edit also failed: {e2}")
 
 
+
+
+# Backward Compatibility Alias
+KyroContainer = KyroContainer

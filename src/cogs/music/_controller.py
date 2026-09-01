@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Music Controller
+Kyro Discord Bot - Music Controller
 High-Performance Audio Controller with Components V2 Player Cards, Gapless Autoplay Buffer, and Rock-Solid Stability.
 """
 
@@ -15,16 +15,16 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set
 import discord
 
 from src.core.context import CustomContext
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 from src.cogs.music._types import TrackItem, get_ffmpeg_options, HighSpeedJitterProofBuffer
 from src.cogs.music._views import MusicControlView
 from src.cogs.music._resolver import MusicResolver, clean_track_title
 from src.cogs.music._analytics import MusicAnalytics
 
 if TYPE_CHECKING:
-    from src.core.bot import CicadaBot
+    from src.core.bot import KyroBot
 
-logger = logging.getLogger("Cicada.Music.Controller")
+logger = logging.getLogger("Kyro.Music.Controller")
 
 
 def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
@@ -46,7 +46,7 @@ def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
 class MusicController:
     """Central Controller managing voice playback, queue, autoplay buffer, and component cards."""
 
-    def __init__(self, bot: CicadaBot) -> None:
+    def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
         self.analytics = MusicAnalytics(bot)
         self.queues: Dict[int, List[TrackItem]] = {}
@@ -108,7 +108,7 @@ class MusicController:
         guild_id: int,
         channel_name: Optional[str] = None,
         requester: Optional[str] = None,
-    ) -> CicadaContainer:
+    ) -> KyroContainer:
         """Create a compact, ultra-aesthetic Components V2 Container matching user requirements."""
         e_reg = self.bot.custom_emojis
         music_playing = e_reg.get("music_playing", "")
@@ -125,7 +125,7 @@ class MusicController:
         ch_str = f"`# {channel_name}`" if channel_name else "`Voice Channel`"
         short_artist = shorten_artist(track.author)
 
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         prefix_icon = f"{music_playing} " if music_playing else ""
         header_tag = " `[Autoplay]`" if "Autoplay" in str(track.requester) else ""
 
@@ -307,7 +307,7 @@ class MusicController:
         """Send an aesthetic 'Queue Concluded' container card when all tracks have finished playing."""
         if not ctx or not ctx.channel:
             return
-        container = CicadaContainer(accent_color=None)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 "**Queue Concluded**\n"

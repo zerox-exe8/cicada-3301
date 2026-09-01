@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Now Playing Command Handler
+Kyro Discord Bot - Now Playing Command Handler
 """
 
 from __future__ import annotations

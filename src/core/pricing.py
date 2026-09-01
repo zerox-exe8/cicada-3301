@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Centralized Pricing & Plans Configuration
+Kyro Discord Bot - Centralized Pricing & Plans Configuration
 Defines pricing tiers, durations, dual-currency amounts in USD ($) & INR (₹), and smallest unit charges.
 """
 

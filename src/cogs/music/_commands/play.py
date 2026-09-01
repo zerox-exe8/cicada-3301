@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Play Command Handler
+Kyro Discord Bot - Play Command Handler
 """
 
 from __future__ import annotations
@@ -11,13 +11,13 @@ import discord
 from src.cogs.music._controller import shorten_artist
 from src.cogs.music._resolver import MusicResolver
 from src.cogs.music._views import MusicControlView
-from src.utils.containers import CicadaContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.cogs.music._controller import MusicController
     from src.core.context import CustomContext
 
-logger = logging.getLogger("Cicada.Music.Cmd.Play")
+logger = logging.getLogger("Kyro.Music.Cmd.Play")
 
 
 async def handle_play(ctx: CustomContext, controller: MusicController, query: str) -> None:
@@ -39,7 +39,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
     elif voice_client.channel != user_channel:
         await voice_client.move_to(user_channel)
 
-    search_container = CicadaContainer(accent_color=None)
+    search_container = KyroContainer(accent_color=None)
     search_container.add_text(f"**Searching track:** `{query}`...")
     status_msg = await send_container_response(ctx, search_container)
 
@@ -94,7 +94,7 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
         dur_str = f"{dur_m:02d}:{dur_s:02d}" if track.duration > 0 else "Live"
         short_artist = shorten_artist(track.author)
 
-        queued_container = CicadaContainer(accent_color=None)
+        queued_container = KyroContainer(accent_color=None)
         queued_container.add_section(
             content=(
                 f"**{queued_prefix}Track Queued**\n"
@@ -110,5 +110,5 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
             f"{dot} **Requested By:** {ctx.author.display_name}"
         )
         queued_container.add_separator(divider=True)
-        queued_container.add_text(f"-# Cicada 3301 Music Engine")
+        queued_container.add_text(f"-# Kyro Music Engine")
         await send_container_response(ctx, queued_container)

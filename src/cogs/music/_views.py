@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - Music Interactive UI Views
+Kyro Discord Bot - Music Interactive UI Views
 Essential Components V2 Action Row Buttons for Now Playing Player Card.
 """
 
@@ -10,16 +10,16 @@ from typing import TYPE_CHECKING
 import discord
 
 if TYPE_CHECKING:
-    from src.core.bot import CicadaBot
+    from src.core.bot import KyroBot
     from src.cogs.music._controller import MusicController
 
-logger = logging.getLogger("Cicada.Music.Views")
+logger = logging.getLogger("Kyro.Music.Views")
 
 
 class MusicControlView(discord.ui.View):
     """Essential, responsive music button controller."""
 
-    def __init__(self, bot: CicadaBot, controller: MusicController, guild_id: int = 0) -> None:
+    def __init__(self, bot: KyroBot, controller: MusicController, guild_id: int = 0) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.controller = controller

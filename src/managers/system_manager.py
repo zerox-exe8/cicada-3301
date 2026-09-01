@@ -1,5 +1,5 @@
 """
-Cicada 3301 Discord Bot - System Manager
+Kyro Discord Bot - System Manager
 Handles Maintenance Mode and Global Command Killswitches.
 """
 
@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.database.base import BaseDatabase
 
-logger = logging.getLogger("Cicada.SystemManager")
+logger = logging.getLogger("Kyro.SystemManager")
 
 
 class SystemManager:

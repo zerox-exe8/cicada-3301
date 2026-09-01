@@ -16,7 +16,7 @@ import discord
 
 from src.core.context import CustomContext
 from src.utils.containers import CicadaContainer, send_container_response
-from src.cogs.music._types import TrackItem, get_ffmpeg_options
+from src.cogs.music._types import TrackItem, get_ffmpeg_options, HighSpeedJitterProofBuffer
 from src.cogs.music._views import MusicControlView
 from src.cogs.music._resolver import MusicResolver, clean_track_title
 from src.cogs.music._analytics import MusicAnalytics
@@ -182,15 +182,13 @@ class MusicController:
             vol = self.get_volume(ctx.guild.id)
             ffmpeg_opts = get_ffmpeg_options(vol)
             ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
-            try:
-                source = discord.FFmpegOpusAudio(track.stream_url, executable=ffmpeg_exe, **ffmpeg_opts)
-            except Exception:
-                source = discord.FFmpegPCMAudio(track.stream_url, executable=ffmpeg_exe, **ffmpeg_opts)
+            raw_source = discord.FFmpegPCMAudio(track.stream_url, executable=ffmpeg_exe, **ffmpeg_opts)
+            buffered_source = HighSpeedJitterProofBuffer(raw_source, prefetch_frames=50, max_frames=500)
 
             if voice_client.is_playing() or voice_client.is_paused():
                 voice_client.stop()
 
-            voice_client.play(source, after=lambda e: self._handle_track_finish(ctx, e))
+            voice_client.play(buffered_source, after=lambda e: self._handle_track_finish(ctx, e))
 
             # Record to played history to prevent Autoplay repetition
             played = self.get_played_history(ctx.guild.id)

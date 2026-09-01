@@ -248,69 +248,7 @@ async def send_container_response(
             bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
             http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
 
-        # 1. Guild text channels: Try Webhook dispatch for true native Components V2 Container support
-        if isinstance(obj, discord.TextChannel):
-            guild = obj.guild
-            bot_user = getattr(bot_instance, "user", None) or (guild.me if guild else None)
-            wh = None
-            try:
-                if guild and guild.me and obj.permissions_for(guild.me).manage_webhooks:
-                    webhooks = await obj.webhooks()
-                    my_id = bot_user.id if bot_user else (guild.me.id if guild.me else None)
-                    wh = next((w for w in webhooks if w.token and (w.user and my_id and w.user.id == my_id or w.name == "Kyro Events")), None)
-                    
-                    # Fetch bot avatar bytes to assign directly to webhook
-                    avatar_bytes = None
-                    if bot_user and hasattr(bot_user, "display_avatar"):
-                        try:
-                            avatar_bytes = await bot_user.display_avatar.read()
-                        except Exception:
-                            pass
-
-                    if not wh:
-                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "Kyro")
-                        wh = await obj.create_webhook(
-                            name=str(uname),
-                            avatar=avatar_bytes,
-                            reason="Components V2 container dispatcher"
-                        )
-                    elif not wh.avatar and avatar_bytes:
-                        try:
-                            await wh.edit(avatar=avatar_bytes)
-                        except Exception:
-                            pass
-            except Exception as whe:
-                logger.warning(f"Could not prepare webhook in #{obj.name}: {whe}")
-
-            if wh and wh.token:
-                try:
-                    wh_payload = dict(payload)
-                    # Clean username and avatar to avoid Discord 400 Bad Request
-                    if bot_user:
-                        uname = getattr(bot_user, "display_name", None) or getattr(bot_user, "name", "Kyro")
-                        wh_payload["username"] = str(uname)
-                        avatar = getattr(bot_user, "display_avatar", None)
-                        if avatar:
-                            wh_payload["avatar_url"] = str(avatar.with_format("png").url if hasattr(avatar, "with_format") else avatar.url)
-                    wh_payload["allowed_mentions"] = payload.get("allowed_mentions", {"parse": ["users", "roles"], "replied_user": True})
-
-                    import aiohttp
-                    webhook_url = f"https://discord.com/api/v10/webhooks/{wh.id}/{wh.token}?wait=true"
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(webhook_url, json=wh_payload) as resp:
-                            if resp.status in (200, 204):
-                                msg_data = await resp.json() if resp.status == 200 else {}
-                                if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
-                                    if hasattr(bot_instance, "_connection"):
-                                        bot_instance._connection.store_view(view, int(msg_data["id"]))
-                                return msg_data
-                            else:
-                                err_text = await resp.text()
-                                logger.error(f"Discord Webhook API returned {resp.status} in #{obj.name}: {err_text}")
-                except Exception as wh_post_err:
-                    logger.error(f"Webhook container dispatch failed in #{obj.name}: {wh_post_err}", exc_info=wh_post_err)
-
-        # 2. Direct channel message dispatch
+        # Direct bot channel message dispatch
         try:
             msg_data = await http_client.request(
                 discord.http.Route("POST", f"/channels/{channel_id}/messages"),

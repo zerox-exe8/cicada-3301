@@ -1,17 +1,17 @@
 """
 Kyro Discord Bot - Play Command Handler (Lavalink V4)
+Clean single-message dispatcher with zero webhook spam and instant playback.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 import discord
 import wavelink
 
 from src.cogs.music._player import KyroPlayer, shorten_artist
 from src.cogs.music._resolver import MusicResolver
-from src.cogs.music._views import MusicControlView
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ logger = logging.getLogger("Kyro.Music.Cmd.Play")
 
 
 async def handle_play(ctx: CustomContext, controller: MusicController, query: str) -> None:
-    """Execute the play command with signature Components V2 player card."""
+    """Execute the play command cleanly without duplicate embeds or webhooks."""
     if not ctx.author.voice or not ctx.author.voice.channel:
         await ctx.send_warning("You must be connected to a Voice Channel to play music.")
         return
@@ -43,28 +43,14 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
 
     player.home_channel = ctx.channel
 
-    search_container = KyroContainer(accent_color=None)
-    search_container.add_text(f"**Searching track:** `{query}`...")
-    status_msg = await send_container_response(ctx, search_container)
-
-    # 2. Resolve Track with Multi-Tier Anti-Block Fallback
-    try:
-        result = await MusicResolver.resolve(query, requester=ctx.author.display_name)
-    except Exception as ex:
-        logger.error(f"Resolver error for '{query}': {ex}", exc_info=ex)
-        if status_msg:
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
-        await ctx.send_error(f"Failed to search for **{query}**: `{ex}`")
-        return
-
-    if status_msg:
+    # 2. Resolve Track with Multi-Tier Anti-Block Fallback (using discord typing instead of extra message)
+    async with ctx.typing():
         try:
-            await status_msg.delete()
-        except Exception:
-            pass
+            result = await MusicResolver.resolve(query, requester=ctx.author.display_name)
+        except Exception as ex:
+            logger.error(f"Resolver error for '{query}': {ex}", exc_info=ex)
+            await ctx.send_error(f"Failed to search for **{query}**: `{ex}`")
+            return
 
     if not result:
         await ctx.send_warning(f"No results found for `{query}`.")
@@ -101,10 +87,8 @@ async def handle_play(ctx: CustomContext, controller: MusicController, query: st
 
     # 4. Play or Queue Track
     if not player.playing:
+        # Playing track triggers on_wavelink_track_start, which renders the single Now Playing card
         await player.play(track)
-        card = player.build_now_playing_container(track, requester=ctx.author.display_name)
-        view = MusicControlView(ctx.bot, player, ctx.guild.id)
-        player.now_playing_message = await send_container_response(ctx, card, view=view)
     else:
         player.queue.put(track)
         dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "•"))

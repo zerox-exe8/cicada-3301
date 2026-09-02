@@ -240,8 +240,20 @@ class GuildPlayer:
 
         # Resolve FFmpeg executable
         try:
+            import static_ffmpeg
+            static_ffmpeg.add_paths()
+        except Exception:
+            pass
+
+        try:
             import imageio_ffmpeg
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            import os, stat
+            try:
+                st = os.stat(ffmpeg_exe)
+                os.chmod(ffmpeg_exe, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+            except Exception:
+                pass
         except Exception:
             import shutil
             ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
@@ -259,7 +271,9 @@ class GuildPlayer:
             )
             audio_source = discord.PCMVolumeTransformer(raw_source, volume=self.volume)
         except Exception as e:
-            logger.error(f"FFmpeg audio stream creation error: {e}")
+            logger.error(f"FFmpeg audio stream creation error: {e}", exc_info=True)
+            if self.home_channel:
+                await self.home_channel.send(f"⚠️ **FFmpeg Stream Error:** `{e}`")
             return
 
         if self.voice_client.is_playing() or self.voice_client.is_paused():
@@ -267,7 +281,12 @@ class GuildPlayer:
 
         def _after_callback(error):
             if error:
-                logger.error(f"Voice playback error in guild {self.guild.id}: {error}")
+                logger.error(f"Voice playback error in guild {self.guild.id}: {error}", exc_info=True)
+                if self.home_channel:
+                    asyncio.run_coroutine_threadsafe(
+                        self.home_channel.send(f"⚠️ **Voice Playback Error:** `{error}`"),
+                        self.bot.loop,
+                    )
             asyncio.run_coroutine_threadsafe(self._handle_track_finish(), self.bot.loop)
 
         self.voice_client.play(audio_source, after=_after_callback)

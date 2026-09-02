@@ -43,15 +43,32 @@ if not discord.opus.is_loaded():
             pass
 
     if not discord.opus.is_loaded():
-        for lib_name in ["libopus.so.0", "libopus.so", "opus.dll", "libopus-0.dll", "libopus.dll"]:
-            dll_path = BASE_DIR / lib_name
-            target = str(dll_path) if dll_path.exists() else lib_name
+        possible_opus_paths = [
+            "/usr/lib/x86_64-linux-gnu/libopus.so.0",
+            "/usr/lib/x86_64-linux-gnu/libopus.so",
+            "/usr/lib/libopus.so.0",
+            "/usr/lib64/libopus.so.0",
+            "/usr/local/lib/libopus.so.0",
+            str(BASE_DIR / "libopus.so.0"),
+            str(BASE_DIR / "libopus.so"),
+            str(BASE_DIR / "opus.dll"),
+            "libopus.so.0",
+            "libopus.so",
+            "opus.dll",
+            "libopus-0.dll",
+        ]
+        for target in possible_opus_paths:
             try:
                 discord.opus.load_opus(target)
                 logger.info(f"Loaded Opus library from: {target}")
                 break
-            except Exception as e:
-                logger.debug(f"Notice loading {lib_name}: {e}")
+            except Exception:
+                pass
+
+    if discord.opus.is_loaded():
+        logger.info("Discord Opus voice engine is fully loaded & active.")
+    else:
+        logger.warning("Discord Opus library could not be loaded automatically.")
 
 active_bot: KyroBot | None = None
 

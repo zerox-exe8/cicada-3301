@@ -9,9 +9,12 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import os
 import queue
 import re
 import shutil
+import stat
+import subprocess
 import threading
 import time
 from typing import TYPE_CHECKING, List, Optional, Set
@@ -28,80 +31,78 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Kyro.Music.Player")
 
 
-class HighSpeedJitterProofBuffer(discord.AudioSource):
+class DirectFFmpegStream(discord.AudioSource):
     """
-    Ultra-Smooth Multi-Guild Jitter-Proof Audio Ring Buffer.
-    Pre-buffers audio frames in RAM before playback starts and maintains a continuous 500-frame (10s) prefetch buffer.
-    Guarantees that audio NEVER drops, aborts early, or stutters even under heavy network load.
+    Direct, Rock-Solid FFmpeg Audio Source for Discord Voice.
+    Accumulates exact 3840-byte PCM frames, preventing partial-read premature EOF drops,
+    with auto-reconnect, C-level volume scaling, and seamless jitter buffering.
     """
     FRAME_SIZE = 3840  # 20ms of 48000Hz 16-bit stereo PCM
 
-    def __init__(self, original: discord.AudioSource, prefetch_frames: int = 50, max_frames: int = 500) -> None:
-        self.original = original
-        self.queue: queue.Queue[bytes] = queue.Queue(maxsize=max_frames)
-        self.stopped = threading.Event()
-        self.ready_event = threading.Event()
-        self.prefetch_target = prefetch_frames
-        self._eof = False
+    def __init__(self, stream_url: str, executable: str, volume: float = 1.0) -> None:
+        self.stream_url = stream_url
+        self.executable = executable
+        self.volume = max(0.0, min(volume, 2.0))
+        self._process: Optional[subprocess.Popen] = None
+        self._buffer = bytearray()
+        self._start_process()
 
-        self.worker = threading.Thread(target=self._worker_loop, daemon=True, name="JitterProofAudioWorker")
-        self.worker.start()
-        # Wait up to 1.5 seconds for initial prefetch
-        self.ready_event.wait(timeout=1.5)
-
-    def _worker_loop(self) -> None:
-        while not self.stopped.is_set():
-            try:
-                data = self.original.read()
-                if not data:
-                    self._eof = True
-                    break
-
-                # Continuous feeder: wait for consumer to read without crashing on queue.Full
-                while not self.stopped.is_set():
-                    try:
-                        self.queue.put(data, timeout=0.2)
-                        break
-                    except queue.Full:
-                        continue
-
-                if not self.ready_event.is_set() and self.queue.qsize() >= self.prefetch_target:
-                    self.ready_event.set()
-            except Exception as e:
-                logger.debug(f"Audio worker stream notice: {e}")
-                break
-        self._eof = True
-        self.ready_event.set()
+    def _start_process(self) -> None:
+        cmd = [
+            self.executable,
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+            "-nostdin",
+            "-i", self.stream_url,
+            "-f", "s16le",
+            "-ar", "48000",
+            "-ac", "2",
+            "-vn",
+            "-filter:a", f"volume={self.volume:.2f}",
+            "-loglevel", "error",
+            "pipe:1",
+        ]
+        self._process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=1024 * 1024,
+        )
 
     def read(self) -> bytes:
-        if self.stopped.is_set():
+        if not self._process or not self._process.stdout:
             return b""
-        try:
-            return self.queue.get_nowait()
-        except queue.Empty:
-            if self._eof:
-                return b""
-            # If worker is actively decoding, give it up to 50ms before injecting brief silence
-            try:
-                return self.queue.get(timeout=0.05)
-            except queue.Empty:
-                if self._eof:
-                    return b""
-                # Output silence frame during network micro-jitter to prevent voice socket disconnect
-                return b"\x00" * self.FRAME_SIZE
 
-    def cleanup(self) -> None:
-        self.stopped.set()
-        # Drain queue to unblock any pending worker put calls
-        while not self.queue.empty():
+        # Accumulate until at least 3840 bytes are ready or true stream EOF
+        while len(self._buffer) < self.FRAME_SIZE:
             try:
-                self.queue.get_nowait()
+                chunk = self._process.stdout.read(self.FRAME_SIZE - len(self._buffer))
+                if not chunk:
+                    break
+                self._buffer.extend(chunk)
             except Exception:
                 break
-        try:
-            self.original.cleanup()
-        except Exception:
-            pass
+
+        if len(self._buffer) >= self.FRAME_SIZE:
+            frame = bytes(self._buffer[:self.FRAME_SIZE])
+            del self._buffer[:self.FRAME_SIZE]
+            return frame
+        elif len(self._buffer) > 0:
+            frame = bytes(self._buffer).ljust(self.FRAME_SIZE, b"\x00")
+            self._buffer.clear()
+            return frame
+        else:
+            return b""
+
+    def cleanup(self) -> None:
+        if self._process:
+            try:
+                self._process.kill()
+            except Exception:
+                pass
+            self._process = None
+        self._buffer.clear()
 
 
 def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
@@ -252,7 +253,6 @@ class GuildPlayer:
         try:
             import imageio_ffmpeg
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-            import os, stat
             try:
                 st = os.stat(ffmpeg_exe)
                 os.chmod(ffmpeg_exe, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
@@ -261,18 +261,12 @@ class GuildPlayer:
         except Exception:
             ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
 
-        # Direct Stream with Auto-reconnect and Volume Filter in C
-        before_options = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
-        options = f"-vn -filter:a volume={self.volume:.2f}"
-
         try:
-            raw_source = discord.FFmpegPCMAudio(
-                track.stream_url,
+            audio_source = DirectFFmpegStream(
+                stream_url=track.stream_url,
                 executable=ffmpeg_exe,
-                before_options=before_options,
-                options=options,
+                volume=self.volume,
             )
-            buffered_source = HighSpeedJitterProofBuffer(raw_source, prefetch_frames=50, max_frames=500)
         except Exception as e:
             logger.error(f"FFmpeg audio stream creation error: {e}", exc_info=True)
             if self.home_channel:
@@ -297,7 +291,7 @@ class GuildPlayer:
                     )
             asyncio.run_coroutine_threadsafe(self._handle_track_finish(gen), self.bot.loop)
 
-        self.voice_client.play(buffered_source, after=_after_callback)
+        self.voice_client.play(audio_source, after=_after_callback)
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
 
     async def _handle_track_finish(self, gen: int) -> None:

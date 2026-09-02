@@ -62,9 +62,8 @@ class KyroBot(commands.Bot):
             case_insensitive=True,
             strip_after_prefix=True,
             status=discord.Status.dnd,
-            activity=discord.Activity(
-                type=discord.ActivityType.listening,
-                name=f"{Config.DEFAULT_PREFIX}help",
+            activity=discord.CustomActivity(
+                name=f"Listening to {Config.DEFAULT_PREFIX}help",
             ),
         )
 
@@ -214,9 +213,8 @@ class KyroBot(commands.Bot):
         try:
             await self.change_presence(
                 status=discord.Status.dnd,
-                activity=discord.Activity(
-                    type=discord.ActivityType.listening,
-                    name=f"{Config.DEFAULT_PREFIX}help",
+                activity=discord.CustomActivity(
+                    name=f"Listening to {Config.DEFAULT_PREFIX}help",
                 ),
             )
         except Exception:
@@ -238,9 +236,8 @@ class KyroBot(commands.Bot):
         try:
             await self.change_presence(
                 status=discord.Status.dnd,
-                activity=discord.Activity(
-                    type=discord.ActivityType.listening,
-                    name=f"{Config.DEFAULT_PREFIX}help",
+                activity=discord.CustomActivity(
+                    name=f"Listening to {Config.DEFAULT_PREFIX}help",
                 ),
             )
         except Exception:

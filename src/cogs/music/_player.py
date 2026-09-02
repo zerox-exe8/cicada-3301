@@ -310,7 +310,7 @@ class GuildPlayer:
         play_prefix = f"{music_icon} " if music_icon else ""
 
         short_artist_name = shorten_artist(track.author)
-        channel_name = self.voice_client.channel.name if (self.voice_client and self.voice_client.channel) else "Voice Channel"
+        channel_mention = f"<#{self.voice_client.channel.id}>" if (self.voice_client and self.voice_client.channel) else "#Hangout"
 
         container = KyroContainer(accent_color=None)
         container.add_section(
@@ -323,11 +323,9 @@ class GuildPlayer:
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
 
-        container.add_separator(divider=True)
-
         container.add_text(
-            f"• **Channel:** `#{channel_name}`\n"
-            f"• **Requested By: {track.requester}**\n\n"
+            f"• **Channel:** {channel_mention}\n"
+            f"• **Requested By:** {track.requester}\n\n"
             f"-# Kyro Music Engine"
         )
 

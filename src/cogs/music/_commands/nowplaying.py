@@ -18,7 +18,7 @@ async def execute_nowplaying(cog: Music, ctx: commands.Context) -> None:
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected or not player.current:
         container = KyroContainer(accent_color=None)
-        container.add_text("❌ **Nothing is currently playing.**")
+        container.add_text("**Nothing is currently playing.**")
         await send_container_response(ctx, container)
         return
 

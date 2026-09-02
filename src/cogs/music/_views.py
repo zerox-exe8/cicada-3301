@@ -36,15 +36,15 @@ class MusicControlView(discord.ui.View):
             if isinstance(child, discord.ui.Button):
                 cid = child.custom_id or ""
                 if "playpause" in cid:
-                    child.emoji = e_reg._emojis.get("paused")
+                    child.emoji = e_reg.get_emoji_obj("paused")
                 elif "skip" in cid:
-                    child.emoji = e_reg._emojis.get("skip")
+                    child.emoji = e_reg.get_emoji_obj("skip")
                 elif "voldown" in cid:
-                    child.emoji = e_reg._emojis.get("volume_down")
+                    child.emoji = e_reg.get_emoji_obj("volume_down")
                 elif "volup" in cid:
-                    child.emoji = e_reg._emojis.get("volume_up")
+                    child.emoji = e_reg.get_emoji_obj("volume_up")
                 elif "stop" in cid:
-                    child.emoji = e_reg._emojis.get("icons_stop_button")
+                    child.emoji = e_reg.get_emoji_obj("icons_stop_button")
 
     def _get_player(self, interaction: discord.Interaction) -> Optional[GuildPlayer]:
         if self.player:

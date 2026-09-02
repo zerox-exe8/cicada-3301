@@ -61,6 +61,11 @@ class KyroBot(commands.Bot):
             help_command=None,
             case_insensitive=True,
             strip_after_prefix=True,
+            status=discord.Status.dnd,
+            activity=discord.Activity(
+                type=discord.ActivityType.listening,
+                name=f"{Config.DEFAULT_PREFIX}help",
+            ),
         )
 
         # Sole Database Driver (Supabase PostgreSQL)
@@ -209,8 +214,9 @@ class KyroBot(commands.Bot):
         try:
             await self.change_presence(
                 status=discord.Status.dnd,
-                activity=discord.CustomActivity(
-                    name=f"Listening to {Config.DEFAULT_PREFIX}help",
+                activity=discord.Activity(
+                    type=discord.ActivityType.listening,
+                    name=f"{Config.DEFAULT_PREFIX}help",
                 ),
             )
         except Exception:
@@ -227,6 +233,18 @@ class KyroBot(commands.Bot):
         logger.info(
             f"Logged in as {self.user} (ID: {self.user.id}) across {len(self.guilds)} guilds."
         )
+
+        # Immediately lock presence to DND
+        try:
+            await self.change_presence(
+                status=discord.Status.dnd,
+                activity=discord.Activity(
+                    type=discord.ActivityType.listening,
+                    name=f"{Config.DEFAULT_PREFIX}help",
+                ),
+            )
+        except Exception:
+            pass
 
         # Start rotating DND status loop
         if not self._rotate_presence.is_running():

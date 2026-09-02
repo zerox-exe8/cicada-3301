@@ -81,17 +81,25 @@ class DirectFFmpegStream(discord.AudioSource):
     """
     Direct, Rock-Solid FFmpeg Audio Source for Discord Voice.
     Accumulates exact 3840-byte PCM frames, preventing partial-read premature EOF drops,
-    with auto-reconnect, C-level volume scaling, and seamless jitter buffering.
+    with auto-reconnect, dynamic real-time C-level volume scaling, and seamless jitter buffering.
     """
     FRAME_SIZE = 3840  # 20ms of 48000Hz 16-bit stereo PCM
 
     def __init__(self, stream_url: str, executable: str, volume: float = 1.0) -> None:
         self.stream_url = stream_url
         self.executable = executable
-        self.volume = max(0.0, min(volume, 2.0))
+        self._volume = max(0.0, min(volume, 2.0))
         self._process: Optional[subprocess.Popen] = None
         self._buffer = bytearray()
         self._start_process()
+
+    @property
+    def volume(self) -> float:
+        return self._volume
+
+    @volume.setter
+    def volume(self, val: float) -> None:
+        self._volume = max(0.0, min(val, 2.0))
 
     def _start_process(self) -> None:
         cmd = [
@@ -105,7 +113,6 @@ class DirectFFmpegStream(discord.AudioSource):
             "-ar", "48000",
             "-ac", "2",
             "-vn",
-            "-filter:a", f"volume={self.volume:.2f}",
             "-loglevel", "warning",
             "pipe:1",
         ]
@@ -137,10 +144,22 @@ class DirectFFmpegStream(discord.AudioSource):
         if len(self._buffer) >= self.FRAME_SIZE:
             frame = bytes(self._buffer[:self.FRAME_SIZE])
             del self._buffer[:self.FRAME_SIZE]
+            if self._volume != 1.0:
+                try:
+                    import audioop
+                    frame = audioop.mul(frame, 2, self._volume)
+                except Exception:
+                    pass
             return frame
         elif len(self._buffer) > 0:
             frame = bytes(self._buffer).ljust(self.FRAME_SIZE, b"\x00")
             self._buffer.clear()
+            if self._volume != 1.0:
+                try:
+                    import audioop
+                    frame = audioop.mul(frame, 2, self._volume)
+                except Exception:
+                    pass
             return frame
         else:
             return b""
@@ -218,9 +237,12 @@ class GuildPlayer:
         return self.loop_mode
 
     def set_volume(self, vol_pct: int) -> int:
-        """Set player volume (0 to 200%)."""
+        """Set player volume (0 to 200%) dynamically in real time."""
         clamped = max(0, min(200, vol_pct))
         self.volume = clamped / 100.0
+        if self.voice_client and self.voice_client.source:
+            if hasattr(self.voice_client.source, "volume"):
+                self.voice_client.source.volume = self.volume
         return clamped
 
     async def connect_voice(self, channel: discord.VoiceChannel) -> None:
@@ -432,18 +454,20 @@ class GuildPlayer:
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**{play_prefix}Now Playing**\n"
-                f"**Title:** [{track.title}]({track.url})\n"
-                f"**Artist:** `{short_artist_name}`\n"
-                f"**Duration:** `{track.formatted_duration}`"
+                f"{play_prefix}**Now Playing**\n"
+                f"> **Track** • [{track.title}]({track.url})\n"
+                f"> **Artist** • `{short_artist_name}`\n"
+                f"> **Length** • `{track.formatted_duration}` • `320kbps HD`"
             ),
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
 
+        container.add_separator(divider=True)
+
         container.add_text(
-            f"• **Channel:** {channel_mention}\n"
-            f"• **Requested By:** {track.requester}\n\n"
-            f"-# Kyro Music Engine"
+            f"> **Channel** • {channel_mention}\n"
+            f"> **Requester** • `{track.requester}`\n\n"
+            f"-# Kyro Music Engine • Studio Audio"
         )
 
         return container

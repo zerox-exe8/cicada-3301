@@ -234,7 +234,7 @@ class Help(commands.Cog):
 
     @commands.hybrid_command(
         name="help",
-        aliases=["commands", "modules"],
+        aliases=["commands", "modules", "h"],
         description="Display the Kyro command directory tailored to your permissions.",
     )
     async def help_command(self, ctx: CustomContext, *, command_or_module: str | None = None) -> None:

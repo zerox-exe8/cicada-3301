@@ -85,6 +85,14 @@ class PostgresDatabase(BaseDatabase):
                 value TEXT
             );
             """,
+            # System No-Prefix persistent authorized dispatchers
+            """
+            CREATE TABLE IF NOT EXISTS system_no_prefix (
+                user_id BIGINT PRIMARY KEY,
+                added_by BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
             # User profiles / Economy table
             """
             CREATE TABLE IF NOT EXISTS user_profiles (

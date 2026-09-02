@@ -33,15 +33,17 @@ logger = logging.getLogger("Kyro.Core")
 async def get_prefix(bot: KyroBot, message: discord.Message) -> list[str] | str:
     """
     Dynamic prefix resolver:
-    - Bot Owner & Developers can use commands with NO prefix (e.g. 'ping', 'help') or normal prefixes.
+    - Bot Owner, Developers & No-Prefix Authorized Users can use commands with NO prefix (e.g. 'ping', 'help') or normal prefixes.
     - Regular members must use server prefix or bot mention.
     """
     guild_id = message.guild.id if message.guild else None
     guild_prefix = bot.guild_mgr.get_prefix(guild_id)
 
-    # Check if author is Owner or Developer
-    if message.author and await bot.perm_mgr.is_developer(message.author.id):
-        return commands.when_mentioned_or(guild_prefix, "")(bot, message)
+    # Check if author has No-Prefix authorization or is Owner/Developer
+    if message.author:
+        author_id = message.author.id
+        if author_id in getattr(bot, "no_prefix_users", set()) or await bot.perm_mgr.is_developer(author_id):
+            return commands.when_mentioned_or(guild_prefix, "")(bot, message)
 
     return commands.when_mentioned_or(guild_prefix)(bot, message)
 
@@ -85,6 +87,7 @@ class KyroBot(commands.Bot):
         self.event_mgr: EventManager = EventManager(self.db)
         self.ticket_mgr: TicketManager = TicketManager(self.db)
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
+        self.no_prefix_users: set[int] = set()
 
         # Attach Global Command Guard
         self.add_check(self._global_command_check)
@@ -168,6 +171,14 @@ class KyroBot(commands.Bot):
         await self.premium_mgr.load_cache()
         await self.ticket_mgr.load_cache()
         await self.custom_emojis.load()
+
+        # Load No-Prefix authorized users into memory
+        try:
+            np_rows = await self.db.fetch_all("SELECT user_id FROM system_no_prefix;")
+            self.no_prefix_users = {int(r["user_id"]) for r in np_rows}
+            logger.info(f"Loaded {len(self.no_prefix_users)} No-Prefix authorized user(s) into memory cache.")
+        except Exception as e:
+            logger.debug(f"Notice loading No-Prefix users: {e}")
 
         # 4. Load Error Handler
         await self.load_extension("src.errors.handler")

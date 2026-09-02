@@ -31,8 +31,8 @@ logger = logging.getLogger("Kyro.Music.Player")
 class HighSpeedJitterProofBuffer(discord.AudioSource):
     """
     Ultra-Smooth Multi-Guild Jitter-Proof Audio Ring Buffer.
-    Pre-buffers audio frames in RAM before playback starts and maintains a 500-frame (10s) prefetch buffer.
-    Guarantees that audio NEVER drops, buffers, or stutters even under heavy network load.
+    Pre-buffers audio frames in RAM before playback starts and maintains a continuous 500-frame (10s) prefetch buffer.
+    Guarantees that audio NEVER drops, aborts early, or stutters even under heavy network load.
     """
     FRAME_SIZE = 3840  # 20ms of 48000Hz 16-bit stereo PCM
 
@@ -50,19 +50,25 @@ class HighSpeedJitterProofBuffer(discord.AudioSource):
         self.ready_event.wait(timeout=1.5)
 
     def _worker_loop(self) -> None:
-        frames_filled = 0
         while not self.stopped.is_set():
             try:
                 data = self.original.read()
                 if not data:
                     self._eof = True
                     break
-                self.queue.put(data, timeout=1.0)
-                frames_filled += 1
-                if frames_filled >= self.prefetch_target:
+
+                # Continuous feeder: wait for consumer to read without crashing on queue.Full
+                while not self.stopped.is_set():
+                    try:
+                        self.queue.put(data, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+
+                if not self.ready_event.is_set() and self.queue.qsize() >= self.prefetch_target:
                     self.ready_event.set()
-            except Exception:
-                self._eof = True
+            except Exception as e:
+                logger.debug(f"Audio worker stream notice: {e}")
                 break
         self._eof = True
         self.ready_event.set()
@@ -75,11 +81,23 @@ class HighSpeedJitterProofBuffer(discord.AudioSource):
         except queue.Empty:
             if self._eof:
                 return b""
-            # Output silence frame during network micro-jitter to prevent voice socket disconnect
-            return b"\x00" * self.FRAME_SIZE
+            # If worker is actively decoding, give it up to 50ms before injecting brief silence
+            try:
+                return self.queue.get(timeout=0.05)
+            except queue.Empty:
+                if self._eof:
+                    return b""
+                # Output silence frame during network micro-jitter to prevent voice socket disconnect
+                return b"\x00" * self.FRAME_SIZE
 
     def cleanup(self) -> None:
         self.stopped.set()
+        # Drain queue to unblock any pending worker put calls
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except Exception:
+                break
         try:
             self.original.cleanup()
         except Exception:

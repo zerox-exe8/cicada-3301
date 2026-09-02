@@ -232,9 +232,10 @@ class NativeExtractor:
                         if results:
                             song = results[0]
                             more_info = song.get("more_info", {})
+                            has_320 = str(more_info.get("320kbps", "")).lower() == "true"
                             enc_url = more_info.get("encrypted_media_url")
                             if enc_url:
-                                dec_stream = cls._decrypt_saavn_url(enc_url)
+                                dec_stream = cls._decrypt_saavn_url(enc_url, has_320kbps=has_320)
                                 if dec_stream:
                                     title = clean_track_title(song.get("title") or song.get("song") or query)
                                     raw_art = more_info.get("artistMap", {}).get("primary_artists", [])
@@ -317,14 +318,16 @@ class NativeExtractor:
         return None
 
     @staticmethod
-    def _decrypt_saavn_url(encrypted_url: str) -> Optional[str]:
-        """Decrypt JioSaavn 320kbps media stream URL."""
+    def _decrypt_saavn_url(encrypted_url: str, has_320kbps: bool = True) -> Optional[str]:
+        """Decrypt JioSaavn media stream URL with reliable bitrate fallback."""
         try:
             enc_bytes = base64.b64decode(encrypted_url.strip())
             dec_bytes = _SAAVN_DES_CIPHER.decrypt(enc_bytes)
             url = dec_bytes.decode("utf-8").strip()
-            # Upgrade audio stream to 320kbps high bitrate
-            return url.replace("_96.mp4", "_320.mp4").replace("_160.mp4", "_320.mp4")
+            if has_320kbps:
+                return url.replace("_96.mp4", "_320.mp4").replace("_160.mp4", "_320.mp4")
+            else:
+                return url.replace("_96.mp4", "_160.mp4")
         except Exception:
             return None
 

@@ -57,14 +57,12 @@ class BufferedAudioSource(discord.AudioSource):
             "-reconnect", "1",
             "-reconnect_streamed", "1",
             "-reconnect_delay_max", "5",
-            "-probesize", "32",
-            "-analyzeduration", "0",
             "-i", self.stream_url,
             "-f", "s16le",
             "-ar", "48000",
             "-ac", "2",
             "-vn",
-            "-loglevel", "error",
+            "-loglevel", "quiet",
             "pipe:1",
         ]
         self._process = subprocess.Popen(
@@ -273,7 +271,7 @@ class GuildPlayer:
         except Exception as e:
             logger.error(f"FFmpeg audio stream creation error: {e}", exc_info=True)
             if self.home_channel:
-                await self.home_channel.send(f"⚠️ **FFmpeg Stream Error:** `{e}`")
+                await self.home_channel.send(f"⚠️ **Audio Stream Error:** `{e}`")
             return
 
         if self.voice_client.is_playing() or self.voice_client.is_paused():

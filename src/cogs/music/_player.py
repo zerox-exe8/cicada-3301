@@ -16,7 +16,6 @@ import time
 from typing import TYPE_CHECKING, List, Optional, Set
 
 import discord
-import imageio_ffmpeg
 
 from src.cogs.music._models import Track
 from src.cogs.music._autoplay import NativeSmartAutoplay, clean_track_title
@@ -46,7 +45,13 @@ class BufferedAudioSource(discord.AudioSource):
         self._start_ffmpeg()
 
     def _start_ffmpeg(self) -> None:
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        try:
+            import imageio_ffmpeg
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            import shutil
+            ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
+
         cmd = [
             ffmpeg_exe,
             "-reconnect", "1",

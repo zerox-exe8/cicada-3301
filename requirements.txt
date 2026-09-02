@@ -10,6 +10,7 @@ wavelink>=3.5.2
 yt-dlp>=2025.01.01
 pyDes>=2.0.1
 static-ffmpeg>=2.5
+imageio-ffmpeg>=0.4.9
 
 # Configuration & Utilities
 python-dotenv>=1.0.0

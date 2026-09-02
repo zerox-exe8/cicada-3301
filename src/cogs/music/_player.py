@@ -204,25 +204,41 @@ class GuildPlayer:
 
         # Ensure Opus is loaded across Linux, Render, and Windows
         if not discord.opus.is_loaded():
-            import ctypes.util
-            opus_lib = ctypes.util.find_library("opus")
-            if opus_lib:
+            from pathlib import Path
+            import os, sys
+            base_d = Path(__file__).resolve().parent.parent.parent.parent
+            if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
                 try:
-                    discord.opus.load_opus(opus_lib)
+                    os.add_dll_directory(str(base_d))
                 except Exception:
                     pass
 
-            if not discord.opus.is_loaded():
-                from pathlib import Path
-                base_d = Path(__file__).resolve().parent.parent.parent.parent
-                for lib_name in ["libopus.so.0", "libopus.so", "opus.dll", "libopus-0.dll", "libopus.dll"]:
-                    cand_path = base_d / lib_name
-                    target = str(cand_path) if cand_path.exists() else lib_name
-                    try:
-                        discord.opus.load_opus(target)
+            possible_opus_paths = [
+                str(base_d / "opus.dll"),
+                str(base_d / "libopus.so.0"),
+                str(base_d / "libopus.so"),
+                "/usr/lib/x86_64-linux-gnu/libopus.so.0",
+                "/usr/lib/x86_64-linux-gnu/libopus.so",
+                "/usr/lib/libopus.so.0",
+                "/usr/lib64/libopus.so.0",
+                "/usr/local/lib/libopus.so.0",
+                "opus.dll",
+                "libopus.so.0",
+                "libopus.so",
+                "libopus-0.dll",
+            ]
+            import ctypes.util
+            opus_lib = ctypes.util.find_library("opus")
+            if opus_lib:
+                possible_opus_paths.insert(0, opus_lib)
+
+            for target in possible_opus_paths:
+                try:
+                    discord.opus.load_opus(target)
+                    if discord.opus.is_loaded():
                         break
-                    except Exception:
-                        pass
+                except Exception:
+                    pass
 
         self.current = track
         clean_t = clean_track_title(track.title).lower()

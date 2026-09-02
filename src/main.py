@@ -32,38 +32,40 @@ from src.utils.logger import setup_logger
 logger = setup_logger("Kyro")
 
 # Ensure Opus library is loaded across Windows, Linux, and Cloud Hosting
+if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
+    try:
+        os.add_dll_directory(str(BASE_DIR))
+    except Exception:
+        pass
+
 if not discord.opus.is_loaded():
+    possible_opus_paths = [
+        str(BASE_DIR / "opus.dll"),
+        str(BASE_DIR / "libopus.so.0"),
+        str(BASE_DIR / "libopus.so"),
+        "/usr/lib/x86_64-linux-gnu/libopus.so.0",
+        "/usr/lib/x86_64-linux-gnu/libopus.so",
+        "/usr/lib/libopus.so.0",
+        "/usr/lib64/libopus.so.0",
+        "/usr/local/lib/libopus.so.0",
+        "opus.dll",
+        "libopus.so.0",
+        "libopus.so",
+        "libopus-0.dll",
+    ]
     import ctypes.util
     opus_lib = ctypes.util.find_library("opus")
     if opus_lib:
-        try:
-            discord.opus.load_opus(opus_lib)
-            logger.info(f"Loaded Opus library from system: {opus_lib}")
-        except Exception:
-            pass
+        possible_opus_paths.insert(0, opus_lib)
 
-    if not discord.opus.is_loaded():
-        possible_opus_paths = [
-            "/usr/lib/x86_64-linux-gnu/libopus.so.0",
-            "/usr/lib/x86_64-linux-gnu/libopus.so",
-            "/usr/lib/libopus.so.0",
-            "/usr/lib64/libopus.so.0",
-            "/usr/local/lib/libopus.so.0",
-            str(BASE_DIR / "libopus.so.0"),
-            str(BASE_DIR / "libopus.so"),
-            str(BASE_DIR / "opus.dll"),
-            "libopus.so.0",
-            "libopus.so",
-            "opus.dll",
-            "libopus-0.dll",
-        ]
-        for target in possible_opus_paths:
-            try:
-                discord.opus.load_opus(target)
+    for target in possible_opus_paths:
+        try:
+            discord.opus.load_opus(target)
+            if discord.opus.is_loaded():
                 logger.info(f"Loaded Opus library from: {target}")
                 break
-            except Exception:
-                pass
+        except Exception as e:
+            logger.debug(f"Notice loading {target}: {e}")
 
     if discord.opus.is_loaded():
         logger.info("Discord Opus voice engine is fully loaded & active.")

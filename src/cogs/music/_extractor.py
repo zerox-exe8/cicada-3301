@@ -182,8 +182,12 @@ class NativeExtractor:
 
         cleaned_query = parse_and_clean_query(raw_q)
 
-        # Tier 1 & 2: JioSaavn 320kbps HD Audio (100% Unblocked on Cloud/Render)
+        # Tier 1: JioSaavn 320kbps HD Audio (100% Unblocked on Cloud/Render)
         track = await cls._extract_jiosaavn(cleaned_query, requester, is_autoplay)
+
+        # Tier 2: SoundCloud Worldwide Engine (Phonk, Anime, Brazilian Funk, EDM, Remixes, English Indie)
+        if not track:
+            track = await cls._extract_soundcloud(cleaned_query, requester, is_autoplay)
 
         # Tier 3: YouTube Fallback (Any rare remaining audio)
         if not track:
@@ -351,6 +355,112 @@ class NativeExtractor:
                 return url.replace("_96.mp4", "_160.mp4")
         except Exception:
             return None
+
+    _SC_CLIENT_ID: Optional[str] = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
+    _SC_CID_EXPIRE: float = 0.0
+
+    @classmethod
+    async def _get_sc_client_id(cls, session: aiohttp.ClientSession) -> str:
+        """Fetch or refresh dynamic SoundCloud Client ID."""
+        now = time.time()
+        if cls._SC_CLIENT_ID and now < cls._SC_CID_EXPIRE:
+            return cls._SC_CLIENT_ID
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+        try:
+            async with session.get("https://soundcloud.com", headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp:
+                text = await resp.text()
+                script_urls = re.findall(r'<script[^>]+src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', text)
+                for s_url in script_urls[-5:]:
+                    async with session.get(s_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as s_resp:
+                        s_text = await s_resp.text()
+                        m = re.search(r'client_id:\s*"([a-zA-Z0-9]{32})"', s_text) or re.search(r'client_id=([a-zA-Z0-9]{32})', s_text)
+                        if m:
+                            cls._SC_CLIENT_ID = m.group(1)
+                            cls._SC_CID_EXPIRE = now + 86400.0
+                            return cls._SC_CLIENT_ID
+        except Exception:
+            pass
+
+        cls._SC_CLIENT_ID = cls._SC_CLIENT_ID or "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
+        cls._SC_CID_EXPIRE = now + 3600.0
+        return cls._SC_CLIENT_ID
+
+    @classmethod
+    async def _extract_soundcloud(
+        cls,
+        query: str,
+        requester: str,
+        is_autoplay: bool,
+    ) -> Optional[Track]:
+        """Search and extract direct audio stream from SoundCloud Worldwide catalog."""
+        if not query:
+            return None
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*",
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                cid = await cls._get_sc_client_id(session)
+                encoded_q = urllib.parse.quote(query)
+                search_url = f"https://api-v2.soundcloud.com/search/tracks?q={encoded_q}&client_id={cid}&limit=3"
+
+                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+                    collection = data.get("collection", [])
+                    if not collection:
+                        return None
+
+                    item = collection[0]
+                    title = clean_track_title(item.get("title") or query)
+                    author = item.get("user", {}).get("username") or "SoundCloud Artist"
+                    duration = int((item.get("duration") or 0) / 1000)
+                    thumbnail = item.get("artwork_url") or item.get("user", {}).get("avatar_url") or "https://cdn.discordapp.com/embed/avatars/0.png"
+                    thumbnail = thumbnail.replace("-large", "-t500x500")
+                    permalink = item.get("permalink_url") or "https://soundcloud.com"
+
+                    media = item.get("media", {}).get("transcodings", [])
+                    stream_endpoint = None
+                    for t in media:
+                        fmt = t.get("format", {})
+                        if fmt.get("protocol") == "progressive":
+                            stream_endpoint = t.get("url")
+                            break
+                        elif fmt.get("protocol") == "hls" and not stream_endpoint:
+                            stream_endpoint = t.get("url")
+
+                    if not stream_endpoint:
+                        return None
+
+                    async with session.get(f"{stream_endpoint}?client_id={cid}", headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as s_resp:
+                        if s_resp.status != 200:
+                            return None
+                        s_data = await s_resp.json()
+                        final_stream_url = s_data.get("url")
+                        if not final_stream_url:
+                            return None
+
+                        return Track(
+                            title=title,
+                            author=author,
+                            url=permalink,
+                            stream_url=final_stream_url,
+                            duration=duration,
+                            thumbnail=thumbnail,
+                            requester=requester,
+                            is_autoplay=is_autoplay,
+                        )
+        except Exception as e:
+            logger.debug(f"SoundCloud extract notice for '{query}': {e}")
+
+        return None
 
     @classmethod
     def _extract_youtube_fallback(

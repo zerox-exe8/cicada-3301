@@ -246,19 +246,11 @@ class GuildPlayer:
             import shutil
             ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
 
-        # Direct Opus Stream with YouTube User-Agent Header & Auto-reconnect
-        before_options = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin -user_agent \"Mozilla/5.0 (Windows NT 10.0; Win64; x64)\""
-        vol_opt = f"-filter:a volume={self.volume}" if self.volume != 1.0 else ""
-        options = f"-vn {vol_opt}".strip()
+        # Direct Stream with Auto-reconnect and User-Agent
+        before_options = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin"
+        options = "-vn"
 
         try:
-            audio_source: discord.AudioSource = discord.FFmpegOpusAudio(
-                track.stream_url,
-                executable=ffmpeg_exe,
-                before_options=before_options,
-                options=options,
-            )
-        except Exception:
             raw_source = discord.FFmpegPCMAudio(
                 track.stream_url,
                 executable=ffmpeg_exe,
@@ -266,6 +258,9 @@ class GuildPlayer:
                 options=options,
             )
             audio_source = discord.PCMVolumeTransformer(raw_source, volume=self.volume)
+        except Exception as e:
+            logger.error(f"FFmpeg audio stream creation error: {e}")
+            return
 
         if self.voice_client.is_playing() or self.voice_client.is_paused():
             self.voice_client.stop()

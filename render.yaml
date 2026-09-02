@@ -2,7 +2,7 @@ services:
   - type: web
     name: kyro-discord-bot
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: chmod +x build.sh && ./build.sh
     startCommand: python src/main.py
     plan: free
     envVars:

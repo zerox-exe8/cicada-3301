@@ -315,6 +315,27 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"JioSaavn search notice for '{query}': {e}")
 
+        # Step 3: Relaxed modifier fallback if complex phrase failed
+        relaxed = re.sub(
+            r"\b(?:lofi|slowed|reverb|mashup|sad|status|version|acoustic|unplugged|bass boosted|dholki mix|remix|full song|song|track)\b",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        )
+        relaxed = re.sub(r"\s+", " ", relaxed).strip()
+        if relaxed and relaxed.lower() != query.lower():
+            relaxed_track = await cls._extract_jiosaavn(relaxed, requester, is_autoplay)
+            if relaxed_track:
+                return relaxed_track
+
+        # Step 4: First 3 primary tokens if query was very long (e.g. > 4 words)
+        words = query.split()
+        if len(words) > 4:
+            short_q = " ".join(words[:3])
+            short_track = await cls._extract_jiosaavn(short_q, requester, is_autoplay)
+            if short_track:
+                return short_track
+
         return None
 
     @staticmethod
@@ -397,6 +418,20 @@ class NativeExtractor:
     @staticmethod
     async def _fetch_youtube_title(youtube_url: str) -> Optional[str]:
         """Extract title and artist metadata from YouTube URL without streaming chunk blocks."""
+        # 1. Official YouTube oEmbed protocol (Super fast, 100% unblocked on Cloud/Render)
+        try:
+            oembed_url = f"https://www.youtube.com/oembed?url={urllib.parse.quote(youtube_url)}&format=json"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=4)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        title = data.get("title")
+                        if title:
+                            return title.strip()
+        except Exception as e:
+            logger.debug(f"YouTube oEmbed fetch error: {e}")
+
+        # 2. Fallback to flat yt-dlp extract
         try:
             def _get_title():
                 with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:

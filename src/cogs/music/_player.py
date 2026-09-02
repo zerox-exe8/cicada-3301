@@ -229,8 +229,21 @@ class GuildPlayer:
             self.consecutive_same_artist = 1
             self.last_artist = art_clean
 
-        # Create zero-stutter RAM buffered source
-        raw_source = BufferedAudioSource(track.stream_url)
+        # Resolve FFmpeg executable
+        try:
+            import imageio_ffmpeg
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            import shutil
+            ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
+
+        # Create rock-solid Discord FFmpeg audio source with auto-reconnect
+        raw_source = discord.FFmpegPCMAudio(
+            track.stream_url,
+            executable=ffmpeg_exe,
+            before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin",
+            options="-vn",
+        )
         volume_source = discord.PCMVolumeTransformer(raw_source, volume=self.volume)
 
         if self.voice_client.is_playing() or self.voice_client.is_paused():

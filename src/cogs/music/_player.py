@@ -204,15 +204,24 @@ class GuildPlayer:
             else:
                 return
 
-        # Ensure Opus DLL is loaded on Windows
+        # Ensure Opus is loaded across Linux, Render, and Windows
         if not discord.opus.is_loaded():
-            from pathlib import Path
-            base_d = Path(__file__).resolve().parent.parent.parent.parent
-            for dll_name in ["opus.dll", "libopus-0.dll", "libopus.dll"]:
-                dll_path = base_d / dll_name
-                if dll_path.exists():
+            import ctypes.util
+            opus_lib = ctypes.util.find_library("opus")
+            if opus_lib:
+                try:
+                    discord.opus.load_opus(opus_lib)
+                except Exception:
+                    pass
+
+            if not discord.opus.is_loaded():
+                from pathlib import Path
+                base_d = Path(__file__).resolve().parent.parent.parent.parent
+                for lib_name in ["libopus.so.0", "libopus.so", "opus.dll", "libopus-0.dll", "libopus.dll"]:
+                    cand_path = base_d / lib_name
+                    target = str(cand_path) if cand_path.exists() else lib_name
                     try:
-                        discord.opus.load_opus(str(dll_path))
+                        discord.opus.load_opus(target)
                         break
                     except Exception:
                         pass
@@ -237,14 +246,26 @@ class GuildPlayer:
             import shutil
             ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
 
-        # Create rock-solid Discord FFmpeg audio source with auto-reconnect
-        raw_source = discord.FFmpegPCMAudio(
-            track.stream_url,
-            executable=ffmpeg_exe,
-            before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin",
-            options="-vn",
-        )
-        volume_source = discord.PCMVolumeTransformer(raw_source, volume=self.volume)
+        # Direct Opus Stream with YouTube User-Agent Header & Auto-reconnect
+        before_options = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin -user_agent \"Mozilla/5.0 (Windows NT 10.0; Win64; x64)\""
+        vol_opt = f"-filter:a volume={self.volume}" if self.volume != 1.0 else ""
+        options = f"-vn {vol_opt}".strip()
+
+        try:
+            audio_source: discord.AudioSource = discord.FFmpegOpusAudio(
+                track.stream_url,
+                executable=ffmpeg_exe,
+                before_options=before_options,
+                options=options,
+            )
+        except Exception:
+            raw_source = discord.FFmpegPCMAudio(
+                track.stream_url,
+                executable=ffmpeg_exe,
+                before_options=before_options,
+                options=options,
+            )
+            audio_source = discord.PCMVolumeTransformer(raw_source, volume=self.volume)
 
         if self.voice_client.is_playing() or self.voice_client.is_paused():
             self.voice_client.stop()
@@ -254,7 +275,7 @@ class GuildPlayer:
                 logger.error(f"Voice playback error in guild {self.guild.id}: {error}")
             asyncio.run_coroutine_threadsafe(self._handle_track_finish(), self.bot.loop)
 
-        self.voice_client.play(volume_source, after=_after_callback)
+        self.voice_client.play(audio_source, after=_after_callback)
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
 
     async def _handle_track_finish(self) -> None:

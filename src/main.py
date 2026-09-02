@@ -31,17 +31,27 @@ from src.utils.logger import setup_logger
 
 logger = setup_logger("Kyro")
 
-# Ensure Opus DLL is loaded on Windows
+# Ensure Opus library is loaded across Windows, Linux, and Cloud Hosting
 if not discord.opus.is_loaded():
-    for dll_name in ["opus.dll", "libopus-0.dll", "libopus.dll"]:
-        dll_path = BASE_DIR / dll_name
-        if dll_path.exists():
+    import ctypes.util
+    opus_lib = ctypes.util.find_library("opus")
+    if opus_lib:
+        try:
+            discord.opus.load_opus(opus_lib)
+            logger.info(f"Loaded Opus library from system: {opus_lib}")
+        except Exception:
+            pass
+
+    if not discord.opus.is_loaded():
+        for lib_name in ["libopus.so.0", "libopus.so", "opus.dll", "libopus-0.dll", "libopus.dll"]:
+            dll_path = BASE_DIR / lib_name
+            target = str(dll_path) if dll_path.exists() else lib_name
             try:
-                discord.opus.load_opus(str(dll_path))
-                logger.debug(f"Loaded Opus library from {dll_path}")
+                discord.opus.load_opus(target)
+                logger.info(f"Loaded Opus library from: {target}")
                 break
             except Exception as e:
-                logger.debug(f"Notice loading {dll_name}: {e}")
+                logger.debug(f"Notice loading {lib_name}: {e}")
 
 active_bot: KyroBot | None = None
 

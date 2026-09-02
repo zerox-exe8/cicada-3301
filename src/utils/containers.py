@@ -267,7 +267,8 @@ async def send_container_response(
             raise
         except Exception as e:
             logger.warning(f"Raw Components V2 HTTP request failed ({e}), attempting standard send fallback...")
-            if hasattr(obj, "send"):
+            target_send = getattr(obj, "send", None) or getattr(getattr(obj, "channel", None), "send", None)
+            if target_send:
                 primary = container if isinstance(container, KyroContainer) else container[0]
                 
                 # Extract link buttons from container into a fallback View if no view is provided
@@ -289,7 +290,7 @@ async def send_container_response(
                     if has_buttons:
                         fallback_view = link_view
 
-                return await obj.send(
+                return await target_send(
                     content=content,
                     embed=primary.to_embed(),
                     view=fallback_view,

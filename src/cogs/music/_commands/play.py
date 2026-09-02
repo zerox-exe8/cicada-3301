@@ -80,7 +80,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     # 3. If nothing is currently playing, start playback
     if not player.is_playing and not player.is_paused:
-        await player.play_track(track)
+        await player.play_track(track, message_to_edit=search_msg)
     else:
         # Add to queue
         player.queue.append(track)

@@ -205,12 +205,13 @@ class KyroBot(commands.Bot):
 
     @tasks.loop(seconds=60)
     async def _rotate_presence(self) -> None:
-        """Maintain persistent bot presence and DND status."""
+        """Maintain persistent bot presence and online status."""
         try:
             await self.change_presence(
-                status=discord.Status.dnd,
-                activity=discord.CustomActivity(
-                    name=f"Listening to {Config.DEFAULT_PREFIX}help",
+                status=discord.Status.online,
+                activity=discord.Activity(
+                    type=discord.ActivityType.listening,
+                    name=f"{Config.DEFAULT_PREFIX}help",
                 ),
             )
         except Exception:

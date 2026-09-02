@@ -31,6 +31,52 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Kyro.Music.Player")
 
 
+def resolve_ffmpeg_executable() -> str:
+    """Robust multi-platform resolver for FFmpeg binary across Windows, Linux, Render, and Docker."""
+    # 1. System PATH
+    exe = shutil.which("ffmpeg")
+    if exe and os.path.isfile(exe) and os.access(exe, os.X_OK):
+        return exe
+
+    # 2. static_ffmpeg
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+        exe = shutil.which("ffmpeg")
+        if exe and os.path.isfile(exe) and os.access(exe, os.X_OK):
+            return exe
+    except Exception:
+        pass
+
+    # 3. Candidate Linux/Render paths
+    home = os.path.expanduser("~")
+    candidates = [
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        os.path.join(home, ".local", "bin", "ffmpeg"),
+        os.path.join(home, ".static_ffmpeg", "bin", "linux", "ffmpeg"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+
+    # 4. imageio_ffmpeg
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.isfile(exe):
+            try:
+                st = os.stat(exe)
+                os.chmod(exe, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+            except Exception:
+                pass
+            return exe
+    except Exception:
+        pass
+
+    return "ffmpeg"
+
+
 class DirectFFmpegStream(discord.AudioSource):
     """
     Direct, Rock-Solid FFmpeg Audio Source for Discord Voice.
@@ -60,13 +106,13 @@ class DirectFFmpegStream(discord.AudioSource):
             "-ac", "2",
             "-vn",
             "-filter:a", f"volume={self.volume:.2f}",
-            "-loglevel", "error",
+            "-loglevel", "warning",
             "pipe:1",
         ]
         self._process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             bufsize=1024 * 1024,
         )
 
@@ -79,9 +125,13 @@ class DirectFFmpegStream(discord.AudioSource):
             try:
                 chunk = self._process.stdout.read(self.FRAME_SIZE - len(self._buffer))
                 if not chunk:
+                    if self._process.poll() is not None and self._process.returncode != 0:
+                        err = self._process.stderr.read().decode("utf-8", errors="ignore") if self._process.stderr else ""
+                        logger.error(f"FFmpeg stream exited with code {self._process.returncode}: {err}")
                     break
                 self._buffer.extend(chunk)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"FFmpeg stdout read notice: {e}")
                 break
 
         if len(self._buffer) >= self.FRAME_SIZE:
@@ -244,22 +294,8 @@ class GuildPlayer:
             self.last_artist = art_clean
 
         # Resolve FFmpeg executable
-        try:
-            import static_ffmpeg
-            static_ffmpeg.add_paths()
-        except Exception:
-            pass
-
-        try:
-            import imageio_ffmpeg
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-            try:
-                st = os.stat(ffmpeg_exe)
-                os.chmod(ffmpeg_exe, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-            except Exception:
-                pass
-        except Exception:
-            ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
+        ffmpeg_exe = resolve_ffmpeg_executable()
+        logger.info(f"Resolved FFmpeg executable for stream: {ffmpeg_exe}")
 
         try:
             audio_source = DirectFFmpegStream(

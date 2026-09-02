@@ -317,6 +317,24 @@ class HealthServer:
 
         return web.json_response({"status": "ignored"}, status=200)
 
+    async def _keepalive_loop(self) -> None:
+        """Self-ping loop every 8 minutes to prevent Render Free tier spin-down."""
+        render_url = os.getenv("RENDER_EXTERNAL_URL") or "https://cicada-3301.onrender.com"
+        target_url = f"{render_url.rstrip('/')}/health"
+        logger.info(f"Initialized 24/7 keep-alive pinger for: {target_url}")
+
+        await asyncio.sleep(60)  # Initial delay after server boot
+
+        while True:
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(target_url, timeout=15) as resp:
+                        logger.debug(f"Render keep-alive ping status: {resp.status}")
+            except Exception as e:
+                logger.debug(f"Render keep-alive notice: {e}")
+            await asyncio.sleep(480)  # Ping every 8 minutes (Render sleeps at 15m)
+
     async def start(self) -> None:
         """Start the async HTTP server with automatic port fallback."""
         base_port = int(os.getenv("PORT", 8080))
@@ -329,6 +347,7 @@ class HealthServer:
                 await site.start()
                 actual_port = port if port != 0 else getattr(site._server.sockets[0], "getsockname", lambda: (0, 0))()[1]
                 logger.info(f"Keep-Alive Health & Webhook Server listening on http://0.0.0.0:{actual_port}")
+                self._keepalive_task = asyncio.create_task(self._keepalive_loop())
                 return
             except OSError as e:
                 logger.warning(f"Port {port} is in use ({e}). Trying next port...")
@@ -336,6 +355,8 @@ class HealthServer:
 
     async def stop(self) -> None:
         """Gracefully stop the web server."""
+        if hasattr(self, "_keepalive_task") and self._keepalive_task:
+            self._keepalive_task.cancel()
         if self.runner:
             await self.runner.cleanup()
             logger.info("Keep-Alive Health & Webhook Server stopped.")

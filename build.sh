@@ -13,4 +13,8 @@ fi
 pip install --upgrade pip
 pip install -r requirements.txt
 
+# Pre-cache static FFmpeg binaries for Linux
+echo "Configuring FFmpeg binaries..."
+python -c "import static_ffmpeg; static_ffmpeg.add_paths()" || true
+
 echo "=== Build completed successfully ==="

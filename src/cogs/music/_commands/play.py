@@ -65,6 +65,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     # 2. Extract track in background
     track = await NativeExtractor.extract(query, requester=ctx.author.display_name)
+    if track:
+        track.requester_id = ctx.author.id
 
     if not track:
         err_container = KyroContainer(accent_color=None)

@@ -18,6 +18,7 @@ class Track:
     duration: int  # in seconds
     thumbnail: Optional[str] = None
     requester: str = "DJ / AutoPlay"
+    requester_id: Optional[int] = None
     is_autoplay: bool = False
 
     @property

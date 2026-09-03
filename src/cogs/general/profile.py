@@ -5,6 +5,7 @@ Displays concise, enterprise-grade Kyro network passport in Components V2 layout
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Optional
 import discord
 from discord.ext import commands
@@ -14,6 +15,8 @@ from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
+
+logger = logging.getLogger("Kyro.General.Profile")
 
 
 class Profile(commands.Cog):
@@ -91,27 +94,38 @@ class Profile(commands.Cog):
             if music_cog and hasattr(music_cog, "controller"):
                 # First check current guild player
                 curr_player = music_cog.controller.get_player(ctx.guild.id) if ctx.guild else None
-                if curr_player and curr_player.is_playing and curr_player.current:
-                    target_member = ctx.guild.get_member(target_id) if ctx.guild else None
-                    if (target_member and target_member.voice and target_member.voice.channel == curr_player.voice_channel) or (curr_player.current.requester_id == target_id):
+                if curr_player and curr_player.current and (curr_player.is_playing or curr_player.is_paused or curr_player.voice_client):
+                    bot_vc = curr_player.voice_client.channel if curr_player.voice_client else None
+                    target_member = target if isinstance(target, discord.Member) else (ctx.guild.get_member(target_id) if ctx.guild else None)
+
+                    in_same_vc = bool(target_member and target_member.voice and bot_vc and target_member.voice.channel.id == bot_vc.id)
+                    req_id_match = getattr(curr_player.current, "requester_id", None) == target_id
+                    req_name_match = bool(curr_player.current.requester and curr_player.current.requester in (target.name, target.display_name, getattr(target, "global_name", "")))
+
+                    if in_same_vc or req_id_match or req_name_match:
                         live_audio_title = curr_player.current.title
                         live_audio_author = curr_player.current.author or "Official Artist"
-                        live_audio_url = curr_player.current.uri
-                        live_audio_vc = curr_player.voice_channel.name if curr_player.voice_channel else "Voice Channel"
+                        live_audio_url = getattr(curr_player.current, "uri", None) or curr_player.current.url
+                        live_audio_vc = bot_vc.name if bot_vc else "Voice Channel"
 
                 # If not found in current guild, search active players across all guilds
                 if not live_audio_title:
                     for p in music_cog.controller.players.values():
-                        if p and p.is_playing and p.current:
-                            guild_member = p.guild.get_member(target_id)
-                            if (guild_member and guild_member.voice and guild_member.voice.channel == p.voice_channel) or (p.current.requester_id == target_id):
+                        if p and p.current and (p.is_playing or p.is_paused or p.voice_client):
+                            p_vc = p.voice_client.channel if p.voice_client else None
+                            g_member = p.guild.get_member(target_id)
+                            in_same_vc = bool(g_member and g_member.voice and p_vc and g_member.voice.channel.id == p_vc.id)
+                            req_id_match = getattr(p.current, "requester_id", None) == target_id
+                            req_name_match = bool(p.current.requester and p.current.requester in (target.name, target.display_name, getattr(target, "global_name", "")))
+
+                            if in_same_vc or req_id_match or req_name_match:
                                 live_audio_title = p.current.title
                                 live_audio_author = p.current.author or "Official Artist"
-                                live_audio_url = p.current.uri
-                                live_audio_vc = p.voice_channel.name if p.voice_channel else "Voice Channel"
+                                live_audio_url = getattr(p.current, "uri", None) or p.current.url
+                                live_audio_vc = p_vc.name if p_vc else "Voice Channel"
                                 break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to resolve live audio status in profile: {e}", exc_info=True)
 
         avatar_url = target.display_avatar.url if target.display_avatar else None
 

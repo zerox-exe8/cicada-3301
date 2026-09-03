@@ -225,6 +225,12 @@ class GuildPlayer:
     def is_connected(self) -> bool:
         return bool(self.voice_client and self.voice_client.is_connected())
 
+    @property
+    def voice_channel(self) -> Optional[discord.VoiceChannel]:
+        if self.voice_client and self.voice_client.channel:
+            return self.voice_client.channel
+        return None
+
     def set_loop_mode(self, mode: str) -> str:
         """Set loop mode: 'off', 'track' (single song), 'queue' (all songs)."""
         m = mode.lower().strip()

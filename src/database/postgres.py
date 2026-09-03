@@ -93,6 +93,16 @@ class PostgresDatabase(BaseDatabase):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
+            # Global Blacklist persistent table
+            """
+            CREATE TABLE IF NOT EXISTS system_blacklists (
+                target_id BIGINT PRIMARY KEY,
+                target_type VARCHAR(16) DEFAULT 'user',
+                reason TEXT,
+                added_by BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
             # User profiles / Economy table
             """
             CREATE TABLE IF NOT EXISTS user_profiles (

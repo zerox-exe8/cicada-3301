@@ -144,7 +144,7 @@ class Music(commands.Cog):
 
     @commands.hybrid_command(
         name="nowplaying",
-        aliases=["np"],
+        aliases=["now", "playing"],
         description="Display the currently playing song with interactive controls.",
     )
     async def nowplaying(self, ctx: CustomContext) -> None:

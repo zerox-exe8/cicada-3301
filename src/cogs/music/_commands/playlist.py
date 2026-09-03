@@ -282,15 +282,32 @@ async def handle_playlist(
         )
         container.add_separator(divider=True)
 
+        current_prefix = ctx.prefix or "?"
+        first_pl_name = playlists[0]["playlist_name"] if playlists else "Gym"
+
         container.add_section(
             content=(
                 "**Command Quick Guide**\n"
-                "> • **Play** • `?playlist play <name>`\n"
-                "> • **View** • `?playlist view <name>`\n"
-                "> • **Add Track** • `?playlist add <name> [song title]`\n"
-                "> • **Remove Track** • `?playlist removetrack <name> <track # | title>`\n"
-                "> • **Like / Unlike** • `?like` • `?unlike [song title | #]`\n"
-                "> • **Delete** • `?playlist delete <name>`"
+                f"> • **Play** • `{current_prefix}playlist play <name>`\n"
+                f"> • **View** • `{current_prefix}playlist view <name>`\n"
+                f"> • **Add Track** • `{current_prefix}playlist add <name> [song title]`\n"
+                f"> • **Remove Track** • `{current_prefix}playlist removetrack <name> <# | title>`\n"
+                f"> • **Like / Unlike** • `{current_prefix}like` • `{current_prefix}unlike [title | #]`\n"
+                f"> • **Delete** • `{current_prefix}playlist delete <name>`"
+            )
+        )
+        container.add_separator(divider=True)
+
+        container.add_section(
+            content=(
+                "**Practical Examples**\n"
+                f"> • `{current_prefix}playlist add {first_pl_name} Starboy` • Add song to `{first_pl_name}`\n"
+                f"> • `{current_prefix}playlist play {first_pl_name}` • Play your `{first_pl_name}` playlist\n"
+                f"> • `{current_prefix}playlist view {first_pl_name}` • Inspect songs in `{first_pl_name}`\n"
+                f"> • `{current_prefix}playlist removetrack {first_pl_name} 2` • Remove 2nd track from `{first_pl_name}`\n"
+                f"> • `{current_prefix}like` • Save currently playing track to `Favorites`\n"
+                f"> • `{current_prefix}unlike Starboy` • Remove track from `Favorites`\n"
+                f"> • `{current_prefix}unlike Starboy in {first_pl_name}` • Remove track from `{first_pl_name}`"
             )
         )
         container.add_separator(divider=True)
@@ -301,7 +318,7 @@ async def handle_playlist(
     # 2. ADD TRACK
     elif act == "add":
         if not name:
-            await ctx.send_warning("Please specify a playlist name. Usage: `?playlist add <name> [song title]`")
+            await ctx.send_warning("Please specify a playlist name.\n> Example: `?playlist add Gym Starboy`")
             return
 
         clean_pl_name = name.strip()
@@ -319,15 +336,15 @@ async def handle_playlist(
                 title_to_save = extracted.title
                 author_to_save = extracted.author
                 duration_to_save = extracted.duration
-                url_to_save = extracted.uri or extracted.url
+                url_to_save = extracted.url
         elif current:
             title_to_save = current.title
             author_to_save = current.author
             duration_to_save = current.duration
-            url_to_save = current.uri or current.url
+            url_to_save = current.url
 
         if not title_to_save or not url_to_save:
-            await ctx.send_warning("No song specified or currently playing. Usage: `?playlist add <name> <song title>`")
+            await ctx.send_warning(f"No song specified or currently playing.\n> Example: `?playlist add {clean_pl_name} Starboy`")
             return
 
         # Ensure playlist exists
@@ -369,14 +386,14 @@ async def handle_playlist(
     # 3. REMOVE TRACK FROM PLAYLIST
     elif act in ("removetrack", "rmtrack", "deltrack", "removesong", "delsong") or (act == "remove" and query):
         if not name:
-            await ctx.send_warning("Usage: `?playlist removetrack <name> <track # | song title>`")
+            await ctx.send_warning("Specify which playlist and song to remove.\n> Example: `?playlist removetrack Gym 2` or `?playlist removetrack Gym Starboy`")
             return
 
         clean_pl_name = name.strip()
         target_param = (query or "").strip()
 
         if not target_param:
-            await ctx.send_warning("Please specify which song to remove. Usage: `?playlist removetrack <name> <track # | song title>`")
+            await ctx.send_warning(f"Specify which song to remove from `{clean_pl_name}`.\n> Example: `?playlist removetrack {clean_pl_name} 2` or `?playlist removetrack {clean_pl_name} Starboy`")
             return
 
         pl_row = await db.fetch_one(
@@ -385,7 +402,7 @@ async def handle_playlist(
             clean_pl_name,
         )
         if not pl_row:
-            await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.")
+            await ctx.send_warning(f"Playlist `{clean_pl_name}` not found. Use `?playlist` to see your playlists.")
             return
 
         pl_id = pl_row["id"]
@@ -407,7 +424,7 @@ async def handle_playlist(
                 removed_track = tracks[idx - 1]
                 await db.execute("DELETE FROM user_playlist_tracks WHERE id = $1;", removed_track["id"])
             else:
-                await ctx.send_warning(f"Invalid song number. Playlist `{clean_pl_name}` has {len(tracks)} song(s).")
+                await ctx.send_warning(f"Invalid song number. Playlist `{clean_pl_name}` has {len(tracks)} song(s).\n> Example: `?playlist removetrack {clean_pl_name} 1`")
                 return
         else:
             # Case B: Search track by title
@@ -420,7 +437,7 @@ async def handle_playlist(
                 removed_track = matched
                 await db.execute("DELETE FROM user_playlist_tracks WHERE id = $1;", matched["id"])
             else:
-                await ctx.send_warning(f"No song matching `{target_param}` found in `{clean_pl_name}`.")
+                await ctx.send_warning(f"No song matching `{target_param}` found in `{clean_pl_name}`.\n> Tip: View song list via `?playlist view {clean_pl_name}`")
                 return
 
         container = KyroContainer(accent_color=None)
@@ -438,7 +455,7 @@ async def handle_playlist(
     # 4. PLAY PLAYLIST
     elif act == "play":
         if not name:
-            await ctx.send_warning("Please specify which playlist to play. Usage: `?playlist play <name>`")
+            await ctx.send_warning("Please specify which playlist to play.\n> Example: `?playlist play Gym`")
             return
 
         clean_pl_name = name.strip()
@@ -517,7 +534,7 @@ async def handle_playlist(
     # 5. VIEW PLAYLIST
     elif act == "view":
         if not name:
-            await ctx.send_warning("Usage: `?playlist view <name>`")
+            await ctx.send_warning("Please specify which playlist to view.\n> Example: `?playlist view Gym`")
             return
 
         clean_pl_name = name.strip()
@@ -573,7 +590,7 @@ async def handle_playlist(
     # 6. DELETE PLAYLIST
     elif act in ("delete", "remove"):
         if not name:
-            await ctx.send_warning("Usage: `?playlist delete <name>`")
+            await ctx.send_warning("Please specify which playlist to delete.\n> Example: `?playlist delete Gym`")
             return
 
         clean_pl_name = name.strip()
@@ -589,4 +606,4 @@ async def handle_playlist(
             container.add_text("-# Powered by Kyro Studio")
             await send_container_response(ctx, container)
         else:
-            await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.")
+            await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.\n> Use `?playlist` to see your existing playlists.")

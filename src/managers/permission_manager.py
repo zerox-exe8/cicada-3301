@@ -39,23 +39,31 @@ class PermissionManager:
         self._developer_ids = {row["user_id"] for row in records}
         logger.info(f"Loaded {len(self._developer_ids)} developer ID(s) into memory cache.")
 
-    async def is_owner(self, user_id: int) -> bool:
-        """Check if a user is the primary Bot Owner."""
-        try:
-            if await self.bot.is_owner(discord.Object(id=user_id)):
-                return True
-        except Exception:
-            pass
-
-        if self.bot.owner_ids and user_id in self.bot.owner_ids:
+    def is_developer_sync(self, user_id: int) -> bool:
+        """Fast, synchronous in-memory developer check (0ns latency, zero API calls)."""
+        if user_id in {1082437832087445604, 879986471866630155}:
             return True
-        return user_id == self.bot.owner_id or user_id in {1082437832087445604, 879986471866630155}
+        if user_id in self._developer_ids:
+            return True
+        if getattr(self.bot, "owner_ids", None) and user_id in self.bot.owner_ids:
+            return True
+        if getattr(self.bot, "owner_id", None) and user_id == self.bot.owner_id:
+            return True
+        return False
+
+    async def is_owner(self, user_id: int) -> bool:
+        """Check if a user is the primary Bot Owner in memory."""
+        if user_id in {1082437832087445604, 879986471866630155}:
+            return True
+        if getattr(self.bot, "owner_ids", None) and user_id in self.bot.owner_ids:
+            return True
+        if getattr(self.bot, "owner_id", None) and user_id == self.bot.owner_id:
+            return True
+        return False
 
     async def is_developer(self, user_id: int) -> bool:
         """Check if a user is either a Bot Owner or registered Developer."""
-        if user_id in self._developer_ids or user_id in {1082437832087445604, 879986471866630155}:
-            return True
-        return await self.is_owner(user_id)
+        return self.is_developer_sync(user_id)
 
     async def add_developer(self, user_id: int, added_by: int) -> None:
         """Add a developer to memory cache and database."""

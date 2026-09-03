@@ -26,18 +26,19 @@ class Help(commands.Cog):
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
-    async def _can_run_command(self, cmd: commands.Command, ctx: CustomContext) -> bool:
+    async def _can_run_command(
+        self, cmd: commands.Command, ctx: CustomContext, is_dev: bool = False, is_server_owner: bool = False
+    ) -> bool:
         """Check if the context author has permission to run this command."""
         if cmd.hidden:
             return False
 
         # Developer check
-        is_dev = await self.bot.perm_mgr.is_developer(ctx.author.id)
         if getattr(cmd.cog, "category", "") == "Developer" and not is_dev:
             return False
 
         # If user is bot developer or server owner, allow visibility
-        if is_dev or (ctx.guild and ctx.author.id == ctx.guild.owner_id):
+        if is_dev or is_server_owner:
             return True
 
         # Check command permission checks
@@ -50,6 +51,8 @@ class Help(commands.Cog):
     async def _get_visible_categories(self, ctx: CustomContext) -> dict[str, list[commands.Command]]:
         """Group commands that the current user has permission to execute."""
         categories: dict[str, list[commands.Command]] = {}
+        is_dev = self.bot.perm_mgr.is_developer_sync(ctx.author.id)
+        is_server_owner = bool(ctx.guild and ctx.author.id == ctx.guild.owner_id)
 
         for cog_name, cog in self.bot.cogs.items():
             if cog_name.lower() in ["errorhandler"]:
@@ -60,7 +63,7 @@ class Help(commands.Cog):
                 categories[category_name] = []
 
             for cmd in cog.get_commands():
-                if await self._can_run_command(cmd, ctx):
+                if await self._can_run_command(cmd, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
                     if cmd not in categories[category_name]:
                         categories[category_name].append(cmd)
 

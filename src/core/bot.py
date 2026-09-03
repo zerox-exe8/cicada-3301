@@ -42,7 +42,7 @@ async def get_prefix(bot: KyroBot, message: discord.Message) -> list[str] | str:
     # Check if author has No-Prefix authorization or is Owner/Developer
     if message.author:
         author_id = message.author.id
-        if author_id in getattr(bot, "no_prefix_users", set()) or await bot.perm_mgr.is_developer(author_id):
+        if author_id in getattr(bot, "no_prefix_users", set()) or bot.perm_mgr.is_developer_sync(author_id):
             return commands.when_mentioned_or(guild_prefix, "")(bot, message)
 
     return commands.when_mentioned_or(guild_prefix)(bot, message)
@@ -134,8 +134,9 @@ class KyroBot(commands.Bot):
         if message.author.bot:
             return
 
-        # Check if message is purely mentioning the bot
-        if self.user and message.content in [f"<@{self.user.id}>", f"<@!{self.user.id}>"]:
+        # Check if message is purely mentioning the bot (with optional spaces)
+        clean_content = message.content.strip()
+        if self.user and clean_content in [f"<@{self.user.id}>", f"<@!{self.user.id}>"]:
             from src.utils.containers import KyroContainer, send_container_response
             current_prefix = self.guild_mgr.get_prefix(message.guild.id if message.guild else None)
             container = KyroContainer(accent_color=None)
@@ -147,7 +148,7 @@ class KyroBot(commands.Bot):
             )
             container.add_separator(divider=True)
             container.add_text(f"-# Requested by {message.author.display_name}")
-            await send_container_response(message, container)
+            await send_container_response(message.channel, container)
             return
 
         await self.process_commands(message)
@@ -242,6 +243,17 @@ class KyroBot(commands.Bot):
         logger.info(
             f"Logged in as {self.user} (ID: {self.user.id}) across {len(self.guilds)} guilds."
         )
+
+        # Cache application owner credentials once logged in
+        try:
+            app_info = await self.application_info()
+            if app_info.team:
+                self.owner_ids = {m.id for m in app_info.team.members}
+            else:
+                self.owner_id = app_info.owner.id
+            logger.info("Application owner credentials cached in memory.")
+        except Exception as e:
+            logger.debug(f"Notice caching application info: {e}")
 
         # Immediately lock presence to DND
         try:

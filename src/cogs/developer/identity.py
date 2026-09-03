@@ -1,11 +1,12 @@
 """
 Kyro Discord Bot - Bot Identity & Persona Customization Module
 Allows Bot Owners and Developers to live-update the bot's avatar, username, and status
-using clean Components V2 cards, interactive Modals, and direct CLI shortcuts.
+using clean Components V2 embed prompt flows, interactive buttons, and direct CLI shortcuts.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Optional
 
@@ -24,139 +25,17 @@ logger = logging.getLogger("Kyro.Developer.Identity")
 
 
 # =========================================================
-# Interactive Discord Modals (Pop-up Forms)
-# =========================================================
-
-class EditNameModal(discord.ui.Modal, title="Bot Persona: Edit Username"):
-    """Pop-up modal to change bot username."""
-
-    new_name = discord.ui.TextInput(
-        label="New Bot Username",
-        placeholder="e.g. Kyro",
-        min_length=2,
-        max_length=32,
-        required=True,
-    )
-
-    def __init__(self, bot: KyroBot) -> None:
-        super().__init__()
-        self.bot = bot
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        name_val = str(self.new_name.value).strip()
-
-        try:
-            await self.bot.user.edit(username=name_val)
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**Bot Username Updated**\n"
-                    f"> **New Username:** `{name_val}`\n"
-                    f"> **Status:** `Applied Across Network`"
-                )
-            )
-            await interaction.followup.send(embed=container.to_embed(), ephemeral=True)
-        except discord.HTTPException as e:
-            await interaction.followup.send(
-                f"**Failed to update username:** `{e}`\n"
-                f"-# Note: Discord restricts bot name updates to 2 times per hour.",
-                ephemeral=True,
-            )
-
-
-class EditAvatarModal(discord.ui.Modal, title="Bot Persona: Edit Avatar"):
-    """Pop-up modal to change bot avatar."""
-
-    avatar_url = discord.ui.TextInput(
-        label="Direct Image URL",
-        placeholder="https://example.com/avatar.png (PNG, JPG, WEBP)",
-        min_length=10,
-        max_length=500,
-        required=True,
-    )
-
-    def __init__(self, bot: KyroBot) -> None:
-        super().__init__()
-        self.bot = bot
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        url_val = str(self.avatar_url.value).strip()
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url_val) as resp:
-                    if resp.status != 200:
-                        await interaction.followup.send(
-                            f"**Error:** Could not download image (HTTP {resp.status}).",
-                            ephemeral=True,
-                        )
-                        return
-                    img_bytes = await resp.read()
-
-            await self.bot.user.edit(avatar=img_bytes)
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**Bot Avatar Updated**\n"
-                    f"> **Status:** `Live Avatar Applied Successfully`"
-                ),
-                accessory={"type": 11, "media": {"url": self.bot.user.display_avatar.url}},
-            )
-            await interaction.followup.send(embed=container.to_embed(), ephemeral=True)
-        except discord.HTTPException as e:
-            await interaction.followup.send(f"**Failed to update avatar:** `{e}`", ephemeral=True)
-
-
-class EditStatusModal(discord.ui.Modal, title="Bot Persona: Edit Status"):
-    """Pop-up modal to change bot activity text."""
-
-    status_text = discord.ui.TextInput(
-        label="Activity Status Text",
-        placeholder="e.g. Listening to ?help",
-        min_length=1,
-        max_length=128,
-        required=True,
-    )
-
-    def __init__(self, bot: KyroBot) -> None:
-        super().__init__()
-        self.bot = bot
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        text_val = str(self.status_text.value).strip()
-
-        try:
-            await self.bot.change_presence(
-                status=discord.Status.dnd,
-                activity=discord.CustomActivity(name=text_val),
-            )
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**Bot Activity Status Updated**\n"
-                    f"> **Activity:** `{text_val}`\n"
-                    f"> **Status:** `Do Not Disturb (DND)`"
-                )
-            )
-            await interaction.followup.send(embed=container.to_embed(), ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"**Failed to update status:** `{e}`", ephemeral=True)
-
-
-# =========================================================
-# Interactive View with Clean Action Buttons
+# Interactive View with Embed Prompt Buttons
 # =========================================================
 
 class BotEditView(discord.ui.View):
-    """Interactive button action row to edit bot identity."""
+    """Interactive button action row to trigger embed-based input prompts."""
 
-    def __init__(self, bot: KyroBot, author_id: int) -> None:
+    def __init__(self, bot: KyroBot, author_id: int, channel_id: int) -> None:
         super().__init__(timeout=180)
         self.bot = bot
         self.author_id = author_id
+        self.channel_id = channel_id
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -169,18 +48,181 @@ class BotEditView(discord.ui.View):
 
     @discord.ui.button(label="Edit Avatar", style=discord.ButtonStyle.secondary, custom_id="btn_botedit_avatar")
     async def btn_avatar(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        modal = EditAvatarModal(self.bot)
-        await interaction.response.send_modal(modal)
+        # Send prompt embed in chat
+        prompt_card = KyroContainer(accent_color=None)
+        prompt_card.add_section(
+            content=(
+                f"**Edit Bot Avatar**\n"
+                f"> Upload an image attachment or paste a direct image URL in this channel.\n"
+                f"> Type `cancel` to abort."
+            )
+        )
+        prompt_card.add_separator(divider=True)
+        prompt_card.add_text("-# Waiting for input • 60s timeout")
+        await interaction.response.send_message(embed=prompt_card.to_embed())
+
+        def check(m: discord.Message) -> bool:
+            return m.author.id == self.author_id and m.channel.id == self.channel_id
+
+        try:
+            msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=60.0)
+        except asyncio.TimeoutError:
+            timeout_card = KyroContainer(accent_color=None)
+            timeout_card.add_text("**Avatar Update Timed Out:** No input received within 60 seconds.")
+            await interaction.channel.send(embed=timeout_card.to_embed())
+            return
+
+        if msg.content.strip().lower() == "cancel":
+            cancel_card = KyroContainer(accent_color=None)
+            cancel_card.add_text("**Cancelled:** Avatar update aborted.")
+            await interaction.channel.send(embed=cancel_card.to_embed())
+            return
+
+        # Resolve image URL from attachment or text
+        img_url = None
+        if msg.attachments:
+            img_url = msg.attachments[0].url
+        elif msg.content.strip().startswith("http"):
+            img_url = msg.content.strip()
+
+        if not img_url:
+            err_card = KyroContainer(accent_color=None)
+            err_card.add_text("**Error:** No valid image attachment or URL found.")
+            await interaction.channel.send(embed=err_card.to_embed())
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(img_url) as resp:
+                    if resp.status != 200:
+                        err_card = KyroContainer(accent_color=None)
+                        err_card.add_text(f"**Error:** Could not download image (HTTP {resp.status}).")
+                        await interaction.channel.send(embed=err_card.to_embed())
+                        return
+                    img_bytes = await resp.read()
+
+            await self.bot.user.edit(avatar=img_bytes)
+            success_card = KyroContainer(accent_color=None)
+            success_card.add_section(
+                content=(
+                    f"**Bot Avatar Updated**\n"
+                    f"> **Status:** `Live Avatar Applied Successfully`"
+                ),
+                accessory={"type": 11, "media": {"url": self.bot.user.display_avatar.url}},
+            )
+            await interaction.channel.send(embed=success_card.to_embed())
+        except discord.HTTPException as e:
+            err_card = KyroContainer(accent_color=None)
+            err_card.add_text(f"**Failed to update avatar:** `{e}`")
+            await interaction.channel.send(embed=err_card.to_embed())
 
     @discord.ui.button(label="Edit Name", style=discord.ButtonStyle.secondary, custom_id="btn_botedit_name")
     async def btn_name(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        modal = EditNameModal(self.bot)
-        await interaction.response.send_modal(modal)
+        prompt_card = KyroContainer(accent_color=None)
+        prompt_card.add_section(
+            content=(
+                f"**Edit Bot Username**\n"
+                f"> Type the new bot username in this channel.\n"
+                f"> Type `cancel` to abort."
+            )
+        )
+        prompt_card.add_separator(divider=True)
+        prompt_card.add_text("-# Waiting for input • 60s timeout")
+        await interaction.response.send_message(embed=prompt_card.to_embed())
+
+        def check(m: discord.Message) -> bool:
+            return m.author.id == self.author_id and m.channel.id == self.channel_id
+
+        try:
+            msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=60.0)
+        except asyncio.TimeoutError:
+            timeout_card = KyroContainer(accent_color=None)
+            timeout_card.add_text("**Username Update Timed Out:** No input received within 60 seconds.")
+            await interaction.channel.send(embed=timeout_card.to_embed())
+            return
+
+        name_val = msg.content.strip()
+        if name_val.lower() == "cancel":
+            cancel_card = KyroContainer(accent_color=None)
+            cancel_card.add_text("**Cancelled:** Username update aborted.")
+            await interaction.channel.send(embed=cancel_card.to_embed())
+            return
+
+        if len(name_val) < 2 or len(name_val) > 32:
+            err_card = KyroContainer(accent_color=None)
+            err_card.add_text("**Error:** Username must be between 2 and 32 characters.")
+            await interaction.channel.send(embed=err_card.to_embed())
+            return
+
+        try:
+            await self.bot.user.edit(username=name_val)
+            success_card = KyroContainer(accent_color=None)
+            success_card.add_section(
+                content=(
+                    f"**Bot Username Updated**\n"
+                    f"> **New Username:** `{name_val}`\n"
+                    f"> **Status:** `Applied Across Network`"
+                )
+            )
+            await interaction.channel.send(embed=success_card.to_embed())
+        except discord.HTTPException as e:
+            err_card = KyroContainer(accent_color=None)
+            err_card.add_text(
+                f"**Failed to update username:** `{e}`\n"
+                f"-# Note: Discord restricts bot name changes to 2 times per hour."
+            )
+            await interaction.channel.send(embed=err_card.to_embed())
 
     @discord.ui.button(label="Edit Status", style=discord.ButtonStyle.secondary, custom_id="btn_botedit_status")
     async def btn_status(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        modal = EditStatusModal(self.bot)
-        await interaction.response.send_modal(modal)
+        prompt_card = KyroContainer(accent_color=None)
+        prompt_card.add_section(
+            content=(
+                f"**Edit Bot Status**\n"
+                f"> Type the new activity/status text in this channel (e.g. `Listening to ?h`).\n"
+                f"> Type `cancel` to abort."
+            )
+        )
+        prompt_card.add_separator(divider=True)
+        prompt_card.add_text("-# Waiting for input • 60s timeout")
+        await interaction.response.send_message(embed=prompt_card.to_embed())
+
+        def check(m: discord.Message) -> bool:
+            return m.author.id == self.author_id and m.channel.id == self.channel_id
+
+        try:
+            msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=60.0)
+        except asyncio.TimeoutError:
+            timeout_card = KyroContainer(accent_color=None)
+            timeout_card.add_text("**Status Update Timed Out:** No input received within 60 seconds.")
+            await interaction.channel.send(embed=timeout_card.to_embed())
+            return
+
+        text_val = msg.content.strip()
+        if text_val.lower() == "cancel":
+            cancel_card = KyroContainer(accent_color=None)
+            cancel_card.add_text("**Cancelled:** Status update aborted.")
+            await interaction.channel.send(embed=cancel_card.to_embed())
+            return
+
+        try:
+            await self.bot.change_presence(
+                status=discord.Status.dnd,
+                activity=discord.CustomActivity(name=text_val),
+            )
+            success_card = KyroContainer(accent_color=None)
+            success_card.add_section(
+                content=(
+                    f"**Bot Activity Status Updated**\n"
+                    f"> **Activity:** `{text_val}`\n"
+                    f"> **Status:** `Do Not Disturb (DND)`"
+                )
+            )
+            await interaction.channel.send(embed=success_card.to_embed())
+        except Exception as e:
+            err_card = KyroContainer(accent_color=None)
+            err_card.add_text(f"**Failed to update status:** `{e}`")
+            await interaction.channel.send(embed=err_card.to_embed())
 
 
 # =========================================================
@@ -198,7 +240,7 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
         name="botedit",
         aliases=["setbot", "identity", "botset"],
         invoke_without_command=True,
-        description="Interactive Bot Identity & Persona console with Edit buttons.",
+        description="Interactive Bot Identity & Persona console with Embed prompts.",
     )
     @is_developer()
     async def botedit(self, ctx: CustomContext) -> None:
@@ -230,7 +272,7 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
             f"-# Root Identity Customization • Instant Live Effect"
         )
 
-        view = BotEditView(self.bot, ctx.author.id)
+        view = BotEditView(self.bot, ctx.author.id, ctx.channel.id)
         await send_container_response(ctx, container, view=view)
 
     @botedit.command(name="avatar")

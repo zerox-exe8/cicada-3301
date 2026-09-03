@@ -48,18 +48,17 @@ class BotEditView(discord.ui.View):
 
     @discord.ui.button(label="Edit Avatar", style=discord.ButtonStyle.secondary, custom_id="btn_botedit_avatar")
     async def btn_avatar(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        # Send prompt embed in chat
         prompt_card = KyroContainer(accent_color=None)
         prompt_card.add_section(
             content=(
-                f"**Edit Bot Avatar**\n"
-                f"> Upload an image attachment or paste a direct image URL in this channel.\n"
-                f"> Type `cancel` to abort."
+                "**Edit Bot Avatar**\n"
+                "> Upload an image attachment or paste a direct image URL in this channel.\n"
+                "> Type `cancel` to abort."
             )
         )
         prompt_card.add_separator(divider=True)
         prompt_card.add_text("-# Waiting for input • 60s timeout")
-        await interaction.response.send_message(embed=prompt_card.to_embed())
+        await send_container_response(interaction, prompt_card, ephemeral=True)
 
         def check(m: discord.Message) -> bool:
             return m.author.id == self.author_id and m.channel.id == self.channel_id
@@ -69,16 +68,15 @@ class BotEditView(discord.ui.View):
         except asyncio.TimeoutError:
             timeout_card = KyroContainer(accent_color=None)
             timeout_card.add_text("**Avatar Update Timed Out:** No input received within 60 seconds.")
-            await interaction.channel.send(embed=timeout_card.to_embed())
+            await send_container_response(interaction.channel, timeout_card)
             return
 
         if msg.content.strip().lower() == "cancel":
             cancel_card = KyroContainer(accent_color=None)
             cancel_card.add_text("**Cancelled:** Avatar update aborted.")
-            await interaction.channel.send(embed=cancel_card.to_embed())
+            await send_container_response(interaction.channel, cancel_card)
             return
 
-        # Resolve image URL from attachment or text
         img_url = None
         if msg.attachments:
             img_url = msg.attachments[0].url
@@ -88,7 +86,7 @@ class BotEditView(discord.ui.View):
         if not img_url:
             err_card = KyroContainer(accent_color=None)
             err_card.add_text("**Error:** No valid image attachment or URL found.")
-            await interaction.channel.send(embed=err_card.to_embed())
+            await send_container_response(interaction.channel, err_card)
             return
 
         try:
@@ -97,7 +95,7 @@ class BotEditView(discord.ui.View):
                     if resp.status != 200:
                         err_card = KyroContainer(accent_color=None)
                         err_card.add_text(f"**Error:** Could not download image (HTTP {resp.status}).")
-                        await interaction.channel.send(embed=err_card.to_embed())
+                        await send_container_response(interaction.channel, err_card)
                         return
                     img_bytes = await resp.read()
 
@@ -105,30 +103,104 @@ class BotEditView(discord.ui.View):
             success_card = KyroContainer(accent_color=None)
             success_card.add_section(
                 content=(
-                    f"**Bot Avatar Updated**\n"
-                    f"> **Status:** `Live Avatar Applied Successfully`"
+                    "**Bot Avatar Updated**\n"
+                    "> **Status:** `Live Avatar Applied Successfully`"
                 ),
                 accessory={"type": 11, "media": {"url": self.bot.user.display_avatar.url}},
             )
-            await interaction.channel.send(embed=success_card.to_embed())
+            success_card.add_separator(divider=True)
+            success_card.add_text("-# Powered by Kyro Studio")
+            await send_container_response(interaction.channel, success_card)
         except discord.HTTPException as e:
             err_card = KyroContainer(accent_color=None)
-            err_card.add_text(f"**Failed to update avatar:** `{e}`")
-            await interaction.channel.send(embed=err_card.to_embed())
+            err_card.add_text(
+                f"**Failed to update avatar:** `{e}`\n"
+                f"-# Note: Discord restricts avatar changes to 2 times per 10 minutes."
+            )
+            await send_container_response(interaction.channel, err_card)
+
+    @discord.ui.button(label="Edit Banner", style=discord.ButtonStyle.secondary, custom_id="btn_botedit_banner")
+    async def btn_banner(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        prompt_card = KyroContainer(accent_color=None)
+        prompt_card.add_section(
+            content=(
+                "**Edit Bot Banner**\n"
+                "> Upload a banner image attachment or paste a direct image URL in this channel.\n"
+                "> Type `cancel` to abort."
+            )
+        )
+        prompt_card.add_separator(divider=True)
+        prompt_card.add_text("-# Waiting for input • 60s timeout")
+        await send_container_response(interaction, prompt_card, ephemeral=True)
+
+        def check(m: discord.Message) -> bool:
+            return m.author.id == self.author_id and m.channel.id == self.channel_id
+
+        try:
+            msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=60.0)
+        except asyncio.TimeoutError:
+            timeout_card = KyroContainer(accent_color=None)
+            timeout_card.add_text("**Banner Update Timed Out:** No input received within 60 seconds.")
+            await send_container_response(interaction.channel, timeout_card)
+            return
+
+        if msg.content.strip().lower() == "cancel":
+            cancel_card = KyroContainer(accent_color=None)
+            cancel_card.add_text("**Cancelled:** Banner update aborted.")
+            await send_container_response(interaction.channel, cancel_card)
+            return
+
+        img_url = None
+        if msg.attachments:
+            img_url = msg.attachments[0].url
+        elif msg.content.strip().startswith("http"):
+            img_url = msg.content.strip()
+
+        if not img_url:
+            err_card = KyroContainer(accent_color=None)
+            err_card.add_text("**Error:** No valid banner image attachment or URL found.")
+            await send_container_response(interaction.channel, err_card)
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(img_url) as resp:
+                    if resp.status != 200:
+                        err_card = KyroContainer(accent_color=None)
+                        err_card.add_text(f"**Error:** Could not download banner image (HTTP {resp.status}).")
+                        await send_container_response(interaction.channel, err_card)
+                        return
+                    img_bytes = await resp.read()
+
+            await self.bot.user.edit(banner=img_bytes)
+            success_card = KyroContainer(accent_color=None)
+            success_card.add_section(
+                content=(
+                    "**Bot Banner Updated**\n"
+                    "> **Status:** `Live Banner Applied Successfully`"
+                )
+            )
+            success_card.add_separator(divider=True)
+            success_card.add_text("-# Powered by Kyro Studio")
+            await send_container_response(interaction.channel, success_card)
+        except discord.HTTPException as e:
+            err_card = KyroContainer(accent_color=None)
+            err_card.add_text(f"**Failed to update banner:** `{e}`")
+            await send_container_response(interaction.channel, err_card)
 
     @discord.ui.button(label="Edit Name", style=discord.ButtonStyle.secondary, custom_id="btn_botedit_name")
     async def btn_name(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         prompt_card = KyroContainer(accent_color=None)
         prompt_card.add_section(
             content=(
-                f"**Edit Bot Username**\n"
-                f"> Type the new bot username in this channel.\n"
-                f"> Type `cancel` to abort."
+                "**Edit Bot Username**\n"
+                "> Type the new bot username in this channel.\n"
+                "> Type `cancel` to abort."
             )
         )
         prompt_card.add_separator(divider=True)
         prompt_card.add_text("-# Waiting for input • 60s timeout")
-        await interaction.response.send_message(embed=prompt_card.to_embed())
+        await send_container_response(interaction, prompt_card, ephemeral=True)
 
         def check(m: discord.Message) -> bool:
             return m.author.id == self.author_id and m.channel.id == self.channel_id
@@ -138,20 +210,20 @@ class BotEditView(discord.ui.View):
         except asyncio.TimeoutError:
             timeout_card = KyroContainer(accent_color=None)
             timeout_card.add_text("**Username Update Timed Out:** No input received within 60 seconds.")
-            await interaction.channel.send(embed=timeout_card.to_embed())
+            await send_container_response(interaction.channel, timeout_card)
             return
 
         name_val = msg.content.strip()
         if name_val.lower() == "cancel":
             cancel_card = KyroContainer(accent_color=None)
             cancel_card.add_text("**Cancelled:** Username update aborted.")
-            await interaction.channel.send(embed=cancel_card.to_embed())
+            await send_container_response(interaction.channel, cancel_card)
             return
 
         if len(name_val) < 2 or len(name_val) > 32:
             err_card = KyroContainer(accent_color=None)
             err_card.add_text("**Error:** Username must be between 2 and 32 characters.")
-            await interaction.channel.send(embed=err_card.to_embed())
+            await send_container_response(interaction.channel, err_card)
             return
 
         try:
@@ -164,28 +236,30 @@ class BotEditView(discord.ui.View):
                     f"> **Status:** `Applied Across Network`"
                 )
             )
-            await interaction.channel.send(embed=success_card.to_embed())
+            success_card.add_separator(divider=True)
+            success_card.add_text("-# Powered by Kyro Studio")
+            await send_container_response(interaction.channel, success_card)
         except discord.HTTPException as e:
             err_card = KyroContainer(accent_color=None)
             err_card.add_text(
                 f"**Failed to update username:** `{e}`\n"
                 f"-# Note: Discord restricts bot name changes to 2 times per hour."
             )
-            await interaction.channel.send(embed=err_card.to_embed())
+            await send_container_response(interaction.channel, err_card)
 
     @discord.ui.button(label="Edit Status", style=discord.ButtonStyle.secondary, custom_id="btn_botedit_status")
     async def btn_status(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         prompt_card = KyroContainer(accent_color=None)
         prompt_card.add_section(
             content=(
-                f"**Edit Bot Status**\n"
-                f"> Type the new activity/status text in this channel (e.g. `Listening to ?h`).\n"
-                f"> Type `cancel` to abort."
+                "**Edit Bot Status**\n"
+                "> Type the new activity/status text in this channel (e.g. `Listening to ?help`).\n"
+                "> Type `cancel` to abort."
             )
         )
         prompt_card.add_separator(divider=True)
         prompt_card.add_text("-# Waiting for input • 60s timeout")
-        await interaction.response.send_message(embed=prompt_card.to_embed())
+        await send_container_response(interaction, prompt_card, ephemeral=True)
 
         def check(m: discord.Message) -> bool:
             return m.author.id == self.author_id and m.channel.id == self.channel_id
@@ -195,14 +269,14 @@ class BotEditView(discord.ui.View):
         except asyncio.TimeoutError:
             timeout_card = KyroContainer(accent_color=None)
             timeout_card.add_text("**Status Update Timed Out:** No input received within 60 seconds.")
-            await interaction.channel.send(embed=timeout_card.to_embed())
+            await send_container_response(interaction.channel, timeout_card)
             return
 
         text_val = msg.content.strip()
         if text_val.lower() == "cancel":
             cancel_card = KyroContainer(accent_color=None)
             cancel_card.add_text("**Cancelled:** Status update aborted.")
-            await interaction.channel.send(embed=cancel_card.to_embed())
+            await send_container_response(interaction.channel, cancel_card)
             return
 
         try:
@@ -218,11 +292,13 @@ class BotEditView(discord.ui.View):
                     f"> **Status:** `Do Not Disturb (DND)`"
                 )
             )
-            await interaction.channel.send(embed=success_card.to_embed())
+            success_card.add_separator(divider=True)
+            success_card.add_text("-# Powered by Kyro Studio")
+            await send_container_response(interaction.channel, success_card)
         except Exception as e:
             err_card = KyroContainer(accent_color=None)
             err_card.add_text(f"**Failed to update status:** `{e}`")
-            await interaction.channel.send(embed=err_card.to_embed())
+            await send_container_response(interaction.channel, err_card)
 
 
 # =========================================================
@@ -268,7 +344,7 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
         container.add_separator(divider=True)
         container.add_text(
             f"> Use buttons below or CLI shortcuts:\n"
-            f"> `?botedit avatar <url>` • `?botedit name <name>` • `?botedit status <text>`\n\n"
+            f"> `?botedit avatar <url>` • `?botedit banner <url>` • `?botedit name <name>` • `?botedit status <text>`\n\n"
             f"-# Root Identity Customization • Instant Live Effect"
         )
 
@@ -287,7 +363,7 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
 
         if not img_url:
             container = KyroContainer(accent_color=None)
-            container.add_text("**Error:** Provide an image URL or attach an image to your message.")
+            container.add_text("**Error:** Provide an image URL or attach an image to your message.\n> Example: `?botedit avatar <url>`")
             await send_container_response(ctx, container)
             return
 
@@ -308,10 +384,55 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
                 ),
                 accessory={"type": 11, "media": {"url": self.bot.user.display_avatar.url}},
             )
+            container.add_separator(divider=True)
+            container.add_text("-# Powered by Kyro Studio")
             await send_container_response(ctx, container)
-        except Exception as e:
+        except discord.HTTPException as e:
             container = KyroContainer(accent_color=None)
-            container.add_text(f"**Failed to update avatar:** `{e}`")
+            container.add_text(
+                f"**Failed to update avatar:** `{e}`\n"
+                f"-# Note: Discord restricts avatar changes to 2 times per 10 minutes."
+            )
+            await send_container_response(ctx, container)
+
+    @botedit.command(name="banner")
+    @is_developer()
+    async def edit_banner(self, ctx: CustomContext, url: Optional[str] = None) -> None:
+        """Update bot banner via direct URL or attached image."""
+        img_url = url
+
+        # Check attachment if no URL provided
+        if not img_url and ctx.message.attachments:
+            img_url = ctx.message.attachments[0].url
+
+        if not img_url:
+            container = KyroContainer(accent_color=None)
+            container.add_text("**Error:** Provide an image URL or attach a banner image to your message.\n> Example: `?botedit banner <url>`")
+            await send_container_response(ctx, container)
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(img_url) as resp:
+                    if resp.status != 200:
+                        await ctx.send_error(f"Failed to fetch image: HTTP {resp.status}")
+                        return
+                    img_bytes = await resp.read()
+
+            await self.bot.user.edit(banner=img_bytes)
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    f"**Bot Banner Updated**\n"
+                    f"> **Status:** `Live Banner Applied Successfully`"
+                ),
+            )
+            container.add_separator(divider=True)
+            container.add_text("-# Powered by Kyro Studio")
+            await send_container_response(ctx, container)
+        except discord.HTTPException as e:
+            container = KyroContainer(accent_color=None)
+            container.add_text(f"**Failed to update banner:** `{e}`")
             await send_container_response(ctx, container)
 
     @botedit.command(name="name")

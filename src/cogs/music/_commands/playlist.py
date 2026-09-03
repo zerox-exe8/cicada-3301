@@ -75,8 +75,18 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
 
     playlist_id = pl_row["id"]
 
-    # 2. Add track to playlist (store permanent web URL if available, else track URI)
-    track_web_url = current.uri or current.url
+    # 2. Check for duplicate track in Favorites
+    existing = await db.fetch_one(
+        "SELECT id FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) = LOWER($2);",
+        playlist_id,
+        current.title,
+    )
+    if existing:
+        await ctx.send_warning(f"`{current.title}` is already saved in your Favorites playlist.")
+        return
+
+    # 3. Add track to playlist (safely access URL)
+    track_web_url = getattr(current, "url", None) or getattr(current, "stream_url", "")
     await db.execute(
         "INSERT INTO user_playlist_tracks (playlist_id, title, author, duration, url) VALUES ($1, $2, $3, $4, $5);",
         playlist_id,
@@ -94,6 +104,95 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
             f"> **Playlist:** `Favorites`"
         ),
         accessory={"type": 11, "media": {"url": current.thumbnail}} if current.thumbnail else None,
+    )
+    container.add_separator(divider=True)
+    container.add_text("-# Powered by Kyro Studio")
+    await send_container_response(ctx, container)
+
+
+async def handle_unlike(ctx: CustomContext, cog: Music, *, query: Optional[str] = None) -> None:
+    """Remove a song from user's personal Favorites playlist by title, index, or currently playing track."""
+    db = ctx.bot.db
+    user_id = ctx.author.id
+
+    pl_row = await db.fetch_one(
+        "SELECT id FROM user_playlists WHERE user_id = $1 AND playlist_name = 'Favorites';",
+        user_id,
+    )
+    if not pl_row:
+        await ctx.send_warning("You do not have a Favorites playlist yet. Use `?like` to add songs.")
+        return
+
+    playlist_id = pl_row["id"]
+    tracks = await db.fetch_all(
+        "SELECT id, title, author, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
+        playlist_id,
+    )
+    if not tracks:
+        await ctx.send_warning("Your Favorites playlist is currently empty.")
+        return
+
+    target_track = None
+
+    # Case 1: Song title or track number provided
+    if query and query.strip():
+        clean_q = query.strip()
+        clean_num = clean_q.lstrip("#")
+        if clean_num.isdigit():
+            idx = int(clean_num)
+            if 1 <= idx <= len(tracks):
+                target_track = tracks[idx - 1]
+            else:
+                await ctx.send_warning(f"Invalid song number. Your Favorites has `{len(tracks)}` song(s).")
+                return
+        else:
+            # Substring match on title
+            matched = await db.fetch_one(
+                "SELECT id, title, author FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) LIKE '%' || LOWER($2) || '%' ORDER BY id ASC LIMIT 1;",
+                playlist_id,
+                clean_q,
+            )
+            if matched:
+                target_track = matched
+            else:
+                await ctx.send_warning(f"No song matching `{clean_q}` found in your Favorites.")
+                return
+
+    # Case 2: No query provided, resolve currently playing song in voice
+    else:
+        player = cog.controller.get_player(ctx.guild.id) if ctx.guild else None
+        if player and player.current:
+            cur_title = player.current.title
+            matched = await db.fetch_one(
+                "SELECT id, title, author FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) = LOWER($2) LIMIT 1;",
+                playlist_id,
+                cur_title,
+            )
+            if not matched:
+                matched = await db.fetch_one(
+                    "SELECT id, title, author FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) LIKE '%' || LOWER($2) || '%' LIMIT 1;",
+                    playlist_id,
+                    cur_title[:20],
+                )
+            if matched:
+                target_track = matched
+            else:
+                await ctx.send_warning(f"Currently playing song `{cur_title}` is not in your Favorites.\n> Specify a title: `?unlike <song title>`")
+                return
+        else:
+            await ctx.send_warning("Specify which song to remove. Usage: `?unlike <song title | #number>`")
+            return
+
+    # Delete track from Favorites
+    await db.execute("DELETE FROM user_playlist_tracks WHERE id = $1;", target_track["id"])
+
+    container = KyroContainer(accent_color=None)
+    container.add_section(
+        content=(
+            f"**Removed from Favorites**\n"
+            f"> **Track:** `{target_track['title']}`\n"
+            f"> **Playlist:** `Favorites`"
+        )
     )
     container.add_separator(divider=True)
     container.add_text("-# Powered by Kyro Studio")
@@ -173,6 +272,7 @@ async def handle_playlist(
                 "> • **View** • `?playlist view <name>`\n"
                 "> • **Add Track** • `?playlist add <name> [song title]`\n"
                 "> • **Remove Track** • `?playlist removetrack <name> <track # | title>`\n"
+                "> • **Like / Unlike** • `?like` • `?unlike [song title | #]`\n"
                 "> • **Delete** • `?playlist delete <name>`"
             )
         )

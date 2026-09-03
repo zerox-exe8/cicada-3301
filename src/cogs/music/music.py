@@ -28,7 +28,7 @@ from src.cogs.music._commands.controls import (
     execute_clear,
     execute_volume,
 )
-from src.cogs.music._commands.playlist import handle_playlist, handle_like
+from src.cogs.music._commands.playlist import handle_playlist, handle_like, handle_unlike
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -194,6 +194,16 @@ class Music(commands.Cog):
     async def like(self, ctx: CustomContext) -> None:
         """Save current song to Favorites playlist."""
         await handle_like(ctx, self)
+
+    @commands.hybrid_command(
+        name="unlike",
+        aliases=["unfav", "dislike"],
+        description="Remove a song from your personal Favorites playlist by title or playing track.",
+    )
+    @app_commands.describe(query="Optional song title or track number to remove from Favorites")
+    async def unlike(self, ctx: CustomContext, *, query: Optional[str] = None) -> None:
+        """Remove a song from Favorites playlist."""
+        await handle_unlike(ctx, self, query=query)
 
     @commands.hybrid_command(
         name="playlist",

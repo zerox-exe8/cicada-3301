@@ -22,6 +22,10 @@ class Track:
     is_autoplay: bool = False
 
     @property
+    def uri(self) -> str:
+        return self.url
+
+    @property
     def formatted_duration(self) -> str:
         if self.duration <= 0:
             return "Live Stream"

@@ -65,19 +65,24 @@ class Profile(commands.Cog):
             pass
 
         # 3. Music Telemetry (Saved Playlists)
-        playlist_count = 0
+        pl_display = "None"
         try:
             pl_rows = await self.bot.db.fetch_all(
-                "SELECT COUNT(*) as c FROM user_playlists WHERE user_id = $1;",
+                "SELECT playlist_name FROM user_playlists WHERE user_id = $1 ORDER BY id ASC;",
                 target_id,
             )
-            if pl_rows and len(pl_rows) > 0:
-                playlist_count = pl_rows[0]["c"] or 0
+            if pl_rows:
+                names = [r["playlist_name"] for r in pl_rows if r.get("playlist_name")]
+                if names:
+                    pl_display = ", ".join(f"`{n}`" for n in names[:5])
+                    if len(names) > 5:
+                        pl_display += f" +{len(names) - 5} more"
         except Exception:
             pass
 
         # 4. Live Audio Detection
         live_audio_title: str | None = None
+        live_audio_author: str | None = None
         live_audio_url: str | None = None
         live_audio_vc: str | None = None
 
@@ -90,6 +95,7 @@ class Profile(commands.Cog):
                     target_member = ctx.guild.get_member(target_id) if ctx.guild else None
                     if (target_member and target_member.voice and target_member.voice.channel == curr_player.voice_channel) or (curr_player.current.requester_id == target_id):
                         live_audio_title = curr_player.current.title
+                        live_audio_author = curr_player.current.author or "Official Artist"
                         live_audio_url = curr_player.current.uri
                         live_audio_vc = curr_player.voice_channel.name if curr_player.voice_channel else "Voice Channel"
 
@@ -100,6 +106,7 @@ class Profile(commands.Cog):
                             guild_member = p.guild.get_member(target_id)
                             if (guild_member and guild_member.voice and guild_member.voice.channel == p.voice_channel) or (p.current.requester_id == target_id):
                                 live_audio_title = p.current.title
+                                live_audio_author = p.current.author or "Official Artist"
                                 live_audio_url = p.current.uri
                                 live_audio_vc = p.voice_channel.name if p.voice_channel else "Voice Channel"
                                 break
@@ -124,14 +131,15 @@ class Profile(commands.Cog):
 
         if live_audio_title:
             link_str = f"[{live_audio_title}]({live_audio_url})" if live_audio_url else f"`{live_audio_title}`"
+            author_str = f" by `{live_audio_author}`" if live_audio_author else ""
             audio_lines = (
-                f"> **Playlists** • `{playlist_count} Repositories`\n"
-                f"> **Live Audio** • {link_str}\n"
+                f"> **Playlists** • {pl_display}\n"
+                f"> **Live Audio** • {link_str}{author_str}\n"
                 f"> **Channel** • `{live_audio_vc}` • `320kbps Studio Master`\n\n"
             )
         else:
             audio_lines = (
-                f"> **Playlists** • `{playlist_count} Repositories`\n"
+                f"> **Playlists** • {pl_display}\n"
                 f"> **Live Audio** • `Idle (Not Listening)`\n\n"
             )
 

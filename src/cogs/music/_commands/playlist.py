@@ -1,6 +1,7 @@
 """
 Kyro Discord Bot - User Saved Playlists & Like System (Native Engine)
-Instant first-track playback and background loading.
+Instant playback, zero premature skips via dynamic query re-resolution,
+and full playlist management (add, removetrack, view, list, delete).
 """
 
 from __future__ import annotations
@@ -19,6 +20,24 @@ if TYPE_CHECKING:
     from src.cogs.music.music import Music
 
 logger = logging.getLogger("Kyro.Music.Cmd.Playlist")
+
+
+def resolve_playlist_track_query(row: dict) -> str:
+    """
+    Safely resolve query for playlist track playback.
+    Avoids passing stale, expired CDN streaming links which cause premature 403 skips.
+    """
+    url = (row.get("url") or "").strip()
+    title = (row.get("title") or "").strip()
+    author = (row.get("author") or "").strip()
+
+    # Permanent web links are safe to re-extract
+    if url.startswith("http") and any(d in url for d in ("youtube.com/watch", "youtu.be/", "soundcloud.com/", "open.spotify.com/track")):
+        return url
+
+    # Otherwise, search fresh by title + author for guaranteed fresh 320kbps stream
+    clean_auth = author if author and author != "Official Artist" else ""
+    return f"{title} {clean_auth}".strip() if clean_auth else title
 
 
 async def handle_like(ctx: CustomContext, cog: Music) -> None:
@@ -56,31 +75,28 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
 
     playlist_id = pl_row["id"]
 
-    # 2. Add track to playlist
+    # 2. Add track to playlist (store permanent web URL if available, else track URI)
+    track_web_url = current.uri or current.url
     await db.execute(
         "INSERT INTO user_playlist_tracks (playlist_id, title, author, duration, url) VALUES ($1, $2, $3, $4, $5);",
         playlist_id,
         current.title,
         current.author or "Official Artist",
         current.duration,
-        current.url,
+        track_web_url,
     )
 
     container = KyroContainer(accent_color=None)
     container.add_section(
         content=(
             f"**Added to Favorites**\n"
-            f"> **Title:** [{current.title}]({current.url})\n"
-            f"> **Artist:** `{current.author}`"
+            f"> **Track:** [{current.title}]({track_web_url}) by `{current.author}`\n"
+            f"> **Playlist:** `Favorites`"
         ),
         accessory={"type": 11, "media": {"url": current.thumbnail}} if current.thumbnail else None,
     )
     container.add_separator(divider=True)
-    container.add_text(
-        f"**Playlist:** `Favorites` | **Saved By:** `{ctx.author.display_name}`"
-    )
-    container.add_separator(divider=True)
-    container.add_text("-# Use ?playlist play Favorites to play your liked songs.")
+    container.add_text("-# Powered by Kyro Studio")
     await send_container_response(ctx, container)
 
 
@@ -92,21 +108,22 @@ async def handle_playlist(
     *,
     query: Optional[str] = None,
 ) -> None:
-    """Manage custom user playlists: add, play, list, view, delete."""
+    """Manage custom user playlists: add, removetrack, play, list, view, delete."""
     if not action or action.lower() in ("help", "guide"):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Music Playlist Manager**\n"
-                "> Save your favorite tracks and play your personal music collections anytime."
+                "**Music Playlist Operations**\n"
+                "> **list** • `?playlist list`\n"
+                "> **play** • `?playlist play <name>`\n"
+                "> **view** • `?playlist view <name>`\n"
+                "> **add** • `?playlist add <name> [song title]`\n"
+                "> **removetrack** • `?playlist removetrack <name> <track # | song title>`\n"
+                "> **delete** • `?playlist delete <name>`"
             )
         )
         container.add_separator(divider=True)
-        container.add_text(
-            "`?like`, `?playlist add <name>`, `?playlist play <name>`, `?playlist list`, `?playlist view <name>`, `?playlist delete <name>`"
-        )
-        container.add_separator(divider=True)
-        container.add_text("-# Kyro Native Music Engine")
+        container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
         return
 
@@ -131,17 +148,17 @@ async def handle_playlist(
             await ctx.send_warning("You do not have any saved playlists yet. Use `?like` or `?playlist add <name>` to create one.")
             return
 
-        lines = [f"`{i}.` **{pl['playlist_name']}** ({pl['track_count']} songs)" for i, pl in enumerate(playlists, 1)]
+        lines = [f"> `{i}.` **{pl['playlist_name']}** • `{pl['track_count']} songs`" for i, pl in enumerate(playlists, 1)]
         container = KyroContainer(accent_color=None)
         container.add_section(content=f"**Your Saved Playlists ({len(playlists)})**\n" + "\n".join(lines))
         container.add_separator(divider=True)
-        container.add_text("Use `?playlist play <name>` to start listening.")
+        container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
 
     # 2. ADD TRACK
     elif act == "add":
         if not name:
-            await ctx.send_warning("Please specify a playlist name. Usage: `?playlist add <name>`")
+            await ctx.send_warning("Please specify a playlist name. Usage: `?playlist add <name> [song title]`")
             return
 
         clean_pl_name = name.strip()
@@ -159,12 +176,12 @@ async def handle_playlist(
                 title_to_save = extracted.title
                 author_to_save = extracted.author
                 duration_to_save = extracted.duration
-                url_to_save = extracted.url
+                url_to_save = extracted.uri or extracted.url
         elif current:
             title_to_save = current.title
             author_to_save = current.author
             duration_to_save = current.duration
-            url_to_save = current.url
+            url_to_save = current.uri or current.url
 
         if not title_to_save or not url_to_save:
             await ctx.send_warning("No song specified or currently playing. Usage: `?playlist add <name> <song title>`")
@@ -198,15 +215,84 @@ async def handle_playlist(
         container.add_section(
             content=(
                 f"**Added to Playlist**\n"
-                f"> **Track:** [{title_to_save}]({url_to_save})\n"
+                f"> **Track:** [{title_to_save}]({url_to_save}) by `{author_to_save}`\n"
                 f"> **Playlist:** `{clean_pl_name}`"
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"Use `?playlist play {clean_pl_name}` to play this playlist.")
+        container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
 
-    # 3. PLAY PLAYLIST
+    # 3. REMOVE TRACK FROM PLAYLIST
+    elif act in ("removetrack", "rmtrack", "deltrack", "removesong", "delsong") or (act == "remove" and query):
+        if not name:
+            await ctx.send_warning("Usage: `?playlist removetrack <name> <track # | song title>`")
+            return
+
+        clean_pl_name = name.strip()
+        target_param = (query or "").strip()
+
+        if not target_param:
+            await ctx.send_warning("Please specify which song to remove. Usage: `?playlist removetrack <name> <track # | song title>`")
+            return
+
+        pl_row = await db.fetch_one(
+            "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+            user_id,
+            clean_pl_name,
+        )
+        if not pl_row:
+            await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.")
+            return
+
+        pl_id = pl_row["id"]
+        tracks = await db.fetch_all(
+            "SELECT id, title, author, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
+            pl_id,
+        )
+        if not tracks:
+            await ctx.send_warning(f"Playlist `{clean_pl_name}` is empty.")
+            return
+
+        removed_track = None
+
+        # Case A: Track number passed (e.g. "3" or "#3")
+        clean_num = target_param.lstrip("#")
+        if clean_num.isdigit():
+            idx = int(clean_num)
+            if 1 <= idx <= len(tracks):
+                removed_track = tracks[idx - 1]
+                await db.execute("DELETE FROM user_playlist_tracks WHERE id = $1;", removed_track["id"])
+            else:
+                await ctx.send_warning(f"Invalid song number. Playlist `{clean_pl_name}` has {len(tracks)} song(s).")
+                return
+        else:
+            # Case B: Search track by title
+            matched = await db.fetch_one(
+                "SELECT id, title, author FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) LIKE '%' || LOWER($2) || '%' ORDER BY id ASC LIMIT 1;",
+                pl_id,
+                target_param,
+            )
+            if matched:
+                removed_track = matched
+                await db.execute("DELETE FROM user_playlist_tracks WHERE id = $1;", matched["id"])
+            else:
+                await ctx.send_warning(f"No song matching `{target_param}` found in `{clean_pl_name}`.")
+                return
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"**Removed from Playlist**\n"
+                f"> **Track:** `{removed_track['title']}`\n"
+                f"> **Playlist:** `{clean_pl_name}`"
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text("-# Powered by Kyro Studio")
+        await send_container_response(ctx, container)
+
+    # 4. PLAY PLAYLIST
     elif act == "play":
         if not name:
             await ctx.send_warning("Please specify which playlist to play. Usage: `?playlist play <name>`")
@@ -238,15 +324,16 @@ async def handle_playlist(
         player.home_channel = ctx.channel
         await player.connect_voice(ctx.author.voice.channel)
 
-        # 1. Resolve first track immediately
+        # 1. Resolve first track with fresh query (never uses expired CDN link)
         first_row = tracks[0]
+        first_query = resolve_playlist_track_query(first_row)
         first_track = await NativeExtractor.extract(
-            first_row["url"] or first_row["title"],
+            first_query,
             requester=ctx.author.display_name,
         )
 
         if not first_track:
-            await ctx.send_error("Failed to load tracks from playlist.")
+            await ctx.send_error(f"Failed to load first track `{first_row['title']}`.")
             return
 
         # Start playback
@@ -260,28 +347,31 @@ async def handle_playlist(
             content=(
                 f"**Playing Playlist: `{clean_pl_name}`**\n"
                 f"> **Queued:** `{len(tracks)}` songs\n"
-                f"> **Starting Track:** [{first_track.title}]({first_track.url})"
+                f"> **Starting Track:** [{first_track.title}]({first_track.url}) by `{first_track.author}`"
             )
         )
+        container.add_separator(divider=True)
+        container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
 
-        # 2. Queue remaining tracks in background
+        # 2. Queue remaining tracks in background safely
         if len(tracks) > 1:
             async def _bg_load_playlist(remaining_tracks):
                 for row in remaining_tracks:
                     try:
+                        q = resolve_playlist_track_query(row)
                         t = await NativeExtractor.extract(
-                            row["url"] or row["title"],
+                            q,
                             requester=ctx.author.display_name,
                         )
                         if t:
                             player.queue.append(t)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to load playlist track '{row.get('title')}': {e}")
 
             asyncio.create_task(_bg_load_playlist(tracks[1:]))
 
-    # 4. VIEW PLAYLIST
+    # 5. VIEW PLAYLIST
     elif act == "view":
         if not name:
             await ctx.send_warning("Usage: `?playlist view <name>`")
@@ -305,15 +395,26 @@ async def handle_playlist(
             await ctx.send_warning(f"Playlist `{clean_pl_name}` is empty.")
             return
 
-        lines = [f"`{i}.` [{t['title']}]({t['url']}) `[{t['duration'] // 60:02d}:{t['duration'] % 60:02d}]`" for i, t in enumerate(tracks[:15], 1)]
+        lines = []
+        for i, t in enumerate(tracks[:15], 1):
+            dur_m = (t["duration"] or 0) // 60
+            dur_s = (t["duration"] or 0) % 60
+            dur_str = f"[{dur_m:02d}:{dur_s:02d}]"
+            t_url = t.get("url")
+            link = f"[{t['title']}]({t_url})" if t_url and t_url.startswith("http") else f"`{t['title']}`"
+            author = f" by `{t['author']}`" if t.get("author") else ""
+            lines.append(f"> `{i}.` {link}{author} • `{dur_str}`")
+
         if len(tracks) > 15:
-            lines.append(f"-# ...and {len(tracks) - 15} more tracks")
+            lines.append(f"> -# ...and {len(tracks) - 15} more tracks")
 
         container = KyroContainer(accent_color=None)
         container.add_section(content=f"**Playlist: `{clean_pl_name}` ({len(tracks)} songs)**\n" + "\n".join(lines))
+        container.add_separator(divider=True)
+        container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
 
-    # 5. DELETE PLAYLIST
+    # 6. DELETE PLAYLIST
     elif act in ("delete", "remove"):
         if not name:
             await ctx.send_warning("Usage: `?playlist delete <name>`")
@@ -326,6 +427,10 @@ async def handle_playlist(
             clean_pl_name,
         )
         if deleted > 0:
-            await ctx.send_success(f"Playlist `{clean_pl_name}` has been deleted.")
+            container = KyroContainer(accent_color=None)
+            container.add_section(content=f"**Playlist Deleted**\n> Playlist `{clean_pl_name}` has been completely removed.")
+            container.add_separator(divider=True)
+            container.add_text("-# Powered by Kyro Studio")
+            await send_container_response(ctx, container)
         else:
             await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.")

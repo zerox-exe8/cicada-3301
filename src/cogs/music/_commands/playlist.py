@@ -283,7 +283,6 @@ async def handle_playlist(
         container.add_separator(divider=True)
 
         current_prefix = ctx.prefix or "?"
-        first_pl_name = playlists[0]["playlist_name"] if playlists else "Gym"
 
         container.add_section(
             content=(
@@ -294,20 +293,6 @@ async def handle_playlist(
                 f"> • **Remove Track** • `{current_prefix}playlist removetrack <name> <# | title>`\n"
                 f"> • **Like / Unlike** • `{current_prefix}like` • `{current_prefix}unlike [title | #]`\n"
                 f"> • **Delete** • `{current_prefix}playlist delete <name>`"
-            )
-        )
-        container.add_separator(divider=True)
-
-        container.add_section(
-            content=(
-                "**Practical Examples**\n"
-                f"> • `{current_prefix}playlist add {first_pl_name} Starboy` • Add song to `{first_pl_name}`\n"
-                f"> • `{current_prefix}playlist play {first_pl_name}` • Play your `{first_pl_name}` playlist\n"
-                f"> • `{current_prefix}playlist view {first_pl_name}` • Inspect songs in `{first_pl_name}`\n"
-                f"> • `{current_prefix}playlist removetrack {first_pl_name} 2` • Remove 2nd track from `{first_pl_name}`\n"
-                f"> • `{current_prefix}like` • Save currently playing track to `Favorites`\n"
-                f"> • `{current_prefix}unlike Starboy` • Remove track from `Favorites`\n"
-                f"> • `{current_prefix}unlike Starboy in {first_pl_name}` • Remove track from `{first_pl_name}`"
             )
         )
         container.add_separator(divider=True)

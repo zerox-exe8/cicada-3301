@@ -75,20 +75,27 @@ class BotInfo(commands.Cog):
         gateway_ping = round(self.bot.latency * 1000) if (self.bot.latency and self.bot.latency == self.bot.latency) else 0
         current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
 
-        # 3. Resolve Developer Name
+        # 3. Resolve Developer Name dynamically
         owner_str = "zerox.exe"
-        if self.bot.owner_id:
+        if getattr(self.bot, "owner_id", None):
             owner_obj = self.bot.get_user(self.bot.owner_id)
             if owner_obj:
                 owner_str = owner_obj.name
+        elif getattr(self.bot, "owner_ids", None):
+            owners = [self.bot.get_user(oid) for oid in self.bot.owner_ids]
+            valid_owners = [o.name for o in owners if o]
+            if valid_owners:
+                owner_str = ", ".join(valid_owners)
 
-        # 4. Construct Components V2 Container
-        container = KyroContainer(accent_color=None)
+        # 4. Resolve Bot Identity dynamically
+        bot_name = self.bot.user.name if self.bot.user else Config.BOT_NAME
         bot_avatar = self.bot.user.display_avatar.url if self.bot.user else None
 
+        # 5. Construct Components V2 Container
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### {Config.BOT_NAME} Information\n"
+                f"### {bot_name} Information\n"
                 f"> **Developer** • `{owner_str}`\n"
                 f"> **Prefix** • `{current_prefix}` (Supports No-Prefix)\n"
                 f"> **Ping** • `{gateway_ping}ms` • **Uptime** • `{uptime_str}`"

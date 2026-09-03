@@ -100,6 +100,17 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
     await send_container_response(ctx, container)
 
 
+def format_duration(seconds: int) -> str:
+    """Format seconds into MM:SS or HH:MM:SS."""
+    if not seconds:
+        return "00:00"
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}h {m:02d}m {s:02d}s"
+    return f"{m:02d}:{s:02d}"
+
+
 async def handle_playlist(
     ctx: CustomContext,
     cog: Music,
@@ -109,33 +120,15 @@ async def handle_playlist(
     query: Optional[str] = None,
 ) -> None:
     """Manage custom user playlists: add, removetrack, play, list, view, delete."""
-    if not action or action.lower() in ("help", "guide"):
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "**Music Playlist Operations**\n"
-                "> **list** • `?playlist list`\n"
-                "> **play** • `?playlist play <name>`\n"
-                "> **view** • `?playlist view <name>`\n"
-                "> **add** • `?playlist add <name> [song title]`\n"
-                "> **removetrack** • `?playlist removetrack <name> <track # | song title>`\n"
-                "> **delete** • `?playlist delete <name>`"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text("-# Powered by Kyro Studio")
-        await send_container_response(ctx, container)
-        return
-
-    act = action.lower().strip()
     db = ctx.bot.db
     user_id = ctx.author.id
 
-    # 1. LIST PLAYLISTS
-    if act == "list":
+    # If action is None or 'list' or 'help', display the comprehensive Playlist Hub
+    if not action or action.lower() in ("help", "guide", "list"):
+        # Fetch all user's playlists with track counts and total durations
         playlists = await db.fetch_all(
             """
-            SELECT p.playlist_name, COUNT(t.id) as track_count
+            SELECT p.id, p.playlist_name, COUNT(t.id) as track_count, COALESCE(SUM(t.duration), 0) as total_duration
             FROM user_playlists p
             LEFT JOIN user_playlist_tracks t ON p.id = t.playlist_id
             WHERE p.user_id = $1
@@ -144,16 +137,49 @@ async def handle_playlist(
             """,
             user_id,
         )
-        if not playlists:
-            await ctx.send_warning("You do not have any saved playlists yet. Use `?like` or `?playlist add <name>` to create one.")
-            return
 
-        lines = [f"> `{i}.` **{pl['playlist_name']}** • `{pl['track_count']} songs`" for i, pl in enumerate(playlists, 1)]
+        pl_lines = []
+        if playlists:
+            for i, pl in enumerate(playlists, 1):
+                dur_str = format_duration(int(pl["total_duration"]))
+                pl_lines.append(f"> • **{pl['playlist_name']}** • `{pl['track_count']} songs` • `{dur_str}`")
+        else:
+            pl_lines = [
+                "> • None saved yet\n"
+                ">   Use `?like` while listening to music or `?playlist add <name>` to create one."
+            ]
+
         container = KyroContainer(accent_color=None)
-        container.add_section(content=f"**Your Saved Playlists ({len(playlists)})**\n" + "\n".join(lines))
+        container.add_section(
+            content=(
+                "### Music Playlist Hub\n"
+                "> Personalized high-fidelity collections & lossless audio streaming."
+            )
+        )
+        container.add_separator(divider=True)
+
+        container.add_section(
+            content=(
+                f"**Your Saved Playlists ({len(playlists)})**\n"
+                + "\n".join(pl_lines)
+            )
+        )
+        container.add_separator(divider=True)
+
+        container.add_section(
+            content=(
+                "**Command Quick Guide**\n"
+                "> • **Play** • `?playlist play <name>`\n"
+                "> • **View** • `?playlist view <name>`\n"
+                "> • **Add Track** • `?playlist add <name> [song title]`\n"
+                "> • **Remove Track** • `?playlist removetrack <name> <track # | title>`\n"
+                "> • **Delete** • `?playlist delete <name>`"
+            )
+        )
         container.add_separator(divider=True)
         container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
+        return
 
     # 2. ADD TRACK
     elif act == "add":
@@ -379,39 +405,52 @@ async def handle_playlist(
 
         clean_pl_name = name.strip()
         pl_row = await db.fetch_one(
-            "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+            "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
             user_id,
             clean_pl_name,
         )
         if not pl_row:
-            await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.")
+            await ctx.send_warning(f"Playlist `{clean_pl_name}` not found. Use `?playlist` to see your playlists.")
             return
 
         tracks = await db.fetch_all(
-            "SELECT title, author, duration, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
+            "SELECT id, title, author, duration, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
             pl_row["id"],
         )
         if not tracks:
-            await ctx.send_warning(f"Playlist `{clean_pl_name}` is empty.")
+            await ctx.send_warning(f"Playlist `{clean_pl_name}` is empty. Add songs using `?playlist add {clean_pl_name} [song]`.")
             return
+
+        total_sec = sum(t["duration"] or 0 for t in tracks)
+        total_dur_str = format_duration(total_sec)
 
         lines = []
         for i, t in enumerate(tracks[:15], 1):
-            dur_m = (t["duration"] or 0) // 60
-            dur_s = (t["duration"] or 0) % 60
-            dur_str = f"[{dur_m:02d}:{dur_s:02d}]"
+            dur_str = format_duration(t["duration"] or 0)
             t_url = t.get("url")
             link = f"[{t['title']}]({t_url})" if t_url and t_url.startswith("http") else f"`{t['title']}`"
-            author = f" by `{t['author']}`" if t.get("author") else ""
+            author = f" • {t['author']}" if t.get("author") and t.get("author") != "Official Artist" else ""
             lines.append(f"> `{i}.` {link}{author} • `{dur_str}`")
 
         if len(tracks) > 15:
-            lines.append(f"> -# ...and {len(tracks) - 15} more tracks")
+            lines.append(f"> -# ...and {len(tracks) - 15} more tracks in collection")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content=f"**Playlist: `{clean_pl_name}` ({len(tracks)} songs)**\n" + "\n".join(lines))
+        container.add_section(
+            content=(
+                f"### Playlist: {pl_row['playlist_name']}\n"
+                f"> **Total Songs:** `{len(tracks)}` • **Duration:** `{total_dur_str}`\n"
+                f"> **Curator:** {ctx.author.display_name}"
+            )
+        )
         container.add_separator(divider=True)
-        container.add_text("-# Powered by Kyro Studio")
+        container.add_section(content="\n".join(lines))
+        container.add_separator(divider=True)
+        container.add_text(
+            f"> • **Play Collection:** `?playlist play {pl_row['playlist_name']}`\n"
+            f"> • **Remove Song:** `?playlist removetrack {pl_row['playlist_name']} <#>`\n\n"
+            f"-# Powered by Kyro Studio"
+        )
         await send_container_response(ctx, container)
 
     # 6. DELETE PLAYLIST

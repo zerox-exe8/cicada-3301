@@ -111,31 +111,48 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
 
 
 async def handle_unlike(ctx: CustomContext, cog: Music, *, query: Optional[str] = None) -> None:
-    """Remove a song from user's personal Favorites playlist by title, index, or currently playing track."""
+    """Remove a song from Favorites or specified playlist by title, index, or currently playing track."""
     db = ctx.bot.db
     user_id = ctx.author.id
 
+    target_playlist_name = "Favorites"
+    clean_q = query.strip() if query else ""
+
+    # Support 'in <playlist>' syntax: e.g. ?unlike Faded in Gym
+    if " in " in clean_q.lower():
+        q_part, pl_part = clean_q.rsplit(" in ", 1)
+        check_pl = await db.fetch_one(
+            "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+            user_id,
+            pl_part.strip(),
+        )
+        if check_pl:
+            target_playlist_name = check_pl["playlist_name"]
+            clean_q = q_part.strip()
+
     pl_row = await db.fetch_one(
-        "SELECT id FROM user_playlists WHERE user_id = $1 AND playlist_name = 'Favorites';",
+        "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
         user_id,
+        target_playlist_name,
     )
     if not pl_row:
-        await ctx.send_warning("You do not have a Favorites playlist yet. Use `?like` to add songs.")
+        await ctx.send_warning(f"Playlist `{target_playlist_name}` not found. Use `?playlist` to view your playlists.")
         return
 
     playlist_id = pl_row["id"]
+    display_pl_name = pl_row["playlist_name"]
     tracks = await db.fetch_all(
         "SELECT id, title, author, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
         playlist_id,
     )
     if not tracks:
-        await ctx.send_warning("Your Favorites playlist is currently empty.")
+        await ctx.send_warning(f"Your `{display_pl_name}` playlist is currently empty.")
         return
 
     target_track = None
 
     # Case 1: Song title or track number provided
-    if query and query.strip():
+    if clean_q:
         clean_q = query.strip()
         clean_num = clean_q.lstrip("#")
         if clean_num.isdigit():
@@ -155,7 +172,7 @@ async def handle_unlike(ctx: CustomContext, cog: Music, *, query: Optional[str] 
             if matched:
                 target_track = matched
             else:
-                await ctx.send_warning(f"No song matching `{clean_q}` found in your Favorites.")
+                await ctx.send_warning(f"No song matching `{clean_q}` found in `{display_pl_name}`.")
                 return
 
     # Case 2: No query provided, resolve currently playing song in voice
@@ -177,21 +194,21 @@ async def handle_unlike(ctx: CustomContext, cog: Music, *, query: Optional[str] 
             if matched:
                 target_track = matched
             else:
-                await ctx.send_warning(f"Currently playing song `{cur_title}` is not in your Favorites.\n> Specify a title: `?unlike <song title>`")
+                await ctx.send_warning(f"Currently playing song `{cur_title}` is not in `{display_pl_name}`.\n> Specify a title: `?unlike <song title>`")
                 return
         else:
             await ctx.send_warning("Specify which song to remove. Usage: `?unlike <song title | #number>`")
             return
 
-    # Delete track from Favorites
+    # Delete track from playlist
     await db.execute("DELETE FROM user_playlist_tracks WHERE id = $1;", target_track["id"])
 
     container = KyroContainer(accent_color=None)
     container.add_section(
         content=(
-            f"**Removed from Favorites**\n"
+            f"**Removed from Playlist**\n"
             f"> **Track:** `{target_track['title']}`\n"
-            f"> **Playlist:** `Favorites`"
+            f"> **Playlist:** `{display_pl_name}`"
         )
     )
     container.add_separator(divider=True)

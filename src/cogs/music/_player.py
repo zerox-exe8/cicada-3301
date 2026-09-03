@@ -79,18 +79,23 @@ def resolve_ffmpeg_executable() -> str:
 
 class DirectFFmpegStream(discord.AudioSource):
     """
-    Direct, Rock-Solid FFmpeg Audio Source for Discord Voice.
-    Accumulates exact 3840-byte PCM frames, preventing partial-read premature EOF drops,
-    with auto-reconnect, dynamic real-time C-level volume scaling, and seamless jitter buffering.
+    High-Performance, Jitter-Buffered FFmpeg Audio Source for Discord Voice.
+    Uses a dedicated daemon background worker to decouple network pipe I/O
+    from Discord's real-time 20ms audio transmission loop.
+    Eliminates packet rushing, stuttering, cutting, and premature EOF.
     """
     FRAME_SIZE = 3840  # 20ms of 48000Hz 16-bit stereo PCM
+    BUFFER_SIZE = 150  # ~3 seconds of pre-buffered RAM audio frames
 
     def __init__(self, stream_url: str, executable: str, volume: float = 1.0) -> None:
         self.stream_url = stream_url
         self.executable = executable
         self._volume = max(0.0, min(volume, 2.0))
         self._process: Optional[subprocess.Popen] = None
-        self._buffer = bytearray()
+        self._queue: queue.Queue[Optional[bytes]] = queue.Queue(maxsize=self.BUFFER_SIZE)
+        self._stopped = threading.Event()
+        self._reader_thread: Optional[threading.Thread] = None
+        self._prebuffered = False
         self._start_process()
 
     @property
@@ -106,8 +111,11 @@ class DirectFFmpegStream(discord.AudioSource):
             self.executable,
             "-reconnect", "1",
             "-reconnect_streamed", "1",
+            "-reconnect_at_eof", "1",
             "-reconnect_delay_max", "5",
             "-nostdin",
+            "-probesize", "32768",
+            "-analyzeduration", "0",
             "-i", self.stream_url,
             "-f", "s16le",
             "-ar", "48000",
@@ -120,58 +128,108 @@ class DirectFFmpegStream(discord.AudioSource):
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            bufsize=1024 * 1024,
+            bufsize=512 * 1024,
         )
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop,
+            daemon=True,
+            name="FFmpeg-Audio-Reader",
+        )
+        self._reader_thread.start()
 
-    def read(self) -> bytes:
-        if not self._process or not self._process.stdout:
-            return b""
+    def _reader_loop(self) -> None:
+        """Continuously pull raw PCM bytes from FFmpeg pipe and enqueue exact frames."""
+        buf = bytearray()
+        stdout = self._process.stdout if self._process else None
+        if not stdout:
+            self._queue.put(None)
+            return
 
-        # Accumulate until at least 3840 bytes are ready or true stream EOF
-        while len(self._buffer) < self.FRAME_SIZE:
+        while not self._stopped.is_set():
             try:
-                chunk = self._process.stdout.read(self.FRAME_SIZE - len(self._buffer))
+                chunk = stdout.read(self.FRAME_SIZE)
                 if not chunk:
-                    if self._process.poll() is not None and self._process.returncode != 0:
-                        err = self._process.stderr.read().decode("utf-8", errors="ignore") if self._process.stderr else ""
-                        logger.error(f"FFmpeg stream exited with code {self._process.returncode}: {err}")
+                    # True EOF from FFmpeg
                     break
-                self._buffer.extend(chunk)
+                buf.extend(chunk)
+                while len(buf) >= self.FRAME_SIZE and not self._stopped.is_set():
+                    frame = bytes(buf[:self.FRAME_SIZE])
+                    del buf[:self.FRAME_SIZE]
+                    # Block with timeout so we can exit promptly if stopped
+                    while not self._stopped.is_set():
+                        try:
+                            self._queue.put(frame, timeout=0.05)
+                            break
+                        except queue.Full:
+                            continue
             except Exception as e:
-                logger.debug(f"FFmpeg stdout read notice: {e}")
+                logger.debug(f"FFmpeg reader pipe notice: {e}")
                 break
 
-        if len(self._buffer) >= self.FRAME_SIZE:
-            frame = bytes(self._buffer[:self.FRAME_SIZE])
-            del self._buffer[:self.FRAME_SIZE]
-            if self._volume != 1.0:
-                try:
-                    import audioop
-                    frame = audioop.mul(frame, 2, self._volume)
-                except Exception:
-                    pass
-            return frame
-        elif len(self._buffer) > 0:
-            frame = bytes(self._buffer).ljust(self.FRAME_SIZE, b"\x00")
-            self._buffer.clear()
-            if self._volume != 1.0:
-                try:
-                    import audioop
-                    frame = audioop.mul(frame, 2, self._volume)
-                except Exception:
-                    pass
-            return frame
-        else:
+        # Flush remaining bytes padded to frame size
+        if len(buf) > 0 and not self._stopped.is_set():
+            padded = bytes(buf).ljust(self.FRAME_SIZE, b"\x00")
+            try:
+                self._queue.put(padded, timeout=0.5)
+            except Exception:
+                pass
+
+        # Sentinel indicating end of stream
+        try:
+            self._queue.put(None, timeout=0.5)
+        except Exception:
+            pass
+
+    def read(self) -> bytes:
+        if self._stopped.is_set():
             return b""
 
+        # Pre-buffer 8 frames (~160ms) on startup to prevent initial jitter/rushing
+        if not self._prebuffered:
+            waits = 0
+            while self._queue.qsize() < 8 and waits < 30 and not self._stopped.is_set():
+                if self._process and self._process.poll() is not None and self._queue.empty():
+                    break
+                time.sleep(0.01)
+                waits += 1
+            self._prebuffered = True
+
+        try:
+            frame = self._queue.get(timeout=0.04)
+        except queue.Empty:
+            # If process is still running but network temporarily stalled,
+            # return silent frame so Discord's internal 50 packets/sec voice pacing stays locked!
+            if self._process and self._process.poll() is None:
+                return b"\x00" * self.FRAME_SIZE
+            return b""
+
+        if frame is None:
+            # Sentinel reached: End of song
+            return b""
+
+        if self._volume != 1.0:
+            try:
+                import audioop
+                frame = audioop.mul(frame, 2, self._volume)
+            except Exception:
+                pass
+
+        return frame
+
     def cleanup(self) -> None:
+        self._stopped.set()
         if self._process:
             try:
                 self._process.kill()
             except Exception:
                 pass
             self._process = None
-        self._buffer.clear()
+        # Drain queue
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except Exception:
+                break
 
 
 def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:

@@ -95,6 +95,71 @@ PHONETIC_TYPO_MAP = {
     "jubin": "jubin nautiyal",
 }
 
+# Modifiers indicating non-original / alternate versions of songs
+UNWANTED_VERSION_KEYWORDS = [
+    "lofi", "lo-fi", "slowed", "reverb", "remix", "mashup",
+    "reprise", "acoustic", "unplugged", "cover", "female version",
+    "male version", "karaoke", "reply", "status", "ringtone",
+    "dholki", "bass boosted", "8d", "instrumental", "tribute",
+    "orchestral", "chillhop", "nightcore", "sped up", "speed up",
+    "dance mix", "dj mix", "club mix", "flip", "mix", "soundtrack version",
+    "piano version", "live version", "parody", "originally performed",
+    "originally by", "backing track", "backing business", "backing", "8-bit",
+    "shinchan", "amateur", "re-recorded", "tribute to"
+]
+
+
+def score_candidate(
+    title: str,
+    subtitle_or_author: str,
+    query: str,
+    views: int = 0,
+    duration: int = 0,
+) -> float:
+    """
+    Score candidate song match to strictly prioritize the original official version.
+    Unless the user explicitly requested an alternate version (e.g. 'lofi', 'remix'),
+    candidates with modifier tags in title or artist are heavily penalized.
+    """
+    c_title = (title or "").lower()
+    c_author = (subtitle_or_author or "").lower()
+    q_lower = query.lower()
+
+    user_requested = [kw for kw in UNWANTED_VERSION_KEYWORDS if kw in q_lower]
+
+    score = 0.0
+    q_tokens = [w for w in re.findall(r"\w+", q_lower) if len(w) > 1]
+    title_tokens = [w for w in re.findall(r"\w+", c_title) if len(w) > 1]
+
+    matched = sum(1 for tok in q_tokens if tok in title_tokens or tok in c_author)
+    if q_tokens:
+        score += (matched / len(q_tokens)) * 60.0
+
+    clean_c_title = re.sub(r"\(.*?\)|\[.*?\]", "", c_title).strip()
+    if q_lower == clean_c_title or clean_c_title.startswith(q_lower):
+        score += 30.0
+
+    # Penalize unwanted modifier keywords found in title or artist/subtitle
+    for kw in UNWANTED_VERSION_KEYWORDS:
+        if (kw in c_title or kw in c_author) and kw not in user_requested:
+            score -= 100.0
+
+    if views > 10_000_000:
+        score += 40.0
+    elif views > 1_000_000:
+        score += 20.0
+
+    # Standard song length is 120s - 600s; penalize short snippets (< 120s)
+    if 120 <= duration <= 600:
+        score += 15.0
+    elif 0 < duration < 120:
+        score -= 40.0
+    elif duration > 1800:
+        score -= 100.0
+
+    return score
+
+
 # In-memory search cache with 10-minute TTL for instant repeat queries
 _SEARCH_CACHE: Dict[str, Tuple[float, Track]] = {}
 _CACHE_TTL = 600.0  # 10 minutes
@@ -219,10 +284,10 @@ class NativeExtractor:
             "Accept": "application/json, text/plain, */*",
         }
 
-        # Step 1: Query search.getResults
+        # Step 1: Query search.getResults with top 10 candidates
         search_url = (
             f"https://www.jiosaavn.com/api.php?"
-            f"__call=search.getResults&_format=json&p=1&n=5&q={encoded_q}"
+            f"__call=search.getResults&_format=json&p=1&n=10&q={encoded_q}"
             f"&_marker=0&api_version=4&ctx=web6dot0"
         )
 
@@ -234,39 +299,55 @@ class NativeExtractor:
                         data = json.loads(text)
                         results = data.get("results", [])
                         if results:
-                            song = results[0]
-                            more_info = song.get("more_info", {})
-                            has_320 = str(more_info.get("320kbps", "")).lower() == "true"
-                            enc_url = more_info.get("encrypted_media_url")
-                            if enc_url:
-                                dec_stream = cls._decrypt_saavn_url(enc_url, has_320kbps=has_320)
-                                if dec_stream:
-                                    title = clean_track_title(song.get("title") or song.get("song") or query)
-                                    raw_art = more_info.get("artistMap", {}).get("primary_artists", [])
-                                    if raw_art:
-                                        author = ", ".join([a.get("name", "") for a in raw_art if a.get("name")])
-                                    else:
-                                        author = song.get("subtitle") or "Official Artist"
+                            scored = []
+                            for song in results:
+                                s_title = song.get("title") or song.get("song") or ""
+                                s_sub = song.get("subtitle") or ""
+                                m_info = song.get("more_info", {})
+                                dur = int(m_info.get("duration") or song.get("duration") or 0)
+                                sc = score_candidate(s_title, s_sub, query, duration=dur)
+                                scored.append((sc, song))
 
-                                    raw_image = song.get("image") or ""
-                                    thumbnail = (
-                                        raw_image.replace("150x150", "500x500").replace("50x50", "500x500")
-                                        if raw_image
-                                        else "https://cdn.discordapp.com/embed/avatars/0.png"
-                                    )
-                                    duration = int(more_info.get("duration") or song.get("duration") or 0)
-                                    webpage = song.get("perma_url") or "https://www.jiosaavn.com"
+                            scored.sort(key=lambda x: x[0], reverse=True)
+                            has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
 
-                                    return Track(
-                                        title=title,
-                                        author=author,
-                                        url=webpage,
-                                        stream_url=dec_stream,
-                                        duration=duration,
-                                        thumbnail=thumbnail,
-                                        requester=requester,
-                                        is_autoplay=is_autoplay,
-                                    )
+                            for sc, song in scored:
+                                # Skip penalized versions unless user explicitly requested that version
+                                if sc < 0 and not has_user_keyword:
+                                    continue
+
+                                more_info = song.get("more_info", {})
+                                has_320 = str(more_info.get("320kbps", "")).lower() == "true"
+                                enc_url = more_info.get("encrypted_media_url")
+                                if enc_url:
+                                    dec_stream = cls._decrypt_saavn_url(enc_url, has_320kbps=has_320)
+                                    if dec_stream:
+                                        title = clean_track_title(song.get("title") or song.get("song") or query)
+                                        raw_art = more_info.get("artistMap", {}).get("primary_artists", [])
+                                        if raw_art:
+                                            author = ", ".join([a.get("name", "") for a in raw_art if a.get("name")])
+                                        else:
+                                            author = song.get("subtitle") or "Official Artist"
+
+                                        raw_image = song.get("image") or ""
+                                        thumbnail = (
+                                            raw_image.replace("150x150", "500x500").replace("50x50", "500x500")
+                                            if raw_image
+                                            else "https://cdn.discordapp.com/embed/avatars/0.png"
+                                        )
+                                        duration = int(more_info.get("duration") or song.get("duration") or 0)
+                                        webpage = song.get("perma_url") or "https://www.jiosaavn.com"
+
+                                        return Track(
+                                            title=title,
+                                            author=author,
+                                            url=webpage,
+                                            stream_url=dec_stream,
+                                            duration=duration,
+                                            thumbnail=thumbnail,
+                                            requester=requester,
+                                            is_autoplay=is_autoplay,
+                                        )
 
                 # Step 2: Fallback to autocomplete.get + song.getDetails
                 auto_url = (
@@ -279,43 +360,53 @@ class NativeExtractor:
                         data2 = json.loads(text2)
                         songs2 = data2.get("songs", {}).get("data", [])
                         if songs2:
-                            first_song = songs2[0]
-                            pid = first_song.get("id")
-                            if pid:
-                                det_url = (
-                                    f"https://www.jiosaavn.com/api.php?"
-                                    f"__call=song.getDetails&cc=in&_marker=0%3F_marker%3D0&_format=json&pids={pid}"
-                                )
-                                async with session.get(det_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp3:
-                                    if resp3.status == 200:
-                                        text3 = await resp3.text()
-                                        det_data = json.loads(text3)
-                                        sinfo = det_data.get(pid, {})
-                                        enc_url = sinfo.get("encrypted_media_url")
-                                        if enc_url:
-                                            dec_stream = cls._decrypt_saavn_url(enc_url)
-                                            if dec_stream:
-                                                title = clean_track_title(first_song.get("title") or query)
-                                                author = first_song.get("description") or first_song.get("more_info", {}).get("primary_artists") or "Official Artist"
-                                                raw_image = first_song.get("image") or ""
-                                                thumbnail = (
-                                                    raw_image.replace("150x150", "500x500").replace("50x50", "500x500")
-                                                    if raw_image
-                                                    else "https://cdn.discordapp.com/embed/avatars/0.png"
-                                                )
-                                                duration = int(sinfo.get("duration") or 0)
-                                                webpage = first_song.get("url") or "https://www.jiosaavn.com"
+                            scored2 = []
+                            for s in songs2:
+                                sc2 = score_candidate(s.get("title") or "", s.get("description") or "", query)
+                                scored2.append((sc2, s))
 
-                                                return Track(
-                                                    title=title,
-                                                    author=author,
-                                                    url=webpage,
-                                                    stream_url=dec_stream,
-                                                    duration=duration,
-                                                    thumbnail=thumbnail,
-                                                    requester=requester,
-                                                    is_autoplay=is_autoplay,
-                                                )
+                            scored2.sort(key=lambda x: x[0], reverse=True)
+                            has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
+
+                            for sc2, first_song in scored2:
+                                if sc2 < 0 and not has_user_keyword:
+                                    continue
+                                pid = first_song.get("id")
+                                if pid:
+                                    det_url = (
+                                        f"https://www.jiosaavn.com/api.php?"
+                                        f"__call=song.getDetails&cc=in&_marker=0%3F_marker%3D0&_format=json&pids={pid}"
+                                    )
+                                    async with session.get(det_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp3:
+                                        if resp3.status == 200:
+                                            text3 = await resp3.text()
+                                            det_data = json.loads(text3)
+                                            sinfo = det_data.get(pid, {})
+                                            enc_url = sinfo.get("encrypted_media_url")
+                                            if enc_url:
+                                                dec_stream = cls._decrypt_saavn_url(enc_url)
+                                                if dec_stream:
+                                                    title = clean_track_title(first_song.get("title") or query)
+                                                    author = first_song.get("description") or first_song.get("more_info", {}).get("primary_artists") or "Official Artist"
+                                                    raw_image = first_song.get("image") or ""
+                                                    thumbnail = (
+                                                        raw_image.replace("150x150", "500x500").replace("50x50", "500x500")
+                                                        if raw_image
+                                                        else "https://cdn.discordapp.com/embed/avatars/0.png"
+                                                    )
+                                                    duration = int(sinfo.get("duration") or 0)
+                                                    webpage = first_song.get("url") or "https://www.jiosaavn.com"
+
+                                                    return Track(
+                                                        title=title,
+                                                        author=author,
+                                                        url=webpage,
+                                                        stream_url=dec_stream,
+                                                        duration=duration,
+                                                        thumbnail=thumbnail,
+                                                        requester=requester,
+                                                        is_autoplay=is_autoplay,
+                                                    )
         except Exception as e:
             logger.debug(f"JioSaavn search notice for '{query}': {e}")
 
@@ -469,10 +560,13 @@ class NativeExtractor:
         requester: str,
         is_autoplay: bool,
     ) -> Optional[Track]:
-        """YouTube search fallback for rare tracks."""
+        """YouTube search fallback with smart candidate ranking and anti-remix filter."""
         is_url = raw_query.startswith(("http://", "https://"))
-        target = raw_query if is_url else f"ytsearch1:{raw_query}"
-        entry = cls._sync_yt_dlp_extract(target)
+        if is_url:
+            entry = cls._sync_yt_dlp_extract(raw_query)
+        else:
+            entry = cls._sync_yt_dlp_smart_search(raw_query)
+
         if not entry or not entry.get("url"):
             return None
 
@@ -493,6 +587,49 @@ class NativeExtractor:
             requester=requester,
             is_autoplay=is_autoplay,
         )
+
+    @classmethod
+    def _sync_yt_dlp_smart_search(cls, query: str) -> Optional[Dict[str, Any]]:
+        """Search top 5 YouTube entries, score them to avoid remixes/lofi, and extract the winning stream."""
+        ydl_flat = {
+            "quiet": True,
+            "skip_download": True,
+            "extract_flat": True,
+            "ignoreerrors": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios"],
+                }
+            },
+        }
+        with yt_dlp.YoutubeDL(ydl_flat) as ydl:
+            try:
+                res = ydl.extract_info(f"ytsearch5:{query}", download=False)
+                entries = (res.get("entries") or []) if res else []
+                scored = []
+                for e in entries:
+                    if not e:
+                        continue
+                    sc = score_candidate(
+                        e.get("title") or "",
+                        e.get("uploader") or "",
+                        query,
+                        views=int(e.get("view_count") or 0),
+                        duration=int(e.get("duration") or 0),
+                    )
+                    scored.append((sc, e))
+
+                if not scored:
+                    return None
+
+                scored.sort(key=lambda x: x[0], reverse=True)
+                winner = scored[0][1]
+                vid_id = winner.get("id")
+                winner_url = winner.get("url") or f"https://www.youtube.com/watch?v={vid_id}"
+                return cls._sync_yt_dlp_extract(winner_url)
+            except Exception as e:
+                logger.debug(f"YouTube smart search notice for '{query}': {e}")
+                return None
 
     @staticmethod
     def _sync_yt_dlp_extract(target: str) -> Optional[Dict[str, Any]]:

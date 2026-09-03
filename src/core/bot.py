@@ -88,6 +88,7 @@ class KyroBot(commands.Bot):
         self.ticket_mgr: TicketManager = TicketManager(self.db)
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
         self.no_prefix_users: set[int] = set()
+        self.custom_status: str | None = None
 
         # Attach Global Command Guard
         self.add_check(self._global_command_check)
@@ -181,6 +182,15 @@ class KyroBot(commands.Bot):
         except Exception as e:
             logger.debug(f"Notice loading No-Prefix users: {e}")
 
+        # Load persistent custom bot status into memory
+        try:
+            status_row = await self.db.fetch_one("SELECT value FROM system_state WHERE key = 'bot_status';")
+            if status_row and status_row.get("value"):
+                self.custom_status = status_row["value"]
+                logger.info(f"Loaded persistent custom bot status: {self.custom_status}")
+        except Exception as e:
+            logger.debug(f"Notice loading custom status: {e}")
+
         # 4. Load Error Handler
         await self.load_extension("src.errors.handler")
 
@@ -223,11 +233,10 @@ class KyroBot(commands.Bot):
     async def _rotate_presence(self) -> None:
         """Maintain persistent bot presence and DND status."""
         try:
+            status_text = self.custom_status or f"Listening to {Config.DEFAULT_PREFIX}help"
             await self.change_presence(
                 status=discord.Status.dnd,
-                activity=discord.CustomActivity(
-                    name=f"Listening to {Config.DEFAULT_PREFIX}help",
-                ),
+                activity=discord.CustomActivity(name=status_text),
             )
         except Exception:
             pass
@@ -255,18 +264,15 @@ class KyroBot(commands.Bot):
         except Exception as e:
             logger.debug(f"Notice caching application info: {e}")
 
-        # Immediately lock presence to DND
+        # Immediately lock presence to DND with persistent custom status
         try:
+            status_text = self.custom_status or f"Listening to {Config.DEFAULT_PREFIX}help"
             await self.change_presence(
                 status=discord.Status.dnd,
-                activity=discord.CustomActivity(
-                    name=f"Listening to {Config.DEFAULT_PREFIX}help",
-                ),
+                activity=discord.CustomActivity(name=status_text),
             )
-        except Exception:
-            pass
-
-        # Start rotating DND status loop
+        except Exception as e:
+            logger.warning(f"Could not enforce DND presence: {e}")
         if not self._rotate_presence.is_running():
             self._rotate_presence.start()
 

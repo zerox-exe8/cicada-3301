@@ -279,17 +279,30 @@ class BotEditView(discord.ui.View):
             await send_container_response(interaction.channel, cancel_card)
             return
 
+        is_reset = text_val.lower() in ("reset", "default", "none")
+        target_text = f"Listening to {Config.DEFAULT_PREFIX}help" if is_reset else text_val
+
         try:
+            self.bot.custom_status = None if is_reset else text_val
+            if is_reset:
+                await self.bot.db.execute("DELETE FROM system_state WHERE key = 'bot_status';")
+            else:
+                await self.bot.db.execute(
+                    "INSERT INTO system_state (key, value) VALUES ('bot_status', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;",
+                    text_val,
+                )
+
             await self.bot.change_presence(
                 status=discord.Status.dnd,
-                activity=discord.CustomActivity(name=text_val),
+                activity=discord.CustomActivity(name=target_text),
             )
             success_card = KyroContainer(accent_color=None)
             success_card.add_section(
                 content=(
                     f"**Bot Activity Status Updated**\n"
-                    f"> **Activity:** `{text_val}`\n"
-                    f"> **Status:** `Do Not Disturb (DND)`"
+                    f"> **Activity:** `{target_text}`\n"
+                    f"> **Mode:** `Do Not Disturb (DND)`\n"
+                    f"> **Persistence:** `Active & Saved to Database`"
                 )
             )
             success_card.add_separator(divider=True)
@@ -464,19 +477,34 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
     async def edit_status(self, ctx: CustomContext, *, new_status: str) -> None:
         """Update bot presence status text."""
         clean_status = new_status.strip()
+        is_reset = clean_status.lower() in ("reset", "default", "none")
+        target_text = f"Listening to {Config.DEFAULT_PREFIX}help" if is_reset else clean_status
+
         try:
+            self.bot.custom_status = None if is_reset else clean_status
+            if is_reset:
+                await self.bot.db.execute("DELETE FROM system_state WHERE key = 'bot_status';")
+            else:
+                await self.bot.db.execute(
+                    "INSERT INTO system_state (key, value) VALUES ('bot_status', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;",
+                    clean_status,
+                )
+
             await self.bot.change_presence(
                 status=discord.Status.dnd,
-                activity=discord.CustomActivity(name=clean_status),
+                activity=discord.CustomActivity(name=target_text),
             )
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
                     f"**Bot Activity Status Updated**\n"
-                    f"> **Activity:** `{clean_status}`\n"
-                    f"> **Status:** `Do Not Disturb (DND)`"
+                    f"> **Activity:** `{target_text}`\n"
+                    f"> **Mode:** `Do Not Disturb (DND)`\n"
+                    f"> **Persistence:** `Active & Saved to Database`"
                 )
             )
+            container.add_separator(divider=True)
+            container.add_text("-# Powered by Kyro Studio")
             await send_container_response(ctx, container)
         except Exception as e:
             container = KyroContainer(accent_color=None)

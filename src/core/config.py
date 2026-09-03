@@ -85,7 +85,7 @@ class Config:
     
     # Bot Branding & Official Links
     BOT_NAME: str = "Kyro"
-    FOOTER_TEXT: str = "◈ KYRO • Autonomous Studio System"
+    FOOTER_TEXT: str = "Powered by Kyro Studio"
     INVITE_URL: str = "https://discord.com/oauth2/authorize?client_id=1544289369907658853&permissions=8&integration_type=0&scope=applications.commands+bot"
     SUPPORT_URL: str = "https://discord.gg/kBKnvBVCj7"
 

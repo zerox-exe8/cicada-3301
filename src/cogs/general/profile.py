@@ -64,23 +64,7 @@ class Profile(commands.Cog):
         except Exception:
             pass
 
-        # 3. Economy & Capital Metrics
-        level = 1
-        xp = 0
-        balance = 0
-        try:
-            econ_row = await self.bot.db.fetch_one(
-                "SELECT balance, bank, level, xp FROM user_profiles WHERE user_id = $1;",
-                target_id,
-            )
-            if econ_row:
-                level = econ_row["level"] or 1
-                xp = econ_row["xp"] or 0
-                balance = (econ_row["balance"] or 0) + (econ_row["bank"] or 0)
-        except Exception:
-            pass
-
-        # 4. Music Telemetry
+        # 3. Music Telemetry (Saved Playlists)
         playlist_count = 0
         try:
             pl_rows = await self.bot.db.fetch_all(
@@ -92,8 +76,36 @@ class Profile(commands.Cog):
         except Exception:
             pass
 
-        # 5. Registration timestamp
-        created_str = target.created_at.strftime("%d %b %Y")
+        # 4. Live Audio Detection
+        live_audio_title: str | None = None
+        live_audio_url: str | None = None
+        live_audio_vc: str | None = None
+
+        try:
+            music_cog = self.bot.get_cog("Music")
+            if music_cog and hasattr(music_cog, "controller"):
+                # First check current guild player
+                curr_player = music_cog.controller.get_player(ctx.guild.id) if ctx.guild else None
+                if curr_player and curr_player.is_playing and curr_player.current:
+                    target_member = ctx.guild.get_member(target_id) if ctx.guild else None
+                    if (target_member and target_member.voice and target_member.voice.channel == curr_player.voice_channel) or (curr_player.current.requester_id == target_id):
+                        live_audio_title = curr_player.current.title
+                        live_audio_url = curr_player.current.uri
+                        live_audio_vc = curr_player.voice_channel.name if curr_player.voice_channel else "Voice Channel"
+
+                # If not found in current guild, search active players across all guilds
+                if not live_audio_title:
+                    for p in music_cog.controller.players.values():
+                        if p and p.is_playing and p.current:
+                            guild_member = p.guild.get_member(target_id)
+                            if (guild_member and guild_member.voice and guild_member.voice.channel == p.voice_channel) or (p.current.requester_id == target_id):
+                                live_audio_title = p.current.title
+                                live_audio_url = p.current.uri
+                                live_audio_vc = p.voice_channel.name if p.voice_channel else "Voice Channel"
+                                break
+        except Exception:
+            pass
+
         avatar_url = target.display_avatar.url if target.display_avatar else None
 
         # Build Clean Components V2 Card
@@ -110,12 +122,21 @@ class Profile(commands.Cog):
 
         container.add_separator(divider=True)
 
+        if live_audio_title:
+            link_str = f"[{live_audio_title}]({live_audio_url})" if live_audio_url else f"`{live_audio_title}`"
+            audio_lines = (
+                f"> **Playlists** • `{playlist_count} Repositories`\n"
+                f"> **Live Audio** • {link_str}\n"
+                f"> **Channel** • `{live_audio_vc}` • `320kbps Studio Master`\n\n"
+            )
+        else:
+            audio_lines = (
+                f"> **Playlists** • `{playlist_count} Repositories`\n"
+                f"> **Live Audio** • `Idle (Not Listening)`\n\n"
+            )
+
         container.add_text(
-            f"> **Level** • `{level}` ({xp:,} XP)\n"
-            f"> **Balance** • `{balance:,} Credits`\n"
-            f"> **Playlists** • `{playlist_count} Repositories`\n"
-            f"> **Joined Discord** • `{created_str}`\n\n"
-            f"-# Kyro Network Identity Matrix"
+            audio_lines + "-# Powered by Kyro Studio"
         )
 
         await send_container_response(ctx, container)

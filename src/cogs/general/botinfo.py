@@ -102,7 +102,7 @@ class BotInfo(commands.Cog):
             f"> **Servers** • `{total_guilds:,} Guilds`\n"
             f"> **Users** • `{total_members:,} Members`\n"
             f"> **Audio Engine** • `320kbps Studio Master`\n\n"
-            f"-# Kyro Core Protocol • High-Performance System"
+            f"-# Powered by Kyro Studio"
         )
 
         view = BotInfoView()

@@ -43,7 +43,8 @@ class GuildsCog(commands.Cog, name="Developer-Guilds"):
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Total Network Entities: {total_members:,} | Latency: {round(self.bot.latency * 1000)}ms")
+        lat = round(self.bot.latency * 1000) if (self.bot.latency and self.bot.latency == self.bot.latency) else 0
+        container.add_text(f"-# Total Network Entities: {total_members:,} | Latency: {lat}ms")
         await send_container_response(ctx, container)
 
 

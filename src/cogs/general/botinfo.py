@@ -72,7 +72,7 @@ class BotInfo(commands.Cog):
         # 2. Network Metrics
         total_guilds = len(self.bot.guilds)
         total_members = sum(g.member_count or 0 for g in self.bot.guilds)
-        gateway_ping = round(self.bot.latency * 1000) if self.bot.latency else 0
+        gateway_ping = round(self.bot.latency * 1000) if (self.bot.latency and self.bot.latency == self.bot.latency) else 0
         current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
 
         # 3. Resolve Developer Name

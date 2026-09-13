@@ -32,3 +32,29 @@ class Track:
         m = self.duration // 60
         s = self.duration % 60
         return f"{m:02d}:{s:02d}"
+
+
+@dataclass
+class PlaylistTrackItem:
+    """Represents an item in an external playlist before stream resolution."""
+    title: str
+    author: str
+    query: str
+    duration: int = 0
+    url: Optional[str] = None
+
+
+@dataclass
+class PlaylistResult:
+    """Represents a loaded external playlist collection."""
+    title: str
+    author: str
+    url: str
+    tracks: list[PlaylistTrackItem]
+    thumbnail: Optional[str] = None
+    requester: str = "DJ / AutoPlay"
+    requester_id: Optional[int] = None
+
+    @property
+    def track_count(self) -> int:
+        return len(self.tracks)

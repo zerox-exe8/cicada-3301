@@ -23,7 +23,7 @@ import aiohttp
 import pyDes
 import yt_dlp
 
-from src.cogs.music._models import Track
+from src.cogs.music._models import Track, PlaylistResult, PlaylistTrackItem
 
 logger = logging.getLogger("Kyro.Music.Extractor")
 
@@ -222,6 +222,34 @@ def parse_and_clean_query(raw_query: str) -> str:
 
     core = re.sub(r"\s+", " ", core).strip()
     return core if core else cleaned
+
+
+def is_playlist_url(raw_url: str) -> bool:
+    """Detect if a query/url is an external playlist or album link."""
+    if not raw_url or not isinstance(raw_url, str):
+        return False
+    u = raw_url.strip()
+    if u.startswith("<") and u.endswith(">"):
+        u = u[1:-1].strip()
+    u_low = u.lower()
+
+    # YouTube Playlists
+    if any(yt in u_low for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
+        if "list=" in u_low and not ("list=rd" in u_low and "v=" in u_low):
+            return True
+        if "/playlist" in u_low:
+            return True
+
+    # Spotify Playlists & Albums
+    if any(sp in u_low for sp in ("spotify.com/", "spotify.link/")):
+        if any(sec in u_low for sec in ("/playlist/", "/album/")):
+            return True
+
+    # SoundCloud Sets
+    if "soundcloud.com/" in u_low and "/sets/" in u_low:
+        return True
+
+    return False
 
 
 class NativeExtractor:
@@ -871,3 +899,181 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"YouTube title extract error: {e}")
         return None
+
+    @classmethod
+    async def extract_playlist(
+        cls,
+        url: str,
+        requester: str = "DJ / AutoPlay",
+    ) -> Optional[PlaylistResult]:
+        """Unified playlist extraction for Spotify, YouTube, and SoundCloud."""
+        clean_u = url.strip()
+        if clean_u.startswith("<") and clean_u.endswith(">"):
+            clean_u = clean_u[1:-1].strip()
+
+        # 1. Spotify Playlist or Album
+        if "spotify.com/" in clean_u or "spotify.link/" in clean_u:
+            res = await cls._extract_spotify_playlist(clean_u, requester=requester)
+            if res:
+                return res
+
+        # 2. YouTube Playlist
+        if any(d in clean_u for d in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
+            res = await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
+            if res:
+                return res
+
+        # 3. SoundCloud / Generic Fallback via yt-dlp
+        return await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
+
+    @classmethod
+    async def _extract_spotify_playlist(
+        cls,
+        url: str,
+        requester: str = "DJ / AutoPlay",
+    ) -> Optional[PlaylistResult]:
+        """Extract all tracks from a Spotify playlist or album via embed data."""
+        m = re.search(r"spotify\.com/(?:intl-[a-zA-Z\-]+/)?(playlist|album)/([a-zA-Z0-9]+)", url)
+        if not m:
+            return None
+        entity_type, entity_id = m.group(1), m.group(2)
+        embed_url = f"https://open.spotify.com/embed/{entity_type}/{entity_id}"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(embed_url, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                    if resp.status != 200:
+                        return None
+                    html_text = await resp.text()
+
+            next_data = re.search(r'<script\s+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html_text, re.DOTALL)
+            if not next_data:
+                return None
+
+            data = json.loads(next_data.group(1))
+            props = data.get("props", {}).get("pageProps", {})
+            state = props.get("state", {}).get("data", {})
+            entity = state.get("entity", {})
+            if not entity:
+                return None
+
+            pl_title = entity.get("title") or entity.get("name") or "Spotify Playlist"
+            pl_author = entity.get("subtitle") or "Spotify"
+            raw_track_list = entity.get("trackList", [])
+            if not raw_track_list:
+                return None
+
+            tracks: List[PlaylistTrackItem] = []
+            for item in raw_track_list:
+                if not item:
+                    continue
+                t_title = (item.get("title") or "").strip()
+                t_author = (item.get("subtitle") or "").strip().replace("\xa0", " ")
+                if not t_title:
+                    continue
+
+                duration_ms = int(item.get("duration") or 0)
+                dur_sec = max(0, duration_ms // 1000)
+                t_uri = item.get("uri") or ""
+                t_url = f"https://open.spotify.com/track/{t_uri.split(':')[-1]}" if t_uri.startswith("spotify:track:") else None
+
+                query_str = f"{t_title} {t_author}".strip() if t_author else t_title
+                tracks.append(PlaylistTrackItem(
+                    title=t_title,
+                    author=t_author or "Spotify Artist",
+                    query=query_str,
+                    duration=dur_sec,
+                    url=t_url,
+                ))
+
+            if not tracks:
+                return None
+
+            cover_art = entity.get("coverArt", {}).get("sources", [])
+            thumbnail = cover_art[0].get("url") if cover_art else None
+
+            return PlaylistResult(
+                title=clean_track_title(pl_title),
+                author=pl_author,
+                url=url,
+                tracks=tracks,
+                thumbnail=thumbnail,
+                requester=requester,
+            )
+        except Exception as e:
+            logger.error(f"Spotify playlist extraction error: {e}")
+            return None
+
+    @classmethod
+    def _sync_extract_youtube_playlist(
+        cls,
+        url: str,
+        requester: str = "DJ / AutoPlay",
+    ) -> Optional[PlaylistResult]:
+        """Synchronous yt-dlp flat playlist extraction."""
+        ydl_opts = {
+            "quiet": True,
+            "extract_flat": "in_playlist",
+            "skip_download": True,
+            "ignoreerrors": True,
+            "socket_timeout": 8,
+            "source_address": "0.0.0.0",
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if not info:
+                    return None
+
+                pl_title = info.get("title") or "YouTube Playlist"
+                pl_author = info.get("uploader") or info.get("channel") or "YouTube"
+                entries = info.get("entries") or []
+                if not entries:
+                    return None
+
+                tracks: List[PlaylistTrackItem] = []
+                for e in entries:
+                    if not e:
+                        continue
+                    v_id = e.get("id") or e.get("url")
+                    v_title = e.get("title") or "Unknown Video"
+                    v_author = e.get("uploader") or e.get("channel") or "YouTube Artist"
+                    v_dur = int(e.get("duration") or 0)
+
+                    if not v_id:
+                        continue
+
+                    if str(v_id).startswith("http"):
+                        v_url = str(v_id)
+                    else:
+                        v_url = f"https://www.youtube.com/watch?v={v_id}"
+
+                    tracks.append(PlaylistTrackItem(
+                        title=clean_track_title(v_title),
+                        author=v_author,
+                        query=v_url,
+                        duration=v_dur,
+                        url=v_url,
+                    ))
+
+                if not tracks:
+                    return None
+
+                thumbnails = info.get("thumbnails") or []
+                thumb_url = thumbnails[-1].get("url") if thumbnails else None
+
+                return PlaylistResult(
+                    title=clean_track_title(pl_title),
+                    author=pl_author,
+                    url=url,
+                    tracks=tracks,
+                    thumbnail=thumb_url,
+                    requester=requester,
+                )
+        except Exception as e:
+            logger.error(f"YouTube playlist extraction error: {e}")
+            return None

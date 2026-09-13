@@ -13,7 +13,7 @@ import discord
 
 from src.core.context import CustomContext
 from src.cogs.music._player import GuildPlayer, shorten_artist
-from src.cogs.music._extractor import NativeExtractor, clean_track_title
+from src.cogs.music._extractor import NativeExtractor, clean_track_title, is_playlist_url
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -302,13 +302,72 @@ async def handle_playlist(
         await send_container_response(ctx, container)
         return
 
-    # 2. ADD TRACK
-    elif act == "add":
+    # 2. ADD / IMPORT TRACK OR PLAYLIST
+    elif act in ("add", "import"):
         if not name:
-            await ctx.send_warning("Please specify a playlist name.\n> Example: `?playlist add Gym Starboy`")
+            await ctx.send_warning("Please specify a playlist name.\n> Example: `?playlist add Gym Starboy` or `?playlist import Gym <url>`")
             return
 
         clean_pl_name = name.strip()
+
+        # Handle external playlist URL import: ?playlist add <name> <playlist_url>
+        if query and is_playlist_url(query):
+            wait_c = KyroContainer(accent_color=None)
+            wait_c.add_text(f"**Importing playlist:** `{query}`...")
+            await send_container_response(ctx, wait_c)
+
+            pl_result = await NativeExtractor.extract_playlist(query, requester=ctx.author.display_name)
+            if not pl_result or not pl_result.tracks:
+                await ctx.send_warning(f"Could not load playlist from `{query}`.")
+                return
+
+            await db.execute(
+                "INSERT INTO user_playlists (user_id, playlist_name) VALUES ($1, $2) ON CONFLICT DO NOTHING;",
+                user_id,
+                clean_pl_name,
+            )
+            pl_row = await db.fetch_one(
+                "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+                user_id,
+                clean_pl_name,
+            )
+            if not pl_row:
+                await ctx.send_error("Failed to access playlist.")
+                return
+
+            added_count = 0
+            for it in pl_result.tracks:
+                t_title = (it.title or "Unknown Track")[:250]
+                t_author = (it.author or "Official Artist")[:250]
+                t_dur = it.duration
+                t_url = it.url or it.query
+                try:
+                    await db.execute(
+                        "INSERT INTO user_playlist_tracks (playlist_id, title, author, duration, url) VALUES ($1, $2, $3, $4, $5);",
+                        pl_row["id"],
+                        t_title,
+                        t_author,
+                        t_dur,
+                        t_url,
+                    )
+                    added_count += 1
+                except Exception:
+                    pass
+
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    f"**Imported Playlist to `{pl_row['playlist_name']}`**\n"
+                    f"> **Source:** [{pl_result.title}]({pl_result.url})\n"
+                    f"> **Imported Songs:** `{added_count}` / `{pl_result.track_count}` songs\n"
+                    f"> **Curator:** `{pl_result.author}`"
+                )
+            )
+            container.add_separator(divider=True)
+            container.add_text("-# Powered by Kyro Studio")
+            await send_container_response(ctx, container)
+            return
+
         player = cog.controller.get_player(ctx.guild.id) if ctx.guild else None
         current = player.current if (player and player.current) else None
 
@@ -459,6 +518,13 @@ async def handle_playlist(
     elif act in ("play", "start", "load"):
         if not name:
             await ctx.send_warning("Please specify which playlist to play.\n> Example: `?playlist play Gym`")
+            return
+
+        # Check if user passed an external playlist URL (e.g. ?playlist play https://open.spotify.com/playlist/...)
+        target_candidate = f"{name} {query}".strip() if query else (name or "").strip()
+        if is_playlist_url(target_candidate) or (name and is_playlist_url(name)):
+            from src.cogs.music._commands.play import execute_play
+            await execute_play(cog, ctx, target_candidate if is_playlist_url(target_candidate) else name)
             return
 
         # Support multi-word playlist names without quotes (e.g. ?playlist play Chill Vibes)

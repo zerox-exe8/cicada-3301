@@ -239,6 +239,10 @@ class NativeExtractor:
         if not raw_q:
             return None
 
+        # Strip Discord URL angle brackets if present
+        if raw_q.startswith("<") and raw_q.endswith(">"):
+            raw_q = raw_q[1:-1].strip()
+
         # 1. Check in-memory search cache for instant playback
         cache_key = raw_q.lower()
         now = time.time()
@@ -256,17 +260,30 @@ class NativeExtractor:
                     is_autoplay=is_autoplay,
                 )
 
-        # 2. Spotify URL Handling
-        if "spotify.com" in raw_q:
-            spotify_title = await cls._fetch_spotify_title(raw_q)
-            if spotify_title:
-                raw_q = spotify_title
+        # 2. Direct YouTube URL Handling (Extract exact audio stream directly from YouTube)
+        if "youtube.com/" in raw_q or "youtu.be/" in raw_q:
+            track = await asyncio.to_thread(cls._extract_youtube_fallback, raw_q, requester, is_autoplay)
+            if track:
+                _SEARCH_CACHE[cache_key] = (now, track)
+                return track
 
-        # 3. YouTube URL Handling (Extract title metadata to bridge to 320kbps unblocked stream)
-        if "youtube.com" in raw_q or "youtu.be" in raw_q:
+            # Fallback if direct YouTube stream extraction fails (e.g. cloud IP block): bridge title
             yt_title = await cls._fetch_youtube_title(raw_q)
             if yt_title:
                 raw_q = yt_title
+
+        # 3. Direct SoundCloud URL Handling
+        elif "soundcloud.com/" in raw_q:
+            track = await cls._extract_soundcloud(raw_q, requester, is_autoplay)
+            if track:
+                _SEARCH_CACHE[cache_key] = (now, track)
+                return track
+
+        # 4. Spotify URL Handling (Extract metadata title to bridge to search)
+        elif "spotify.com" in raw_q:
+            spotify_title = await cls._fetch_spotify_title(raw_q)
+            if spotify_title:
+                raw_q = spotify_title
 
         cleaned_query = parse_and_clean_query(raw_q)
 
@@ -554,37 +571,45 @@ class NativeExtractor:
             async with aiohttp.ClientSession() as session:
                 cid = await cls._get_sc_client_id(session)
                 encoded_q = urllib.parse.quote(query)
-                search_url = f"https://api-v2.soundcloud.com/search/tracks?q={encoded_q}&client_id={cid}&limit=10"
+                item = None
 
-                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
-                    collection = data.get("collection", [])
-                    if not collection:
-                        return None
+                if "soundcloud.com/" in query:
+                    resolve_url = f"https://api-v2.soundcloud.com/resolve?url={encoded_q}&client_id={cid}"
+                    async with session.get(resolve_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data.get("media"):
+                                item = data
+                else:
+                    search_url = f"https://api-v2.soundcloud.com/search/tracks?q={encoded_q}&client_id={cid}&limit=10"
+                    async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                        if resp.status != 200:
+                            return None
+                        data = await resp.json()
+                        collection = data.get("collection", [])
+                        if not collection:
+                            return None
 
-                    scored = []
-                    for it in collection:
-                        it_title = it.get("title") or ""
-                        it_user = it.get("user", {}).get("username") or ""
-                        it_dur = int((it.get("duration") or 0) / 1000)
-                        sc = score_candidate(it_title, it_user, query, duration=it_dur)
-                        scored.append((sc, it))
+                        scored = []
+                        for it in collection:
+                            it_title = it.get("title") or ""
+                            it_user = it.get("user", {}).get("username") or ""
+                            it_dur = int((it.get("duration") or 0) / 1000)
+                            sc = score_candidate(it_title, it_user, query, duration=it_dur)
+                            scored.append((sc, it))
 
-                    scored.sort(key=lambda x: x[0], reverse=True)
-                    has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
+                        scored.sort(key=lambda x: x[0], reverse=True)
+                        has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
 
-                    item = None
-                    for sc, candidate in scored:
-                        if sc < 0 and not has_user_keyword:
-                            continue
-                        item = candidate
-                        break
+                        for sc, candidate in scored:
+                            if sc < 0 and not has_user_keyword:
+                                continue
+                            item = candidate
+                            break
 
-                    if not item and scored:
-                        # Fallback to top scored candidate so valid songs are never dropped to Not Found
-                        item = scored[0][1]
+                        if not item and scored:
+                            # Fallback to top scored candidate so valid songs are never dropped to Not Found
+                            item = scored[0][1]
 
                     if not item:
                         return None

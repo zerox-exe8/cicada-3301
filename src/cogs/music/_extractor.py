@@ -97,15 +97,24 @@ PHONETIC_TYPO_MAP = {
 
 # Modifiers indicating non-original / alternate versions of songs
 UNWANTED_VERSION_KEYWORDS = [
-    "lofi", "lo-fi", "slowed", "reverb", "remix", "mashup",
-    "reprise", "acoustic", "unplugged", "cover", "female version",
-    "male version", "karaoke", "reply", "status", "ringtone",
-    "dholki", "bass boosted", "8d", "instrumental", "tribute",
-    "orchestral", "chillhop", "nightcore", "sped up", "speed up",
-    "dance mix", "dj mix", "club mix", "flip", "mix", "soundtrack version",
-    "piano version", "live version", "parody", "originally performed",
-    "originally by", "backing track", "backing business", "backing", "8-bit",
-    "shinchan", "amateur", "re-recorded", "tribute to"
+    # DJ, Remixes & Dance edits
+    "remix", "remixed", "dj", "dj mix", "dj version", "djs", "dance mix",
+    "club mix", "flip", "bootleg", "drop", "bass boosted", "trap mix", "mashup",
+    
+    # Guitar, Instrumental & Acoustic Covers
+    "guitar", "guitar cover", "fingerstyle", "lead guitar", "acoustic guitar",
+    "acoustic", "unplugged", "piano version", "piano cover", "instrumental",
+    "flute", "violin", "sitar", "harmonium", "ukulele", "orchestral", "8-bit",
+    
+    # Lo-fi, Slowed & Sped up
+    "lofi", "lo-fi", "slowed", "slowed + reverb", "slowed down", "reverb",
+    "chillhop", "nightcore", "daycore", "sped up", "speed up",
+    
+    # Covers & Non-original versions
+    "cover", "reprise", "female version", "male version", "karaoke", "reply",
+    "status", "ringtone", "dholki", "8d", "tribute", "parody",
+    "originally performed", "originally by", "backing track", "backing",
+    "amateur", "re-recorded", "tribute to", "bgm", "theme music"
 ]
 
 
@@ -118,7 +127,7 @@ def score_candidate(
 ) -> float:
     """
     Score candidate song match to strictly prioritize the original official version.
-    Unless the user explicitly requested an alternate version (e.g. 'lofi', 'remix'),
+    Unless the user explicitly requested an alternate version (e.g. 'lofi', 'remix', 'guitar'),
     candidates with modifier tags in title or artist are heavily penalized.
     """
     c_title = (title or "").lower()
@@ -137,12 +146,27 @@ def score_candidate(
 
     clean_c_title = re.sub(r"\(.*?\)|\[.*?\]", "", c_title).strip()
     if q_lower == clean_c_title or clean_c_title.startswith(q_lower):
+        score += 35.0
+
+    # Boost official artist topic tracks and original audio
+    if " - topic" in c_author or "topic" in c_author:
+        score += 40.0
+    if "official audio" in c_title or "official music video" in c_title or "original track" in c_title:
         score += 30.0
 
     # Penalize unwanted modifier keywords found in title or artist/subtitle
     for kw in UNWANTED_VERSION_KEYWORDS:
-        if (kw in c_title or kw in c_author) and kw not in user_requested:
-            score -= 100.0
+        if any(ur in kw or kw in ur for ur in user_requested):
+            continue
+
+        # Use regex word boundaries for short tokens like 'dj' to prevent substring collisions
+        if len(kw) <= 3:
+            pattern = rf"\b{re.escape(kw)}\b"
+            if re.search(pattern, c_title) or re.search(pattern, c_author):
+                score -= 150.0
+        else:
+            if kw in c_title or kw in c_author:
+                score -= 150.0
 
     if views > 10_000_000:
         score += 40.0
@@ -153,7 +177,7 @@ def score_candidate(
     if 120 <= duration <= 600:
         score += 15.0
     elif 0 < duration < 120:
-        score -= 40.0
+        score -= 50.0
     elif duration > 1800:
         score -= 100.0
 
@@ -499,7 +523,7 @@ class NativeExtractor:
             async with aiohttp.ClientSession() as session:
                 cid = await cls._get_sc_client_id(session)
                 encoded_q = urllib.parse.quote(query)
-                search_url = f"https://api-v2.soundcloud.com/search/tracks?q={encoded_q}&client_id={cid}&limit=3"
+                search_url = f"https://api-v2.soundcloud.com/search/tracks?q={encoded_q}&client_id={cid}&limit=10"
 
                 async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     if resp.status != 200:
@@ -509,7 +533,27 @@ class NativeExtractor:
                     if not collection:
                         return None
 
-                    item = collection[0]
+                    scored = []
+                    for it in collection:
+                        it_title = it.get("title") or ""
+                        it_user = it.get("user", {}).get("username") or ""
+                        it_dur = int((it.get("duration") or 0) / 1000)
+                        sc = score_candidate(it_title, it_user, query, duration=it_dur)
+                        scored.append((sc, it))
+
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
+
+                    item = None
+                    for sc, candidate in scored:
+                        if sc < 0 and not has_user_keyword:
+                            continue
+                        item = candidate
+                        break
+
+                    if not item:
+                        # All candidates were penalized remixes/covers; reject to allow clean YouTube fallback
+                        return None
                     title = clean_track_title(item.get("title") or query)
                     author = item.get("user", {}).get("username") or "SoundCloud Artist"
                     duration = int((item.get("duration") or 0) / 1000)
@@ -604,7 +648,7 @@ class NativeExtractor:
         }
         with yt_dlp.YoutubeDL(ydl_flat) as ydl:
             try:
-                res = ydl.extract_info(f"ytsearch5:{query}", download=False)
+                res = ydl.extract_info(f"ytsearch8:{query}", download=False)
                 entries = (res.get("entries") or []) if res else []
                 scored = []
                 for e in entries:
@@ -623,7 +667,18 @@ class NativeExtractor:
                     return None
 
                 scored.sort(key=lambda x: x[0], reverse=True)
-                winner = scored[0][1]
+                has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
+
+                winner = None
+                for sc, e in scored:
+                    if sc < 0 and not has_user_keyword:
+                        continue
+                    winner = e
+                    break
+
+                if not winner:
+                    winner = scored[0][1]
+
                 vid_id = winner.get("id")
                 winner_url = winner.get("url") or f"https://www.youtube.com/watch?v={vid_id}"
                 return cls._sync_yt_dlp_extract(winner_url)

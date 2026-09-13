@@ -56,7 +56,7 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
 
     # 1. Ensure 'Favorites' playlist exists
     pl_row = await db.fetch_one(
-        "SELECT id FROM user_playlists WHERE user_id = $1 AND playlist_name = 'Favorites';",
+        "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = 'favorites';",
         user_id,
     )
     if not pl_row:
@@ -65,7 +65,7 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
             user_id,
         )
         pl_row = await db.fetch_one(
-            "SELECT id FROM user_playlists WHERE user_id = $1 AND playlist_name = 'Favorites';",
+            "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = 'favorites';",
             user_id,
         )
 
@@ -74,15 +74,17 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
         return
 
     playlist_id = pl_row["id"]
+    save_title = (current.title or "Unknown Track")[:250]
+    save_author = (current.author or "Official Artist")[:250]
 
     # 2. Check for duplicate track in Favorites
     existing = await db.fetch_one(
         "SELECT id FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) = LOWER($2);",
         playlist_id,
-        current.title,
+        save_title,
     )
     if existing:
-        await ctx.send_warning(f"`{current.title}` is already saved in your Favorites playlist.")
+        await ctx.send_warning(f"`{save_title}` is already saved in your Favorites playlist.")
         return
 
     # 3. Add track to playlist (safely access URL)
@@ -90,8 +92,8 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
     await db.execute(
         "INSERT INTO user_playlist_tracks (playlist_id, title, author, duration, url) VALUES ($1, $2, $3, $4, $5);",
         playlist_id,
-        current.title,
-        current.author or "Official Artist",
+        save_title,
+        save_author,
         current.duration,
         track_web_url,
     )
@@ -100,7 +102,7 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
     container.add_section(
         content=(
             f"**Added to Favorites**\n"
-            f"> **Track:** [{current.title}]({track_web_url}) by `{current.author}`\n"
+            f"> **Track:** [{save_title}]({track_web_url}) by `{save_author}`\n"
             f"> **Playlist:** `Favorites`"
         ),
         accessory={"type": 11, "media": {"url": current.thumbnail}} if current.thumbnail else None,
@@ -153,7 +155,6 @@ async def handle_unlike(ctx: CustomContext, cog: Music, *, query: Optional[str] 
 
     # Case 1: Song title or track number provided
     if clean_q:
-        clean_q = query.strip()
         clean_num = clean_q.lstrip("#")
         if clean_num.isdigit():
             idx = int(clean_num)
@@ -319,17 +320,19 @@ async def handle_playlist(
         if query:
             extracted = await NativeExtractor.extract(query)
             if extracted:
-                title_to_save = extracted.title
-                author_to_save = extracted.author
+                title_to_save = (extracted.title or "Unknown Track")[:250]
+                author_to_save = (extracted.author or "Official Artist")[:250]
                 duration_to_save = extracted.duration
                 url_to_save = extracted.url
+            else:
+                await ctx.send_warning(f"Could not find any song matching `{query}`.\n> Try searching with full title or artist name.")
+                return
         elif current:
-            title_to_save = current.title
-            author_to_save = current.author
+            title_to_save = (current.title or "Unknown Track")[:250]
+            author_to_save = (current.author or "Official Artist")[:250]
             duration_to_save = current.duration
             url_to_save = current.url
-
-        if not title_to_save or not url_to_save:
+        else:
             await ctx.send_warning(f"No song specified or currently playing.\n> Example: `?playlist add {clean_pl_name} Starboy`")
             return
 
@@ -340,7 +343,7 @@ async def handle_playlist(
             clean_pl_name,
         )
         pl_row = await db.fetch_one(
-            "SELECT id FROM user_playlists WHERE user_id = $1 AND playlist_name = $2;",
+            "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
             user_id,
             clean_pl_name,
         )
@@ -355,7 +358,7 @@ async def handle_playlist(
             title_to_save,
         )
         if existing_track:
-            await ctx.send_warning(f"`{title_to_save}` is already saved in playlist `{clean_pl_name}`.")
+            await ctx.send_warning(f"`{title_to_save}` is already saved in playlist `{pl_row['playlist_name']}`.")
             return
 
         await db.execute(
@@ -372,7 +375,7 @@ async def handle_playlist(
             content=(
                 f"**Added to Playlist**\n"
                 f"> **Track:** [{title_to_save}]({url_to_save}) by `{author_to_save}`\n"
-                f"> **Playlist:** `{clean_pl_name}`"
+                f"> **Playlist:** `{pl_row['playlist_name']}`"
             )
         )
         container.add_separator(divider=True)
@@ -380,7 +383,7 @@ async def handle_playlist(
         await send_container_response(ctx, container)
 
     # 3. REMOVE TRACK FROM PLAYLIST
-    elif act in ("removetrack", "rmtrack", "deltrack", "removesong", "delsong") or (act == "remove" and query):
+    elif act in ("removetrack", "rmtrack", "deltrack", "removesong", "delsong", "remove"):
         if not name:
             await ctx.send_warning("Specify which playlist and song to remove.\n> Example: `?playlist removetrack Gym 2` or `?playlist removetrack Gym Starboy`")
             return
@@ -389,7 +392,11 @@ async def handle_playlist(
         target_param = (query or "").strip()
 
         if not target_param:
-            await ctx.send_warning(f"Specify which song to remove from `{clean_pl_name}`.\n> Example: `?playlist removetrack {clean_pl_name} 2` or `?playlist removetrack {clean_pl_name} Starboy`")
+            await ctx.send_warning(
+                f"Specify which song to remove from `{clean_pl_name}`.\n"
+                f"> Example: `?playlist removetrack {clean_pl_name} 2` or `?playlist removetrack {clean_pl_name} Starboy`\n"
+                f"> To delete the entire playlist, use `?playlist delete {clean_pl_name}`."
+            )
             return
 
         pl_row = await db.fetch_one(
@@ -407,7 +414,7 @@ async def handle_playlist(
             pl_id,
         )
         if not tracks:
-            await ctx.send_warning(f"Playlist `{clean_pl_name}` is empty.")
+            await ctx.send_warning(f"Playlist `{pl_row['playlist_name']}` is empty.")
             return
 
         removed_track = None
@@ -420,7 +427,7 @@ async def handle_playlist(
                 removed_track = tracks[idx - 1]
                 await db.execute("DELETE FROM user_playlist_tracks WHERE id = $1;", removed_track["id"])
             else:
-                await ctx.send_warning(f"Invalid song number. Playlist `{clean_pl_name}` has {len(tracks)} song(s).\n> Example: `?playlist removetrack {clean_pl_name} 1`")
+                await ctx.send_warning(f"Invalid song number. Playlist `{pl_row['playlist_name']}` has {len(tracks)} song(s).\n> Example: `?playlist removetrack {pl_row['playlist_name']} 1`")
                 return
         else:
             # Case B: Search track by title
@@ -433,7 +440,7 @@ async def handle_playlist(
                 removed_track = matched
                 await db.execute("DELETE FROM user_playlist_tracks WHERE id = $1;", matched["id"])
             else:
-                await ctx.send_warning(f"No song matching `{target_param}` found in `{clean_pl_name}`.\n> Tip: View song list via `?playlist view {clean_pl_name}`")
+                await ctx.send_warning(f"No song matching `{target_param}` found in `{pl_row['playlist_name']}`.\n> Tip: View song list via `?playlist view {pl_row['playlist_name']}`")
                 return
 
         container = KyroContainer(accent_color=None)
@@ -441,7 +448,7 @@ async def handle_playlist(
             content=(
                 f"**Removed from Playlist**\n"
                 f"> **Track:** `{removed_track['title']}`\n"
-                f"> **Playlist:** `{clean_pl_name}`"
+                f"> **Playlist:** `{pl_row['playlist_name']}`"
             )
         )
         container.add_separator(divider=True)
@@ -449,21 +456,30 @@ async def handle_playlist(
         await send_container_response(ctx, container)
 
     # 4. PLAY PLAYLIST
-    elif act == "play":
+    elif act in ("play", "start", "load"):
         if not name:
             await ctx.send_warning("Please specify which playlist to play.\n> Example: `?playlist play Gym`")
             return
 
-        clean_pl_name = name.strip()
+        # Support multi-word playlist names without quotes (e.g. ?playlist play Chill Vibes)
+        clean_pl_name = f"{name} {query}".strip() if query else name.strip()
         pl_row = await db.fetch_one(
-            "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+            "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
             user_id,
             clean_pl_name,
         )
+        if not pl_row and query:
+            pl_row = await db.fetch_one(
+                "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+                user_id,
+                name.strip(),
+            )
+
         if not pl_row:
             await ctx.send_warning(f"Playlist `{clean_pl_name}` not found. Use `?playlist list` to see your playlists.")
             return
 
+        clean_pl_name = pl_row["playlist_name"]
         tracks = await db.fetch_all(
             "SELECT title, author, duration, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
             pl_row["id"],
@@ -539,73 +555,97 @@ async def handle_playlist(
             asyncio.create_task(_bg_load_playlist(tracks[1:], load_gen))
 
     # 5. VIEW PLAYLIST
-    elif act == "view":
+    elif act in ("view", "show", "info"):
         if not name:
             await ctx.send_warning("Please specify which playlist to view.\n> Example: `?playlist view Gym`")
             return
 
-        clean_pl_name = name.strip()
+        # Support multi-word playlist names and optional page number (e.g. ?playlist view Chill Vibes or ?playlist view Gym 2)
+        has_trailing_page = query and query.strip().isdigit()
+        page_num = int(query.strip()) if has_trailing_page else 1
+        clean_pl_name = name.strip() if has_trailing_page else (f"{name} {query}".strip() if query else name.strip())
+
         pl_row = await db.fetch_one(
             "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
             user_id,
             clean_pl_name,
         )
+        if not pl_row and query and not has_trailing_page:
+            pl_row = await db.fetch_one(
+                "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+                user_id,
+                name.strip(),
+            )
+
         if not pl_row:
             await ctx.send_warning(f"Playlist `{clean_pl_name}` not found. Use `?playlist` to see your playlists.")
             return
 
+        display_name = pl_row["playlist_name"]
         tracks = await db.fetch_all(
             "SELECT id, title, author, duration, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
             pl_row["id"],
         )
         if not tracks:
-            await ctx.send_warning(f"Playlist `{clean_pl_name}` is empty. Add songs using `?playlist add {clean_pl_name} [song]`.")
+            await ctx.send_warning(f"Playlist `{display_name}` is empty. Add songs using `?playlist add {display_name} [song]`.")
             return
+
+        per_page = 15
+        total_pages = max(1, (len(tracks) + per_page - 1) // per_page)
+        page_num = max(1, min(page_num, total_pages))
+        start_idx = (page_num - 1) * per_page
+        page_tracks = tracks[start_idx : start_idx + per_page]
 
         total_sec = sum(t["duration"] or 0 for t in tracks)
         total_dur_str = format_duration(total_sec)
 
         lines = []
-        for i, t in enumerate(tracks[:15], 1):
+        for i, t in enumerate(page_tracks, start=start_idx + 1):
             dur_str = format_duration(t["duration"] or 0)
             t_url = t.get("url")
             link = f"[{t['title']}]({t_url})" if t_url and t_url.startswith("http") else f"`{t['title']}`"
             author = f" • {t['author']}" if t.get("author") and t.get("author") != "Official Artist" else ""
             lines.append(f"> `{i}.` {link}{author} • `{dur_str}`")
 
-        if len(tracks) > 15:
-            lines.append(f"> -# ...and {len(tracks) - 15} more tracks in collection")
-
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Playlist: {pl_row['playlist_name']}\n"
+                f"### Playlist: {display_name}\n"
                 f"> **Total Songs:** `{len(tracks)}` • **Duration:** `{total_dur_str}`\n"
-                f"> **Curator:** {ctx.author.display_name}"
+                f"> **Page:** `{page_num} of {total_pages}` • **Curator:** {ctx.author.display_name}"
             )
         )
         container.add_separator(divider=True)
         container.add_section(content="\n".join(lines))
         container.add_separator(divider=True)
+        footer_page_hint = f"> • **Next Page:** `?playlist view {display_name} {page_num + 1}`\n" if page_num < total_pages else ""
         container.add_text(
-            f"> • **Play Collection:** `?playlist play {pl_row['playlist_name']}`\n"
-            f"> • **Remove Song:** `?playlist removetrack {pl_row['playlist_name']} <#>`\n\n"
+            f"> • **Play Collection:** `?playlist play {display_name}`\n"
+            f"> • **Remove Song:** `?playlist removetrack {display_name} <#>`\n"
+            f"{footer_page_hint}\n"
             f"-# Powered by Kyro Studio"
         )
         await send_container_response(ctx, container)
 
-    # 6. DELETE PLAYLIST
-    elif act in ("delete", "remove"):
+    # 6. DELETE PLAYLIST (Strictly explicit deletion keywords)
+    elif act in ("delete", "del", "drop"):
         if not name:
             await ctx.send_warning("Please specify which playlist to delete.\n> Example: `?playlist delete Gym`")
             return
 
-        clean_pl_name = name.strip()
+        clean_pl_name = f"{name} {query}".strip() if query else name.strip()
         pl_row = await db.fetch_one(
             "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
             user_id,
             clean_pl_name,
         )
+        if not pl_row and query:
+            pl_row = await db.fetch_one(
+                "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+                user_id,
+                name.strip(),
+            )
+
         if not pl_row:
             await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.\n> Use `?playlist` to see your existing playlists.")
             return

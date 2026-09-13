@@ -135,3 +135,118 @@ class MusicControlView(discord.ui.View):
 
         await player.stop()
         await interaction.response.send_message("Player **Stopped** and disconnected.", ephemeral=True)
+
+    @discord.ui.button(
+        label="Like",
+        style=discord.ButtonStyle.secondary,
+        custom_id="kyro:music:like",
+        row=1,
+    )
+    async def btn_like(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        player = self._get_player(interaction)
+        if not player or not player.current:
+            await interaction.response.send_message("No track is currently playing to add to Favorites.", ephemeral=True)
+            return
+
+        current = player.current
+        db = self.bot.db
+        user_id = interaction.user.id
+
+        pl_row = await db.fetch_one(
+            "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = 'favorites';",
+            user_id,
+        )
+        if not pl_row:
+            await db.execute(
+                "INSERT INTO user_playlists (user_id, playlist_name) VALUES ($1, 'Favorites') ON CONFLICT DO NOTHING;",
+                user_id,
+            )
+            pl_row = await db.fetch_one(
+                "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = 'favorites';",
+                user_id,
+            )
+
+        if not pl_row:
+            await interaction.response.send_message("Failed to access your Favorites playlist.", ephemeral=True)
+            return
+
+        playlist_id = pl_row["id"]
+        save_title = (current.title or "Unknown Track")[:250]
+        save_author = (current.author or "Official Artist")[:250]
+
+        existing = await db.fetch_one(
+            "SELECT id FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) = LOWER($2);",
+            playlist_id,
+            save_title,
+        )
+        if existing:
+            await interaction.response.send_message(f"`{save_title}` is already in your **Favorites**.", ephemeral=True)
+            return
+
+        track_web_url = getattr(current, "url", None) or getattr(current, "stream_url", "")
+        await db.execute(
+            "INSERT INTO user_playlist_tracks (playlist_id, title, author, duration, url) VALUES ($1, $2, $3, $4, $5);",
+            playlist_id,
+            save_title,
+            save_author,
+            current.duration,
+            track_web_url,
+        )
+        await interaction.response.send_message(f"Saved **[{save_title}]({track_web_url})** to your **Favorites** playlist!", ephemeral=True)
+
+    @discord.ui.button(
+        label="Loop",
+        style=discord.ButtonStyle.secondary,
+        custom_id="kyro:music:loop",
+        row=1,
+    )
+    async def btn_loop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        player = self._get_player(interaction)
+        if not player:
+            await interaction.response.send_message("Player not active.", ephemeral=True)
+            return
+
+        modes = ["off", "track", "queue"]
+        cur_mode = getattr(player, "loop_mode", "off")
+        next_idx = (modes.index(cur_mode) + 1) % len(modes) if cur_mode in modes else 0
+        player.loop_mode = modes[next_idx]
+        await interaction.response.send_message(f"Loop mode set to **{player.loop_mode.upper()}**.", ephemeral=True)
+
+    @discord.ui.button(
+        label="Autoplay",
+        style=discord.ButtonStyle.secondary,
+        custom_id="kyro:music:autoplay",
+        row=1,
+    )
+    async def btn_autoplay(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        player = self._get_player(interaction)
+        if not player:
+            await interaction.response.send_message("Player not active.", ephemeral=True)
+            return
+
+        player.smart_autoplay = not player.smart_autoplay
+        state = "Enabled" if player.smart_autoplay else "Disabled"
+        await interaction.response.send_message(f"Smart Autoplay **{state}**.", ephemeral=True)
+
+    @discord.ui.button(
+        label="Queue",
+        style=discord.ButtonStyle.secondary,
+        custom_id="kyro:music:queue",
+        row=1,
+    )
+    async def btn_queue(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        player = self._get_player(interaction)
+        if not player or not player.queue:
+            await interaction.response.send_message("The playback queue is currently empty.", ephemeral=True)
+            return
+
+        q_lines = []
+        for i, t in enumerate(player.queue[:10], 1):
+            q_lines.append(f"`{i}.` **{t.title}** (`{t.formatted_duration}`) • {t.author}")
+
+        remaining = len(player.queue) - 10
+        rem_text = f"\n*...and {remaining} more in queue*" if remaining > 0 else ""
+        await interaction.response.send_message(
+            f"**Upcoming Queue ({len(player.queue)} tracks):**\n" + "\n".join(q_lines) + rem_text,
+            ephemeral=True,
+        )

@@ -116,7 +116,7 @@ class DirectFFmpegStream(discord.AudioSource):
             "-nostdin",
             "-i", self.stream_url,
             "-vn",
-            "-af", "aresample=48000:resample_first=1",
+            "-af", "aresample=48000",
             "-f", "s16le",
             "-ar", "48000",
             "-ac", "2",
@@ -164,6 +164,11 @@ class DirectFFmpegStream(discord.AudioSource):
             except Exception as e:
                 logger.debug(f"FFmpeg reader pipe notice: {e}")
                 break
+
+        if self._process:
+            self._process.poll()
+            if self._process.returncode not in (0, None):
+                logger.warning(f"FFmpeg reader process exited with code {self._process.returncode}")
 
         # Flush remaining bytes padded to frame size
         if len(buf) > 0 and not self._stopped.is_set():

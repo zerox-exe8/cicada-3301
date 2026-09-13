@@ -71,6 +71,18 @@ METADATA_NOISE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Strip leading format prefixes (e.g. '8D Audio -', '[8D AUDIO]', '8D Song', 'Slowed + Reverb -')
+AUDIO_FORMAT_PREFIX_PATTERN = re.compile(
+    r"^(?:(?:\[|\()?\s*(?:8d|3d|16d|spatial|surround|lo-?fi|slowed(?:\s*\+\s*reverb)?|bass\s*boosted|remix|acoustic)?\s*(?:audio|music|songs?|version|mix)?\s*(?:\]|\))?\s*[-:|~•]\s*)+"
+    r"|^(?:(?:\[|\()?\s*(?:8d|3d|16d|spatial|surround)\s*(?:audio|music|songs?|version|mix)?\s*(?:\]|\))?\s*[-:|~•]?\s*)+",
+    re.IGNORECASE,
+)
+
+AUDIO_FORMAT_TAGS = re.compile(
+    r"\b(?:use\s+headphones?|put\s+on\s+headphones?|headphones?\s+recommended|8d\s+audio|8d\s+song|8d\s+music|3d\s+audio|3d\s+song|spatial\s+audio)\b",
+    re.IGNORECASE,
+)
+
 PHONETIC_TYPO_MAP = {
     "mossewala": "sidhu moose wala",
     "mosewala": "sidhu moose wala",
@@ -195,12 +207,19 @@ def clean_track_title(raw_title: str) -> str:
     if not raw_title:
         return ""
     clean = html.unescape(raw_title).strip()
+    clean = AUDIO_FORMAT_PREFIX_PATTERN.sub("", clean).strip()
+    clean = AUDIO_FORMAT_TAGS.sub("", clean).strip()
     clean = re.sub(
-        r"[\(\[\{]\s*(?:official\s+video|official\s+audio|lyrics?|full\s+song|hd|4k|1080p|audio|video|prod\..*?|dir\..*?)[\)\]\}]",
+        r"[\(\[\{]\s*(?:official\s+video|official\s+audio|lyrics?|full\s+song|hd|4k|1080p|audio|video|prod\..*?|dir\..*?|use\s+headphones?)[\)\]\}]",
         "",
         clean,
         flags=re.IGNORECASE,
     )
+    if "|" in clean:
+        parts = clean.split("|")
+        if len(parts[0].strip()) > 3:
+            clean = parts[0].strip()
+    clean = re.sub(r"^[\s\-:|~•]+|[\s\-:|~•]+$", "", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
     return clean
 
@@ -209,9 +228,25 @@ def parse_and_clean_query(raw_query: str) -> str:
     """Safely clean query without breaking legitimate song names."""
     cleaned = html.unescape(raw_query).strip()
 
+    # Strip format prefixes (like '8D Audio -', '[8D AUDIO]', '8D Song', 'Slowed + Reverb -')
+    cleaned = AUDIO_FORMAT_PREFIX_PATTERN.sub("", cleaned).strip()
+    cleaned = AUDIO_FORMAT_TAGS.sub("", cleaned).strip()
+    cleaned = re.sub(r"[\(\[\{]\s*(?:8d|3d|use\s+headphones?|slowed|reverb)[\)\]\}]", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[\(\[\{]\s*[\)\]\}]", " ", cleaned)
+
+    # If query contains delimiter '|' (typical of YouTube channel/editor tags), isolate primary title segment
+    if "|" in cleaned:
+        parts = cleaned.split("|")
+        if len(parts[0].strip()) > 3:
+            cleaned = parts[0].strip()
+
     # Strip conversational commands from start/end only
     cleaned = CONVERSATIONAL_PREFIX_PATTERN.sub("", cleaned)
     cleaned = CONVERSATIONAL_SUFFIX_PATTERN.sub("", cleaned)
+
+    # Clean collaboration tokens and brackets that break API searches
+    cleaned = re.sub(r"\b(?:with|feat\.?|ft\.?)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[()\[\]{}]", " ", cleaned)
 
     # Strip noise like 'official video', 'full hd', etc.
     core = METADATA_NOISE_PATTERN.sub(" ", cleaned)
@@ -222,6 +257,8 @@ def parse_and_clean_query(raw_query: str) -> str:
         if typo in core_lower:
             core = re.sub(rf"\b{re.escape(typo)}\b", correction, core, flags=re.IGNORECASE)
 
+    # Clean leftover delimiters at edges
+    core = re.sub(r"^[\s\-:|~•]+|[\s\-:|~•]+$", "", core)
     core = re.sub(r"\s+", " ", core).strip()
     return core if core else cleaned
 
@@ -523,7 +560,7 @@ class NativeExtractor:
 
         # Step 3: Relaxed modifier fallback if complex phrase failed
         relaxed = re.sub(
-            r"\b(?:lofi|slowed|reverb|mashup|sad|status|version|acoustic|unplugged|bass boosted|dholki mix|remix|full song|song|track)\b",
+            r"\b(?:8d(?:\s*audio)?|3d(?:\s*audio)?|16d|spatial\s*audio|lofi|lo-fi|slowed(?:\s*\+\s*reverb)?|reverb|mashup|sad|status|version|acoustic|unplugged|bass boosted|dholki mix|remix|full song|song|track|use headphones?)\b",
             "",
             query,
             flags=re.IGNORECASE,
@@ -534,19 +571,26 @@ class NativeExtractor:
             if relaxed_track:
                 return relaxed_track
 
-        # Step 4: First 3 primary tokens if query was very long (e.g. > 4 words)
-        words = query.split()
-        if len(words) > 4:
-            short_q = " ".join(words[:3])
-            short_track = await cls._extract_jiosaavn(short_q, requester, is_autoplay)
-            if short_track:
-                return short_track
+        # Step 4: Shortened query fallback only if it matches substantive song title tokens
+        clean_tokens = [w for w in query.split() if w.lower() not in {"8d", "3d", "audio", "song", "music", "video", "-", "|", "the", "a", "an"}]
+        if len(clean_tokens) >= 3:
+            short_q = " ".join(clean_tokens[:3])
+            if short_q.lower() != query.lower():
+                short_track = await cls._extract_jiosaavn(short_q, requester, is_autoplay)
+                if short_track:
+                    short_title_words = set(re.findall(r"\w{3,}", short_track.title.lower()))
+                    query_substantive = set(re.findall(r"\w{3,}", query.lower())) - {"audio", "music", "song", "video", "official"}
+                    if short_title_words & query_substantive:
+                        return short_track
 
-        # Step 5: If previous strict passes produced no track, but a candidate exists, use it
+        # Step 5: If previous strict passes produced no track, but a candidate exists, use it only if relevant
         if fallback_song:
             fallback_track = cls._build_saavn_track(fallback_song, requester, is_autoplay, query)
             if fallback_track:
-                return fallback_track
+                fb_words = set(re.findall(r"\w{3,}", fallback_track.title.lower()))
+                q_words = set(re.findall(r"\w{3,}", query.lower())) - {"audio", "music", "song", "video", "official"}
+                if fb_words & q_words:
+                    return fallback_track
 
         return None
 

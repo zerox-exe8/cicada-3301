@@ -44,15 +44,17 @@ YDL_OPTIONS = {
     "no_warnings": True,
     "extract_flat": False,
     "skip_download": True,
-    "socket_timeout": 6,
+    "socket_timeout": 12,
     "source_address": "0.0.0.0",
     "youtube_include_dash_manifest": False,
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["android", "ios"],
-        }
-    },
+    "ignoreerrors": True,
 }
+
+# Regex to reliably match and extract YouTube 11-char video ID from any link or text format
+YOUTUBE_URL_REGEX = re.compile(
+    r"(?:https?://)?(?:www\.|m\.|music\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})",
+    re.IGNORECASE,
+)
 
 # Conversational prefix and suffix pattern stripper (safe for titles like 'Play Date' or 'Suno Na')
 CONVERSATIONAL_PREFIX_PATTERN = re.compile(
@@ -233,11 +235,11 @@ def is_playlist_url(raw_url: str) -> bool:
         u = u[1:-1].strip()
     u_low = u.lower()
 
-    # YouTube Playlists
+    # YouTube Playlists (only pure playlists without specific video target 'v=')
     if any(yt in u_low for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
-        if "list=" in u_low and not ("list=rd" in u_low and "v=" in u_low):
-            return True
         if "/playlist" in u_low:
+            return True
+        if "list=" in u_low and "v=" not in u_low:
             return True
 
     # Spotify Playlists & Albums
@@ -289,16 +291,23 @@ class NativeExtractor:
                 )
 
         # 2. Direct YouTube URL Handling (Extract exact audio stream directly from YouTube)
-        if "youtube.com/" in raw_q or "youtu.be/" in raw_q:
-            track = await asyncio.to_thread(cls._extract_youtube_fallback, raw_q, requester, is_autoplay)
+        yt_match = YOUTUBE_URL_REGEX.search(raw_q)
+        if yt_match:
+            video_id = yt_match.group(1)
+            clean_yt_url = f"https://www.youtube.com/watch?v={video_id}"
+
+            # Direct extraction using clean normalized URL
+            track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
             if track:
                 _SEARCH_CACHE[cache_key] = (now, track)
                 return track
 
-            # Fallback if direct YouTube stream extraction fails (e.g. cloud IP block): bridge title
-            yt_title = await cls._fetch_youtube_title(raw_q)
+            # Fallback if direct stream extraction was blocked: bridge exact YouTube title & artist
+            yt_title = await cls._fetch_youtube_title(clean_yt_url)
             if yt_title:
                 raw_q = yt_title
+            else:
+                return None
 
         # 3. Direct SoundCloud URL Handling
         elif "soundcloud.com/" in raw_q:
@@ -700,8 +709,12 @@ class NativeExtractor:
         is_autoplay: bool,
     ) -> Optional[Track]:
         """YouTube search fallback with smart candidate ranking and anti-remix filter."""
-        is_url = raw_query.startswith(("http://", "https://"))
-        if is_url:
+        yt_match = YOUTUBE_URL_REGEX.search(raw_query)
+        if yt_match:
+            video_id = yt_match.group(1)
+            target_url = f"https://www.youtube.com/watch?v={video_id}"
+            entry = cls._sync_yt_dlp_extract(target_url)
+        elif raw_query.startswith(("http://", "https://")):
             entry = cls._sync_yt_dlp_extract(raw_query)
         else:
             entry = cls._sync_yt_dlp_smart_search(raw_query)
@@ -735,11 +748,7 @@ class NativeExtractor:
             "skip_download": True,
             "extract_flat": True,
             "ignoreerrors": True,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "ios"],
-                }
-            },
+            "socket_timeout": 10,
         }
         with yt_dlp.YoutubeDL(ydl_flat) as ydl:
             try:
@@ -880,8 +889,16 @@ class NativeExtractor:
                 async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=4)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        title = data.get("title")
+                        title = data.get("title") or ""
+                        author = data.get("author_name") or ""
                         if title:
+                            author_clean = re.sub(r"\s*-\s*Topic$", "", author, flags=re.IGNORECASE).strip()
+                            if (
+                                author_clean
+                                and author_clean.lower() not in title.lower()
+                                and not any(k in author_clean.lower() for k in ("vevo", "official", "records"))
+                            ):
+                                return f"{title.strip()} {author_clean}"
                             return title.strip()
         except Exception as e:
             logger.debug(f"YouTube oEmbed fetch error: {e}")
@@ -889,7 +906,7 @@ class NativeExtractor:
         # 2. Fallback to flat yt-dlp extract
         try:
             def _get_title():
-                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 8}) as ydl:
                     info = ydl.extract_info(youtube_url, download=False)
                     if info:
                         return info.get("title")

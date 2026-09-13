@@ -238,9 +238,10 @@ async def handle_playlist(
     """Manage custom user playlists: add, removetrack, play, list, view, delete."""
     db = ctx.bot.db
     user_id = ctx.author.id
+    act = (action or "").lower().strip()
 
     # If action is None or 'list' or 'help', display the comprehensive Playlist Hub
-    if not action or action.lower() in ("help", "guide", "list"):
+    if not act or act in ("help", "guide", "list"):
         # Fetch all user's playlists with track counts and total durations
         playlists = await db.fetch_all(
             """
@@ -345,6 +346,16 @@ async def handle_playlist(
         )
         if not pl_row:
             await ctx.send_error("Failed to access playlist.")
+            return
+
+        # Check duplicate track in playlist
+        existing_track = await db.fetch_one(
+            "SELECT id FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) = LOWER($2);",
+            pl_row["id"],
+            title_to_save,
+        )
+        if existing_track:
+            await ctx.send_warning(f"`{title_to_save}` is already saved in playlist `{clean_pl_name}`.")
             return
 
         await db.execute(
@@ -467,7 +478,11 @@ async def handle_playlist(
 
         player = cog.controller.get_or_create_player(ctx.guild)
         player.home_channel = ctx.channel
-        await player.connect_voice(ctx.author.voice.channel)
+        try:
+            await player.connect_voice(ctx.author.voice.channel)
+        except Exception as e:
+            await ctx.send_error(f"Failed to connect to voice channel: `{e}`")
+            return
 
         # 1. Resolve first track with fresh query (never uses expired CDN link)
         first_row = tracks[0]
@@ -499,22 +514,29 @@ async def handle_playlist(
         container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
 
-        # 2. Queue remaining tracks in background safely
+        # 2. Queue remaining tracks in background safely (bound to current generation)
         if len(tracks) > 1:
-            async def _bg_load_playlist(remaining_tracks):
+            load_gen = player._current_gen
+
+            async def _bg_load_playlist(remaining_tracks: list, target_gen: int) -> None:
                 for row in remaining_tracks:
+                    # Abort background enqueue if player was stopped, cleared, or disconnected
+                    if player._current_gen != target_gen or not player.is_connected:
+                        break
                     try:
                         q = resolve_playlist_track_query(row)
                         t = await NativeExtractor.extract(
                             q,
                             requester=ctx.author.display_name,
                         )
+                        if player._current_gen != target_gen or not player.is_connected:
+                            break
                         if t:
                             player.queue.append(t)
                     except Exception as e:
                         logger.warning(f"Failed to load playlist track '{row.get('title')}': {e}")
 
-            asyncio.create_task(_bg_load_playlist(tracks[1:]))
+            asyncio.create_task(_bg_load_playlist(tracks[1:], load_gen))
 
     # 5. VIEW PLAYLIST
     elif act == "view":
@@ -579,16 +601,28 @@ async def handle_playlist(
             return
 
         clean_pl_name = name.strip()
-        deleted = await db.execute(
-            "DELETE FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+        pl_row = await db.fetch_one(
+            "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
             user_id,
             clean_pl_name,
         )
-        if deleted > 0:
-            container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Playlist Deleted**\n> Playlist `{clean_pl_name}` has been completely removed.")
-            container.add_separator(divider=True)
-            container.add_text("-# Powered by Kyro Studio")
-            await send_container_response(ctx, container)
-        else:
+        if not pl_row:
             await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.\n> Use `?playlist` to see your existing playlists.")
+            return
+
+        await db.execute(
+            "DELETE FROM user_playlists WHERE id = $1;",
+            pl_row["id"],
+        )
+        container = KyroContainer(accent_color=None)
+        container.add_section(content=f"**Playlist Deleted**\n> Playlist `{pl_row['playlist_name']}` has been completely removed.")
+        container.add_separator(divider=True)
+        container.add_text("-# Powered by Kyro Studio")
+        await send_container_response(ctx, container)
+
+    else:
+        current_prefix = ctx.prefix or "?"
+        await ctx.send_warning(
+            f"Unknown playlist action `{action}`.\n"
+            f"> Available actions: `{current_prefix}playlist play`, `view`, `add`, `removetrack`, `list`, `delete`"
+        )

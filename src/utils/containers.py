@@ -300,14 +300,40 @@ async def send_container_response(
 
 
 async def edit_container_response(
-    interaction: discord.Interaction,
+    interaction_or_msg: discord.Interaction | discord.Message,
     container: KyroContainer | list[KyroContainer],
     view: discord.ui.View | None = None,
 ) -> None:
     """Edit an existing Components V2 Container message safely with fallbacks."""
+    payload = build_container_payload(container, view=view)
+
+    if isinstance(interaction_or_msg, discord.Message):
+        msg = interaction_or_msg
+        bot = getattr(msg, "bot", None) or getattr(getattr(msg, "_state", None), "client", None) or getattr(msg, "_state", None)
+        http_client = getattr(bot, "http", None)
+        if http_client:
+            try:
+                await http_client.request(
+                    discord.http.Route(
+                        "PATCH",
+                        f"/channels/{msg.channel.id}/messages/{msg.id}",
+                    ),
+                    json=payload,
+                )
+                if view and hasattr(bot, "_connection"):
+                    bot._connection.store_view(view, msg.id)
+                return
+            except Exception as e:
+                logger.warning(f"Direct channel PATCH edit failed ({e}). Attempting embed fallback.")
+                container_list = [container] if isinstance(container, KyroContainer) else container
+                primary = container_list[0] if container_list else KyroContainer()
+                await msg.edit(embed=primary.to_embed(), view=view)
+                return
+        return
+
+    interaction = interaction_or_msg
     bot = interaction.client
     app_id = getattr(bot, "application_id", None) or (bot.user.id if bot and bot.user else None)
-    payload = build_container_payload(container, view=view)
 
     # 1. Try interaction response callback (type 7 UPDATE_MESSAGE) if not done
     try:

@@ -23,7 +23,7 @@ import discord
 
 from src.cogs.music._models import Track
 from src.cogs.music._autoplay import NativeSmartAutoplay, clean_track_title
-from src.utils.containers import KyroContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -127,7 +127,7 @@ class DirectFFmpegStream(discord.AudioSource):
         self._process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             bufsize=512 * 1024,
         )
         self._reader_thread = threading.Thread(
@@ -184,21 +184,11 @@ class DirectFFmpegStream(discord.AudioSource):
         if self._stopped.is_set():
             return b""
 
-        # Pre-buffer 8 frames (~160ms) on startup to prevent initial jitter/rushing
-        if not self._prebuffered:
-            waits = 0
-            while self._queue.qsize() < 8 and waits < 30 and not self._stopped.is_set():
-                if self._process and self._process.poll() is not None and self._queue.empty():
-                    break
-                time.sleep(0.01)
-                waits += 1
-            self._prebuffered = True
-
         try:
-            frame = self._queue.get(timeout=0.04)
+            frame = self._queue.get_nowait()
         except queue.Empty:
-            # If process is still running but network temporarily stalled,
-            # return silent frame so Discord's internal 50 packets/sec voice pacing stays locked!
+            # If process is still running but network temporarily buffering,
+            # return silent frame immediately so Discord's 20ms voice pacing is never stalled
             if self._process and self._process.poll() is None:
                 return b"\x00" * self.FRAME_SIZE
             return b""
@@ -267,6 +257,8 @@ class GuildPlayer:
         self.played_history: Set[str] = set()
         self.consecutive_same_artist: int = 0
         self.last_artist: str = ""
+        self.consecutive_failures: int = 0
+        self._track_started_at: float = 0.0
 
         self._current_gen: int = 0
         self._lock = asyncio.Lock()
@@ -397,6 +389,7 @@ class GuildPlayer:
 
         self._current_gen += 1
         current_gen = self._current_gen
+        self._track_started_at = time.time()
 
         if self.voice_client.is_playing() or self.voice_client.is_paused():
             self.voice_client.stop()
@@ -424,6 +417,33 @@ class GuildPlayer:
 
         async with self._lock:
             if gen != self._current_gen:
+                return
+
+            elapsed = (time.time() - self._track_started_at) if self._track_started_at > 0 else 10.0
+            if elapsed < 2.0:
+                self.consecutive_failures += 1
+            else:
+                self.consecutive_failures = 0
+
+            if self.consecutive_failures >= 3:
+                logger.warning(f"Aborting playback in guild {self.guild.id}: 3 consecutive fast failures.")
+                self.current = None
+                self.consecutive_failures = 0
+                if self.home_channel:
+                    try:
+                        c = KyroContainer(accent_color=None)
+                        c.add_section(
+                            content=(
+                                "**Playback Paused**\n"
+                                "> Multiple audio streams failed to play consecutively.\n"
+                                "> Playback has been paused to protect your queue."
+                            )
+                        )
+                        c.add_separator(divider=True)
+                        c.add_text("-# Kyro Music Engine")
+                        await send_container_response(self.home_channel, c)
+                    except Exception:
+                        pass
                 return
 
             # 1. Loop Track
@@ -549,7 +569,7 @@ class GuildPlayer:
         # If we have an existing search message to edit into Now Playing
         if message_to_edit and isinstance(message_to_edit, discord.Message):
             try:
-                await message_to_edit.edit(embed=container.to_embed(), view=view)
+                await edit_container_response(message_to_edit, container, view=view)
                 self.now_playing_message = message_to_edit
                 return
             except Exception:

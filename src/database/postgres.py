@@ -323,6 +323,10 @@ class PostgresDatabase(BaseDatabase):
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
+            # User Playlist Tracks index on foreign key
+            """
+            CREATE INDEX IF NOT EXISTS idx_user_playlist_tracks_plid ON user_playlist_tracks(playlist_id);
+            """,
         ]
         async with self.pool.acquire() as conn:
             for query in queries:

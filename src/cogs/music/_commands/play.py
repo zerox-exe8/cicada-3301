@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands
 
 from src.cogs.music._extractor import NativeExtractor
-from src.utils.containers import KyroContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
 if TYPE_CHECKING:
     from src.cogs.music.music import Music
@@ -73,7 +73,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         err_container.add_text(f"**No results found for:** `{query}`")
         if search_msg and isinstance(search_msg, discord.Message):
             try:
-                await search_msg.edit(embed=err_container.to_embed())
+                await edit_container_response(search_msg, err_container)
                 return
             except Exception:
                 pass

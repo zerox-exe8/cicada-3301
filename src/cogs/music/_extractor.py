@@ -162,9 +162,20 @@ def score_candidate(
     if q_tokens:
         score += (matched / len(q_tokens)) * 60.0
 
+    # Ensure the candidate's TITLE has substantive overlap with the query
+    substantive_q_tokens = {
+        w for w in q_tokens
+        if w not in {"8d", "3d", "audio", "song", "music", "video", "official", "use", "headphones", "sound"}
+    }
+    title_matched = sum(1 for tok in substantive_q_tokens if tok in title_tokens)
+    if substantive_q_tokens and not title_matched:
+        # Candidate title does not contain any of the user's song keywords (e.g. artist collision)
+        score -= 80.0
+
     clean_c_title = re.sub(r"\(.*?\)|\[.*?\]", "", c_title).strip()
-    if q_lower == clean_c_title or clean_c_title.startswith(q_lower):
-        score += 35.0
+    clean_title_matches = bool(clean_c_title and (q_lower == clean_c_title or clean_c_title in q_lower or q_lower.startswith(clean_c_title)))
+    if clean_title_matches:
+        score += 45.0
 
     # Boost official artist topic tracks and original audio
     if " - topic" in c_author or "topic" in c_author:
@@ -179,7 +190,11 @@ def score_candidate(
 
         pattern = rf"\b{re.escape(kw)}\b"
         if re.search(pattern, c_title) or re.search(pattern, c_author):
-            score -= 120.0
+            # If the clean title already matches the user query perfectly, lightly penalize rather than discard
+            if clean_title_matches and kw in {"remix", "remixed", "dance mix"}:
+                score -= 20.0
+            else:
+                score -= 120.0
 
     if views > 10_000_000:
         score += 40.0
@@ -215,40 +230,43 @@ def clean_track_title(raw_title: str) -> str:
         clean,
         flags=re.IGNORECASE,
     )
-    if "|" in clean:
-        parts = clean.split("|")
-        if len(parts[0].strip()) > 3:
-            clean = parts[0].strip()
+    # Strip emojis
+    clean = re.sub(r"[\U00010000-\U0010ffff]", "", clean)
     clean = re.sub(r"^[\s\-:|~•]+|[\s\-:|~•]+$", "", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
     return clean
 
 
 def parse_and_clean_query(raw_query: str) -> str:
-    """Safely clean query without breaking legitimate song names."""
+    r"""
+    Smart Universal Query Normalizer.
+    Reads the full title without cutting or truncating:
+    - Neutralizes symbols (| , / , \ , - , _ , ~ , • , : , () , [] , {}) to spaces
+    - Strips non-music noise (viewing instructions, emojis, audio formats)
+    - Retains full song name, primary artist, and featured artists intact
+    """
     cleaned = html.unescape(raw_query).strip()
-
-    # Strip format prefixes (like '8D Audio -', '[8D AUDIO]', '8D Song', 'Slowed + Reverb -')
-    cleaned = AUDIO_FORMAT_PREFIX_PATTERN.sub("", cleaned).strip()
-    cleaned = AUDIO_FORMAT_TAGS.sub("", cleaned).strip()
-    cleaned = re.sub(r"[\(\[\{]\s*(?:8d|3d|use\s+headphones?|slowed|reverb)[\)\]\}]", " ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"[\(\[\{]\s*[\)\]\}]", " ", cleaned)
-
-    # If query contains delimiter '|' (typical of YouTube channel/editor tags), isolate primary title segment
-    if "|" in cleaned:
-        parts = cleaned.split("|")
-        if len(parts[0].strip()) > 3:
-            cleaned = parts[0].strip()
 
     # Strip conversational commands from start/end only
     cleaned = CONVERSATIONAL_PREFIX_PATTERN.sub("", cleaned)
     cleaned = CONVERSATIONAL_SUFFIX_PATTERN.sub("", cleaned)
 
-    # Clean collaboration tokens and brackets that break API searches
-    cleaned = re.sub(r"\b(?:with|feat\.?|ft\.?)\b", " ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"[()\[\]{}]", " ", cleaned)
+    # Strip audio format prefixes (like '8D Audio -', '[8D AUDIO]', '8D Song')
+    cleaned = AUDIO_FORMAT_PREFIX_PATTERN.sub("", cleaned).strip()
+    cleaned = AUDIO_FORMAT_TAGS.sub("", cleaned).strip()
+    cleaned = re.sub(r"[\(\[\{]\s*(?:8d|3d|16d|use\s+headphones?|slowed|reverb)[\)\]\}]", " ", cleaned, flags=re.IGNORECASE)
 
-    # Strip noise like 'official video', 'full hd', etc.
+    # Strip emojis
+    cleaned = re.sub(r"[\U00010000-\U0010ffff]", " ", cleaned)
+
+    # Normalize collaboration keywords like 'with', 'feat.', 'ft.'
+    cleaned = re.sub(r"\b(?:with|feat\.?|ft\.?)\b", " ", cleaned, flags=re.IGNORECASE)
+
+    # Convert all punctuation and delimiters (| , / , \ , - , _ , ~ , • , : , ; , () , [] , {}) to spaces
+    # so NO symbol breaks the query and the full song title is read cleanly without confusion
+    cleaned = re.sub(r"[|/\\_~•:;!@#$%^&*()\[\]{}<>+=?\"'`]", " ", cleaned)
+
+    # Strip generic metadata noise (e.g. 'official video', '4k', 'full song', etc.)
     core = METADATA_NOISE_PATTERN.sub(" ", cleaned)
     core_lower = core.lower()
 
@@ -369,14 +387,15 @@ class NativeExtractor:
 
         # Tier 1: JioSaavn 320kbps HD Audio (100% Unblocked on Cloud/Render)
         track = await cls._extract_jiosaavn(cleaned_query, requester, is_autoplay)
-        if not track and cleaned_query.lower() != raw_q.lower():
-            # If cleaned query failed, retry JioSaavn with exact raw query
+        has_noise = bool(AUDIO_FORMAT_PREFIX_PATTERN.search(raw_q) or AUDIO_FORMAT_TAGS.search(raw_q))
+        if not track and cleaned_query.lower() != raw_q.lower() and not has_noise:
+            # Only retry JioSaavn with raw query if raw query has no noise tags
             track = await cls._extract_jiosaavn(raw_q, requester, is_autoplay)
 
         # Tier 2: SoundCloud Worldwide Engine (Phonk, Anime, Brazilian Funk, EDM, Remixes, English Indie)
         if not track:
             track = await cls._extract_soundcloud(cleaned_query, requester, is_autoplay)
-        if not track and cleaned_query.lower() != raw_q.lower():
+        if not track and cleaned_query.lower() != raw_q.lower() and not has_noise:
             track = await cls._extract_soundcloud(raw_q, requester, is_autoplay)
 
         # Tier 3: YouTube Fallback (Any rare remaining audio)

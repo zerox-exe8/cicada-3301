@@ -279,9 +279,15 @@ class NativeExtractor:
                 _SEARCH_CACHE[cache_key] = (now, track)
                 return track
 
-        # 4. Spotify URL Handling (Extract metadata title to bridge to search)
-        elif "spotify.com" in raw_q:
-            spotify_title = await cls._fetch_spotify_title(raw_q)
+        # 4. Spotify URL Handling (Extract '{Title} {Artist}' metadata to bridge to 320kbps HD audio)
+        is_spotify = any(sp in raw_q for sp in ("spotify.com/", "spotify.link/", "spotify:track:"))
+        orig_spotify_url = None
+        if is_spotify:
+            sp_url = raw_q
+            if sp_url.startswith("spotify:track:"):
+                sp_url = f"https://open.spotify.com/track/{sp_url.split(':')[-1]}"
+            orig_spotify_url = sp_url
+            spotify_title = await cls._fetch_spotify_title(sp_url)
             if spotify_title:
                 raw_q = spotify_title
 
@@ -305,6 +311,8 @@ class NativeExtractor:
 
         # Cache successful extraction
         if track:
+            if orig_spotify_url:
+                track.url = orig_spotify_url
             _SEARCH_CACHE[cache_key] = (now, track)
             if len(_SEARCH_CACHE) > 500:
                 oldest_key = min(_SEARCH_CACHE.keys(), key=lambda k: _SEARCH_CACHE[k][0])
@@ -772,18 +780,66 @@ class NativeExtractor:
 
     @staticmethod
     async def _fetch_spotify_title(spotify_url: str) -> Optional[str]:
-        """Extract track title and artist from Spotify URL via oEmbed."""
-        oembed_url = f"https://open.spotify.com/oembed?url={spotify_url}"
+        """
+        Extract track title and artist name from Spotify track URL.
+        Uses Discordbot scraper headers for full '{Title} {Artist}' metadata,
+        with oEmbed fallback.
+        """
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=4)) as resp:
+                # 1. Primary: Scrape Spotify HTML using Discordbot UA for full Title + Artist
+                async with session.get(
+                    spotify_url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                    allow_redirects=True,
+                ) as resp:
                     if resp.status == 200:
                         text = await resp.text()
+
+                        # Pattern 1: <title>Title - song and lyrics by Artist | Spotify</title>
+                        t_match = re.search(
+                            r"<title>(.*?)\s*-\s*song (?:and|&amp;|&) lyrics by (.*?)\s*\|\s*Spotify</title>",
+                            text,
+                            re.IGNORECASE,
+                        )
+                        if t_match:
+                            song_title = html.unescape(t_match.group(1)).strip()
+                            song_artist = html.unescape(t_match.group(2)).strip()
+                            if song_title and song_artist:
+                                return f"{song_title} {song_artist}"
+
+                        # Pattern 2: OpenGraph tags
+                        og_title_m = re.search(r'<meta property="og:title" content="(.*?)"', text)
+                        og_desc_m = re.search(r'<meta property="og:description" content="(.*?)"', text)
+                        if og_title_m:
+                            song_title = html.unescape(og_title_m.group(1)).strip()
+                            song_artist = ""
+                            if og_desc_m:
+                                desc = html.unescape(og_desc_m.group(1)).strip()
+                                parts = [p.strip() for p in re.split(r"[·•\-]", desc) if p.strip()]
+                                if parts:
+                                    song_artist = parts[0]
+                            if song_title and song_artist and "spotify" not in song_artist.lower():
+                                return f"{song_title} {song_artist}"
+                            elif song_title and "spotify" not in song_title.lower():
+                                return song_title
+
+                # 2. Fallback: Spotify oEmbed API
+                oembed_url = f"https://open.spotify.com/oembed?url={spotify_url}"
+                async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=4)) as o_resp:
+                    if o_resp.status == 200:
+                        text = await o_resp.text()
                         data = json.loads(text)
                         title = data.get("title", "")
                         return title.strip() if title else None
         except Exception as e:
-            logger.debug(f"Spotify oEmbed fetch error: {e}")
+            logger.debug(f"Spotify metadata fetch error: {e}")
         return None
 
     @staticmethod

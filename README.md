@@ -1,7 +1,7 @@
 # ⚡ Kyro — Next-Generation Discord Infrastructure
 
 <div align="center">
-  <img src="./assets/Kyro%20banner.jpeg" alt="Kyro Banner" width="100%" style="border-radius: 10px; margin-bottom: 20px;" />
+  <img src="./assets/branding/kyro_banner.webp" alt="Kyro Banner" width="100%" style="border-radius: 10px; margin-bottom: 20px;" />
 
   <h3>Enterprise Discord Management & Community Infrastructure</h3>
   <p>Engineered with Python 3.11+, Discord Components V2 Containers, 0ms In-Memory Caching, and Supabase PostgreSQL.</p>
@@ -83,9 +83,12 @@ Kyro/
 ├── PROJECT_CONTEXT.md    # Exhaustive Technical Specification for AI & Developers
 │
 ├── assets/               # Branding assets & custom application emojis
-│   ├── Kyro banner.jpeg
-│   ├── Kyro logo.jpeg
-│   └── emoji2/
+│   ├── branding/
+│   │   ├── kyro_banner.webp
+│   │   └── kyro_logo.webp
+│   ├── emoji/
+│   ├── emoji2/
+│   └── music/
 │
 └── src/
     ├── main.py           # Application bootstrap & lifecycle manager

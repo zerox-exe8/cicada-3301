@@ -199,7 +199,7 @@ Provides transparent dual-currency display (`$USD` & `₹INR`) with standard set
 ```
 Kyro/
 ├── .env / .env.example / render.yaml / requirements.txt / README.md / PROJECT_CONTEXT.md
-├── assets/Kyro banner.jpeg
+├── assets/branding/kyro_banner.webp
 │
 └── src/
     ├── main.py                  # Bootstrap: logging setup, signal handling, runs KyroBot

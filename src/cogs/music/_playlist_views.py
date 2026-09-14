@@ -13,7 +13,7 @@ import discord
 
 from src.cogs.music._models import Track
 from src.cogs.music._extractor import NativeExtractor
-from src.utils.containers import KyroContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -329,7 +329,7 @@ class PlaylistHubView(discord.ui.View):
                     opt.default = (opt.value == str(self.selected_playlist_id))
 
         container = self.build_container()
-        await send_container_response(interaction, container, view=self)
+        await edit_container_response(interaction, container, view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -424,7 +424,7 @@ class PlaylistHubView(discord.ui.View):
             prefix=self.prefix,
         )
         container = browse_view.build_container()
-        await send_container_response(interaction, container, view=browse_view)
+        await edit_container_response(interaction, container, view=browse_view)
 
     @discord.ui.button(
         label="Delete",
@@ -455,7 +455,7 @@ class PlaylistHubView(discord.ui.View):
         )
         c.add_separator(divider=True)
         c.add_text("-# This action cannot be undone.")
-        await send_container_response(interaction, c, view=confirm_view)
+        await edit_container_response(interaction, c, view=confirm_view)
 
 
 class PlaylistBrowseView(discord.ui.View):
@@ -545,7 +545,7 @@ class PlaylistBrowseView(discord.ui.View):
             self.current_page -= 1
             self._update_buttons()
             container = self.build_container()
-            await send_container_response(interaction, container, view=self)
+            await edit_container_response(interaction, container, view=self)
         else:
             await interaction.response.defer()
 
@@ -559,7 +559,7 @@ class PlaylistBrowseView(discord.ui.View):
             self.current_page += 1
             self._update_buttons()
             container = self.build_container()
-            await send_container_response(interaction, container, view=self)
+            await edit_container_response(interaction, container, view=self)
         else:
             await interaction.response.defer()
 
@@ -570,7 +570,7 @@ class PlaylistBrowseView(discord.ui.View):
     )
     async def btn_back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         container = self.hub_view.build_container()
-        await send_container_response(interaction, container, view=self.hub_view)
+        await edit_container_response(interaction, container, view=self.hub_view)
 
 
 class PlaylistDeleteConfirmView(discord.ui.View):
@@ -645,7 +645,7 @@ class PlaylistDeleteConfirmView(discord.ui.View):
         )
         c.add_separator(divider=True)
         c.add_text("-# Powered by Kyro Studio")
-        await send_container_response(interaction, c, view=self.hub_view)
+        await edit_container_response(interaction, c, view=self.hub_view)
 
     @discord.ui.button(
         label="Cancel",
@@ -654,4 +654,4 @@ class PlaylistDeleteConfirmView(discord.ui.View):
     )
     async def btn_cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         c = self.hub_view.build_container()
-        await send_container_response(interaction, c, view=self.hub_view)
+        await edit_container_response(interaction, c, view=self.hub_view)

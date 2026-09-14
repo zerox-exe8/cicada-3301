@@ -164,12 +164,19 @@ class AutoEvents(commands.Cog):
             return False, f"Error sending message: {e}"
 
     async def _get_autorole_id(self, guild_id: int) -> int | None:
-        """Fetch configured autorole ID for the guild."""
+        """Fetch configured autorole ID for the guild with L1 microsecond cache."""
+        cached = self.bot.cache.get_autorole(guild_id)
+        if cached is not None:
+            return cached if cached != 0 else None
+
         row = await self.bot.db.fetch_one(
             "SELECT role_id FROM guild_autoroles WHERE guild_id = ?;",
             guild_id,
         )
-        return row["role_id"] if row else None
+        role_id = row["role_id"] if row else None
+        # Cache 0 for None so subsequent lookups hit memory in <0.01ms
+        self.bot.cache.set_autorole(guild_id, role_id if role_id is not None else 0)
+        return role_id
 
     # ─── Event Listeners ─────────────────────────────────────────────────────
 
@@ -327,6 +334,7 @@ class AutoEvents(commands.Cog):
             ctx.guild.id,
             role.id,
         )
+        self.bot.cache.set_autorole(ctx.guild.id, role.id)
 
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
@@ -356,6 +364,7 @@ class AutoEvents(commands.Cog):
             "DELETE FROM guild_autoroles WHERE guild_id = ?;",
             ctx.guild.id,
         )
+        self.bot.cache.set_autorole(ctx.guild.id, 0)
 
         container = KyroContainer(accent_color=None)
         container.add_section(

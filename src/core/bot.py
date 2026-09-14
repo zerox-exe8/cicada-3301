@@ -73,11 +73,14 @@ class KyroBot(commands.Bot):
         from src.database.postgres import PostgresDatabase
         self.db: PostgresDatabase = PostgresDatabase(Config.DATABASE_URL)
 
+        from src.core.cache import MicrosecondCache
+        self.cache: MicrosecondCache = MicrosecondCache()
+
         self.session: aiohttp.ClientSession | None = None
         self.start_time: discord.datetime = discord.utils.utcnow()
 
         # Core Managers & Emoji Registry
-        self.guild_mgr: GuildManager = GuildManager(self.db)
+        self.guild_mgr: GuildManager = GuildManager(self.db, cache=self.cache)
         self.perm_mgr: PermissionManager = PermissionManager(self, self.db)
         self.blacklist_mgr: BlacklistManager = BlacklistManager(self.db)
         self.sys_mgr: SystemManager = SystemManager(self.db)
@@ -312,6 +315,89 @@ class KyroBot(commands.Bot):
 
         # Automatically sync custom application emojis from assets in background
         asyncio.create_task(self.custom_emojis.sync_from_assets())
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        """Fired when Kyro is invited to a new server."""
+        logger.info(f"Joined new guild: {guild.name} ({guild.id}) with {getattr(guild, 'member_count', 0)} members.")
+
+        # Find best text channel to send the welcome introduction card
+        target_channel: discord.TextChannel | None = None
+        if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
+            target_channel = guild.system_channel
+        else:
+            for ch in guild.text_channels:
+                if ch.permissions_for(guild.me).send_messages and ch.permissions_for(guild.me).embed_links:
+                    if ch.name in ["general", "chat", "main", "bot-commands", "commands", "lounge"]:
+                        target_channel = ch
+                        break
+            if not target_channel:
+                for ch in guild.text_channels:
+                    if ch.permissions_for(guild.me).send_messages and ch.permissions_for(guild.me).embed_links:
+                        target_channel = ch
+                        break
+
+        if not target_channel:
+            return
+
+        from src.utils.containers import KyroContainer, send_container_response
+        prefix = self.guild_mgr.get_prefix(guild.id)
+        e_reg = self.custom_emojis
+        dot = e_reg.get("heart_dot", "-")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"**Thanks for inviting {Config.BOT_NAME}!**\n"
+                f"> All-in-one Discord ecosystem built for lossless audio streaming, support tickets, moderation, and visual server utilities."
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"{dot} **Prefix:** `{prefix}` | **Slash:** `/`\n"
+            f"{dot} **Help Menu:** `{prefix}help` (Browse all interactive modules)\n"
+            f"{dot} **Play Music:** `{prefix}play <song>` (Lossless studio audio)\n"
+            f"{dot} **Auto-Role:** `{prefix}autorole set @role` (Automated member roles)\n"
+            f"{dot} **Support Tickets:** `{prefix}ticket setup` (Interactive support panels)"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Configured for {guild.name} • Kyro Engine v{Config.VERSION}")
+
+        buttons = []
+        if Config.INVITE_URL:
+            buttons.append({
+                "type": 2,
+                "style": 5,
+                "label": "Invite Kyro",
+                "url": Config.INVITE_URL,
+            })
+        if Config.SUPPORT_URL:
+            buttons.append({
+                "type": 2,
+                "style": 5,
+                "label": "Support Server",
+                "url": Config.SUPPORT_URL,
+            })
+        if buttons:
+            container.add_action_row(buttons)
+
+        try:
+            await send_container_response(target_channel, container)
+        except Exception as e:
+            logger.warning(f"Failed to send welcome container in {guild.name}: {e}")
+
+    async def on_guild_remove(self, guild: discord.Guild) -> None:
+        """Fired when Kyro is removed from a server."""
+        logger.info(f"Removed from guild: {guild.name} ({guild.id}).")
+        # Clean up any active music player for this guild
+        music_cog = self.get_cog("Music")
+        if music_cog and hasattr(music_cog, "controller"):
+            player = music_cog.controller.get_player(guild.id)
+            if player:
+                try:
+                    await player.stop()
+                except Exception:
+                    pass
+                music_cog.controller._players.pop(guild.id, None)
 
 
 # Backward Compatibility Alias

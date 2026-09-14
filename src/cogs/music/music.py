@@ -13,6 +13,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.core.context import CustomContext
+from src.utils.containers import KyroContainer, send_container_response
 from src.cogs.music._controller import MusicController
 from src.cogs.music._views import MusicControlView
 from src.cogs.music._commands.play import execute_play
@@ -61,6 +62,18 @@ class Music(commands.Cog):
             # Bot was disconnected
             player = self.controller.get_player(member.guild.id)
             if player:
+                if player.home_channel and before.channel:
+                    try:
+                        container = KyroContainer(accent_color=None)
+                        container.add_section(
+                            content=(
+                                "**Voice Disconnected**\n"
+                                f"> Kyro has disconnected from {before.channel.mention}."
+                            )
+                        )
+                        await send_container_response(player.home_channel, container)
+                    except Exception:
+                        pass
                 player.queue.clear()
                 player.current = None
                 player.voice_client = None
@@ -77,11 +90,125 @@ class Music(commands.Cog):
                         logger.info(f"Voice channel #{before.channel.name} empty, but 24/7 mode active. Remaining connected.")
                         return
                     logger.info(f"Voice channel #{before.channel.name} empty. Stopping player.")
+                    if player.home_channel:
+                        try:
+                            container = KyroContainer(accent_color=None)
+                            container.add_section(
+                                content=(
+                                    "**Voice Channel Left**\n"
+                                    f"> Disconnected from {before.channel.mention} because the channel was empty."
+                                )
+                            )
+                            await send_container_response(player.home_channel, container)
+                        except Exception:
+                            pass
                     await player.stop()
 
     # ==========================================
     # Prefix & Slash Commands
     # ==========================================
+
+    @commands.hybrid_command(
+        name="join",
+        aliases=["connect", "j"],
+        description="Connect Kyro to your current voice channel.",
+    )
+    async def join(self, ctx: CustomContext) -> None:
+        """Connect to voice channel."""
+        if not ctx.author.voice or not ctx.author.voice.channel:
+            container = KyroContainer(accent_color=None)
+            container.add_text("**You must be in a voice channel to use this command.**")
+            await send_container_response(ctx, container)
+            return
+
+        target_channel = ctx.author.voice.channel
+        player = self.controller.get_or_create_player(ctx.guild)
+        player.home_channel = ctx.channel
+
+        if ctx.guild.me.voice and ctx.guild.me.voice.channel:
+            if ctx.guild.me.voice.channel.id == target_channel.id:
+                container = KyroContainer(accent_color=None)
+                container.add_text(f"**Already connected to** {target_channel.mention}.")
+                await send_container_response(ctx, container)
+                return
+            elif player.is_playing:
+                container = KyroContainer(accent_color=None)
+                container.add_section(
+                    content=(
+                        "**Voice Channel Conflict**\n"
+                        f"> I am currently streaming music in {ctx.guild.me.voice.channel.mention}. Please join that channel or stop playback first."
+                    )
+                )
+                await send_container_response(ctx, container)
+                return
+
+        try:
+            await player.connect_voice(target_channel)
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Voice Channel Connected**\n"
+                    f"> Connected to {target_channel.mention}. Ready to play music!"
+                )
+            )
+            await send_container_response(ctx, container)
+        except Exception as e:
+            container = KyroContainer(accent_color=None)
+            container.add_text(f"**Failed to connect to voice channel:** `{e}`")
+            await send_container_response(ctx, container)
+
+    @commands.hybrid_command(
+        name="listen",
+        aliases=["voicecommand", "vc", "speech"],
+        description="Toggle AI Voice Recognition to control music with your mic (e.g. 'Kyro play <song>').",
+    )
+    @app_commands.describe(state="Enable or disable voice listening: on, off, or toggle")
+    async def listen(self, ctx: CustomContext, state: Optional[str] = "") -> None:
+        """Toggle AI Voice Recognition for hands-free mic commands."""
+        if not ctx.author.voice or not ctx.author.voice.channel:
+            container = KyroContainer(accent_color=None)
+            container.add_text("**You must be in a voice channel to use this command.**")
+            await send_container_response(ctx, container)
+            return
+
+        target_channel = ctx.author.voice.channel
+        player = self.controller.get_or_create_player(ctx.guild)
+        player.home_channel = ctx.channel
+
+        if not player.is_connected:
+            await player.connect_voice(target_channel)
+
+        mode = state.lower().strip() if state else ("off" if player.voice_listening else "on")
+        if mode in ("on", "enable", "start", "true"):
+            success = player.start_voice_listening()
+            container = KyroContainer(accent_color=None)
+            if success:
+                container.add_section(
+                    content=(
+                        "**AI Voice Commander Activated**\n"
+                        "> Kyro is now actively listening to voice commands in your voice channel.\n\n"
+                        "**Supported Wake-Word Prefixes:**\n"
+                        "> • `Kyro play <song name>`\n"
+                        "> • `Kyro pause` • `Kyro resume`\n"
+                        "> • `Kyro skip` • `Kyro stop`\n"
+                        "> • `Kyro volume <0-100>`"
+                    )
+                )
+                container.add_separator(divider=True)
+                container.add_text("-# Speak clearly into your mic • Use ?listen off to stop")
+            else:
+                container.add_text("**Failed to activate AI Voice Commander.** Voice receive extension is required.")
+            await send_container_response(ctx, container)
+        else:
+            player.stop_voice_listening()
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**AI Voice Commander Deactivated**\n"
+                    "> Kyro stopped listening for voice commands in your channel."
+                )
+            )
+            await send_container_response(ctx, container)
 
     @commands.hybrid_command(
         name="play",

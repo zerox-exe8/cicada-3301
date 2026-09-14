@@ -12,6 +12,8 @@ from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
+from src.utils.image_tools import download_image_bytes
+from src.utils.canvas import render_profile_card
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -20,8 +22,8 @@ logger = logging.getLogger("Kyro.General.Profile")
 
 
 class Profile(commands.Cog):
-    """User bot passport and identity statistics."""
-    category: str = "Moderation"
+    """User profile and passport commands."""
+    category: str = "General"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
@@ -162,6 +164,25 @@ class Profile(commands.Cog):
         )
 
         await send_container_response(ctx, container)
+
+        # Render Dynamic Real-Time Passport Card via Canvas
+        try:
+            av_bytes = await download_image_bytes(str(target.display_avatar.url), self.bot.session) if self.bot.session and target.display_avatar else None
+            card_io = render_profile_card(
+                avatar_bytes=av_bytes,
+                username=target.name,
+                display_name=target.display_name,
+                standing=standing,
+                tier=tier_str,
+                playlists_count=len(pl_rows) if 'pl_rows' in locals() and pl_rows else 0,
+                is_owner=is_owner_user,
+                is_dev=is_dev_user,
+            )
+            if card_io:
+                file = discord.File(card_io, filename="kyro_passport.png")
+                await ctx.send(file=file)
+        except Exception as e:
+            logger.debug(f"Notice generating profile canvas: {e}")
 
 
 async def setup(bot: KyroBot) -> None:

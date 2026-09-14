@@ -50,6 +50,9 @@ class HealthServer:
     def _setup_routes(self) -> None:
         self.app.router.add_get("/", self._handle_home)
         self.app.router.add_get("/health", self._handle_health)
+        self.app.router.add_get("/api/stats", self._handle_api_stats)
+        self.app.router.add_get("/api/guilds/{id}", self._handle_api_guild)
+        self.app.router.add_get("/api/music/{id}", self._handle_api_music)
         self.app.router.add_post("/webhook/razorpay", self._handle_razorpay_webhook)
 
     async def _handle_home(self, request: web.Request) -> web.Response:
@@ -71,6 +74,109 @@ class HealthServer:
             "ping_ms": ws_ping,
         }
         return web.json_response(data, status=200)
+
+    async def _handle_api_stats(self, request: web.Request) -> web.Response:
+        """Real-time bot telemetry metrics JSON API."""
+        bot = self.bot
+        if not bot:
+            return web.json_response({"error": "Bot gateway not initialized"}, status=503)
+
+        ws_ping = round(bot.latency * 1000) if bot.latency else 0
+        total_members = sum(getattr(g, "member_count", 0) for g in bot.guilds)
+
+        active_players = 0
+        music_cog = bot.get_cog("Music")
+        if music_cog and hasattr(music_cog, "controller"):
+            active_players = sum(1 for p in music_cog.controller.players.values() if p and p.is_connected)
+
+        import os
+        import psutil
+        process = psutil.Process(os.getpid())
+        ram_mb = round(process.memory_info().rss / (1024 * 1024), 2)
+
+        data = {
+            "status": "online",
+            "bot_name": Config.BOT_NAME,
+            "version": Config.VERSION,
+            "latency_ms": ws_ping,
+            "guilds": len(bot.guilds),
+            "total_users": total_members,
+            "active_audio_players": active_players,
+            "ram_usage_mb": ram_mb,
+            "uptime_seconds": int((discord.utils.utcnow() - bot.start_time).total_seconds()) if hasattr(bot, "start_time") else 0,
+        }
+        return web.json_response(data, headers={"Access-Control-Allow-Origin": "*"})
+
+    async def _handle_api_guild(self, request: web.Request) -> web.Response:
+        """Real-time guild telemetry and configuration."""
+        bot = self.bot
+        guild_id_str = request.match_info.get("id")
+        try:
+            guild_id = int(guild_id_str)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Invalid guild ID"}, status=400)
+
+        if not bot:
+            return web.json_response({"error": "Bot gateway offline"}, status=503)
+
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            return web.json_response({"error": "Guild not found"}, status=404)
+
+        prefix = bot.guild_mgr.get_prefix(guild.id)
+        modlog_ch = bot.log_mgr.get_log_channel(guild, "mod")
+
+        data = {
+            "id": str(guild.id),
+            "name": guild.name,
+            "member_count": getattr(guild, "member_count", 0),
+            "prefix": prefix,
+            "modlog_channel_id": str(modlog_ch.id) if modlog_ch else None,
+            "icon_url": str(guild.icon.url) if guild.icon else None,
+        }
+        return web.json_response(data, headers={"Access-Control-Allow-Origin": "*"})
+
+    async def _handle_api_music(self, request: web.Request) -> web.Response:
+        """Real-time audio streaming telemetry per guild."""
+        bot = self.bot
+        guild_id_str = request.match_info.get("id")
+        try:
+            guild_id = int(guild_id_str)
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Invalid guild ID"}, status=400)
+
+        if not bot:
+            return web.json_response({"error": "Bot gateway offline"}, status=503)
+
+        music_cog = bot.get_cog("Music")
+        if not music_cog or not hasattr(music_cog, "controller"):
+            return web.json_response({"is_playing": False, "connected": False})
+
+        player = music_cog.controller.get_player(guild_id)
+        if not player or not player.is_connected:
+            return web.json_response({"is_playing": False, "connected": False})
+
+        current_track = None
+        if player.current:
+            current_track = {
+                "title": player.current.title,
+                "author": player.current.author,
+                "duration": player.current.duration,
+                "url": player.current.url,
+                "requester": player.current.requester,
+            }
+
+        data = {
+            "connected": True,
+            "is_playing": player.is_playing,
+            "is_paused": player.is_paused,
+            "volume": int(player.volume * 100),
+            "loop_mode": player.loop_mode,
+            "is_247": getattr(player, "is_247", False),
+            "queue_length": len(player.queue),
+            "current": current_track,
+        }
+        return web.json_response(data, headers={"Access-Control-Allow-Origin": "*"})
 
     async def _send_receipt_dm(
         self,

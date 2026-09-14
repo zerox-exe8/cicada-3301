@@ -40,6 +40,7 @@ async def execute_volume(cog: Music, ctx: commands.Context, volume: int) -> None
         return
 
     new_vol = player.set_volume(volume)
+    await player.update_controller_message(force=True)
     container = KyroContainer(accent_color=None)
     container.add_text(f"**Volume adjusted to:** `{new_vol}%`")
     await send_container_response(ctx, container)
@@ -61,6 +62,7 @@ async def execute_loop(cog: Music, ctx: commands.Context, mode: str = "off") -> 
         return
 
     new_mode = player.set_loop_mode(mode)
+    await player.update_controller_message(force=True)
     container = KyroContainer(accent_color=None)
     container.add_text(f"**Loop mode set to:** `{new_mode.upper()}`")
     await send_container_response(ctx, container)

@@ -15,7 +15,7 @@ from src.utils.containers import KyroContainer, send_container_response
 
 class Ping(commands.Cog):
     """General utility and diagnostics commands."""
-    category: str = "Moderation"
+    category: str = "General"
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot

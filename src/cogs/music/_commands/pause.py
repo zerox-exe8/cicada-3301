@@ -30,6 +30,7 @@ async def execute_pause(cog: Music, ctx: commands.Context) -> None:
         return
 
     if player.pause():
+        await player.update_controller_message(force=True)
         container = KyroContainer(accent_color=None)
         container.add_text("**Playback paused.** Type `?resume` to continue.")
         await send_container_response(ctx, container)
@@ -55,6 +56,7 @@ async def execute_resume(cog: Music, ctx: commands.Context) -> None:
         return
 
     if player.resume():
+        await player.update_controller_message(force=True)
         container = KyroContainer(accent_color=None)
         container.add_text("**Playback resumed.**")
         await send_container_response(ctx, container)

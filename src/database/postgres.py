@@ -5,6 +5,7 @@ High-performance asynchronous PostgreSQL database connector using asyncpg connec
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 import asyncpg
@@ -15,16 +16,52 @@ logger = logging.getLogger("Kyro.Database.Postgres")
 
 
 class PostgresDatabase(BaseDatabase):
-    """PostgreSQL / Supabase async database connector."""
+    """PostgreSQL / Supabase async database connector with self-healing connection pool."""
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
         self.pool: asyncpg.Pool | None = None
+        self._lock = asyncio.Lock()
+
+    async def _heal_pool(self) -> None:
+        """Self-healing connection pool reconnector with exponential backoff."""
+        async with self._lock:
+            if self.pool and not self.pool._closed:
+                try:
+                    async with self.pool.acquire(timeout=3) as conn:
+                        await conn.execute("SELECT 1;")
+                    return
+                except Exception:
+                    logger.warning("Database connection pool unhealthy. Cycling connection pool...")
+                    try:
+                        await self.pool.close()
+                    except Exception:
+                        pass
+                    self.pool = None
+
+            clean_dsn = self.dsn.replace("postgresql+asyncpg://", "postgresql://")
+            delays = [0.5, 1.0, 2.0, 4.0]
+            for attempt, delay in enumerate(delays, 1):
+                try:
+                    logger.info(f"Self-healing database pool reconnecting (attempt {attempt}/{len(delays)})...")
+                    self.pool = await asyncpg.create_pool(
+                        clean_dsn,
+                        min_size=2,
+                        max_size=10,
+                        command_timeout=30,
+                        statement_cache_size=0,
+                    )
+                    logger.info("Database pool self-healed and reconnected successfully.")
+                    return
+                except Exception as e:
+                    logger.warning(f"Reconnect attempt {attempt} failed: {e}. Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+
+            raise ConnectionError("Database pool could not be auto-healed after multiple backoff attempts.")
 
     async def connect(self) -> None:
         """Create an asynchronous PostgreSQL connection pool."""
         try:
-            # Strip extra driver prefixes if present
             clean_dsn = self.dsn.replace("postgresql+asyncpg://", "postgresql://")
             self.pool = await asyncpg.create_pool(
                 clean_dsn,
@@ -353,7 +390,17 @@ class PostgresDatabase(BaseDatabase):
                 is_247 BOOLEAN DEFAULT FALSE
             );
             """,
+            # Guild Ghost-Ping Settings table
+            """
+            CREATE TABLE IF NOT EXISTS guild_ghostping_settings (
+                guild_id BIGINT PRIMARY KEY,
+                is_enabled BOOLEAN DEFAULT TRUE,
+                channel_id BIGINT
+            );
+            """,
         ]
+        if not self.pool or self.pool._closed:
+            await self._heal_pool()
         async with self.pool.acquire() as conn:
             for query in queries:
                 await conn.execute(query)
@@ -379,21 +426,69 @@ class PostgresDatabase(BaseDatabase):
         return "".join(result)
 
     async def execute(self, query: str, *args: Any) -> None:
-        """Execute a query without expecting return values."""
+        """Execute a query with automatic connection recovery and exponential retry."""
         pg_query = self._convert_query(query)
-        async with self.pool.acquire() as conn:
+        delays = [0.2, 0.5, 1.5]
+        for attempt, delay in enumerate(delays):
+            try:
+                if not self.pool or self.pool._closed:
+                    await self._heal_pool()
+                async with self.pool.acquire(timeout=10) as conn:
+                    await conn.execute(pg_query, *args)
+                return
+            except (asyncpg.PostgresConnectionError, asyncpg.InterfaceError, asyncio.TimeoutError, ConnectionResetError, OSError) as e:
+                logger.warning(f"Database transient error on execute (attempt {attempt+1}): {e}. Retrying in {delay}s...")
+                await asyncio.sleep(delay)
+                await self._heal_pool()
+
+        # Final attempt
+        if not self.pool or self.pool._closed:
+            await self._heal_pool()
+        async with self.pool.acquire(timeout=10) as conn:
             await conn.execute(pg_query, *args)
 
     async def fetch_one(self, query: str, *args: Any) -> dict[str, Any] | None:
-        """Fetch a single record as a dictionary."""
+        """Fetch a single record with self-healing retry resilience."""
         pg_query = self._convert_query(query)
-        async with self.pool.acquire() as conn:
+        delays = [0.2, 0.5, 1.5]
+        for attempt, delay in enumerate(delays):
+            try:
+                if not self.pool or self.pool._closed:
+                    await self._heal_pool()
+                async with self.pool.acquire(timeout=10) as conn:
+                    row = await conn.fetchrow(pg_query, *args)
+                    return dict(row) if row else None
+            except (asyncpg.PostgresConnectionError, asyncpg.InterfaceError, asyncio.TimeoutError, ConnectionResetError, OSError) as e:
+                logger.warning(f"Database transient error on fetch_one (attempt {attempt+1}): {e}. Retrying in {delay}s...")
+                await asyncio.sleep(delay)
+                await self._heal_pool()
+
+        # Final attempt
+        if not self.pool or self.pool._closed:
+            await self._heal_pool()
+        async with self.pool.acquire(timeout=10) as conn:
             row = await conn.fetchrow(pg_query, *args)
             return dict(row) if row else None
 
     async def fetch_all(self, query: str, *args: Any) -> list[dict[str, Any]]:
-        """Fetch multiple records as a list of dictionaries."""
+        """Fetch multiple records with self-healing retry resilience."""
         pg_query = self._convert_query(query)
-        async with self.pool.acquire() as conn:
+        delays = [0.2, 0.5, 1.5]
+        for attempt, delay in enumerate(delays):
+            try:
+                if not self.pool or self.pool._closed:
+                    await self._heal_pool()
+                async with self.pool.acquire(timeout=10) as conn:
+                    rows = await conn.fetch(pg_query, *args)
+                    return [dict(r) for r in rows]
+            except (asyncpg.PostgresConnectionError, asyncpg.InterfaceError, asyncio.TimeoutError, ConnectionResetError, OSError) as e:
+                logger.warning(f"Database transient error on fetch_all (attempt {attempt+1}): {e}. Retrying in {delay}s...")
+                await asyncio.sleep(delay)
+                await self._heal_pool()
+
+        # Final attempt
+        if not self.pool or self.pool._closed:
+            await self._heal_pool()
+        async with self.pool.acquire(timeout=10) as conn:
             rows = await conn.fetch(pg_query, *args)
             return [dict(r) for r in rows]

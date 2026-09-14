@@ -68,15 +68,13 @@ class MusicControlView(discord.ui.View):
         if player.is_paused:
             player.resume()
             button.label = "Pause"
-            state = "Resumed"
         elif player.is_playing:
             player.pause()
             button.label = "Resume"
-            state = "Paused"
-        else:
-            state = "Idle"
 
-        await interaction.response.send_message(f"**{state}** playback.", ephemeral=True)
+        await player.update_controller_message(force=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
     @discord.ui.button(
         label="Skip",
@@ -90,7 +88,8 @@ class MusicControlView(discord.ui.View):
             return
 
         await player.skip()
-        await interaction.response.send_message("**Skipped** to the next song.", ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
     @discord.ui.button(
         label="Vol -",
@@ -104,8 +103,10 @@ class MusicControlView(discord.ui.View):
             return
 
         cur_vol = int(player.volume * 100)
-        new_vol = player.set_volume(cur_vol - 10)
-        await interaction.response.send_message(f"Volume set to **{new_vol}%**", ephemeral=True)
+        player.set_volume(cur_vol - 10)
+        await player.update_controller_message(force=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
     @discord.ui.button(
         label="Vol +",
@@ -119,8 +120,10 @@ class MusicControlView(discord.ui.View):
             return
 
         cur_vol = int(player.volume * 100)
-        new_vol = player.set_volume(cur_vol + 10)
-        await interaction.response.send_message(f"Volume set to **{new_vol}%**", ephemeral=True)
+        player.set_volume(cur_vol + 10)
+        await player.update_controller_message(force=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
     @discord.ui.button(
         label="Stop",
@@ -134,7 +137,8 @@ class MusicControlView(discord.ui.View):
             return
 
         await player.stop()
-        await interaction.response.send_message("Player **Stopped** and disconnected.", ephemeral=True)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
     @discord.ui.button(
         label="Like",

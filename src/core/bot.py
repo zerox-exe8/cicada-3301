@@ -155,6 +155,8 @@ class KyroBot(commands.Bot):
                 f"• **Quick Start:** `{current_prefix}play <song>` • `{current_prefix}playlist` • `{current_prefix}help`"
             )
             container.add_separator(divider=True)
+            container.add_text(f"-# **Requested by {message.author.display_name}**")
+            container.add_separator(divider=True)
 
             buttons = []
             if Config.INVITE_URL:
@@ -174,7 +176,6 @@ class KyroBot(commands.Bot):
             if buttons:
                 container.add_action_row(buttons)
 
-            container.add_text(f"-# Requested by {message.author.display_name}")
             await send_container_response(message.channel, container)
             return
 

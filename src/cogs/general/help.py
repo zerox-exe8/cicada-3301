@@ -169,6 +169,10 @@ class Help(commands.Cog):
             }
         ])
 
+        container.add_separator(divider=True)
+        container.add_text(f"-# **Requested by {author.display_name}**")
+        container.add_separator(divider=True)
+
         buttons = []
         if Config.INVITE_URL:
             buttons.append({
@@ -187,7 +191,6 @@ class Help(commands.Cog):
         if buttons:
             container.add_action_row(buttons)
 
-        container.add_text(f"-# Requested by {author.display_name}")
         return container
 
     def _build_category_container(
@@ -250,7 +253,28 @@ class Help(commands.Cog):
             }
         ])
 
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        container.add_separator(divider=True)
+        container.add_text(f"-# **Requested by {ctx.author.display_name}**")
+        container.add_separator(divider=True)
+
+        buttons = []
+        if Config.INVITE_URL:
+            buttons.append({
+                "type": 2,
+                "style": 5,
+                "label": "Invite Kyro",
+                "url": Config.INVITE_URL,
+            })
+        if Config.SUPPORT_URL:
+            buttons.append({
+                "type": 2,
+                "style": 5,
+                "label": "Support Server",
+                "url": Config.SUPPORT_URL,
+            })
+        if buttons:
+            container.add_action_row(buttons)
+
         return container
 
     @commands.hybrid_command(

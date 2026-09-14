@@ -140,14 +140,40 @@ class KyroBot(commands.Bot):
         if self.user and clean_content in [f"<@{self.user.id}>", f"<@!{self.user.id}>"]:
             from src.utils.containers import KyroContainer, send_container_response
             current_prefix = self.guild_mgr.get_prefix(message.guild.id if message.guild else None)
+            ws_ping = round(self.latency * 1000) if self.latency else 0
             container = KyroContainer(accent_color=None)
-            container.add_text(
-                f"**Hey, I'm {Config.BOT_NAME}**\n"
-                f"> Modular, high-performance Discord management system.\n\n"
-                f"• **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
-                f"• **Help:** `{current_prefix}help`"
+            container.add_section(
+                content=(
+                    f"**Hey, I'm {Config.BOT_NAME}**\n"
+                    f"> All-in-one Discord ecosystem built for lossless audio streaming, support tickets, and visual server utilities."
+                )
             )
             container.add_separator(divider=True)
+            container.add_text(
+                f"• **Prefix:** `{current_prefix}` (Customizable) | **Slash:** `/`\n"
+                f"• **Latency:** `{ws_ping}ms` | **Audio:** `Studio Lossless`\n"
+                f"• **Quick Start:** `{current_prefix}play <song>` • `{current_prefix}playlist` • `{current_prefix}help`"
+            )
+            container.add_separator(divider=True)
+
+            buttons = []
+            if Config.INVITE_URL:
+                buttons.append({
+                    "type": 2,
+                    "style": 5,
+                    "label": "Invite Kyro",
+                    "url": Config.INVITE_URL,
+                })
+            if Config.SUPPORT_URL:
+                buttons.append({
+                    "type": 2,
+                    "style": 5,
+                    "label": "Support Server",
+                    "url": Config.SUPPORT_URL,
+                })
+            if buttons:
+                container.add_action_row(buttons)
+
             container.add_text(f"-# Requested by {message.author.display_name}")
             await send_container_response(message.channel, container)
             return

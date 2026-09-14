@@ -124,8 +124,8 @@ class Help(commands.Cog):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Hey, I'm {Config.BOT_NAME.lower()}**\n"
-                f"> A fast, secure Discord administration and utility system crafted to manage and protect your server smoothly."
+                f"**Hey, I'm {Config.BOT_NAME}**\n"
+                f"> All-in-one Discord ecosystem built for lossless audio streaming, support tickets, and visual server utilities."
             )
         )
         container.add_separator(divider=True)
@@ -168,6 +168,24 @@ class Help(commands.Cog):
                 "options": options,
             }
         ])
+
+        buttons = []
+        if Config.INVITE_URL:
+            buttons.append({
+                "type": 2,
+                "style": 5,
+                "label": "Invite Kyro",
+                "url": Config.INVITE_URL,
+            })
+        if Config.SUPPORT_URL:
+            buttons.append({
+                "type": 2,
+                "style": 5,
+                "label": "Support Server",
+                "url": Config.SUPPORT_URL,
+            })
+        if buttons:
+            container.add_action_row(buttons)
 
         container.add_text(f"-# Requested by {author.display_name}")
         return container

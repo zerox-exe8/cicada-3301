@@ -14,6 +14,12 @@ import discord
 from src.core.context import CustomContext
 from src.cogs.music._player import GuildPlayer, shorten_artist
 from src.cogs.music._extractor import NativeExtractor, clean_track_title, is_playlist_url
+from src.cogs.music._playlist_views import (
+    PlaylistHubView,
+    PlaylistBrowseView,
+    execute_saved_playlist_playback,
+    format_duration,
+)
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -241,9 +247,8 @@ async def handle_playlist(
     user_id = ctx.author.id
     act = (action or "").lower().strip()
 
-    # If action is None or 'list' or 'help', display the comprehensive Playlist Hub
+    # If action is None or 'list' or 'help', display the interactive Playlist Hub
     if not act or act in ("help", "guide", "list"):
-        # Fetch all user's playlists with track counts and total durations
         playlists = await db.fetch_all(
             """
             SELECT p.id, p.playlist_name, COUNT(t.id) as track_count, COALESCE(SUM(t.duration), 0) as total_duration
@@ -256,50 +261,16 @@ async def handle_playlist(
             user_id,
         )
 
-        pl_lines = []
-        if playlists:
-            for i, pl in enumerate(playlists, 1):
-                dur_str = format_duration(int(pl["total_duration"]))
-                pl_lines.append(f"> • **{pl['playlist_name']}** • `{pl['track_count']} songs` • `{dur_str}`")
-        else:
-            pl_lines = [
-                "> • None saved yet\n"
-                ">   Use `?like` while listening to music or `?playlist add <name>` to create one."
-            ]
-
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "### Music Playlist Hub\n"
-                "> Personalized high-fidelity collections & lossless audio streaming."
-            )
+        hub_view = PlaylistHubView(
+            bot=ctx.bot,
+            cog=cog,
+            author_id=user_id,
+            author_name=ctx.author.display_name,
+            playlists=playlists,
+            prefix=ctx.prefix or "?",
         )
-        container.add_separator(divider=True)
-
-        container.add_section(
-            content=(
-                f"**Your Saved Playlists ({len(playlists)})**\n"
-                + "\n".join(pl_lines)
-            )
-        )
-        container.add_separator(divider=True)
-
-        current_prefix = ctx.prefix or "?"
-
-        container.add_section(
-            content=(
-                "**Command Quick Guide**\n"
-                f"> • **Play** • `{current_prefix}playlist play <name>`\n"
-                f"> • **View** • `{current_prefix}playlist view <name>`\n"
-                f"> • **Add Track** • `{current_prefix}playlist add <name> [song title]`\n"
-                f"> • **Remove Track** • `{current_prefix}playlist removetrack <name> <# | title>`\n"
-                f"> • **Like / Unlike** • `{current_prefix}like` • `{current_prefix}unlike [title | #]`\n"
-                f"> • **Delete** • `{current_prefix}playlist delete <name>`"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text("-# Powered by Kyro Studio")
-        await send_container_response(ctx, container)
+        container = hub_view.build_container()
+        await send_container_response(ctx, container, view=hub_view)
         return
 
     # 2. ADD / IMPORT TRACK OR PLAYLIST
@@ -514,10 +485,10 @@ async def handle_playlist(
         container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
 
-    # 4. PLAY PLAYLIST
-    elif act in ("play", "start", "load"):
+    # 4. PLAY / SHUFFLE PLAYLIST
+    elif act in ("play", "start", "load", "shuffle"):
         if not name:
-            await ctx.send_warning("Please specify which playlist to play.\n> Example: `?playlist play Gym`")
+            await ctx.send_warning(f"Please specify which playlist to play.\n> Example: `?playlist {act} Gym`")
             return
 
         # Check if user passed an external playlist URL (e.g. ?playlist play https://open.spotify.com/playlist/...)
@@ -545,104 +516,36 @@ async def handle_playlist(
             await ctx.send_warning(f"Playlist `{clean_pl_name}` not found. Use `?playlist list` to see your playlists.")
             return
 
-        clean_pl_name = pl_row["playlist_name"]
         tracks = await db.fetch_all(
             "SELECT title, author, duration, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
             pl_row["id"],
         )
         if not tracks:
-            await ctx.send_warning(f"Playlist `{clean_pl_name}` is empty.")
+            await ctx.send_warning(f"Playlist `{pl_row['playlist_name']}` is empty.")
             return
 
         if not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send_warning("You must be in a voice channel to play music.")
             return
 
-        player = cog.controller.get_or_create_player(ctx.guild)
-        player.home_channel = ctx.channel
-        try:
-            await player.connect_voice(ctx.author.voice.channel)
-        except Exception as e:
-            await ctx.send_error(f"Failed to connect to voice channel: `{e}`")
-            return
-
-        # 1. Resolve first track with fresh query (never uses expired CDN link)
-        first_row = tracks[0]
-        first_query = resolve_playlist_track_query(first_row)
-        first_track = await NativeExtractor.extract(
-            first_query,
-            requester=ctx.author.display_name,
+        await execute_saved_playlist_playback(
+            bot=ctx.bot,
+            cog=cog,
+            guild=ctx.guild,
+            user=ctx.author,
+            channel=ctx.channel,
+            pl_row=pl_row,
+            tracks=tracks,
+            shuffle=(act == "shuffle"),
         )
+        return
 
-        if not first_track:
-            await ctx.send_error(f"Failed to load first track `{first_row['title']}`.")
-            return
-
-        # 2. Append all remaining tracks to queue immediately
-        was_idle = not player.is_playing and not player.is_paused
-        insert_start_idx = len(player.queue)
-
-        for row in tracks[1:]:
-            q = resolve_playlist_track_query(row)
-            t = Track(
-                title=row.get("title") or "Unknown Track",
-                author=row.get("author") or "Official Artist",
-                url=row.get("url") or q,
-                stream_url="",
-                duration=int(row.get("duration") or 0),
-                requester=ctx.author.display_name,
-                requester_id=ctx.author.id,
-                query=q,
-            )
-            player.queue.append(t)
-
-        # Start playback
-        if was_idle:
-            await player.play_track(first_track)
-        else:
-            player.queue.insert(insert_start_idx, first_track)
-
-        # Build preview of upcoming tracks
-        if was_idle:
-            upcoming_items = player.queue[:6]
-        else:
-            upcoming_items = player.queue[insert_start_idx:insert_start_idx + 6]
-
-        upcoming_lines = []
-        for i, it in enumerate(upcoming_items, start=1):
-            dur_text = it.formatted_duration
-            upcoming_lines.append(f"`{i:02d}.` [{it.title}]({it.url}) `[{dur_text}]` — `{it.author}`")
-
-        upcoming_preview = "\n".join(upcoming_lines) if upcoming_lines else "No upcoming tracks."
-        remaining_count = len(tracks) - (1 if was_idle else 0) - len(upcoming_lines)
-
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Playing Playlist: `{clean_pl_name}`**\n"
-                f"> **Total Queued:** `{len(tracks)}` songs\n"
-                f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`"
-            ) if was_idle else (
-                f"**Playing Playlist: `{clean_pl_name}`**\n"
-                f"> **Total Queued:** `{len(tracks)}` songs\n"
-                f"> **Starting Track:** [{first_track.title}]({first_track.url}) by `{first_track.author}`"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(
-            f"**Upcoming Songs:**\n{upcoming_preview}\n"
-            + (f"-# ...and {remaining_count} more songs. Use `?queue` to view all pages.\n" if remaining_count > 0 else "")
-            + "-# Powered by Kyro Studio"
-        )
-        await send_container_response(ctx, container)
-
-    # 5. VIEW PLAYLIST
+    # 5. VIEW PLAYLIST (Interactive Paginated Browser)
     elif act in ("view", "show", "info"):
         if not name:
             await ctx.send_warning("Please specify which playlist to view.\n> Example: `?playlist view Gym`")
             return
 
-        # Support multi-word playlist names and optional page number (e.g. ?playlist view Chill Vibes or ?playlist view Gym 2)
         has_trailing_page = query and query.strip().isdigit()
         page_num = int(query.strip()) if has_trailing_page else 1
         clean_pl_name = name.strip() if has_trailing_page else (f"{name} {query}".strip() if query else name.strip())
@@ -663,53 +566,100 @@ async def handle_playlist(
             await ctx.send_warning(f"Playlist `{clean_pl_name}` not found. Use `?playlist` to see your playlists.")
             return
 
-        display_name = pl_row["playlist_name"]
         tracks = await db.fetch_all(
             "SELECT id, title, author, duration, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
             pl_row["id"],
         )
         if not tracks:
-            await ctx.send_warning(f"Playlist `{display_name}` is empty. Add songs using `?playlist add {display_name} [song]`.")
+            await ctx.send_warning(f"Playlist `{pl_row['playlist_name']}` is empty. Add songs using `?playlist add {pl_row['playlist_name']} [song]`.")
             return
 
-        per_page = 15
-        total_pages = max(1, (len(tracks) + per_page - 1) // per_page)
-        page_num = max(1, min(page_num, total_pages))
-        start_idx = (page_num - 1) * per_page
-        page_tracks = tracks[start_idx : start_idx + per_page]
+        # Fetch all user playlists to initialize back-navigation to Hub
+        user_all_playlists = await db.fetch_all(
+            """
+            SELECT p.id, p.playlist_name, COUNT(t.id) as track_count, COALESCE(SUM(t.duration), 0) as total_duration
+            FROM user_playlists p
+            LEFT JOIN user_playlist_tracks t ON p.id = t.playlist_id
+            WHERE p.user_id = $1
+            GROUP BY p.id, p.playlist_name
+            ORDER BY p.created_at DESC;
+            """,
+            user_id,
+        )
 
-        total_sec = sum(t["duration"] or 0 for t in tracks)
-        total_dur_str = format_duration(total_sec)
+        hub_view = PlaylistHubView(
+            bot=ctx.bot,
+            cog=cog,
+            author_id=user_id,
+            author_name=ctx.author.display_name,
+            playlists=user_all_playlists,
+            prefix=ctx.prefix or "?",
+        )
+        hub_view.selected_playlist_id = int(pl_row["id"])
 
-        lines = []
-        for i, t in enumerate(page_tracks, start=start_idx + 1):
-            dur_str = format_duration(t["duration"] or 0)
-            t_url = t.get("url")
-            link = f"[{t['title']}]({t_url})" if t_url and t_url.startswith("http") else f"`{t['title']}`"
-            author = f" • {t['author']}" if t.get("author") and t.get("author") != "Official Artist" else ""
-            lines.append(f"> `{i}.` {link}{author} • `{dur_str}`")
+        browse_view = PlaylistBrowseView(
+            bot=ctx.bot,
+            cog=cog,
+            author_id=user_id,
+            author_name=ctx.author.display_name,
+            playlist=pl_row,
+            tracks=tracks,
+            hub_view=hub_view,
+            prefix=ctx.prefix or "?",
+        )
+        browse_view.current_page = max(1, min(page_num, browse_view.total_pages))
+        browse_view._update_buttons()
+
+        container = browse_view.build_container()
+        await send_container_response(ctx, container, view=browse_view)
+        return
+
+    # 6. EXPORT PLAYLIST
+    elif act in ("export", "share"):
+        if not name:
+            await ctx.send_warning("Please specify which playlist to export.\n> Example: `?playlist export Gym`")
+            return
+
+        clean_pl_name = f"{name} {query}".strip() if query else name.strip()
+        pl_row = await db.fetch_one(
+            "SELECT id, playlist_name FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+            user_id,
+            clean_pl_name,
+        )
+        if not pl_row:
+            await ctx.send_warning(f"Playlist `{clean_pl_name}` not found.")
+            return
+
+        tracks = await db.fetch_all(
+            "SELECT title, author, duration, url FROM user_playlist_tracks WHERE playlist_id = $1 ORDER BY id ASC;",
+            pl_row["id"],
+        )
+        if not tracks:
+            await ctx.send_warning(f"Playlist `{pl_row['playlist_name']}` is empty.")
+            return
+
+        export_lines = []
+        for i, t in enumerate(tracks, start=1):
+            dur = format_duration(t.get("duration") or 0)
+            export_lines.append(f"{i:02d}. {t['title']} - {t['author']} [{dur}]")
+
+        export_text = "\n".join(export_lines[:50])
+        more_notice = f"\n...and {len(tracks) - 50} more tracks" if len(tracks) > 50 else ""
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Playlist: {display_name}\n"
-                f"> **Total Songs:** `{len(tracks)}` • **Duration:** `{total_dur_str}`\n"
-                f"> **Page:** `{page_num} of {total_pages}` • **Curator:** {ctx.author.display_name}"
+                f"**Exported Playlist: `{pl_row['playlist_name']}`**\n"
+                f"> **Total Tracks:** `{len(tracks)}` songs\n"
+                f"> **Curator:** `{ctx.author.display_name}`"
             )
         )
         container.add_separator(divider=True)
-        container.add_section(content="\n".join(lines))
-        container.add_separator(divider=True)
-        footer_page_hint = f"> • **Next Page:** `?playlist view {display_name} {page_num + 1}`\n" if page_num < total_pages else ""
-        container.add_text(
-            f"> • **Play Collection:** `?playlist play {display_name}`\n"
-            f"> • **Remove Song:** `?playlist removetrack {display_name} <#>`\n"
-            f"{footer_page_hint}\n"
-            f"-# Powered by Kyro Studio"
-        )
+        container.add_text(f"```text\n{export_text}{more_notice}\n```\n-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
+        return
 
-    # 6. DELETE PLAYLIST (Strictly explicit deletion keywords)
+    # 7. DELETE PLAYLIST
     elif act in ("delete", "del", "drop"):
         if not name:
             await ctx.send_warning("Please specify which playlist to delete.\n> Example: `?playlist delete Gym`")
@@ -741,10 +691,11 @@ async def handle_playlist(
         container.add_separator(divider=True)
         container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
+        return
 
     else:
         current_prefix = ctx.prefix or "?"
         await ctx.send_warning(
             f"Unknown playlist action `{action}`.\n"
-            f"> Available actions: `{current_prefix}playlist play`, `view`, `add`, `removetrack`, `list`, `delete`"
+            f"> Available actions: `{current_prefix}playlist play`, `shuffle`, `view`, `add`, `import`, `export`, `removetrack`, `list`, `delete`"
         )

@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -48,6 +49,11 @@ YDL_OPTIONS = {
     "source_address": "0.0.0.0",
     "youtube_include_dash_manifest": False,
     "ignoreerrors": True,
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android", "ios"],
+        }
+    },
 }
 
 # Regex to reliably match and extract YouTube 11-char video ID from any link or text format
@@ -217,11 +223,30 @@ _SEARCH_CACHE: Dict[str, Tuple[float, Track]] = {}
 _CACHE_TTL = 600.0  # 10 minutes
 
 
+def normalize_unicode_text(text: str) -> str:
+    r"""
+    Normalize styled, mathematical, or script Unicode characters into standard plain letters,
+    and strip emojis/variation selectors safely without erasing stylized alphanumeric words.
+    """
+    if not text:
+        return ""
+    # 1. NFKD converts mathematical bold/italic/sans/serif/fullwidth into plain letters & numbers
+    norm = unicodedata.normalize("NFKD", text)
+    # 2. Remove variation selectors & zero-width characters
+    norm = re.sub(r"[\ufe00-\ufe0f\u200b-\u200d]", "", norm)
+    # 3. Remove non-BMP characters (emojis and extra planes)
+    norm = re.sub(r"[\U00010000-\U0010ffff]", " ", norm)
+    # 4. Remove standard symbols (dingbats, misc symbols, enclosed characters)
+    norm = re.sub(r"[\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55]", " ", norm)
+    return norm
+
+
 def clean_track_title(raw_title: str) -> str:
     """Clean raw track title for presentation."""
     if not raw_title:
         return ""
     clean = html.unescape(raw_title).strip()
+    clean = normalize_unicode_text(clean)
     clean = AUDIO_FORMAT_PREFIX_PATTERN.sub("", clean).strip()
     clean = AUDIO_FORMAT_TAGS.sub("", clean).strip()
     clean = re.sub(
@@ -230,8 +255,6 @@ def clean_track_title(raw_title: str) -> str:
         clean,
         flags=re.IGNORECASE,
     )
-    # Strip emojis
-    clean = re.sub(r"[\U00010000-\U0010ffff]", "", clean)
     clean = re.sub(r"^[\s\-:|~•]+|[\s\-:|~•]+$", "", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
     return clean
@@ -246,6 +269,7 @@ def parse_and_clean_query(raw_query: str) -> str:
     - Retains full song name, primary artist, and featured artists intact
     """
     cleaned = html.unescape(raw_query).strip()
+    cleaned = normalize_unicode_text(cleaned)
 
     # Strip conversational commands from start/end only
     cleaned = CONVERSATIONAL_PREFIX_PATTERN.sub("", cleaned)
@@ -255,9 +279,6 @@ def parse_and_clean_query(raw_query: str) -> str:
     cleaned = AUDIO_FORMAT_PREFIX_PATTERN.sub("", cleaned).strip()
     cleaned = AUDIO_FORMAT_TAGS.sub("", cleaned).strip()
     cleaned = re.sub(r"[\(\[\{]\s*(?:8d|3d|16d|use\s+headphones?|slowed|reverb)[\)\]\}]", " ", cleaned, flags=re.IGNORECASE)
-
-    # Strip emojis
-    cleaned = re.sub(r"[\U00010000-\U0010ffff]", " ", cleaned)
 
     # Normalize collaboration keywords like 'with', 'feat.', 'ft.'
     cleaned = re.sub(r"\b(?:with|feat\.?|ft\.?)\b", " ", cleaned, flags=re.IGNORECASE)
@@ -345,23 +366,24 @@ class NativeExtractor:
                     is_autoplay=is_autoplay,
                 )
 
-        # 2. Direct YouTube URL Handling (Extract exact audio stream directly from YouTube)
+        # 2. Direct YouTube URL Handling
         yt_match = YOUTUBE_URL_REGEX.search(raw_q)
+        orig_yt_url = None
         if yt_match:
             video_id = yt_match.group(1)
             clean_yt_url = f"https://www.youtube.com/watch?v={video_id}"
+            orig_yt_url = clean_yt_url
 
-            # Direct extraction using clean normalized URL
-            track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
-            if track:
-                _SEARCH_CACHE[cache_key] = (now, track)
-                return track
-
-            # Fallback if direct stream extraction was blocked: bridge exact YouTube title & artist
+            # Fetch exact video title & artist via fast oEmbed / HTML protocol (100-200ms)
             yt_title = await cls._fetch_youtube_title(clean_yt_url)
             if yt_title:
                 raw_q = yt_title
             else:
+                # Direct stream fallback if title couldn't be fetched
+                track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
+                if track:
+                    _SEARCH_CACHE[cache_key] = (now, track)
+                    return track
                 return None
 
         # 3. Direct SoundCloud URL Handling
@@ -398,14 +420,17 @@ class NativeExtractor:
         if not track and cleaned_query.lower() != raw_q.lower() and not has_noise:
             track = await cls._extract_soundcloud(raw_q, requester, is_autoplay)
 
-        # Tier 3: YouTube Fallback (Any rare remaining audio)
+        # Tier 3: YouTube Fallback (Direct URL fallback or smart search)
         if not track:
-            track = await asyncio.to_thread(cls._extract_youtube_fallback, raw_q, requester, is_autoplay)
+            fallback_target = orig_yt_url if orig_yt_url else raw_q
+            track = await asyncio.to_thread(cls._extract_youtube_fallback, fallback_target, requester, is_autoplay)
 
         # Cache successful extraction
         if track:
             if orig_spotify_url:
                 track.url = orig_spotify_url
+            elif orig_yt_url:
+                track.url = orig_yt_url
             _SEARCH_CACHE[cache_key] = (now, track)
             if len(_SEARCH_CACHE) > 500:
                 oldest_key = min(_SEARCH_CACHE.keys(), key=lambda k: _SEARCH_CACHE[k][0])
@@ -892,6 +917,14 @@ class NativeExtractor:
         }
         try:
             async with aiohttp.ClientSession() as session:
+                # Follow short spotify.link redirects to canonical open.spotify.com URL
+                if "spotify.link/" in spotify_url:
+                    try:
+                        async with session.get(spotify_url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=4)) as r_link:
+                            spotify_url = str(r_link.url)
+                    except Exception:
+                        pass
+
                 # 1. Primary: Scrape Spotify HTML using Discordbot UA for full Title + Artist
                 async with session.get(
                     spotify_url,
@@ -912,7 +945,7 @@ class NativeExtractor:
                             song_title = html.unescape(t_match.group(1)).strip()
                             song_artist = html.unescape(t_match.group(2)).strip()
                             if song_title and song_artist:
-                                return f"{song_title} {song_artist}"
+                                return normalize_unicode_text(f"{song_title} {song_artist}")
 
                         # Pattern 2: OpenGraph tags
                         og_title_m = re.search(r'<meta property="og:title" content="(.*?)"', text)
@@ -926,9 +959,9 @@ class NativeExtractor:
                                 if parts:
                                     song_artist = parts[0]
                             if song_title and song_artist and "spotify" not in song_artist.lower():
-                                return f"{song_title} {song_artist}"
+                                return normalize_unicode_text(f"{song_title} {song_artist}")
                             elif song_title and "spotify" not in song_title.lower():
-                                return song_title
+                                return normalize_unicode_text(song_title)
 
                 # 2. Fallback: Spotify oEmbed API
                 oembed_url = f"https://open.spotify.com/oembed?url={spotify_url}"
@@ -937,7 +970,7 @@ class NativeExtractor:
                         text = await o_resp.text()
                         data = json.loads(text)
                         title = data.get("title", "")
-                        return title.strip() if title else None
+                        return normalize_unicode_text(title.strip()) if title else None
         except Exception as e:
             logger.debug(f"Spotify metadata fetch error: {e}")
         return None
@@ -951,28 +984,55 @@ class NativeExtractor:
             async with aiohttp.ClientSession() as session:
                 async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=4)) as resp:
                     if resp.status == 200:
-                        data = await resp.json()
+                        text = await resp.text()
+                        data = json.loads(text)
                         title = data.get("title") or ""
                         author = data.get("author_name") or ""
                         if title:
-                            author_clean = re.sub(r"\s*-\s*Topic$", "", author, flags=re.IGNORECASE).strip()
-                            if (
-                                author_clean
-                                and author_clean.lower() not in title.lower()
-                                and not any(k in author_clean.lower() for k in ("vevo", "official", "records"))
-                            ):
-                                return f"{title.strip()} {author_clean}"
+                            title = normalize_unicode_text(html.unescape(title))
+                            if "- topic" in author.lower():
+                                artist = re.sub(r"\s*-\s*Topic$", "", author, flags=re.IGNORECASE).strip()
+                                if artist and artist.lower() not in title.lower():
+                                    return f"{title.strip()} {artist}"
                             return title.strip()
         except Exception as e:
             logger.debug(f"YouTube oEmbed fetch error: {e}")
 
-        # 2. Fallback to flat yt-dlp extract
+        # 2. HTML scrape fallback for title tag
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.get(youtube_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp:
+                    if resp.status == 200:
+                        html_text = await resp.text()
+                        m = re.search(r"<title>(.*?)</title>", html_text)
+                        if m:
+                            t = html.unescape(m.group(1))
+                            t = re.sub(r"\s*-\s*YouTube$", "", t, flags=re.IGNORECASE).strip()
+                            t = normalize_unicode_text(t)
+                            if t:
+                                return t
+        except Exception as e:
+            logger.debug(f"YouTube HTML scrape error: {e}")
+
+        # 3. Fallback to flat yt-dlp extract
         try:
             def _get_title():
-                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 8}) as ydl:
+                opts = {
+                    "quiet": True,
+                    "no_warnings": True,
+                    "extract_flat": True,
+                    "socket_timeout": 8,
+                    "extractor_args": {"youtube": {"player_client": ["android", "ios"]}},
+                }
+                with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(youtube_url, download=False)
                     if info:
-                        return info.get("title")
+                        raw_t = info.get("title")
+                        return normalize_unicode_text(raw_t) if raw_t else None
                 return None
 
             return await asyncio.to_thread(_get_title)

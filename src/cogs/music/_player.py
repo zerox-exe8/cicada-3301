@@ -23,6 +23,7 @@ import discord
 
 from src.cogs.music._models import Track
 from src.cogs.music._autoplay import NativeSmartAutoplay, clean_track_title
+from src.cogs.music._extractor import NativeExtractor
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
 if TYPE_CHECKING:
@@ -363,6 +364,28 @@ class GuildPlayer:
                 except Exception:
                     pass
 
+        # Resolve deferred stream URL on-demand (e.g. for external playlist queue items)
+        if not track.stream_url:
+            lookup_query = track.query or f"{track.title} {track.author}".strip()
+            resolved = await NativeExtractor.extract(lookup_query, requester=track.requester)
+            if resolved and resolved.stream_url:
+                track.stream_url = resolved.stream_url
+                track.duration = resolved.duration or track.duration
+                if resolved.thumbnail:
+                    track.thumbnail = resolved.thumbnail
+            else:
+                logger.warning(f"Could not resolve stream for track: {track.title}")
+                if self.queue:
+                    next_t = self.queue.pop(0)
+                    await self.play_track(next_t, message_to_edit=message_to_edit)
+                    return
+                else:
+                    return
+
+        # Background pre-fetch next track in queue for instant 0ms transition
+        if self.queue and not self.queue[0].stream_url:
+            asyncio.create_task(self._prefetch_track(self.queue[0]))
+
         self.current = track
         clean_t = clean_track_title(track.title).lower()
         self.played_history.add(clean_t)
@@ -501,6 +524,20 @@ class GuildPlayer:
         """Skip current track."""
         if self.voice_client and (self.voice_client.is_playing() or self.voice_client.is_paused()):
             self.voice_client.stop()
+
+    async def _prefetch_track(self, track: Track) -> None:
+        """Lightweight background pre-fetch for upcoming queued tracks."""
+        try:
+            if not track.stream_url:
+                lookup_query = track.query or f"{track.title} {track.author}".strip()
+                resolved = await NativeExtractor.extract(lookup_query, requester=track.requester)
+                if resolved and resolved.stream_url:
+                    track.stream_url = resolved.stream_url
+                    track.duration = resolved.duration or track.duration
+                    if resolved.thumbnail:
+                        track.thumbnail = resolved.thumbnail
+        except Exception:
+            pass
 
     def pause(self) -> bool:
         """Pause current playback."""

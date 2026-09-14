@@ -81,9 +81,15 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         # 1. Resolve first track immediately for instant playback with 0 lag
         first_item = pl_result.tracks[0]
         first_track = await NativeExtractor.extract(first_item.query, requester=ctx.author.display_name)
+        if not first_track and first_item.title:
+            fallback_q = f"{first_item.title} {first_item.author}".strip()
+            first_track = await NativeExtractor.extract(fallback_q, requester=ctx.author.display_name)
+
         if not first_track:
             for item in pl_result.tracks[1:4]:
                 first_track = await NativeExtractor.extract(item.query, requester=ctx.author.display_name)
+                if not first_track and item.title:
+                    first_track = await NativeExtractor.extract(f"{item.title} {item.author}".strip(), requester=ctx.author.display_name)
                 if first_track:
                     break
 
@@ -101,27 +107,68 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
         first_track.requester_id = ctx.author.id
 
-        # 2. Start playback if idle, or append to queue
+        # 2. Append ALL remaining tracks from playlist to queue immediately so the entire queue is visible
         was_idle = not player.is_playing and not player.is_paused
+        insert_start_idx = len(player.queue)
+
+        for item in pl_result.tracks[1:]:
+            t = Track(
+                title=item.title,
+                author=item.author,
+                url=item.url or item.query,
+                stream_url="",
+                duration=item.duration,
+                thumbnail=pl_result.thumbnail,
+                requester=ctx.author.display_name,
+                requester_id=ctx.author.id,
+                query=item.query,
+            )
+            player.queue.append(t)
+
+        # 3. Start playback if idle, or append first_track to queue
         if was_idle:
             await player.play_track(first_track, message_to_edit=search_msg)
         else:
-            player.queue.append(first_track)
+            # Insert first_track at front of this newly enqueued batch
+            player.queue.insert(insert_start_idx, first_track)
 
-        # 3. Send rich playlist announcement card
+        # 4. Build preview of upcoming tracks for the playlist announcement card
+        if was_idle:
+            upcoming_items = player.queue[:6]
+        else:
+            upcoming_items = player.queue[insert_start_idx:insert_start_idx + 6]
+
+        upcoming_lines = []
+        for i, it in enumerate(upcoming_items, start=1):
+            dur_text = it.formatted_duration
+            upcoming_lines.append(f"`{i:02d}.` [{it.title}]({it.url}) `[{dur_text}]` — `{it.author}`")
+
+        upcoming_preview = "\n".join(upcoming_lines) if upcoming_lines else "No upcoming tracks."
+        remaining_count = pl_result.track_count - (1 if was_idle else 0) - len(upcoming_lines)
+
+        # 5. Send rich playlist announcement card showing all upcoming songs
         pl_card = KyroContainer(accent_color=None)
         pl_card.add_section(
             content=(
                 f"**Queued Playlist: [{pl_result.title}]({pl_result.url})**\n"
                 f"> **Curator / Author:** `{pl_result.author}`\n"
                 f"> **Total Tracks:** `{pl_result.track_count} songs`\n"
-                f"> **First Track:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
+                f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
+                f"> **Requested By:** `{ctx.author.display_name}`"
+            ) if was_idle else (
+                f"**Queued Playlist: [{pl_result.title}]({pl_result.url})**\n"
+                f"> **Curator / Author:** `{pl_result.author}`\n"
+                f"> **Total Tracks Added:** `{pl_result.track_count} songs`\n"
                 f"> **Requested By:** `{ctx.author.display_name}`"
             ),
             accessory={"type": 11, "media": {"url": pl_result.thumbnail}} if pl_result.thumbnail else None,
         )
         pl_card.add_separator(divider=True)
-        pl_card.add_text("-# Powered by Kyro Studio")
+        pl_card.add_text(
+            f"**Upcoming Songs:**\n{upcoming_preview}\n"
+            + (f"-# ...and {remaining_count} more songs. Use `?queue` to view all pages.\n" if remaining_count > 0 else "")
+            + "-# Powered by Kyro Studio"
+        )
 
         if not was_idle and search_msg and isinstance(search_msg, discord.Message):
             try:
@@ -130,29 +177,6 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 await send_container_response(ctx, pl_card)
         else:
             await send_container_response(ctx, pl_card)
-
-        # 4. Background queue remaining tracks safely
-        if len(pl_result.tracks) > 1:
-            load_gen = player._current_gen
-            requester_name = ctx.author.display_name
-            requester_id = ctx.author.id
-
-            async def _bg_load_external_playlist(remaining_items: list, target_gen: int) -> None:
-                for it in remaining_items:
-                    if player._current_gen != target_gen or not player.is_connected:
-                        break
-                    try:
-                        t = await NativeExtractor.extract(it.query, requester=requester_name)
-                        if player._current_gen != target_gen or not player.is_connected:
-                            break
-                        if t:
-                            t.requester_id = requester_id
-                            player.queue.append(t)
-                        await asyncio.sleep(0.15)
-                    except Exception as e:
-                        logger.debug(f"Background playlist load item error: {e}")
-
-            asyncio.create_task(_bg_load_external_playlist(pl_result.tracks[1:], load_gen))
 
         return
 

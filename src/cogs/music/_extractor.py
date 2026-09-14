@@ -991,17 +991,13 @@ class NativeExtractor:
         if clean_u.startswith("<") and clean_u.endswith(">"):
             clean_u = clean_u[1:-1].strip()
 
-        # 1. Spotify Playlist or Album
+        # 1. Spotify Playlist or Album (Do not fallback to yt-dlp to avoid DRM errors)
         if "spotify.com/" in clean_u or "spotify.link/" in clean_u:
-            res = await cls._extract_spotify_playlist(clean_u, requester=requester)
-            if res:
-                return res
+            return await cls._extract_spotify_playlist(clean_u, requester=requester)
 
         # 2. YouTube Playlist
         if any(d in clean_u for d in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
-            res = await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
-            if res:
-                return res
+            return await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
 
         # 3. SoundCloud / Generic Fallback via yt-dlp
         return await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
@@ -1013,6 +1009,15 @@ class NativeExtractor:
         requester: str = "DJ / AutoPlay",
     ) -> Optional[PlaylistResult]:
         """Extract all tracks from a Spotify playlist or album via embed data."""
+        # Follow redirects for short spotify.link URLs
+        if "spotify.link/" in url:
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                        url = str(r.url)
+            except Exception:
+                pass
+
         m = re.search(r"spotify\.com/(?:intl-[a-zA-Z\-]+/)?(playlist|album)/([a-zA-Z0-9]+)", url)
         if not m:
             return None
@@ -1025,7 +1030,7 @@ class NativeExtractor:
         }
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(embed_url, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                async with session.get(embed_url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                     if resp.status != 200:
                         return None
                     html_text = await resp.text()
@@ -1095,17 +1100,20 @@ class NativeExtractor:
         requester: str = "DJ / AutoPlay",
     ) -> Optional[PlaylistResult]:
         """Synchronous yt-dlp flat playlist extraction."""
+        m = re.search(r"[?&]list=([a-zA-Z0-9_-]+)", url)
+        target_url = f"https://www.youtube.com/playlist?list={m.group(1)}" if m else url
+
         ydl_opts = {
             "quiet": True,
-            "extract_flat": "in_playlist",
+            "extract_flat": True,
             "skip_download": True,
             "ignoreerrors": True,
-            "socket_timeout": 8,
+            "socket_timeout": 12,
             "source_address": "0.0.0.0",
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(target_url, download=False)
                 if not info:
                     return None
 

@@ -578,47 +578,63 @@ async def handle_playlist(
             await ctx.send_error(f"Failed to load first track `{first_row['title']}`.")
             return
 
+        # 2. Append all remaining tracks to queue immediately
+        was_idle = not player.is_playing and not player.is_paused
+        insert_start_idx = len(player.queue)
+
+        for row in tracks[1:]:
+            q = resolve_playlist_track_query(row)
+            t = Track(
+                title=row.get("title") or "Unknown Track",
+                author=row.get("author") or "Official Artist",
+                url=row.get("url") or q,
+                stream_url="",
+                duration=int(row.get("duration") or 0),
+                requester=ctx.author.display_name,
+                requester_id=ctx.author.id,
+                query=q,
+            )
+            player.queue.append(t)
+
         # Start playback
-        if not player.is_playing and not player.is_paused:
+        if was_idle:
             await player.play_track(first_track)
         else:
-            player.queue.append(first_track)
+            player.queue.insert(insert_start_idx, first_track)
+
+        # Build preview of upcoming tracks
+        if was_idle:
+            upcoming_items = player.queue[:6]
+        else:
+            upcoming_items = player.queue[insert_start_idx:insert_start_idx + 6]
+
+        upcoming_lines = []
+        for i, it in enumerate(upcoming_items, start=1):
+            dur_text = it.formatted_duration
+            upcoming_lines.append(f"`{i:02d}.` [{it.title}]({it.url}) `[{dur_text}]` — `{it.author}`")
+
+        upcoming_preview = "\n".join(upcoming_lines) if upcoming_lines else "No upcoming tracks."
+        remaining_count = len(tracks) - (1 if was_idle else 0) - len(upcoming_lines)
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Playing Playlist: `{clean_pl_name}`**\n"
-                f"> **Queued:** `{len(tracks)}` songs\n"
+                f"> **Total Queued:** `{len(tracks)}` songs\n"
+                f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`"
+            ) if was_idle else (
+                f"**Playing Playlist: `{clean_pl_name}`**\n"
+                f"> **Total Queued:** `{len(tracks)}` songs\n"
                 f"> **Starting Track:** [{first_track.title}]({first_track.url}) by `{first_track.author}`"
             )
         )
         container.add_separator(divider=True)
-        container.add_text("-# Powered by Kyro Studio")
+        container.add_text(
+            f"**Upcoming Songs:**\n{upcoming_preview}\n"
+            + (f"-# ...and {remaining_count} more songs. Use `?queue` to view all pages.\n" if remaining_count > 0 else "")
+            + "-# Powered by Kyro Studio"
+        )
         await send_container_response(ctx, container)
-
-        # 2. Queue remaining tracks in background safely (bound to current generation)
-        if len(tracks) > 1:
-            load_gen = player._current_gen
-
-            async def _bg_load_playlist(remaining_tracks: list, target_gen: int) -> None:
-                for row in remaining_tracks:
-                    # Abort background enqueue if player was stopped, cleared, or disconnected
-                    if player._current_gen != target_gen or not player.is_connected:
-                        break
-                    try:
-                        q = resolve_playlist_track_query(row)
-                        t = await NativeExtractor.extract(
-                            q,
-                            requester=ctx.author.display_name,
-                        )
-                        if player._current_gen != target_gen or not player.is_connected:
-                            break
-                        if t:
-                            player.queue.append(t)
-                    except Exception as e:
-                        logger.warning(f"Failed to load playlist track '{row.get('title')}': {e}")
-
-            asyncio.create_task(_bg_load_playlist(tracks[1:], load_gen))
 
     # 5. VIEW PLAYLIST
     elif act in ("view", "show", "info"):

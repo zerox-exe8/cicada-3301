@@ -14,12 +14,13 @@ class Track:
     title: str
     author: str
     url: str
-    stream_url: str
-    duration: int  # in seconds
+    stream_url: str = ""
+    duration: int = 0  # in seconds
     thumbnail: Optional[str] = None
     requester: str = "DJ / AutoPlay"
     requester_id: Optional[int] = None
     is_autoplay: bool = False
+    query: Optional[str] = None
 
     @property
     def uri(self) -> str:

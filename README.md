@@ -85,7 +85,7 @@ Kyro/
 ├── assets/               # Branding assets & custom application emojis
 │   ├── branding/
 │   │   ├── kyro_banner.webp
-│   │   └── kyro_logo.webp
+│   │   └── kyro_icon.webp
 │   ├── emoji/
 │   ├── emoji2/
 │   └── music/

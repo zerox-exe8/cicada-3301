@@ -67,9 +67,24 @@ class Help(commands.Cog):
                 categories[category_name] = []
 
             for cmd in cog.get_commands():
-                if await self._can_run_command(cmd, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
-                    if cmd not in categories[category_name]:
-                        categories[category_name].append(cmd)
+                if cmd.hidden:
+                    continue
+
+                if isinstance(cmd, commands.Group) and cmd.commands:
+                    has_sub = False
+                    for sub in sorted(cmd.commands, key=lambda s: s.name):
+                        if not sub.hidden and await self._can_run_command(sub, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
+                            if sub not in categories[category_name]:
+                                categories[category_name].append(sub)
+                                has_sub = True
+                    if not has_sub or getattr(cmd, "fallback", None) or getattr(cmd, "invoke_without_command", False):
+                        if await self._can_run_command(cmd, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
+                            if cmd not in categories[category_name]:
+                                categories[category_name].append(cmd)
+                else:
+                    if await self._can_run_command(cmd, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
+                        if cmd not in categories[category_name]:
+                            categories[category_name].append(cmd)
 
         return {k: v for k, v in categories.items() if v}
 
@@ -217,7 +232,7 @@ class Help(commands.Cog):
         )
         container.add_separator(divider=True)
 
-        formatted_cmds = ", ".join([f"`{cmd.name}`" for cmd in sorted(commands_list, key=lambda c: c.name)])
+        formatted_cmds = ", ".join([f"`{cmd.qualified_name}`" for cmd in sorted(commands_list, key=lambda c: c.qualified_name)])
         container.add_text(formatted_cmds)
         container.add_separator(divider=True)
 

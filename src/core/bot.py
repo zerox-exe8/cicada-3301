@@ -150,7 +150,7 @@ class KyroBot(commands.Bot):
             )
             container.add_separator(divider=True)
             container.add_text(
-                f"• **Prefix:** `{current_prefix}` (Customizable) | **Slash:** `/`\n"
+                f"• **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
                 f"• **Latency:** `{ws_ping}ms` | **Audio:** `Studio Lossless`\n"
                 f"• **Quick Start:** `{current_prefix}play <song>` • `{current_prefix}playlist` • `{current_prefix}help`"
             )

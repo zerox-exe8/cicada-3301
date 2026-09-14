@@ -562,6 +562,7 @@ class TicketSetupWizard(discord.ui.View):
 
 class TicketSystem(commands.Cog):
     """Enterprise Ticket System with Components V2 container panels and slide setup wizard."""
+    category: str = "Ticket"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

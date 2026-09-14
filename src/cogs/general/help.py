@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 class Help(commands.Cog):
     """Enterprise SaaS Help & Module Console with dynamic permission filtering."""
-    category: str = "General"
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
@@ -59,6 +59,10 @@ class Help(commands.Cog):
                 continue
 
             category_name = getattr(cog, "category", cog_name)
+            # Remove Developer module completely - owner only, never displayed in public help
+            if category_name.lower() == "developer":
+                continue
+
             if category_name not in categories:
                 categories[category_name] = []
 
@@ -73,15 +77,13 @@ class Help(commands.Cog):
         """Resolve custom application emoji for category header from assets/emoji and assets/emoji2."""
         e_reg = self.bot.custom_emojis
         mapping = {
-            "General": e_reg.get("icons_utility", e_reg.get("icons_generalinfo", "")),
-            "Music": e_reg.get("Music_Playing", e_reg.get("music_music", e_reg.get("a_musical_notes", ""))),
-            "Utility": e_reg.get("icons_magicwand", e_reg.get("icons_utility", "")),
-            "Settings": e_reg.get("icons_settings", ""),
-            "Admin": e_reg.get("icons_staff", e_reg.get("icon_mod", "")),
+            "Music": e_reg.get("music", e_reg.get("icon_music", e_reg.get("Music_Playing", ""))),
+            "Ticket": e_reg.get("icon_ticket", e_reg.get("ticket_support", e_reg.get("ticket", ""))),
+            "Welcomer": e_reg.get("icons_join", e_reg.get("icon_join", "")),
+            "Moderation": e_reg.get("icon_moderation", e_reg.get("icon_mod", e_reg.get("icons_staff", ""))),
+            "Premium": e_reg.get("verified_premium", e_reg.get("icon_premium", "")),
             "Security": e_reg.get("icons_guardian", e_reg.get("icons_ban", "")),
             "Audit Logs": e_reg.get("icons_podcast", e_reg.get("icon_logging", "")),
-            "Premium": e_reg.get("verified_premium", e_reg.get("icon_premium", "")),
-            "Developer": e_reg.get("icon_developer", e_reg.get("icon_dev", "")),
         }
         return mapping.get(cat_name, e_reg.get("icons_folder", ""))
 
@@ -89,15 +91,13 @@ class Help(commands.Cog):
         """Resolve emoji dict for Select Menu options."""
         e_reg = self.bot.custom_emojis
         mapping = {
-            "General": "icons_utility",
-            "Music": "music_music",
-            "Utility": "icons_magicwand",
-            "Settings": "icons_settings",
-            "Admin": "icons_staff",
+            "Music": "music",
+            "Ticket": "icon_ticket",
+            "Welcomer": "icons_join",
+            "Moderation": "icon_moderation",
+            "Premium": "verified_premium",
             "Security": "icons_guardian",
             "Audit Logs": "icons_podcast",
-            "Premium": "verified_premium",
-            "Developer": "icon_developer",
         }
         emoji_name = mapping.get(cat_name, "icons_folder")
         return e_reg.get_select_emoji(emoji_name, fallback_unicode=None)

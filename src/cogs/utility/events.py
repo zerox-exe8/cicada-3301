@@ -23,7 +23,7 @@ logger = logging.getLogger("Kyro.Events")
 
 class AutoEvents(commands.Cog):
     """Automated Welcome, Farewell/Leave, and Boost Container Dispatcher."""
-    category: str = "Utility"
+    category: str = "Welcomer"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

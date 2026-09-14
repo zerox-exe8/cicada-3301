@@ -15,7 +15,7 @@ from src.utils.containers import KyroContainer, send_container_response
 
 class Sync(commands.Cog):
     """Developer and Admin command synchronization tools."""
-    category: str = "Admin"
+    category: str = "Moderation"
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot

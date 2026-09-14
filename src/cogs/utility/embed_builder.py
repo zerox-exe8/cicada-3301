@@ -1673,7 +1673,7 @@ class EmbedBuilderView(discord.ui.View):
 
 class EmbedBuilder(commands.Cog):
     """Full-featured Discord Components V2 Embed & Container Builder."""
-    category: str = "Utility"
+    category: str = "Welcomer"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
@@ -2040,86 +2040,6 @@ class EmbedBuilder(commands.Cog):
         container.add_text("\n".join(lines))
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
-        await send_container_response(ctx, container)
-
-    @commands.hybrid_command(
-        name="banner",
-        aliases=["resizebanner", "fitbanner", "slimbanner"],
-        description="Convert any tall image into a slim, compact Discord header banner.",
-    )
-    @discord.app_commands.describe(
-        image="Attach an image file directly (Upload file)",
-        image_url="Or provide a direct image URL (Optional)",
-    )
-    async def banner_cmd(
-        self,
-        ctx: CustomContext,
-        image: discord.Attachment | None = None,
-        *,
-        image_url: str | None = None,
-    ) -> None:
-        """Resize or fit any image into a slim, compact Discord header banner."""
-        # Defer immediately so Discord knows the bot is processing (prevents 3s timeout)
-        await ctx.defer()
-
-        target_url = None
-        if image:
-            target_url = image.url
-        elif ctx.message and ctx.message.attachments:
-            target_url = ctx.message.attachments[0].url
-        elif image_url:
-            target_url = image_url.strip()
-
-        if not target_url:
-            await ctx.send("Please provide an image: attach a file directly or provide a URL (e.g. `?banner https://...`).")
-            return
-
-        await self._process_banner(ctx, target_url)
-
-    @banner_cmd.error
-    async def banner_cmd_error(self, ctx: CustomContext, error: commands.CommandError) -> None:
-        """Handle prefix URL argument recovery if typed without slash attachment."""
-        if isinstance(error, (commands.BadArgument, commands.BadUnionArgument)):
-            args = ctx.message.content.split()[1:] if ctx.message else []
-            if args:
-                potential_url = args[0].strip()
-                if potential_url.startswith("http://") or potential_url.startswith("https://"):
-                    await self._process_banner(ctx, potential_url)
-                    return
-        logger.warning(f"Error in banner command: {error}")
-        await ctx.send(f"Could not process banner: `{error}`")
-
-    async def _process_banner(self, ctx: CustomContext, target_url: str) -> None:
-        """Download, transform to 1000x260 widescreen banner, and respond with download link."""
-        session = getattr(self.bot, "session", None)
-        if not session:
-            import aiohttp
-            session = aiohttp.ClientSession()
-
-        image_bytes = await download_image_bytes(target_url, session)
-        if not image_bytes:
-            await ctx.send("Could not download image from the provided link/attachment. Please ensure it is a valid image.")
-            return
-
-        banner_stream = create_slim_banner(image_bytes, target_width=1000, target_height=300, mode="seamless")
-        file = discord.File(banner_stream, filename="slim_banner.png")
-
-        arrow = self.bot.custom_emojis.get("icons_rightarrow", "›")
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "**Seamless Widescreen Banner Generated**\n"
-                f"> Transformed image into an edge-to-edge 1000x300px banner with 0 dark boxes or borders.\n"
-                f"> Right-click / hold the image below {arrow} **Copy Link** and paste into your Embed Builder!"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Generated for {ctx.author.display_name}")
-
-        msg = await ctx.send(file=file)
-        if msg and msg.attachments:
-            cdn_url = msg.attachments[0].url
-            container.add_text(f"**Image Link:** `{cdn_url}`")
         await send_container_response(ctx, container)
 
 

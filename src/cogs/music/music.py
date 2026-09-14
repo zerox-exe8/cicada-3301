@@ -175,12 +175,14 @@ class Music(commands.Cog):
         player = self.controller.get_or_create_player(ctx.guild)
         player.home_channel = ctx.channel
 
-        if not player.is_connected:
-            await player.connect_voice(target_channel)
-
         mode = state.lower().strip() if state else ("off" if player.voice_listening else "on")
         if mode in ("on", "enable", "start", "true"):
-            success = player.start_voice_listening()
+            try:
+                success, err_msg = await player.start_voice_listening(target_channel)
+            except Exception as e:
+                success = False
+                err_msg = str(e)
+
             container = KyroContainer(accent_color=None)
             if success:
                 container.add_section(
@@ -197,7 +199,8 @@ class Music(commands.Cog):
                 container.add_separator(divider=True)
                 container.add_text("-# Speak clearly into your mic • Use ?listen off to stop")
             else:
-                container.add_text("**Failed to activate AI Voice Commander.** Voice receive extension is required.")
+                reason = f"\n> `{err_msg}`" if err_msg else ""
+                container.add_text(f"**Failed to activate AI Voice Commander.**{reason}")
             await send_container_response(ctx, container)
         else:
             player.stop_voice_listening()

@@ -73,7 +73,14 @@ class VoiceCommandSink(voice_recv.AudioSink if HAS_VOICE_RECV else object):
 
         self._stopped = False
         self._watcher_task: Optional[asyncio.Task] = None
-        self._watcher_task = asyncio.create_task(self._silence_watcher())
+        try:
+            loop = player.bot.loop if player and player.bot else asyncio.get_running_loop()
+            self._watcher_task = loop.create_task(self._silence_watcher())
+        except Exception:
+            try:
+                self._watcher_task = asyncio.create_task(self._silence_watcher())
+            except Exception:
+                pass
 
     def wants_opus(self) -> bool:
         # We want decoded raw PCM for direct speech recognition

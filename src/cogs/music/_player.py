@@ -434,27 +434,75 @@ class GuildPlayer:
             c.add_text(f"**Volume set to `{new_v}%` via voice command** ({user.mention}).")
             await send_container_response(self.home_channel, c)
 
-    def start_voice_listening(self) -> bool:
-        """Attach voice sink to listen for wake-word voice commands."""
-        if not self.voice_client or not hasattr(self.voice_client, "listen"):
-            return False
-
+    async def start_voice_listening(self, target_channel: Optional[discord.VoiceChannel] = None) -> tuple[bool, Optional[str]]:
+        """Attach voice sink to listen for wake-word voice commands with automatic upgrade to VoiceRecvClient."""
         from src.cogs.music._voice_listener import VoiceCommandSink, HAS_VOICE_RECV
         if not HAS_VOICE_RECV:
-            return False
+            return False, "voice_recv extension is not installed or available."
 
-        if self.voice_listening:
-            return True
+        if self.voice_listening and self._voice_sink:
+            return True, None
+
+        import discord.ext.voice_recv as voice_recv
+
+        needs_reconnect = False
+        if not self.voice_client or not self.voice_client.is_connected():
+            needs_reconnect = True
+        elif not isinstance(self.voice_client, voice_recv.VoiceRecvClient) or not hasattr(self.voice_client, "listen"):
+            needs_reconnect = True
+
+        channel = target_channel or self.voice_channel
+        if not channel and self.voice_client:
+            channel = self.voice_client.channel
+
+        if not channel:
+            return False, "No active voice channel found to connect."
+
+        if needs_reconnect:
+            if self.voice_client and self.voice_client.is_connected():
+                try:
+                    await self.voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                self.voice_client = None
+
+            try:
+                self.voice_client = await channel.connect(
+                    cls=voice_recv.VoiceRecvClient,
+                    self_deaf=False,
+                    timeout=20.0,
+                    reconnect=True,
+                )
+            except Exception as e:
+                logger.error(f"Failed to connect VoiceRecvClient: {e}")
+                return False, f"Voice connect failed: {e}"
+
+        # Wait briefly for connection secret_key handshake
+        for _ in range(25):
+            if (
+                self.voice_client
+                and hasattr(self.voice_client, "secret_key")
+                and self.voice_client.secret_key is not discord.utils.MISSING
+                and self.voice_client.secret_key is not None
+            ):
+                break
+            await asyncio.sleep(0.1)
 
         try:
-            self._voice_sink = VoiceCommandSink(self, self._handle_voice_command)
+            if not self._voice_sink:
+                self._voice_sink = VoiceCommandSink(self, self._handle_voice_command)
+
+            if hasattr(self.voice_client, "is_listening") and self.voice_client.is_listening():
+                self.voice_listening = True
+                return True, None
+
             self.voice_client.listen(self._voice_sink)
             self.voice_listening = True
             logger.info(f"AI Voice Commander: Started listening in guild {self.guild.id}")
-            return True
+            return True, None
         except Exception as e:
             logger.error(f"Failed to start voice listening: {e}", exc_info=True)
-            return False
+            return False, str(e)
 
     def stop_voice_listening(self) -> None:
         """Stop voice listening and clean up sink."""
@@ -822,13 +870,6 @@ class GuildPlayer:
         short_artist_name = shorten_artist(track.author)
         channel_mention = f"<#{self.voice_client.channel.id}>" if (self.voice_client and self.voice_client.channel) else "#Hangout"
 
-        if elapsed is None:
-            elapsed = self.elapsed_time
-
-        progress_str = render_progress_bar(elapsed, track.duration)
-        vol_pct = int(self.volume * 100)
-        loop_str = self.loop_mode.capitalize()
-
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
@@ -843,10 +884,9 @@ class GuildPlayer:
         container.add_separator(divider=True)
 
         container.add_text(
-            f"> **Timeline** • {progress_str}\n"
-            f"> **Volume** • `{vol_pct}%` • **Loop** • `{loop_str}` • **Engine** • `Gapless RAM`\n"
-            f"> **Channel** • {channel_mention} • **Requester** • `{track.requester}`\n\n"
-            f"-# Kyro Music Engine • Live Studio Controller"
+            f"> **Channel** • {channel_mention}\n"
+            f"> **Requester** • `{track.requester}`\n\n"
+            f"-# Kyro Music Engine • Studio Audio"
         )
 
         return container
@@ -873,10 +913,10 @@ class GuildPlayer:
             logger.debug(f"Controller message edit notice: {e}")
 
     def _start_progress_loop(self) -> None:
-        """Start the live real-time progress bar updater."""
+        """Disabled: Progress timeline bar removed from Now Playing embed."""
         if self._progress_task and not self._progress_task.done():
             self._progress_task.cancel()
-        self._progress_task = asyncio.create_task(self._progress_updater())
+        self._progress_task = None
 
     async def _progress_updater(self) -> None:
         """Periodically update the live progress bar in-place every 5 seconds."""

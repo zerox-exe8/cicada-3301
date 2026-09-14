@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from discord.ext import commands
 
+from src.cogs.music._commands.controls import check_voice_channel
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -14,6 +15,13 @@ if TYPE_CHECKING:
 
 
 async def execute_pause(cog: Music, ctx: commands.Context) -> None:
+    allowed, err = check_voice_channel(ctx)
+    if not allowed:
+        container = KyroContainer(accent_color=None)
+        container.add_text(f"**{err}**")
+        await send_container_response(ctx, container)
+        return
+
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected:
         container = KyroContainer(accent_color=None)
@@ -32,6 +40,13 @@ async def execute_pause(cog: Music, ctx: commands.Context) -> None:
 
 
 async def execute_resume(cog: Music, ctx: commands.Context) -> None:
+    allowed, err = check_voice_channel(ctx)
+    if not allowed:
+        container = KyroContainer(accent_color=None)
+        container.add_text(f"**{err}**")
+        await send_container_response(ctx, container)
+        return
+
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected:
         container = KyroContainer(accent_color=None)

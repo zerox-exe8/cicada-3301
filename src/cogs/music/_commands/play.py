@@ -28,6 +28,20 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         return
 
     voice_channel = ctx.author.voice.channel
+
+    # Check if bot is already connected to another VC in this guild
+    if ctx.guild.me.voice and ctx.guild.me.voice.channel:
+        if ctx.guild.me.voice.channel.id != voice_channel.id:
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Voice Channel Conflict**\n"
+                    f"> I am already active in {ctx.guild.me.voice.channel.mention}. Please join that channel to play music."
+                )
+            )
+            await send_container_response(ctx, container)
+            return
+
     player = cog.controller.get_or_create_player(ctx.guild)
     player.home_channel = ctx.channel
 

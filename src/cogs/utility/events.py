@@ -10,6 +10,7 @@ import logging
 import re
 from typing import Any
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from src.core.bot import KyroBot
@@ -162,13 +163,33 @@ class AutoEvents(commands.Cog):
             logger.error(f"Failed to dispatch {event_type} card in {guild.name}: {e}", exc_info=e)
             return False, f"Error sending message: {e}"
 
+    async def _get_autorole_id(self, guild_id: int) -> int | None:
+        """Fetch configured autorole ID for the guild."""
+        row = await self.bot.db.fetch_one(
+            "SELECT role_id FROM guild_autoroles WHERE guild_id = ?;",
+            guild_id,
+        )
+        return row["role_id"] if row else None
+
     # ─── Event Listeners ─────────────────────────────────────────────────────
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
-        """Handle welcome greeting on member join."""
+        """Handle welcome greeting and auto-role on member join."""
         if member.bot:
             return
+
+        # Handle Auto-Role assignment
+        role_id = await self._get_autorole_id(member.guild.id)
+        if role_id:
+            role = member.guild.get_role(role_id)
+            if role and member.guild.me.guild_permissions.manage_roles and member.guild.me.top_role > role:
+                try:
+                    await member.add_roles(role, reason="Kyro Auto-Role System")
+                    logger.info(f"Assigned autorole @{role.name} to {member} in {member.guild.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to assign autorole in {member.guild.name}: {e}")
+
         await self._send_event_card("welcome", member.guild, member)
 
         # Handle DM Welcome if enabled
@@ -207,6 +228,143 @@ class AutoEvents(commands.Cog):
                 "boost_tier": f"Level {getattr(after.guild, 'premium_tier', 0)}",
             }
             await self._send_event_card("boost", after.guild, after, extra=extra)
+
+    # ─── Auto-Role Command Group ─────────────────────────────────────────────
+
+    @commands.hybrid_group(
+        name="autorole",
+        aliases=["joinrole"],
+        description="Configure automatic role assignment for new joining members.",
+        fallback="status",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_group(self, ctx: CustomContext) -> None:
+        """View current auto-role configuration."""
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "-")
+        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
+
+        role_id = await self._get_autorole_id(ctx.guild.id)
+        role = ctx.guild.get_role(role_id) if role_id else None
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Auto-Role Configuration**\n"
+                "> Automatically assign a role to new members when they join the server."
+            )
+        )
+        container.add_separator(divider=True)
+
+        if role:
+            is_hierarchy_valid = ctx.guild.me.guild_permissions.manage_roles and ctx.guild.me.top_role > role
+            perm_status = "`Valid`" if is_hierarchy_valid else "`Warning: Kyro role must be above this role`"
+            container.add_text(
+                f"{dot} **Status:** `Active`\n"
+                f"{dot} **Assigned Role:** {role.mention} (`{role.id}`)\n"
+                f"{dot} **Bot Permission:** {perm_status}"
+            )
+        else:
+            container.add_text(
+                f"{dot} **Status:** `Disabled`\n"
+                f"{dot} **Assigned Role:** `None`"
+            )
+
+        container.add_separator(divider=True)
+        container.add_text(
+            f"-# Commands: `{prefix}autorole set @role` • `{prefix}autorole remove`"
+        )
+        await send_container_response(ctx, container)
+
+    @autorole_group.command(
+        name="set",
+        description="Set the role to automatically assign to new members.",
+    )
+    @app_commands.describe(role="Role to automatically assign on member join")
+    @commands.has_permissions(manage_roles=True)
+    @commands.bot_has_permissions(manage_roles=True)
+    async def autorole_set(self, ctx: CustomContext, role: discord.Role) -> None:
+        """Set auto-role."""
+        if role.is_default() or role.managed:
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Invalid Role**\n"
+                    "> Cannot set `@everyone` or a bot-managed integration role as auto-role."
+                )
+            )
+            await send_container_response(ctx, container)
+            return
+
+        if role >= ctx.guild.me.top_role:
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Role Hierarchy Error**\n"
+                    f"> The role {role.mention} is higher than or equal to my highest role. Please move my role above {role.mention} in Server Settings."
+                )
+            )
+            await send_container_response(ctx, container)
+            return
+
+        if ctx.author.id != ctx.guild.owner_id and role >= ctx.author.top_role:
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Role Hierarchy Error**\n"
+                    f"> You cannot set {role.mention} because it is higher than or equal to your highest role."
+                )
+            )
+            await send_container_response(ctx, container)
+            return
+
+        await self.bot.db.execute(
+            """
+            INSERT INTO guild_autoroles (guild_id, role_id)
+            VALUES (?, ?)
+            ON CONFLICT (guild_id) DO UPDATE SET role_id = EXCLUDED.role_id, updated_at = CURRENT_TIMESTAMP;
+            """,
+            ctx.guild.id,
+            role.id,
+        )
+
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "-")
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Auto-Role Configured**\n"
+                f"> New members joining the server will now automatically receive {role.mention}."
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"{dot} **Role:** {role.mention} (`{role.id}`)\n"
+            f"{dot} **Configured By:** {ctx.author.mention}"
+        )
+        await send_container_response(ctx, container)
+
+    @autorole_group.command(
+        name="remove",
+        aliases=["disable", "reset"],
+        description="Disable auto-role for this server.",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_remove(self, ctx: CustomContext) -> None:
+        """Disable auto-role."""
+        await self.bot.db.execute(
+            "DELETE FROM guild_autoroles WHERE guild_id = ?;",
+            ctx.guild.id,
+        )
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Auto-Role Disabled**\n"
+                "> Automatic role assignment has been deactivated for this server."
+            )
+        )
+        await send_container_response(ctx, container)
 
     # ─── Welcome Command Group ───────────────────────────────────────────────
 

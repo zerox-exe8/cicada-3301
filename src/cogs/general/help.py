@@ -29,24 +29,15 @@ class Help(commands.Cog):
     async def _can_run_command(
         self, cmd: commands.Command, ctx: CustomContext, is_dev: bool = False, is_server_owner: bool = False
     ) -> bool:
-        """Check if the context author has permission to run this command."""
+        """Check if the command should be visible in the help menu."""
         if cmd.hidden:
             return False
 
-        # Developer check
+        # Developer check - owner/developer only
         if getattr(cmd.cog, "category", "") == "Developer" and not is_dev:
             return False
 
-        # If user is bot developer or server owner, allow visibility
-        if is_dev or is_server_owner:
-            return True
-
-        # Check command permission checks
-        try:
-            can_run = await cmd.can_run(ctx)
-            return can_run
-        except Exception:
-            return False
+        return True
 
     async def _get_visible_categories(self, ctx: CustomContext) -> dict[str, list[commands.Command]]:
         """Group commands that the current user has permission to execute."""

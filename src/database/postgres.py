@@ -327,6 +327,32 @@ class PostgresDatabase(BaseDatabase):
             """
             CREATE INDEX IF NOT EXISTS idx_user_playlist_tracks_plid ON user_playlist_tracks(playlist_id);
             """,
+            # Guild Member Warnings table
+            """
+            CREATE TABLE IF NOT EXISTS guild_warns (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                moderator_id BIGINT NOT NULL,
+                reason TEXT DEFAULT 'No reason provided',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Guild Auto-Role table
+            """
+            CREATE TABLE IF NOT EXISTS guild_autoroles (
+                guild_id BIGINT PRIMARY KEY,
+                role_id BIGINT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Guild 24/7 Voice Stay Mode table
+            """
+            CREATE TABLE IF NOT EXISTS guild_music_247 (
+                guild_id BIGINT PRIMARY KEY,
+                is_247 BOOLEAN DEFAULT FALSE
+            );
+            """,
         ]
         async with self.pool.acquire() as conn:
             for query in queries:

@@ -27,6 +27,9 @@ from src.cogs.music._commands.controls import (
     execute_shuffle,
     execute_clear,
     execute_volume,
+    execute_remove,
+    execute_jump,
+    execute_stay,
 )
 from src.cogs.music._commands.playlist import handle_playlist, handle_like, handle_unlike
 
@@ -70,6 +73,9 @@ class Music(commands.Cog):
                 # Count non-bot members
                 members = [m for m in before.channel.members if not m.bot]
                 if len(members) == 0:
+                    if getattr(player, "is_247", False):
+                        logger.info(f"Voice channel #{before.channel.name} empty, but 24/7 mode active. Remaining connected.")
+                        return
                     logger.info(f"Voice channel #{before.channel.name} empty. Stopping player.")
                     await player.stop()
 
@@ -225,6 +231,36 @@ class Music(commands.Cog):
     ) -> None:
         """Manage custom user playlists."""
         await handle_playlist(ctx, self, action, name, query=query)
+
+
+    @commands.hybrid_command(
+        name="remove",
+        description="Remove a specific track from the upcoming queue by its number.",
+    )
+    @app_commands.describe(index="Track number to remove from the queue")
+    async def remove(self, ctx: CustomContext, index: int) -> None:
+        """Remove a track from queue."""
+        await execute_remove(self, ctx, index)
+
+    @commands.hybrid_command(
+        name="jump",
+        aliases=["skipto"],
+        description="Skip directly to a specific track number in the queue.",
+    )
+    @app_commands.describe(index="Track number to skip directly to")
+    async def jump(self, ctx: CustomContext, index: int) -> None:
+        """Skip directly to a track in queue."""
+        await execute_jump(self, ctx, index)
+
+    @commands.hybrid_command(
+        name="247",
+        aliases=["stay"],
+        description="Toggle 24/7 mode to keep Kyro connected in voice even when empty.",
+    )
+    @commands.has_permissions(manage_guild=True)
+    async def stay_247(self, ctx: CustomContext) -> None:
+        """Toggle 24/7 voice stay mode."""
+        await execute_stay(self, ctx)
 
 
 async def setup(bot: KyroBot) -> None:

@@ -258,6 +258,7 @@ class GuildPlayer:
         self.loop_mode: str = "off"  # "off", "track", "queue"
         self.volume: float = 1.0     # 100%
         self.smart_autoplay: bool = False
+        self.is_247: bool = False
         
         self.played_history: Set[str] = set()
         self.consecutive_same_artist: int = 0

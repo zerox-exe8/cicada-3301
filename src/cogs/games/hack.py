@@ -26,11 +26,30 @@ if TYPE_CHECKING:
 
 
 class HackActionView(discord.ui.View):
-    """Interactive post-breach incident response panel."""
+    """Persistent interactive post-breach incident response panel."""
 
-    def __init__(self, target_name: str) -> None:
-        super().__init__(timeout=180)
+    def __init__(self, target_name: str | None = None) -> None:
+        super().__init__(timeout=None)
         self.target_name = target_name
+
+    def _get_target(self, interaction: discord.Interaction) -> str:
+        if self.target_name:
+            return self.target_name
+        msg = interaction.message
+        if msg:
+            import re
+            m = re.search(r"User Identity:\s*<@!?(\d+)>", str(msg.content))
+            if not m:
+                for comp in getattr(msg, "components", []):
+                    c_dict = getattr(comp, "to_dict", lambda: {})()
+                    m = re.search(r"User Identity:\s*<@!?(\d+)>", str(c_dict))
+                    if m:
+                        break
+            if m and interaction.guild:
+                member = interaction.guild.get_member(int(m.group(1)))
+                if member:
+                    return member.display_name
+        return "Target"
 
     @discord.ui.button(
         label="Terminate Session",
@@ -39,12 +58,13 @@ class HackActionView(discord.ui.View):
     )
     async def terminate_session(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         """Deliver realistic access denied security response."""
+        target = self._get_target(interaction)
         resp = KyroContainer(accent_color=0xED4245)
         resp.add_section(
             content=(
                 "**[SESSION TERMINATION FAILED] Access Denied**\n"
                 "> Error `0x80070005`: Elevated Kernel Hook Detected.\n"
-                f"> Target client `{self.target_name}` is currently locked in debug trace mode.\n\n"
+                f"> Target client `{target}` is currently locked in debug trace mode.\n\n"
                 "> Relax! This was a 100% simulated penetration test."
             )
         )
@@ -59,11 +79,12 @@ class HackActionView(discord.ui.View):
     )
     async def decrypt_vault(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         """Deliver encrypted archive security response."""
+        target = self._get_target(interaction)
         resp = KyroContainer(accent_color=0x5865F2)
         resp.add_section(
             content=(
                 "**[ENCRYPTION KEY REQUIRED] RSA-4096 Protected**\n"
-                f"> Archive `{self.target_name.upper()}_EXFIL_DUMP.tar.gz` (1.82 GB) requires private key.\n"
+                f"> Archive `{target.upper()}_EXFIL_DUMP.tar.gz` (1.82 GB) requires private key.\n"
                 "> Audit Verified: No actual private user credentials were leaked or stored."
             )
         )
@@ -78,12 +99,13 @@ class HackActionView(discord.ui.View):
     )
     async def audit_cert(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         """Display verification disclaimer certificate."""
+        target = self._get_target(interaction)
         case_id = random.randint(100000, 999999)
         resp = KyroContainer(accent_color=0x57F287)
         resp.add_section(
             content=(
                 f"**Audit Certificate #SEC-{case_id}**\n"
-                f"> Target: `{self.target_name}`\n"
+                f"> Target: `{target}`\n"
                 "> Classification: Harmless Entertainment Simulation\n"
                 "> All tokens, passwords, and IPs generated for this command are synthetic."
             )
@@ -99,6 +121,7 @@ class HackCog(commands.Cog, name="Games-Hack"):
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
+        self.bot.add_view(HackActionView())
 
     @commands.hybrid_command(
         name="hack",
@@ -378,4 +401,5 @@ class HackCog(commands.Cog, name="Games-Hack"):
 
 
 async def setup(bot: KyroBot) -> None:
+    bot.add_view(HackActionView())
     await bot.add_cog(HackCog(bot))

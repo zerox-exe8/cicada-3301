@@ -228,7 +228,9 @@ async def send_container_response(
                 )
             if view and hasattr(bot, "_connection"):
                 msg_id = int(msg_data["id"]) if isinstance(msg_data, dict) and "id" in msg_data else None
-                bot._connection.store_view(view, msg_id)
+                state = getattr(bot, "_connection", None) or getattr(bot, "_state", None) or bot
+                if hasattr(state, "store_view"):
+                    state.store_view(view, msg_id)
             return msg_data
         else:
             # Send initial response via raw interaction callback
@@ -250,8 +252,10 @@ async def send_container_response(
                     ),
                     json={"type": 4, "data": payload},
                 )
-            if view and hasattr(bot, "_connection"):
-                bot._connection.store_view(view)
+            if view:
+                state = getattr(bot, "_connection", None) or getattr(bot, "_state", None) or bot
+                if hasattr(state, "store_view"):
+                    state.store_view(view)
             return res
     else:
         obj = target
@@ -295,8 +299,9 @@ async def send_container_response(
                     setattr(view, "message_id", msg_id)
                 if not getattr(view, "channel_id", None):
                     setattr(view, "channel_id", channel_id)
-                if hasattr(bot_instance, "_connection"):
-                    bot_instance._connection.store_view(view, msg_id)
+                state = getattr(bot_instance, "_connection", None) or getattr(bot_instance, "_state", None) or bot_instance
+                if hasattr(state, "store_view"):
+                    state.store_view(view, msg_id)
 
             # Reconstruct discord.Message if state is accessible
             if isinstance(msg_data, dict):
@@ -379,8 +384,10 @@ async def edit_container_response(
                     ),
                     json=payload,
                 )
-                if view and hasattr(bot, "_connection"):
-                    bot._connection.store_view(view, msg.id)
+                if view:
+                    state = getattr(bot, "_connection", None) or getattr(msg, "_state", None) or bot
+                    if hasattr(state, "store_view"):
+                        state.store_view(view, msg.id)
                 return
             except Exception as e:
                 logger.warning(f"Direct channel PATCH edit failed ({e}). Attempting embed fallback.")

@@ -91,6 +91,7 @@ class Help(commands.Cog):
             "Premium": e_reg.get("verified_premium", e_reg.get("icon_premium", "")),
             "Security": e_reg.get("icons_guardian", e_reg.get("icons_ban", "")),
             "Audit Logs": e_reg.get("icons_podcast", e_reg.get("icon_logging", "")),
+            "Games": e_reg.get("icons_magicwand", e_reg.get("icons_tada", e_reg.get("icon_gift", ""))),
         }
         return mapping.get(cat_name, e_reg.get("icons_folder", ""))
 
@@ -106,6 +107,7 @@ class Help(commands.Cog):
             "Premium": "verified_premium",
             "Security": "icons_guardian",
             "Audit Logs": "icons_podcast",
+            "Games": "icons_magicwand",
         }
         emoji_name = mapping.get(cat_name, "icons_folder")
         return e_reg.get_select_emoji(emoji_name, fallback_unicode=None)

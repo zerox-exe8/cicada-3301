@@ -42,7 +42,7 @@ class FakeNitroView(discord.ui.View):
             accessory={
                 "type": 11,
                 "media": {
-                    "url": "https://media1.tenor.com/m/x8v1oNUOmg4AAAAd/rickroll-roll.gif",
+                    "url": "https://media.tenor.com/x8v1oNUOmg4AAAAC/rickroll-roll.gif",
                 },
             },
         )
@@ -83,21 +83,12 @@ class NitroCog(commands.Cog, name="Games-Nitro"):
             accessory={
                 "type": 11,
                 "media": {
-                    "url": "https://i.imgur.com/w9ai84b.png",
+                    "url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_colornitro.png",
                 },
             },
         )
         container.add_separator(divider=True)
         container.add_text("-# Discord Official Partner Gift")
-
-        container.add_action_row([
-            {
-                "type": 2,
-                "style": 3,
-                "label": "Accept",
-                "custom_id": "fake_nitro:accept_btn",
-            }
-        ])
 
         view = FakeNitroView()
         await send_container_response(ctx, container, view=view)

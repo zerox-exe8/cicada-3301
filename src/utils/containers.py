@@ -230,44 +230,92 @@ async def send_container_response(
             return res
     else:
         obj = target
-        target_send = getattr(obj, "send", None) or getattr(getattr(obj, "channel", None), "send", None)
-        if target_send:
-            primary = container if isinstance(container, KyroContainer) else container[0]
-            
-            # Extract link buttons from container into a fallback View if no view is provided
-            fallback_view = view
-            if fallback_view is None:
-                container_list = container if isinstance(container, list) else [container]
-                link_view = discord.ui.View(timeout=None)
-                has_buttons = False
-                for c in container_list:
-                    for comp in c.components:
-                        if comp.get("type") == 1:
-                            for item in comp.get("components", []):
-                                if item.get("type") == 2 and item.get("style") == 5:
-                                    lbl = item.get("label", "Link")
-                                    u = item.get("url", "https://discord.com")
-                                    if u and u.startswith("http"):
-                                        link_view.add_item(discord.ui.Button(label=lbl, url=u, style=discord.ButtonStyle.link))
-                                        has_buttons = True
-                if has_buttons:
-                    fallback_view = link_view
 
-            msg = await target_send(
-                content=content,
-                embed=primary.to_embed(content=content),
-                view=fallback_view,
-                allowed_mentions=discord.AllowedMentions(users=True),
+        # Handle User / Member DMs
+        if isinstance(obj, (discord.User, discord.Member)):
+            dm = await obj.create_dm()
+            channel_id = dm.id
+            bot_instance = getattr(obj, "_state", None)
+            http_client = getattr(bot_instance, "http", None)
+        elif isinstance(obj, discord.abc.GuildChannel) or (isinstance(obj, discord.abc.Messageable) and hasattr(obj, "id") and not hasattr(obj, "channel")):
+            channel_id = obj.id
+            bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
+            http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
+        elif hasattr(obj, "channel"):
+            channel_id = obj.channel.id
+            bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
+            http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
+        else:
+            channel_id = int(obj)
+            bot_instance = getattr(obj, "bot", getattr(obj, "_state", None))
+            http_client = getattr(bot_instance, "http", None) or getattr(getattr(obj, "_state", None), "http", None)
+
+        # Direct bot channel message dispatch via raw Components V2 payload
+        try:
+            msg_data = await http_client.request(
+                discord.http.Route("POST", f"/channels/{channel_id}/messages"),
+                json=payload,
             )
-            if view and msg and hasattr(msg, "id"):
-                setattr(view, "message_id", msg.id)
-                setattr(view, "channel_id", getattr(msg.channel, "id", None))
-                bot_instance = getattr(msg, "_state", None)
-                if bot_instance and hasattr(bot_instance, "store_view"):
-                    bot_instance.store_view(view, msg.id)
-            return msg
+            if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
+                msg_id = int(msg_data["id"])
+                if not getattr(view, "message_id", None):
+                    setattr(view, "message_id", msg_id)
+                if not getattr(view, "channel_id", None):
+                    setattr(view, "channel_id", channel_id)
+                if hasattr(bot_instance, "_connection"):
+                    bot_instance._connection.store_view(view, msg_id)
 
-        raise RuntimeError(f"Cannot dispatch container response to target {type(obj).__name__}")
+            # Reconstruct discord.Message if state is accessible
+            if isinstance(msg_data, dict):
+                channel_obj = getattr(obj, "channel", obj if isinstance(obj, discord.abc.Messageable) else None)
+                state = getattr(bot_instance, "_connection", bot_instance)
+                if hasattr(state, "create_message") and channel_obj:
+                    try:
+                        return state.create_message(channel=channel_obj, data=msg_data)
+                    except Exception:
+                        pass
+            return msg_data
+        except discord.Forbidden:
+            raise
+        except Exception as e:
+            logger.warning(f"Raw Components V2 HTTP request failed ({e}), attempting standard send fallback...")
+            target_send = getattr(obj, "send", None) or getattr(getattr(obj, "channel", None), "send", None)
+            if target_send:
+                primary = container if isinstance(container, KyroContainer) else container[0]
+                
+                # Extract link buttons from container into a fallback View if no view is provided
+                fallback_view = view
+                if fallback_view is None:
+                    container_list = container if isinstance(container, list) else [container]
+                    link_view = discord.ui.View(timeout=None)
+                    has_buttons = False
+                    for c in container_list:
+                        for comp in c.components:
+                            if comp.get("type") == 1:
+                                for item in comp.get("components", []):
+                                    if item.get("type") == 2 and item.get("style") == 5:
+                                        lbl = item.get("label", "Link")
+                                        u = item.get("url", "https://discord.com")
+                                        if u and u.startswith("http"):
+                                            link_view.add_item(discord.ui.Button(label=lbl, url=u, style=discord.ButtonStyle.link))
+                                            has_buttons = True
+                    if has_buttons:
+                        fallback_view = link_view
+
+                msg = await target_send(
+                    content=content,
+                    embed=primary.to_embed(content=content),
+                    view=fallback_view,
+                    allowed_mentions=discord.AllowedMentions(users=True),
+                )
+                if view and msg and hasattr(msg, "id"):
+                    setattr(view, "message_id", msg.id)
+                    setattr(view, "channel_id", getattr(msg.channel, "id", None))
+                    bot_instance = getattr(msg, "_state", None)
+                    if bot_instance and hasattr(bot_instance, "store_view"):
+                        bot_instance.store_view(view, msg.id)
+                return msg
+            raise
 
 
 async def edit_container_response(

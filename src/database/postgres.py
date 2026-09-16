@@ -427,6 +427,27 @@ class PostgresDatabase(BaseDatabase):
                 created_by BIGINT
             );
             """,
+            # Guild Anonymous Confession Settings
+            """
+            CREATE TABLE IF NOT EXISTS guild_confession_settings (
+                guild_id BIGINT PRIMARY KEY,
+                channel_id BIGINT,
+                counter INT DEFAULT 0,
+                is_enabled BOOLEAN DEFAULT TRUE
+            );
+            """,
+            # User AFK Voice Mail & Notes Inbox
+            """
+            CREATE TABLE IF NOT EXISTS user_afk_notes (
+                id SERIAL PRIMARY KEY,
+                target_user_id BIGINT NOT NULL,
+                sender_id BIGINT NOT NULL,
+                sender_name VARCHAR(64) NOT NULL,
+                guild_id BIGINT NOT NULL,
+                note TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

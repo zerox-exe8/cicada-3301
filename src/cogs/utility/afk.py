@@ -58,6 +58,71 @@ def format_duration(seconds: float) -> str:
     return " ".join(parts)
 
 
+class AFKNoteModal(discord.ui.Modal):
+    """Modal to leave a private note for an AFK user."""
+
+    def __init__(self, bot: KyroBot, target_id: int, target_name: str, guild_id: int) -> None:
+        super().__init__(title=f"Note for {target_name[:20]}")
+        self.bot = bot
+        self.target_id = target_id
+        self.target_name = target_name
+        self.guild_id = guild_id
+
+        self.note_input = discord.ui.TextInput(
+            label="Your Message / Note",
+            style=discord.TextStyle.paragraph,
+            placeholder="Write a message to be delivered when they return...",
+            required=True,
+            max_length=250,
+        )
+        self.add_item(self.note_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        note_text = self.note_input.value.strip()
+        if not note_text:
+            await interaction.response.send_message("Note cannot be empty.", ephemeral=True)
+            return
+
+        try:
+            await self.bot.db.execute(
+                """
+                INSERT INTO user_afk_notes (target_user_id, sender_id, sender_name, guild_id, note)
+                VALUES ($1, $2, $3, $4, $5);
+                """,
+                self.target_id,
+                interaction.user.id,
+                interaction.user.display_name,
+                self.guild_id,
+                note_text,
+            )
+            await interaction.response.send_message(
+                f"Your note for **{self.target_name}** has been saved! They will receive it as soon as they return.",
+                ephemeral=True,
+            )
+        except Exception as e:
+            logger.error(f"Failed to save AFK note: {e}")
+            await interaction.response.send_message("Failed to save note due to an internal error.", ephemeral=True)
+
+
+class AFKLeaveNoteView(discord.ui.View):
+    """Interactive button to leave a note for an AFK user."""
+
+    def __init__(self, bot: KyroBot, target_id: int, target_name: str, guild_id: int) -> None:
+        super().__init__(timeout=300.0)
+        self.bot = bot
+        self.target_id = target_id
+        self.target_name = target_name
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Leave a Note", style=discord.ButtonStyle.secondary, custom_id="afk_leave_note_btn")
+    async def leave_note_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if interaction.user.id == self.target_id:
+            await interaction.response.send_message("You cannot leave a note for yourself.", ephemeral=True)
+            return
+        modal = AFKNoteModal(self.bot, self.target_id, self.target_name, self.guild_id)
+        await interaction.response.send_modal(modal)
+
+
 class AFKCog(commands.Cog, name="AFK"):
     """Away From Keyboard (AFK) status management."""
     category: str = "Moderation"
@@ -269,6 +334,23 @@ class AFKCog(commands.Cog, name="AFK"):
                     except Exception as e:
                         logger.debug(f"Unable to revert nickname for {message.author}: {e}")
 
+                # Check and deliver pending AFK notes / voice mails
+                pending_notes = []
+                try:
+                    pending_notes = await self.bot.db.fetch_all(
+                        "SELECT sender_name, note, created_at FROM user_afk_notes WHERE target_user_id = $1 AND guild_id = $2 ORDER BY created_at ASC LIMIT 8;",
+                        author_id,
+                        guild_id,
+                    )
+                    if pending_notes:
+                        await self.bot.db.execute(
+                            "DELETE FROM user_afk_notes WHERE target_user_id = $1 AND guild_id = $2;",
+                            author_id,
+                            guild_id,
+                        )
+                except Exception as e:
+                    logger.debug(f"Failed to fetch AFK notes: {e}")
+
                 # Send welcome back card
                 e_reg = getattr(self.bot, "custom_emojis", {})
                 dot = e_reg.get("heart_dot", "-")
@@ -288,14 +370,30 @@ class AFKCog(commands.Cog, name="AFK"):
                     f"{dot} **Time AFK:** `{duration_str}`\n"
                     f"{dot} **Reason was:** `{afk_data.reason}`"
                 )
+
+                if pending_notes:
+                    container.add_separator(divider=True)
+                    notes_lines = []
+                    for n in pending_notes:
+                        s_name = n.get("sender_name", "Someone")
+                        note_msg = n.get("note", "")
+                        notes_lines.append(f"> **{s_name}:** {note_msg}")
+                    container.add_section(
+                        content=(
+                            f"**AFK Voice Mail ({len(pending_notes)} Note{'s' if len(pending_notes) > 1 else ''} Received)**\n"
+                            + "\n".join(notes_lines)
+                        )
+                    )
+
                 container.add_separator(divider=True)
-                container.add_text("-# This notice will automatically delete in 7 seconds.")
+                delete_delay = 18.0 if pending_notes else 7.0
+                container.add_text(f"-# This notice will automatically delete in {int(delete_delay)} seconds.")
 
                 try:
                     notice_msg = await send_container_response(message.channel, container)
                     if notice_msg and isinstance(notice_msg, discord.Message):
                         async def _cleanup_notice(m: discord.Message) -> None:
-                            await asyncio.sleep(7.0)
+                            await asyncio.sleep(delete_delay)
                             try:
                                 await m.delete()
                             except Exception:
@@ -342,10 +440,11 @@ class AFKCog(commands.Cog, name="AFK"):
                         f"{dot} **Went AFK:** <t:{int(target_afk.created_at.timestamp())}:R>"
                     )
                     container.add_separator(divider=True)
-                    container.add_text(f"-# Mentioned by {message.author.display_name}")
+                    container.add_text(f"-# Mentioned by {message.author.display_name} | Click below to leave a note")
 
+                    view = AFKLeaveNoteView(self.bot, mentioned_user.id, mentioned_user.display_name, guild_id)
                     try:
-                        await send_container_response(message.channel, container)
+                        await send_container_response(message.channel, container, view=view)
                     except Exception as e:
                         logger.debug(f"Failed to send AFK mention notification: {e}")
 

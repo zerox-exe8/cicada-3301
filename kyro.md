@@ -284,3 +284,7 @@ Kyro/
 | `?recovery unlock` | Security | Administrator | Lift emergency lockdown and restore chat permissions |
 | `?recovery snapshot create` | Security | Administrator | Backup legitimate server channels and categories to DB |
 | `?recovery rollback` | Security | Administrator | Compare server to snapshot and auto-purge all foreign raid channels |
+| `?whisper <user> <msg>` | Games | Everyone | Secret in-chat whisper with ephemeral reveal button (zero webhooks) |
+| `?confess <message>` | Games | Everyone | Submit anonymous confession to designated channel (zero webhooks) |
+| `?confess setchannel <#ch>` | Games | Manage Guild | Bind channel where anonymous confessions are posted |
+| `?poll "Question" "Opt 1" "Opt 2"` | Games | Everyone | Dynamic live poll with real-time percentage progress bars |

@@ -277,3 +277,10 @@ Kyro/
 | `?unlock [channel]` | Moderation | Manage Channels| Unlock channel to restore member chat |
 | `?play <query>` | Music | Everyone | Stream lossless audio in voice channel |
 | `?queue` | Music | Everyone | View upcoming server playlist in Components V2 card |
+| `?recovery` | Security | Administrator | Post-attack disaster recovery and restoration console |
+| `?recovery purgechannels` | Security | Administrator | Rate-limit safe bulk deletion of rogue raid channels |
+| `?recovery ban <user>` | Security | Administrator | Ban attacker and wipe all messages/pings from last 24h |
+| `?recovery lockdown` | Security | Administrator | Emergency freeze: disable chat for @everyone across all channels |
+| `?recovery unlock` | Security | Administrator | Lift emergency lockdown and restore chat permissions |
+| `?recovery snapshot create` | Security | Administrator | Backup legitimate server channels and categories to DB |
+| `?recovery rollback` | Security | Administrator | Compare server to snapshot and auto-purge all foreign raid channels |

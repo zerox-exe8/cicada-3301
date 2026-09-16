@@ -344,10 +344,10 @@ async def edit_container_response(
                 return
             except Exception as e:
                 logger.warning(f"Direct channel PATCH edit failed ({e}). Attempting embed fallback.")
-                container_list = [container] if isinstance(container, KyroContainer) else container
-                primary = container_list[0] if container_list else KyroContainer()
-                await msg.edit(embed=primary.to_embed(), view=view)
-                return
+        
+        container_list = [container] if isinstance(container, KyroContainer) else container
+        primary = container_list[0] if container_list else KyroContainer()
+        await msg.edit(embed=primary.to_embed(), view=view)
         return
 
     interaction = interaction_or_msg

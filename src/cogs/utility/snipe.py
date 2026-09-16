@@ -236,7 +236,7 @@ class SnipeView(discord.ui.View):
 
 class SnipeCog(commands.Cog, name="Utility-Snipe"):
     """Channel message retention inspector for deleted and edited messages."""
-    category: str = "Utility"
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

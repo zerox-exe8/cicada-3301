@@ -41,7 +41,7 @@ class InviteView(discord.ui.View):
 
 class Invite(commands.Cog):
     """Bot invitation, official links, and community support."""
-    category: str = "General"
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

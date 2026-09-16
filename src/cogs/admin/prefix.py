@@ -16,7 +16,7 @@ from src.utils.containers import KyroContainer, send_container_response
 
 class Prefix(commands.Cog):
     """Server administration and prefix configuration."""
-    category: str = "General"
+    category: str = "Moderation"
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot

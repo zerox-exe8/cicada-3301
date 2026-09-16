@@ -23,7 +23,7 @@ logger = logging.getLogger("Kyro.General.Profile")
 
 class Profile(commands.Cog):
     """User profile and passport commands."""
-    category: str = "General"
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

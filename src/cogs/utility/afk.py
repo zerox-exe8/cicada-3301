@@ -60,7 +60,7 @@ def format_duration(seconds: float) -> str:
 
 class AFKCog(commands.Cog, name="AFK"):
     """Away From Keyboard (AFK) status management."""
-    category: str = "Utility"
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

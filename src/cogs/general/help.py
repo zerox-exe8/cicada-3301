@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 class Help(commands.Cog):
     """Enterprise SaaS Help & Module Console with dynamic permission filtering."""
-    category: str = "General"
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
@@ -54,6 +54,10 @@ class Help(commands.Cog):
             if category_name.lower() == "developer":
                 continue
 
+            # Merge any legacy General / Utility commands directly into Moderation
+            if category_name.lower() in ("general", "utility"):
+                category_name = "Moderation"
+
             if category_name not in categories:
                 categories[category_name] = []
 
@@ -83,7 +87,6 @@ class Help(commands.Cog):
         """Resolve custom application emoji for category header from assets/emoji and assets/emoji2."""
         e_reg = self.bot.custom_emojis
         mapping = {
-            "General": e_reg.get("icons_folder", e_reg.get("icons_compass", "")),
             "Music": e_reg.get("music", e_reg.get("icon_music", e_reg.get("Music_Playing", ""))),
             "Ticket": e_reg.get("icon_ticket", e_reg.get("ticket_support", e_reg.get("ticket", ""))),
             "Welcomer": e_reg.get("icons_join", e_reg.get("icon_join", "")),
@@ -92,15 +95,13 @@ class Help(commands.Cog):
             "Security": e_reg.get("icons_guardian", e_reg.get("icons_ban", "")),
             "Audit Logs": e_reg.get("icons_podcast", e_reg.get("icon_logging", "")),
             "Games": e_reg.get("icons_magicwand", e_reg.get("icons_tada", e_reg.get("icon_gift", ""))),
-            "Utility": e_reg.get("icons_utility", e_reg.get("icons_settings", e_reg.get("icons_folder", ""))),
         }
-        return mapping.get(cat_name, e_reg.get("icons_folder", ""))
+        return mapping.get(cat_name, e_reg.get("icon_moderation", ""))
 
     def _get_category_select_emoji(self, cat_name: str) -> dict[str, Any] | None:
         """Resolve emoji dict for Select Menu options."""
         e_reg = self.bot.custom_emojis
         mapping = {
-            "General": "icons_folder",
             "Music": "music",
             "Ticket": "icon_ticket",
             "Welcomer": "icons_join",
@@ -109,9 +110,8 @@ class Help(commands.Cog):
             "Security": "icons_guardian",
             "Audit Logs": "icons_podcast",
             "Games": "icons_magicwand",
-            "Utility": "icons_utility",
         }
-        emoji_name = mapping.get(cat_name, "icons_folder")
+        emoji_name = mapping.get(cat_name, "icon_moderation")
         return e_reg.get_select_emoji(emoji_name, fallback_unicode=None)
 
     def _build_home_container(
@@ -304,7 +304,9 @@ class Help(commands.Cog):
             target_cmd = self.bot.get_command(query)
             if target_cmd and await self._can_run_command(target_cmd, ctx):
                 current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
-                cat = getattr(target_cmd.cog, "category", "General")
+                cat = getattr(target_cmd.cog, "category", "Moderation")
+                if cat.lower() in ("general", "utility"):
+                    cat = "Moderation"
                 cat_icon = self._get_category_emoji(cat)
                 desc = target_cmd.description or target_cmd.help or "No detailed description available."
                 aliases = ", ".join([f"`{a}`" for a in target_cmd.aliases]) if target_cmd.aliases else "`None`"

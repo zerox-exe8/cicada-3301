@@ -229,7 +229,7 @@ class SnipeAllView(discord.ui.View):
 
 class SnipeAllCog(commands.Cog, name="Utility-SnipeAll"):
     """Server-wide message retention auditor across all channels."""
-    category: str = "Utility"
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

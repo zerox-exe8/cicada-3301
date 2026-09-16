@@ -42,7 +42,7 @@ class BotInfoView(discord.ui.View):
 
 class BotInfo(commands.Cog):
     """Bot system information, performance metrics, and enterprise telemetry."""
-    category: str = "General"
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

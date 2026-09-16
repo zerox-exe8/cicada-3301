@@ -141,6 +141,14 @@ def build_container_payload(
 
     root_comps = []
 
+    # In Components V2 (flag 32768), traditional top-level 'content' is forbidden by Discord API.
+    # Any outer text / mention ping must be placed as a top-level TextDisplay component (type 10).
+    if content and str(content).strip():
+        root_comps.append({
+            "type": 10,
+            "content": str(content).strip(),
+        })
+
     for c in container_list:
         c_dict: dict[str, Any] = {
             "type": 17,
@@ -175,17 +183,11 @@ def build_container_payload(
             "replied_user": True,
         }
 
-    payload: dict[str, Any] = {
+    return {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
         "components": root_comps[:5],  # Discord allows maximum 5 top-level items
         "allowed_mentions": mentions_payload,
     }
-
-    # Top-level message content outside the container (triggers real Discord notifications/mentions)
-    if content and str(content).strip():
-        payload["content"] = str(content).strip()
-
-    return payload
 
 
 async def send_container_response(

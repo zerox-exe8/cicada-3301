@@ -218,12 +218,12 @@ class PurgeCog(commands.Cog):
 
         info = f"{dot} **Deleted:** `{len(deleted)}` message(s)\n{dot} **Channel:** {ctx.channel.mention}"
         if member:
-            info += f"\n{dot} **Target User:** {member.mention} (`{member.id}`)"
+            info += f"\n{dot} **Target User:** **{member.display_name}** (`{member.id}`)"
         elif filter_type == "bot":
             info += f"\n{dot} **Filter:** `Bots Only`"
         elif filter_type == "human":
             info += f"\n{dot} **Filter:** `Humans Only`"
-        info += f"\n{dot} **Moderator:** {ctx.author.mention}"
+        info += f"\n{dot} **Moderator:** **{ctx.author.display_name}**"
         container.add_text(info)
 
         if not ctx.interaction and len(deleted) > 0:

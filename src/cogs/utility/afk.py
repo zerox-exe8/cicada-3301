@@ -218,7 +218,7 @@ class AFKCog(commands.Cog, name="AFK"):
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **User:** {ctx.author.mention}\n"
+            f"{dot} **User:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{final_reason}`\n"
             f"{dot} **Set At:** <t:{int(now.timestamp())}:t> (<t:{int(now.timestamp())}:R>)"
         )

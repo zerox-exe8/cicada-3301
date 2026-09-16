@@ -82,7 +82,7 @@ class SlowmodeCog(commands.Cog):
         container.add_text(
             f"{dot} **Channel:** {target_channel.mention}\n"
             f"{dot} **Delay:** `{seconds} seconds`\n"
-            f"{dot} **Moderator:** {ctx.author.mention}"
+            f"{dot} **Moderator:** **{ctx.author.display_name}**"
         )
         await send_container_response(ctx, container)
 

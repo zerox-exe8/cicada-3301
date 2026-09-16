@@ -92,9 +92,9 @@ class TimeoutCog(commands.Cog):
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** {member.mention} (`{member.id}`)\n"
+            f"{dot} **Target:** **{member.display_name}** (`{member.id}`)\n"
             f"{dot} **Duration:** `{duration}` (Expires: <t:{int(until.timestamp())}:R>)\n"
-            f"{dot} **Moderator:** {ctx.author.mention}\n"
+            f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
         )
         await send_container_response(ctx, container)
@@ -137,8 +137,8 @@ class TimeoutCog(commands.Cog):
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** {member.mention} (`{member.id}`)\n"
-            f"{dot} **Moderator:** {ctx.author.mention}\n"
+            f"{dot} **Target:** **{member.display_name}** (`{member.id}`)\n"
+            f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
         )
         await send_container_response(ctx, container)

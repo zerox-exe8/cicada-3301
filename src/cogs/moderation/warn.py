@@ -94,9 +94,9 @@ class WarnCog(commands.Cog):
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** {member.mention} (`{member.id}`)\n"
+            f"{dot} **Target:** **{member.display_name}** (`{member.id}`)\n"
             f"{dot} **Total Warnings:** `{total_warns}`\n"
-            f"{dot} **Moderator:** {ctx.author.mention}\n"
+            f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
         )
         await send_container_response(ctx, container)
@@ -197,13 +197,13 @@ class WarnCog(commands.Cog):
         container.add_section(
             content=(
                 f"**Warning Deleted**\n"
-                f"> Warning `#{warn_id}` for <@{row['user_id']}> has been deleted."
+                f"> Warning `#{warn_id}` has been deleted."
             )
         )
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Warning ID:** `#{warn_id}`\n"
-            f"{dot} **Moderator:** {ctx.author.mention}"
+            f"{dot} **Moderator:** **{ctx.author.display_name}**"
         )
         await send_container_response(ctx, container)
 

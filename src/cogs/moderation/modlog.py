@@ -61,7 +61,7 @@ class ModLogCog(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Configured Channel:** {channel.mention}\n"
-            f"{dot} **Configured By:** {ctx.author.mention}"
+            f"{dot} **Configured By:** **{ctx.author.display_name}**"
         )
         await send_container_response(ctx, container)
 

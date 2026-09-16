@@ -286,8 +286,8 @@ class AutoEvents(commands.Cog):
         human_role = ctx.guild.get_role(human_role_id) if human_role_id else None
         bot_role = ctx.guild.get_role(bot_role_id) if bot_role_id else None
 
-        human_str = f"{human_role.mention} (`{human_role.id}`)" if human_role else "`Disabled`"
-        bot_str = f"{bot_role.mention} (`{bot_role.id}`)" if bot_role else "`Disabled`"
+        human_str = f"@{human_role.name} (`{human_role.id}`)" if human_role else "`Disabled`"
+        bot_str = f"@{bot_role.name} (`{bot_role.id}`)" if bot_role else "`Disabled`"
 
         me = ctx.guild.me
         can_manage = me.guild_permissions.manage_roles or me.guild_permissions.administrator
@@ -336,7 +336,7 @@ class AutoEvents(commands.Cog):
                 container.add_section(
                     content=(
                         "**Human Auto-Role Status**\n"
-                        f"> Current role: {role.mention} (`{role.id}`)\n"
+                        f"> Current role: @{role.name} (`{role.id}`)\n"
                         f"> To change: `{prefix}autorole human @role`\n"
                         f"> To disable: `{prefix}autorole human remove`"
                     )
@@ -377,14 +377,14 @@ class AutoEvents(commands.Cog):
         container.add_section(
             content=(
                 "**Human Auto-Role Configured**\n"
-                f"> New human members joining the server will automatically receive {role.mention}."
+                f"> New human members joining the server will automatically receive **{role.name}**."
             )
         )
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Target:** `Humans Only`\n"
-            f"{dot} **Assigned Role:** {role.mention} (`{role.id}`)\n"
-            f"{dot} **Configured By:** {ctx.author.mention}"
+            f"{dot} **Assigned Role:** @{role.name} (`{role.id}`)\n"
+            f"{dot} **Configured By:** **{ctx.author.display_name}**"
         )
         await send_container_response(ctx, container)
 
@@ -433,7 +433,7 @@ class AutoEvents(commands.Cog):
                 container.add_section(
                     content=(
                         "**Bot Auto-Role Status**\n"
-                        f"> Current role: {role.mention} (`{role.id}`)\n"
+                        f"> Current role: @{role.name} (`{role.id}`)\n"
                         f"> To change: `{prefix}autorole bot @role`\n"
                         f"> To disable: `{prefix}autorole bot remove`"
                     )
@@ -473,14 +473,14 @@ class AutoEvents(commands.Cog):
         container.add_section(
             content=(
                 "**Bot Auto-Role Configured**\n"
-                f"> Newly invited bots will automatically receive {role.mention}."
+                f"> Newly invited bots will automatically receive **{role.name}**."
             )
         )
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Target:** `Bots Only`\n"
-            f"{dot} **Assigned Role:** {role.mention} (`{role.id}`)\n"
-            f"{dot} **Configured By:** {ctx.author.mention}"
+            f"{dot} **Assigned Role:** @{role.name} (`{role.id}`)\n"
+            f"{dot} **Configured By:** **{ctx.author.display_name}**"
         )
         await send_container_response(ctx, container)
 

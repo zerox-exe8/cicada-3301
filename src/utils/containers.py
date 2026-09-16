@@ -169,8 +169,8 @@ def build_container_payload(
                 root_comps.extend(view_comps)
 
     mentions_payload = allowed_mentions if allowed_mentions is not None else {
-        "parse": ["users", "roles"],
-        "replied_user": True,
+        "parse": [],
+        "replied_user": False,
     }
 
     return {

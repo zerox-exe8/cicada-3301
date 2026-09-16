@@ -86,8 +86,8 @@ async def dispatch_mod_log(
     container.add_separator(divider=True)
 
     details = (
-        f"{dot} **Moderator:** {moderator.mention} (`{moderator.id}`)\n"
-        f"{dot} **Target:** {target.mention} (`{target.id}`)\n"
+        f"{dot} **Moderator:** **{moderator}** (`{moderator.id}`)\n"
+        f"{dot} **Target:** **{target}** (`{target.id}`)\n"
         f"{dot} **Reason:** `{reason}`"
     )
     if extra:

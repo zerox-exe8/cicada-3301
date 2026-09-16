@@ -93,14 +93,16 @@ class PurgeCog(commands.Cog):
             except Exception:
                 pass
 
-        check_filter = (lambda m: m.author.id == member.id) if member else None
+        purge_kwargs: dict[str, Any] = {}
+        if member:
+            purge_kwargs["check"] = lambda m: m.author.id == member.id
 
         deleted: list[discord.Message] = []
         try:
             if not ctx.interaction and ctx.message:
                 # Include ctx.message in the purge limit and filter it out so bulk delete deletes both cleanly
                 limit_to_fetch = min(count + 1, 100)
-                raw_deleted = await ctx.channel.purge(limit=limit_to_fetch, check=check_filter)
+                raw_deleted = await ctx.channel.purge(limit=limit_to_fetch, **purge_kwargs)
                 deleted = [m for m in raw_deleted if m.id != ctx.message.id]
                 # If command message wasn't caught by purge (e.g. member filter applied), delete it
                 if ctx.message.id not in [m.id for m in raw_deleted]:
@@ -109,7 +111,7 @@ class PurgeCog(commands.Cog):
                     except Exception:
                         pass
             else:
-                deleted = await ctx.channel.purge(limit=count, check=check_filter)
+                deleted = await ctx.channel.purge(limit=count, **purge_kwargs)
         except discord.Forbidden:
             container = KyroContainer(accent_color=None)
             container.add_section(
@@ -136,7 +138,7 @@ class PurgeCog(commands.Cog):
                         except Exception:
                             pass
                         continue
-                    if check_filter and not check_filter(old_msg):
+                    if member and old_msg.author.id != member.id:
                         continue
                     try:
                         await old_msg.delete()

@@ -29,11 +29,13 @@ Kyro strictly enforces a **Cache-First Architecture**:
 2. **Instant Message Hot-Path Execution**: Message processing, prefix parsing, blacklist validation, maintenance guards, and premium entitlement checks resolve in memory at **`< 0.001ms`** without touching PostgreSQL.
 3. **Atomic Dual-Writes**: Any configuration update (e.g. `?prefix set`, `?grantpremium`, `?revokepremium`, payment fulfillment) atomically updates PostgreSQL first, then instantly updates the in-memory cache dictionary.
 
-### B. Discord Components V2 UI (Type 17 Containers)
-Kyro completely rejects legacy, noisy Discord Embeds:
-- All command feedback, tabbed dashboards, checkout cards, and error notices are built using native **Discord Components V2 (Type 17 Containers)** via `KyroContainer` (`src/utils/containers.py`).
+### B. Discord Components V2 UI (Type 17 Containers) — PERMANENT HARD RULE
+Kyro completely and permanently abolishes legacy, noisy Discord Embeds:
+- **Zero Old Embeds**: Traditional `discord.Embed`, `embed=...`, and `.to_embed()` are permanently forbidden across the entire codebase.
+- **100% Components V2**: All command feedback, tabbed dashboards, checkout cards, welcome/leave greetings, and error notices are built exclusively using native **Discord Components V2 (Type 17 Containers)** via `KyroContainer` (`src/utils/containers.py`).
 - Components include Text Displays (`type: 10`), Sections with Accessories (`type: 9`), Visual Separators (`type: 14`), and Action Rows (`type: 1`) for interactive buttons (`type: 2`, `style: 1` Blurple, `style: 2` Grey, `style: 3` Green, `style: 5` Link/URL).
 - Dispatched via `send_container_response()` and edited interactively via `edit_container_response()` with fallback direct channel `PATCH` handling.
+- When `IS_COMPONENTS_V2` (flag `32768`) is used, outer text or mentions must be top-level `TextDisplay` (`type: 10`) components in `components` (top-level `content` is disabled by Discord API). `allowed_mentions` defaults to `{"parse": ["users"], "replied_user": True}`.
 
 ### C. Strict Custom Application Emoji Policy
 - **Zero Standard Unicode Emoji Spam**: Generic unicode emojis (e.g. `🎁`, `⚡`, `💳`, `📊`, `🔑`, `✨`, `💎`, `🔴`, `🟢`) are never used in UI cards or embed text.

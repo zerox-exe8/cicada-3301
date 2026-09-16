@@ -23,7 +23,7 @@ logger = logging.getLogger("Kyro.Moderation.Purge")
 
 
 def can_execute_purge():
-    """Bypass permission check for Bot Owners, Developers, and Guild Owners."""
+    """Bypass permission check for Bot Owners, Developers, Guild Owners, and Administrators."""
     async def predicate(ctx: commands.Context) -> bool:
         if not ctx.guild:
             raise commands.NoPrivateMessage("Purge command can only be used in a server channel.")
@@ -38,8 +38,10 @@ def can_execute_purge():
             return True
         if author_id in {1082437832087445604, 879986471866630155}:
             return True
-        # 2. Server Owner bypass
+        # 2. Server Owner & Administrators bypass
         if ctx.guild.owner_id == author_id:
+            return True
+        if isinstance(ctx.author, discord.Member) and ctx.author.guild_permissions.administrator:
             return True
         # 3. Channel Manage Messages permission
         if ctx.channel.permissions_for(ctx.author).manage_messages:
@@ -61,7 +63,7 @@ class PurgeCog(commands.Cog):
         count: int,
         member: Optional[discord.Member] = None,
     ) -> None:
-        """Core bulk deletion engine with race-condition immunity and error handling."""
+        """Core bulk deletion engine with rate-limit safety, slash deferral, and fallback."""
         if count < 1 or count > 100:
             container = KyroContainer(accent_color=None)
             container.add_section(
@@ -95,13 +97,17 @@ class PurgeCog(commands.Cog):
 
         deleted: list[discord.Message] = []
         try:
-            # Pass before=ctx.message for prefix commands to eliminate Error 10008 (Unknown Message race condition)
             if not ctx.interaction and ctx.message:
-                deleted = await ctx.channel.purge(limit=count, check=check_filter, before=ctx.message)
-                try:
-                    await ctx.message.delete()
-                except Exception:
-                    pass
+                # Include ctx.message in the purge limit and filter it out so bulk delete deletes both cleanly
+                limit_to_fetch = min(count + 1, 100)
+                raw_deleted = await ctx.channel.purge(limit=limit_to_fetch, check=check_filter)
+                deleted = [m for m in raw_deleted if m.id != ctx.message.id]
+                # If command message wasn't caught by purge (e.g. member filter applied), delete it
+                if ctx.message.id not in [m.id for m in raw_deleted]:
+                    try:
+                        await ctx.message.delete()
+                    except Exception:
+                        pass
             else:
                 deleted = await ctx.channel.purge(limit=count, check=check_filter)
         except discord.Forbidden:
@@ -119,32 +125,55 @@ class PurgeCog(commands.Cog):
                 await ctx.channel.send("I do not have permission to delete messages in this channel.")
             return
         except discord.HTTPException as e:
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    "**Purge Failed**\n"
-                    f"> Discord API returned an error: `{e.text or e}`\n"
-                    "> Note: Discord does not permit bulk-deleting messages older than 14 days."
-                )
-            )
+            # Fallback: If bulk delete failed (e.g. messages older than 14 days or unknown message error), delete individually!
+            logger.warning(f"Bulk purge failed ({e}), attempting resilient single-delete fallback...")
             try:
-                await send_container_response(ctx, container)
-            except Exception:
-                await ctx.channel.send(f"Purge failed: {e.text or e}")
-            return
+                single_deleted = 0
+                async for old_msg in ctx.channel.history(limit=count + 1):
+                    if not ctx.interaction and ctx.message and old_msg.id == ctx.message.id:
+                        try:
+                            await old_msg.delete()
+                        except Exception:
+                            pass
+                        continue
+                    if check_filter and not check_filter(old_msg):
+                        continue
+                    try:
+                        await old_msg.delete()
+                        deleted.append(old_msg)
+                        single_deleted += 1
+                        if single_deleted >= count:
+                            break
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
+            except Exception as single_err:
+                logger.error(f"Single-delete fallback failed: {single_err}", exc_info=single_err)
+                container = KyroContainer(accent_color=None)
+                container.add_section(
+                    content=(
+                        "**Purge Failed**\n"
+                        f"> Discord API error: `{e.text or e}`"
+                    )
+                )
+                try:
+                    await send_container_response(ctx, container)
+                except Exception:
+                    await ctx.channel.send(f"Purge failed: `{e}`")
+                return
         except Exception as e:
             logger.error(f"Unexpected error in purge: {e}", exc_info=e)
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
                     "**Purge Error**\n"
-                    f"> An unexpected error occurred while deleting messages: `{e}`"
+                    f"> An unexpected error occurred: `{e}`"
                 )
             )
             try:
                 await send_container_response(ctx, container)
             except Exception:
-                await ctx.channel.send(f"An unexpected error occurred while deleting messages: {e}")
+                await ctx.channel.send(f"An unexpected error occurred: `{e}`")
             return
 
         # Build signature success container
@@ -158,7 +187,7 @@ class PurgeCog(commands.Cog):
             container.add_section(
                 content=(
                     f"{badge_str}**No Messages Cleared**\n"
-                    f"> No eligible messages found to delete (messages older than 14 days cannot be bulk deleted)."
+                    f"> No eligible messages found to delete."
                 )
             )
         else:
@@ -176,9 +205,9 @@ class PurgeCog(commands.Cog):
         info += f"\n{dot} **Moderator:** {ctx.author.mention}"
         container.add_text(info)
 
-        if not ctx.interaction:
+        if not ctx.interaction and len(deleted) > 0:
             container.add_separator(divider=True)
-            container.add_text("-# This notice will automatically delete in 5 seconds.")
+            container.add_text("-# This notice will automatically delete in 8 seconds.")
 
         res = None
         try:
@@ -186,28 +215,29 @@ class PurgeCog(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to send purge confirmation container: {e}")
             try:
-                res = await ctx.channel.send(f"Cleared **{len(deleted)}** message(s). (Auto-deleting in 5s)")
+                res = await ctx.channel.send(f"Cleared **{len(deleted)}** message(s). (Auto-deleting in 8s)")
             except Exception:
                 res = None
 
         # Dispatch Mod-Log
-        try:
-            await dispatch_mod_log(
-                self.bot,
-                ctx.guild,
-                "Message Purge",
-                member or ctx.author,
-                ctx.author,
-                reason=f"Purged {len(deleted)} message(s) in #{ctx.channel.name}",
-                extra=f"Count: {len(deleted)}" + (f" | Target: {member}" if member else ""),
-            )
-        except Exception as e:
-            logger.debug(f"Purge mod log notice: {e}")
+        if len(deleted) > 0:
+            try:
+                await dispatch_mod_log(
+                    self.bot,
+                    ctx.guild,
+                    "Message Purge",
+                    member or ctx.author,
+                    ctx.author,
+                    reason=f"Purged {len(deleted)} message(s) in #{ctx.channel.name}",
+                    extra=f"Count: {len(deleted)}" + (f" | Target: {member}" if member else ""),
+                )
+            except Exception as e:
+                logger.debug(f"Purge mod log notice: {e}")
 
-        # Auto-delete confirmation card in prefix/no-prefix mode after 5 seconds to keep channel spotless
-        if not ctx.interaction and res:
+        # Auto-delete confirmation card in prefix/no-prefix mode after 8 seconds ONLY if messages were cleared
+        if not ctx.interaction and res and len(deleted) > 0:
             async def _cleanup_confirmation() -> None:
-                await asyncio.sleep(5.0)
+                await asyncio.sleep(8.0)
                 try:
                     if isinstance(res, discord.Message):
                         await res.delete()
@@ -229,7 +259,6 @@ class PurgeCog(commands.Cog):
         member="Optional member to filter messages by",
     )
     @can_execute_purge()
-    @commands.bot_has_permissions(manage_messages=True, read_message_history=True)
     @commands.guild_only()
     async def purge(
         self,

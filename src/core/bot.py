@@ -356,7 +356,7 @@ class KyroBot(commands.Bot):
             f"{dot} **Prefix:** `{prefix}` | **Slash:** `/`\n"
             f"{dot} **Help Menu:** `{prefix}help` (Browse all interactive modules)\n"
             f"{dot} **Play Music:** `{prefix}play <song>` (Lossless studio audio)\n"
-            f"{dot} **Auto-Role:** `{prefix}autorole set @role` (Automated member roles)\n"
+            f"{dot} **Auto-Role:** `{prefix}autorole` (Human & Bot join roles)\n"
             f"{dot} **Support Tickets:** `{prefix}ticket setup` (Interactive support panels)"
         )
         container.add_separator(divider=True)

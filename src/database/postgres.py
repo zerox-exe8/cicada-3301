@@ -379,9 +379,17 @@ class PostgresDatabase(BaseDatabase):
             """
             CREATE TABLE IF NOT EXISTS guild_autoroles (
                 guild_id BIGINT PRIMARY KEY,
-                role_id BIGINT NOT NULL,
+                role_id BIGINT,
+                human_role_id BIGINT,
+                bot_role_id BIGINT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            """,
+            """
+            ALTER TABLE guild_autoroles ADD COLUMN IF NOT EXISTS human_role_id BIGINT;
+            """,
+            """
+            ALTER TABLE guild_autoroles ADD COLUMN IF NOT EXISTS bot_role_id BIGINT;
             """,
             # Guild 24/7 Voice Stay Mode table
             """

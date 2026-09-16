@@ -41,8 +41,8 @@ class MicrosecondCache:
         self._store: OrderedDict[str, CacheItem] = OrderedDict()
 
         # Dedicated high-speed memory maps for hot operational paths
-        self.prefixes: Dict[int, str] = {}
         self.autoroles: Dict[int, Optional[int]] = {}
+        self.bot_autoroles: Dict[int, Optional[int]] = {}
         self.modlogs: Dict[int, Optional[int]] = {}
         self.music_247: Dict[int, bool] = {}
         self.ghostping: Dict[int, bool] = {}
@@ -96,13 +96,19 @@ class MicrosecondCache:
         """Reset guild prefix in L1 memory."""
         self.prefixes.pop(guild_id, None)
 
-    def get_autorole(self, guild_id: int) -> Optional[int]:
-        """Retrieve configured autorole ID for guild."""
+    def get_autorole(self, guild_id: int, target: str = "human") -> Optional[int]:
+        """Retrieve configured autorole ID for guild ('human' or 'bot')."""
+        if target == "bot":
+            return self.bot_autoroles.get(guild_id)
         return self.autoroles.get(guild_id)
 
-    def set_autorole(self, guild_id: int, role_id: Optional[int]) -> None:
-        """Store autorole ID in L1 memory."""
-        self.autoroles[guild_id] = role_id
+    def set_autorole(self, guild_id: int, role_id: Optional[int], target: str = "human") -> None:
+        """Store autorole ID in L1 memory ('human' or 'bot')."""
+        val = role_id if (role_id and role_id > 0) else None
+        if target == "bot":
+            self.bot_autoroles[guild_id] = val
+        else:
+            self.autoroles[guild_id] = val
 
     def get_modlog_channel(self, guild_id: int) -> Optional[int]:
         """Retrieve modlog channel ID in sub-0.01ms."""

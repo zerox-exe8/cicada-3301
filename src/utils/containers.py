@@ -74,13 +74,15 @@ class KyroContainer:
         })
         return self
 
-    def to_embed(self) -> discord.Embed:
+    def to_embed(self, content: str | None = None) -> discord.Embed:
         """Convert container components into a standard discord.Embed for fallback compatibility."""
         if hasattr(self, "_fallback_embed") and self._fallback_embed is not None:
             return self._fallback_embed
         embed = discord.Embed(
             color=self.accent_color if self.accent_color is not None else None,
         )
+        if content and str(content).strip():
+            embed.description = str(content).strip()
         for comp in self.components:
             ctype = comp.get("type")
             if ctype == 10:  # TextDisplay
@@ -263,8 +265,6 @@ async def send_container_response(
                 if hasattr(bot_instance, "_connection"):
                     bot_instance._connection.store_view(view, msg_id)
             return msg_data
-        except discord.Forbidden:
-            raise
         except Exception as e:
             logger.warning(f"Raw Components V2 HTTP request failed ({e}), attempting standard send fallback...")
             target_send = getattr(obj, "send", None) or getattr(getattr(obj, "channel", None), "send", None)
@@ -292,7 +292,7 @@ async def send_container_response(
 
                 return await target_send(
                     content=content,
-                    embed=primary.to_embed(),
+                    embed=primary.to_embed(content=content),
                     view=fallback_view,
                     allowed_mentions=discord.AllowedMentions(users=True),
                 )

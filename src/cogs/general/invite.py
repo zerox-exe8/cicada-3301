@@ -20,20 +20,13 @@ if TYPE_CHECKING:
 class InviteView(discord.ui.View):
     """Clean, single-row link buttons for bot authorization and support server."""
 
-    def __init__(self, admin_url: str, standard_url: str, support_url: str | None = None) -> None:
+    def __init__(self, invite_url: str, support_url: str | None = None) -> None:
         super().__init__(timeout=None)
         self.add_item(
             discord.ui.Button(
-                label="Invite Kyro (Admin)",
+                label=f"Invite {Config.BOT_NAME}",
                 style=discord.ButtonStyle.link,
-                url=admin_url,
-            )
-        )
-        self.add_item(
-            discord.ui.Button(
-                label="Invite (Standard)",
-                style=discord.ButtonStyle.link,
-                url=standard_url,
+                url=invite_url,
             )
         )
         if support_url:
@@ -62,14 +55,10 @@ class Invite(commands.Cog):
         """Display Kyro's sleek official invite card and support server access."""
         client_id = self.bot.user.id if self.bot.user else 1544289369907658853
 
-        admin_invite = (
+        invite_url = (
             Config.INVITE_URL
             if Config.INVITE_URL
             else f"https://discord.com/oauth2/authorize?client_id={client_id}&permissions=8&integration_type=0&scope=bot+applications.commands"
-        )
-
-        standard_invite = (
-            f"https://discord.com/oauth2/authorize?client_id={client_id}&permissions=1099513077790&integration_type=0&scope=bot+applications.commands"
         )
 
         support_url = Config.SUPPORT_URL or "https://discord.gg/kBKnvBVCj7"
@@ -90,7 +79,7 @@ class Invite(commands.Cog):
         container.add_separator(divider=True)
         container.add_text("-# Click an authorization link below to add Kyro to your server.")
 
-        view = InviteView(admin_invite, standard_invite, support_url)
+        view = InviteView(invite_url=invite_url, support_url=support_url)
         await send_container_response(ctx, container, view=view)
 
 

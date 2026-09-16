@@ -41,6 +41,7 @@ class MicrosecondCache:
         self._store: OrderedDict[str, CacheItem] = OrderedDict()
 
         # Dedicated high-speed memory maps for hot operational paths
+        self.prefixes: Dict[int, str] = {}
         self.autoroles: Dict[int, Optional[int]] = {}
         self.bot_autoroles: Dict[int, Optional[int]] = {}
         self.modlogs: Dict[int, Optional[int]] = {}

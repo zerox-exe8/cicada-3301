@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Optional, Any, Callable
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.cogs.moderation._helpers import dispatch_mod_log
+from src.cogs.moderation._commands.purge_bot import execute_purge_bot
+from src.cogs.moderation._commands.purge_human import execute_purge_human
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -62,6 +64,8 @@ class PurgeCog(commands.Cog):
         ctx: CustomContext,
         count: int,
         member: Optional[discord.Member] = None,
+        filter_type: str = "all",
+        check_func: Optional[Callable[[discord.Message], bool]] = None,
     ) -> None:
         """Core bulk deletion engine with rate-limit safety, slash deferral, and fallback."""
         if count < 1 or count > 100:
@@ -94,8 +98,13 @@ class PurgeCog(commands.Cog):
                 pass
 
         purge_kwargs: dict[str, Any] = {}
+        effective_check: Optional[Callable[[discord.Message], bool]] = None
         if member:
-            purge_kwargs["check"] = lambda m: m.author.id == member.id
+            effective_check = lambda m: m.author.id == member.id
+            purge_kwargs["check"] = effective_check
+        elif check_func:
+            effective_check = check_func
+            purge_kwargs["check"] = effective_check
 
         deleted: list[discord.Message] = []
         try:
@@ -138,7 +147,7 @@ class PurgeCog(commands.Cog):
                         except Exception:
                             pass
                         continue
-                    if member and old_msg.author.id != member.id:
+                    if effective_check and not effective_check(old_msg):
                         continue
                     try:
                         await old_msg.delete()
@@ -184,18 +193,24 @@ class PurgeCog(commands.Cog):
         badge = e_reg.get("icon_moderation", "")
         badge_str = f"{badge} " if badge else ""
 
+        type_label = ""
+        if filter_type == "bot":
+            type_label = "Bot "
+        elif filter_type == "human":
+            type_label = "Human "
+
         container = KyroContainer(accent_color=None)
         if len(deleted) == 0:
             container.add_section(
                 content=(
-                    f"{badge_str}**No Messages Cleared**\n"
+                    f"{badge_str}**No {type_label}Messages Cleared**\n"
                     f"> No eligible messages found to delete."
                 )
             )
         else:
             container.add_section(
                 content=(
-                    f"{badge_str}**Messages Purged**\n"
+                    f"{badge_str}**{type_label}Messages Purged**\n"
                     f"> Successfully cleared **{len(deleted)}** message(s)."
                 )
             )
@@ -204,6 +219,10 @@ class PurgeCog(commands.Cog):
         info = f"{dot} **Deleted:** `{len(deleted)}` message(s)\n{dot} **Channel:** {ctx.channel.mention}"
         if member:
             info += f"\n{dot} **Target User:** {member.mention} (`{member.id}`)"
+        elif filter_type == "bot":
+            info += f"\n{dot} **Filter:** `Bots Only`"
+        elif filter_type == "human":
+            info += f"\n{dot} **Filter:** `Humans Only`"
         info += f"\n{dot} **Moderator:** {ctx.author.mention}"
         container.add_text(info)
 
@@ -223,15 +242,21 @@ class PurgeCog(commands.Cog):
 
         # Dispatch Mod-Log
         if len(deleted) > 0:
+            action_name = "Message Purge"
+            if filter_type == "bot":
+                action_name = "Bot Message Purge"
+            elif filter_type == "human":
+                action_name = "Human Message Purge"
+
             try:
                 await dispatch_mod_log(
                     self.bot,
                     ctx.guild,
-                    "Message Purge",
+                    action_name,
                     member or ctx.author,
                     ctx.author,
                     reason=f"Purged {len(deleted)} message(s) in #{ctx.channel.name}",
-                    extra=f"Count: {len(deleted)}" + (f" | Target: {member}" if member else ""),
+                    extra=f"Count: {len(deleted)}" + (f" | Target: {member}" if member else f" | Type: {filter_type}"),
                 )
             except Exception as e:
                 logger.debug(f"Purge mod log notice: {e}")
@@ -251,9 +276,11 @@ class PurgeCog(commands.Cog):
 
             asyncio.create_task(_cleanup_confirmation())
 
-    @commands.hybrid_command(
+    @commands.hybrid_group(
         name="purge",
         aliases=["prune", "clean"],
+        invoke_without_command=True,
+        fallback="all",
         description="Bulk delete messages in the current channel (1 to 100).",
     )
     @app_commands.describe(
@@ -268,8 +295,42 @@ class PurgeCog(commands.Cog):
         count: int = 10,
         member: Optional[discord.Member] = None,
     ) -> None:
-        """Bulk delete messages."""
-        await self._execute_purge(ctx, count, member)
+        """Bulk delete messages (all messages, or filtered by user)."""
+        if ctx.invoked_subcommand is not None:
+            return
+        await self._execute_purge(ctx, count, member=member, filter_type="all")
+
+    @purge.command(
+        name="bot",
+        aliases=["bots"],
+        description="Bulk delete messages sent by bot accounts (1 to 100).",
+    )
+    @app_commands.describe(count="Number of bot messages to delete (1-100)")
+    @can_execute_purge()
+    @commands.guild_only()
+    async def purge_bot(
+        self,
+        ctx: CustomContext,
+        count: int = 10,
+    ) -> None:
+        """Bulk delete only bot messages."""
+        await execute_purge_bot(self, ctx, count=count)
+
+    @purge.command(
+        name="human",
+        aliases=["humans", "user", "users"],
+        description="Bulk delete messages sent by real humans/users (1 to 100).",
+    )
+    @app_commands.describe(count="Number of human messages to delete (1-100)")
+    @can_execute_purge()
+    @commands.guild_only()
+    async def purge_human(
+        self,
+        ctx: CustomContext,
+        count: int = 10,
+    ) -> None:
+        """Bulk delete only human/user messages."""
+        await execute_purge_human(self, ctx, count=count)
 
     @purge.error
     async def purge_error(self, ctx: CustomContext, error: commands.CommandError) -> None:
@@ -327,7 +388,10 @@ class PurgeCog(commands.Cog):
                 content=(
                     "**Purge Usage Error**\n"
                     f"> `{original}`\n\n"
-                    f"> Usage: `{prefix_str}purge [count: 1-100] [@user]`"
+                    f"> Usage:\n"
+                    f"> • `{prefix_str}purge [count: 1-100] [@user]`\n"
+                    f"> • `{prefix_str}purge bot [count: 1-100]`\n"
+                    f"> • `{prefix_str}purge human [count: 1-100]`"
                 )
             )
         container.add_separator(divider=True)

@@ -24,7 +24,7 @@ class DMCog(commands.Cog, name="Developer-DM"):
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
-    @commands.command(name="dm", aliases=["whisper", "secretmsg"], hidden=True)
+    @commands.command(name="dm", aliases=["directmessage", "pm"], hidden=True)
     @is_developer()
     async def secret_dm(self, ctx: CustomContext, user: discord.User, *, message: str) -> None:
         """

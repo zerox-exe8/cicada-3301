@@ -143,7 +143,7 @@ class ConfessionsCog(commands.Cog, name="Games-Confessions"):
 
     @commands.group(
         name="confess",
-        aliases=["confession", "secretmsg"],
+        aliases=["confession"],
         invoke_without_command=True,
         description="Submit an anonymous confession or view the confessions console.",
     )

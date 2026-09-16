@@ -97,19 +97,31 @@ class WhisperCog(commands.Cog, name="Games-Whisper"):
         member="The server member to send the secret whisper to",
         message="The private message content",
     )
-    async def whisper(self, ctx: CustomContext, member: discord.Member, *, message: str) -> None:
-        """Dispatch a secret in-channel whisper card."""
-        if member.id == ctx.author.id:
-            await ctx.send_error("You cannot send a secret whisper to yourself.")
-            return
-
-        if member.bot:
-            await ctx.send_error("You cannot send a secret whisper to a bot.")
-            return
-
-        clean_message = message.strip()
-        if not clean_message:
-            await ctx.send_error("Whisper message cannot be empty.")
+    async def whisper(
+        self, ctx: CustomContext, member: Optional[discord.Member] = None, *, message: Optional[str] = None
+    ) -> None:
+        """Dispatch a secret in-channel whisper card or view usage instructions."""
+        if not member or not message or not message.strip():
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    f"**{Config.BOT_NAME} Secret In-Chat Whisper**\n"
+                    "> Send private in-chat messages with an interactive `[Reveal Whisper]` button.\n"
+                    "> Only the targeted member (and you) can click to read the hidden message."
+                )
+            )
+            container.add_separator(divider=True)
+            container.add_text(
+                f"**Usage:**\n"
+                f"• `{ctx.clean_prefix}whisper @member <secret message>`\n"
+                f"• `{ctx.clean_prefix}whisper <username_or_id> <secret message>`\n"
+                f"• `/whisper member:@member message:<secret message>`\n\n"
+                f"**Example:**\n"
+                f"`{ctx.clean_prefix}whisper @friend Kal 5 baje aana`"
+            )
+            container.add_separator(divider=True)
+            container.add_text("-# Trigger message is automatically deleted so chat never sees the secret text.")
+            await send_container_response(ctx, container)
             return
 
         # Delete the trigger message if invoked via prefix so nobody sees the text

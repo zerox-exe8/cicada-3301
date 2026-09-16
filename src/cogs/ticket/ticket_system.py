@@ -141,8 +141,9 @@ class TicketInsideControlsView(discord.ui.View):
         file = await generate_html_transcript(interaction.channel, ticket, bot=self.cog.bot)
         t_card = KyroContainer()
         t_card.add_section(content="**Ticket Transcript**\n> Here is the live HTML transcript for this ticket:")
-        await interaction.followup.send(
-            embed=t_card.to_embed(),
+        await send_container_response(
+            interaction,
+            t_card,
             file=file,
             ephemeral=True,
         )
@@ -728,8 +729,9 @@ class TicketSystem(commands.Cog):
                 err_card.add_section(
                     content=f"**Creation Failed**\n> Failed to create ticket channel: `{final_err}`.\n> Please ensure the bot has **Manage Channels** permission."
                 )
-                await interaction.followup.send(
-                    embed=err_card.to_embed(),
+                await send_container_response(
+                    interaction,
+                    err_card,
                     ephemeral=True,
                 )
                 return
@@ -790,8 +792,9 @@ class TicketSystem(commands.Cog):
         created_card.add_section(
             content=f"**Ticket Created**\n> Your support ticket is ready: {ticket_channel.mention}"
         )
-        await interaction.followup.send(
-            embed=created_card.to_embed(),
+        await send_container_response(
+            interaction,
+            created_card,
             ephemeral=True,
         )
 
@@ -839,7 +842,7 @@ class TicketSystem(commands.Cog):
                             f"> Reason: `{reason}`"
                         )
                     )
-                    await user.send(embed=dm_container.to_embed(), file=transcript_file)
+                    await send_container_response(user, dm_container, file=transcript_file)
             except Exception as dm_e:
                 logger.debug(f"Could not DM user close transcript: {dm_e}")
 
@@ -862,7 +865,7 @@ class TicketSystem(commands.Cog):
                             f"> Reason: `{reason}`"
                         )
                     )
-                    await log_ch.send(embed=log_c.to_embed(), file=t_file_2)
+                    await send_container_response(log_ch, log_c, file=t_file_2)
                 except Exception as log_err:
                     logger.warning(f"Could not send close log: {log_err}")
 
@@ -1025,7 +1028,7 @@ class TicketSystem(commands.Cog):
         file = await generate_html_transcript(ctx.channel, ticket, bot=self.bot)
         t_card = KyroContainer()
         t_card.add_section(content="**Ticket Transcript**\n> Here is the generated HTML transcript for this ticket channel.")
-        await ctx.send(embed=t_card.to_embed(), file=file)
+        await send_container_response(ctx, t_card, file=file)
 
     @ticket_group.command(
         name="list",

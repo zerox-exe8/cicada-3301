@@ -1437,12 +1437,9 @@ class EmbedBuilderView(discord.ui.View):
                 upd_card = KyroContainer()
                 upd_card.add_section(content="**Card Builder**\n> Card updated.")
                 try:
-                    await interaction.response.edit_message(content=None, embed=upd_card.to_embed(), view=None)
+                    await send_container_response(interaction, upd_card, ephemeral=True)
                 except Exception:
-                    try:
-                        await send_container_response(interaction, upd_card, ephemeral=True)
-                    except Exception:
-                        pass
+                    pass
 
         # ALWAYS PATCH the main builder message in the channel
         if self.channel_id and self.message_id:

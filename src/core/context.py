@@ -18,11 +18,23 @@ class CustomContext(commands.Context):
 
     async def send_container(
         self,
-        container: KyroContainer,
+        container: KyroContainer | list[KyroContainer],
+        view: discord.ui.View | None = None,
         ephemeral: bool = False,
+        content: str | None = None,
+        file: discord.File | None = None,
+        files: list[discord.File] | None = None,
     ) -> Any:
-        """Send a Components V2 Container card."""
-        return await send_container_response(self, container, ephemeral=ephemeral)
+        """Send a Components V2 Container card with full parameter support."""
+        return await send_container_response(
+            self,
+            container,
+            view=view,
+            ephemeral=ephemeral,
+            content=content,
+            file=file,
+            files=files,
+        )
 
     async def send_success(
         self,

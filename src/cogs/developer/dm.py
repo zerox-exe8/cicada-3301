@@ -50,7 +50,7 @@ class DMCog(commands.Cog, name="Developer-DM"):
         container.add_text("-# Sent via Kyro Core Network")
 
         try:
-            await user.send(embed=container.to_embed())
+            await send_container_response(user, container)
             confirm = KyroContainer(accent_color=None)
             confirm.add_section(
                 content=f"Secret DM successfully delivered to `{user}` (`{user.id}`)."

@@ -90,7 +90,7 @@ async def execute_saved_playlist_playback(
         c = KyroContainer()
         c.add_section(content=f"**Connection Error**\n> Failed to connect to voice channel: `{e}`")
         if interaction:
-            await interaction.followup.send(embed=c.to_embed(), ephemeral=True)
+            await send_container_response(interaction, c, ephemeral=True)
         else:
             await send_container_response(channel, c)
         return
@@ -114,7 +114,7 @@ async def execute_saved_playlist_playback(
         c = KyroContainer()
         c.add_section(content=f"**Playback Error**\n> Failed to load first track `{first_row.get('title')}`.")
         if interaction:
-            await interaction.followup.send(embed=c.to_embed(), ephemeral=True)
+            await send_container_response(interaction, c, ephemeral=True)
         else:
             await send_container_response(channel, c)
         return

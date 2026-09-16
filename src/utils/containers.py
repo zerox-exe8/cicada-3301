@@ -186,8 +186,10 @@ async def send_container_response(
     view: discord.ui.View | None = None,
     ephemeral: bool = False,
     content: str | None = None,
+    file: discord.File | None = None,
+    files: list[discord.File] | None = None,
 ) -> Any:
-    """Send or edit a message using Components V2 Container(s)."""
+    """Send or edit a message using Components V2 Container(s) with optional file attachments."""
     # 1. Resolve hybrid context interaction if present
     interaction = getattr(interaction_or_ctx, "interaction", None)
     if interaction is not None:
@@ -196,6 +198,7 @@ async def send_container_response(
         target = interaction_or_ctx
 
     payload = build_container_payload(container, view=view, content=content)
+    file_list = [file] if file is not None else (files or [])
 
     if isinstance(target, discord.Interaction):
         interaction = target
@@ -205,26 +208,48 @@ async def send_container_response(
             payload["flags"] |= 64  # EPHEMERAL
 
         if interaction.response.is_done():
-            msg_data = await bot.http.request(
-                discord.http.Route(
-                    "POST",
-                    f"/webhooks/{app_id}/{interaction.token}",
-                ),
-                json=payload,
-            )
+            if file_list:
+                form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                msg_data = await bot.http.request(
+                    discord.http.Route(
+                        "POST",
+                        f"/webhooks/{app_id}/{interaction.token}",
+                    ),
+                    form=form,
+                    files=file_list,
+                )
+            else:
+                msg_data = await bot.http.request(
+                    discord.http.Route(
+                        "POST",
+                        f"/webhooks/{app_id}/{interaction.token}",
+                    ),
+                    json=payload,
+                )
             if view and hasattr(bot, "_connection"):
                 msg_id = int(msg_data["id"]) if isinstance(msg_data, dict) and "id" in msg_data else None
                 bot._connection.store_view(view, msg_id)
             return msg_data
         else:
             # Send initial response via raw interaction callback
-            res = await bot.http.request(
-                discord.http.Route(
-                    "POST",
-                    f"/interactions/{interaction.id}/{interaction.token}/callback",
-                ),
-                json={"type": 4, "data": payload},
-            )
+            if file_list:
+                form = [{"name": "payload_json", "value": discord.utils._to_json({"type": 4, "data": payload})}]
+                res = await bot.http.request(
+                    discord.http.Route(
+                        "POST",
+                        f"/interactions/{interaction.id}/{interaction.token}/callback",
+                    ),
+                    form=form,
+                    files=file_list,
+                )
+            else:
+                res = await bot.http.request(
+                    discord.http.Route(
+                        "POST",
+                        f"/interactions/{interaction.id}/{interaction.token}/callback",
+                    ),
+                    json={"type": 4, "data": payload},
+                )
             if view and hasattr(bot, "_connection"):
                 bot._connection.store_view(view)
             return res
@@ -252,10 +277,18 @@ async def send_container_response(
 
         # Direct bot channel message dispatch via raw Components V2 payload
         try:
-            msg_data = await http_client.request(
-                discord.http.Route("POST", f"/channels/{channel_id}/messages"),
-                json=payload,
-            )
+            if file_list:
+                form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                msg_data = await http_client.request(
+                    discord.http.Route("POST", f"/channels/{channel_id}/messages"),
+                    form=form,
+                    files=file_list,
+                )
+            else:
+                msg_data = await http_client.request(
+                    discord.http.Route("POST", f"/channels/{channel_id}/messages"),
+                    json=payload,
+                )
             if view and msg_data and isinstance(msg_data, dict) and "id" in msg_data:
                 msg_id = int(msg_data["id"])
                 if not getattr(view, "message_id", None):
@@ -302,12 +335,19 @@ async def send_container_response(
                     if has_buttons:
                         fallback_view = link_view
 
-                msg = await target_send(
-                    content=content,
-                    embed=primary.to_embed(content=content),
-                    view=fallback_view,
-                    allowed_mentions=discord.AllowedMentions(users=True),
-                )
+                send_kwargs: dict[str, Any] = {
+                    "content": content,
+                    "embed": primary.to_embed(content=content),
+                    "view": fallback_view,
+                    "allowed_mentions": discord.AllowedMentions(users=True),
+                }
+                if file_list:
+                    if len(file_list) == 1:
+                        send_kwargs["file"] = file_list[0]
+                    else:
+                        send_kwargs["files"] = file_list
+
+                msg = await target_send(**send_kwargs)
                 if view and msg and hasattr(msg, "id"):
                     setattr(view, "message_id", msg.id)
                     setattr(view, "channel_id", getattr(msg.channel, "id", None))

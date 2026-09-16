@@ -88,9 +88,6 @@ class AutoEvents(commands.Cog):
                 outer_content = None
             else:
                 outer_content = resolve_placeholders(msg_template, user=member, guild=guild, extra=extra)
-        elif event_type == "welcome":
-            # If no custom ping message is set, default to pinging member directly so Discord triggers audio/push notification
-            outer_content = member.mention
 
         # 2. Build Container from saved embed or fallback container
         container = None

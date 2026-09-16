@@ -418,6 +418,15 @@ class PostgresDatabase(BaseDatabase):
                 PRIMARY KEY (user_id, guild_id)
             );
             """,
+            # Guild Server Snapshots for Disaster Recovery & Nuke Rollback
+            """
+            CREATE TABLE IF NOT EXISTS guild_server_snapshots (
+                guild_id BIGINT PRIMARY KEY,
+                snapshot_data JSONB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by BIGINT
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

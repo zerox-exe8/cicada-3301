@@ -319,7 +319,7 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
 
     @commands.hybrid_command(
         name="snipe",
-        aliases=["s"],
+        aliases=["sn"],
         description="Inspect recently deleted and edited messages in this channel.",
     )
     @commands.guild_only()

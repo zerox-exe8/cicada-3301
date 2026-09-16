@@ -398,6 +398,18 @@ class PostgresDatabase(BaseDatabase):
                 channel_id BIGINT
             );
             """,
+            # User AFK table
+            """
+            CREATE TABLE IF NOT EXISTS user_afk (
+                user_id BIGINT,
+                guild_id BIGINT,
+                reason TEXT DEFAULT 'AFK',
+                nickname_changed BOOLEAN DEFAULT FALSE,
+                original_nickname VARCHAR(64),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, guild_id)
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

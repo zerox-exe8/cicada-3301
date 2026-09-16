@@ -54,11 +54,7 @@ class PollButton(discord.ui.Button):
 
         # Re-render container card
         updated_container = view.build_poll_container()
-        await interaction.response.edit_message(components=updated_container.build(), view=view)
-        try:
-            await interaction.followup.send(ack_msg, ephemeral=True)
-        except Exception:
-            pass
+        await edit_container_response(interaction, updated_container, view=view)
 
 
 class PollView(discord.ui.View):
@@ -155,7 +151,7 @@ class PollCog(commands.Cog, name="Games-Poll"):
             except discord.HTTPException:
                 pass
 
-        await ctx.channel.send(components=container.build(), view=view)
+        await send_container_response(ctx.channel, container, view=view)
 
 
 async def setup(bot: KyroBot) -> None:

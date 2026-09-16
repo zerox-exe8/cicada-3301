@@ -140,9 +140,9 @@ class WhisperCog(commands.Cog, name="Games-Whisper"):
         if ctx.interaction:
             # Ephemeral acknowledgment for the author in slash command
             await ctx.interaction.response.send_message("Whisper dispatched privately.", ephemeral=True)
-            await ctx.channel.send(components=container.build(), view=view)
+            await send_container_response(ctx.channel, container, view=view)
         else:
-            await ctx.channel.send(components=container.build(), view=view)
+            await send_container_response(ctx.channel, container, view=view)
 
 
 async def setup(bot: KyroBot) -> None:

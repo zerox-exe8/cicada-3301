@@ -182,41 +182,79 @@ class DisasterRecovery(commands.Cog, name="Security-Recovery"):
     @recovery.command(
         name="purgechannels",
         aliases=["cleanrooms", "delchannels", "raidchannels"],
-        description="Bulk delete rogue channels created during an attack within the specified time window.",
+        description="Bulk delete rogue channels created during an attack by name pattern or time window.",
     )
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     @commands.bot_has_permissions(manage_channels=True)
     async def recovery_purgechannels(
-        self, ctx: CustomContext, minutes: int = 30, *, pattern: Optional[str] = None
+        self, ctx: CustomContext, *, query: Optional[str] = None
     ) -> None:
-        """Find and bulk delete channels created within the last N minutes or matching a pattern."""
+        """Find and bulk delete channels created within the last N minutes/hours or matching a pattern."""
         guild = ctx.guild
         if not guild:
             return
 
-        if minutes <= 0 or minutes > 1440:
-            await ctx.send_error("Please specify a duration between `1` and `1440` minutes (up to 24 hours).")
-            return
+        # Determine filter mode from query
+        target_minutes: int | None = 1440  # Default to last 24 hours
+        target_pattern: str | None = None
+
+        if query:
+            q = query.strip()
+            parts = q.split(maxsplit=1)
+            first = parts[0].lower()
+            if first.endswith("h") and first[:-1].isdigit():
+                target_minutes = int(first[:-1]) * 60
+                target_pattern = parts[1].lower() if len(parts) > 1 else None
+            elif first.endswith("m") and first[:-1].isdigit():
+                target_minutes = int(first[:-1])
+                target_pattern = parts[1].lower() if len(parts) > 1 else None
+            elif first.isdigit():
+                target_minutes = int(first)
+                target_pattern = parts[1].lower() if len(parts) > 1 else None
+            elif first in ("all", "today", "recent"):
+                target_minutes = 1440
+                target_pattern = parts[1].lower() if len(parts) > 1 else None
+            else:
+                # User provided a name pattern directly! E.g. '?recovery purgechannels nuke'
+                target_pattern = q.lower()
+                target_minutes = None  # Match any channel containing this word regardless of age
 
         now = discord.utils.utcnow()
-        cutoff_time = now - datetime.timedelta(minutes=minutes)
+        cutoff_time = (now - datetime.timedelta(minutes=target_minutes)) if target_minutes else None
 
-        # Scan guild channels for creation time >= cutoff_time
+        # Scan guild channels
         candidate_channels: list[discord.abc.GuildChannel] = []
         for ch in guild.channels:
             # Do not delete the channel where the admin is running the recovery command
             if ch.id == ctx.channel.id:
                 continue
 
-            # Check creation timestamp
-            created_at = ch.created_at
-            if created_at and created_at >= cutoff_time:
-                if pattern:
-                    if pattern.lower() in ch.name.lower():
-                        candidate_channels.append(ch)
-                else:
-                    candidate_channels.append(ch)
+            # Time check
+            if cutoff_time:
+                created_at = ch.created_at
+                if not (created_at and created_at >= cutoff_time):
+                    continue
+
+            # Pattern check
+            if target_pattern:
+                if target_pattern not in ch.name.lower():
+                    continue
+
+            candidate_channels.append(ch)
+
+        # Sort so normal channels are deleted first, category channels last
+        candidate_channels.sort(key=lambda c: (1 if isinstance(c, discord.CategoryChannel) else 0))
+
+        filter_desc = []
+        if target_minutes:
+            if target_minutes >= 60:
+                filter_desc.append(f"created in the last **{target_minutes // 60} hour(s)**")
+            else:
+                filter_desc.append(f"created in the last **{target_minutes} minute(s)**")
+        if target_pattern:
+            filter_desc.append(f"matching name pattern `{target_pattern}`")
+        filter_summary = " and ".join(filter_desc) if filter_desc else "created recently"
 
         if not candidate_channels:
             container = KyroContainer(accent_color=None)
@@ -224,8 +262,8 @@ class DisasterRecovery(commands.Cog, name="Security-Recovery"):
                 content=(
                     "**No Rogue Channels Found**\n"
                     f"> Scanned all channels in **{guild.name}**.\n"
-                    f"> No channels were created in the last **{minutes} minute(s)**"
-                    + (f" matching pattern `{pattern}`." if pattern else ".")
+                    f"> No channels were found {filter_summary}.\n\n"
+                    f"-# Tip: If rogue channels have a specific name, use: `{ctx.clean_prefix}recovery purgechannels <channel_name_or_word>`"
                 )
             )
             await send_container_response(ctx, container)
@@ -233,15 +271,15 @@ class DisasterRecovery(commands.Cog, name="Security-Recovery"):
 
         # Prepare Confirmation Card
         total_found = len(candidate_channels)
-        sample_names = ", ".join([f"`#{c.name}`" for c in candidate_channels[:12]])
-        if total_found > 12:
-            sample_names += f" and **{total_found - 12} more...**"
+        sample_names = ", ".join([f"`#{c.name}`" for c in candidate_channels[:15]])
+        if total_found > 15:
+            sample_names += f" and **{total_found - 15} more...**"
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Rogue Channel Purge Request**\n"
-                f"> Detected **{total_found} channel(s)** created within the last **{minutes} minute(s)**.\n\n"
+                f"> Detected **{total_found} channel(s)** ({filter_summary}).\n\n"
                 f"**Channels to be deleted:**\n{sample_names}"
             )
         )
@@ -299,8 +337,20 @@ class DisasterRecovery(commands.Cog, name="Security-Recovery"):
             )
         )
         done_card.add_separator(divider=True)
-        done_card.add_text(f"-# **Executed by {ctx.author.display_name}** | Duration window: {minutes}m")
+        done_card.add_text(f"-# **Executed by {ctx.author.display_name}** | {filter_summary}")
         await edit_container_response(resp_msg, done_card)
+
+    @recovery.command(
+        name="purgebyname",
+        aliases=["delbyname", "cleanbyname"],
+        description="Bulk delete all channels whose name contains the specified word/pattern.",
+    )
+    @commands.guild_only()
+    @commands.has_permissions(administrator=True)
+    @commands.bot_has_permissions(manage_channels=True)
+    async def recovery_purgebyname(self, ctx: CustomContext, *, pattern: str) -> None:
+        """Shortcut to bulk delete all channels matching a pattern name."""
+        await self.recovery_purgechannels(ctx, query=pattern)
 
     @recovery.command(
         name="lockdown",

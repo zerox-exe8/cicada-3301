@@ -190,7 +190,7 @@ class PurgeCog(commands.Cog):
 
     @purge.error
     async def purge_error(self, ctx: CustomContext, error: commands.CommandError) -> None:
-        """Intelligent fallback for inverted argument orders (e.g. ?purge @user 10)."""
+        """Intelligent fallback for inverted argument orders and explicit error card rendering."""
         original = getattr(error, "original", error)
         if isinstance(original, (commands.BadArgument, commands.MemberNotFound)):
             if ctx.message and ctx.message.content:
@@ -214,8 +214,42 @@ class PurgeCog(commands.Cog):
                         await self._execute_purge(ctx, resolved_count, resolved_member)
                         return
 
-        # If recovery was not possible, pass to global error handler
-        await self.bot.on_command_error(ctx, error)
+        # Explicit error card dispatch (prevents ErrorHandler from silently ignoring errors)
+        container = KyroContainer(accent_color=None)
+        if isinstance(original, commands.MissingPermissions):
+            missing = ", ".join(f"`{p}`" for p in original.missing_permissions)
+            container.add_section(
+                content=(
+                    "**Permission Denied**\n"
+                    f"> You need the following permissions to execute this command:\n> {missing}"
+                )
+            )
+        elif isinstance(original, commands.BotMissingPermissions):
+            missing = ", ".join(f"`{p}`" for p in original.missing_permissions)
+            container.add_section(
+                content=(
+                    "**Bot Missing Permissions**\n"
+                    f"> I need the following permissions in this channel to purge:\n> {missing}"
+                )
+            )
+        elif isinstance(original, commands.NoPrivateMessage):
+            container.add_section(
+                content=(
+                    "**Server Only**\n"
+                    "> Purge command can only be used in a server channel."
+                )
+            )
+        else:
+            container.add_section(
+                content=(
+                    "**Purge Usage Error**\n"
+                    f"> `{original}`\n\n"
+                    f"> Usage: `{ctx.prefix}purge [count: 1-100] [@user]`"
+                )
+            )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        await send_container_response(ctx, container, ephemeral=True)
 
 
 async def setup(bot: KyroBot) -> None:

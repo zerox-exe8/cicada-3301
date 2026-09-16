@@ -30,13 +30,18 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     voice_channel = ctx.author.voice.channel
 
     # Check if bot is already connected to another VC in this guild
-    if ctx.guild.me.voice and ctx.guild.me.voice.channel:
-        if ctx.guild.me.voice.channel.id != voice_channel.id:
+    bot_vc = ctx.guild.me.voice.channel if ctx.guild.me.voice else None
+    if bot_vc and bot_vc.id != voice_channel.id:
+        player_check = cog.controller.get_player(ctx.guild.id)
+        current_listeners = [m for m in bot_vc.members if not m.bot]
+        # Only block moving if actively streaming music AND has active human listeners
+        if player_check and player_check.is_playing and len(current_listeners) > 0:
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
                     "**Voice Channel Conflict**\n"
-                    f"> I am already active in {ctx.guild.me.voice.channel.mention}. Please join that channel to play music."
+                    f"> I am currently playing music for {len(current_listeners)} listener(s) in {bot_vc.mention}.\n"
+                    "> Please join that channel or wait until playback concludes."
                 )
             )
             await send_container_response(ctx, container)
@@ -44,6 +49,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     player = cog.controller.get_or_create_player(ctx.guild)
     player.home_channel = ctx.channel
+    player.cancel_empty_vc_timer(auto_resume=False)
 
     # Connect to voice
     try:

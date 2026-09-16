@@ -8,6 +8,8 @@ import logging
 from typing import TYPE_CHECKING, Optional
 import discord
 
+from src.utils.containers import KyroContainer, send_container_response
+
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
     from src.cogs.music._player import GuildPlayer
@@ -62,7 +64,9 @@ class MusicControlView(discord.ui.View):
     async def btn_pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player or not player.is_connected:
-            await interaction.response.send_message("Player is not connected to a voice channel.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Voice Error**\n> Player is not connected to a voice channel.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         if player.is_paused:
@@ -84,7 +88,9 @@ class MusicControlView(discord.ui.View):
     async def btn_skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player or not player.is_connected:
-            await interaction.response.send_message("Player is not connected.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Voice Error**\n> Player is not connected.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         await player.skip()
@@ -99,7 +105,9 @@ class MusicControlView(discord.ui.View):
     async def btn_vol_down(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player:
-            await interaction.response.send_message("Player not active.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Player Notice**\n> Player not active.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         cur_vol = int(player.volume * 100)
@@ -116,7 +124,9 @@ class MusicControlView(discord.ui.View):
     async def btn_vol_up(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player:
-            await interaction.response.send_message("Player not active.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Player Notice**\n> Player not active.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         cur_vol = int(player.volume * 100)
@@ -133,9 +143,12 @@ class MusicControlView(discord.ui.View):
     async def btn_stop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player:
-            await interaction.response.send_message("Player not active.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Player Notice**\n> Player not active.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
+        player._disconnect_announced = True
         await player.stop()
         if not interaction.response.is_done():
             await interaction.response.defer()
@@ -149,7 +162,9 @@ class MusicControlView(discord.ui.View):
     async def btn_like(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player or not player.current:
-            await interaction.response.send_message("No track is currently playing to add to Favorites.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Favorites Notice**\n> No track is currently playing to add to Favorites.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         current = player.current
@@ -171,7 +186,9 @@ class MusicControlView(discord.ui.View):
             )
 
         if not pl_row:
-            await interaction.response.send_message("Failed to access your Favorites playlist.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Database Error**\n> Failed to access your Favorites playlist.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         playlist_id = pl_row["id"]
@@ -184,7 +201,9 @@ class MusicControlView(discord.ui.View):
             save_title,
         )
         if existing:
-            await interaction.response.send_message(f"`{save_title}` is already in your **Favorites**.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content=f"**Favorites Notice**\n> `{save_title}` is already in your **Favorites**.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         track_web_url = getattr(current, "url", None) or getattr(current, "stream_url", "")
@@ -196,7 +215,9 @@ class MusicControlView(discord.ui.View):
             current.duration,
             track_web_url,
         )
-        await interaction.response.send_message(f"Saved **[{save_title}]({track_web_url})** to your **Favorites** playlist!", ephemeral=True)
+        c = KyroContainer()
+        c.add_section(content=f"**Favorites Added**\n> Saved **[{save_title}]({track_web_url})** to your **Favorites** playlist!")
+        await send_container_response(interaction, c, ephemeral=True)
 
     @discord.ui.button(
         label="Loop",
@@ -207,14 +228,18 @@ class MusicControlView(discord.ui.View):
     async def btn_loop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player:
-            await interaction.response.send_message("Player not active.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Player Notice**\n> Player not active.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         modes = ["off", "track", "queue"]
         cur_mode = getattr(player, "loop_mode", "off")
         next_idx = (modes.index(cur_mode) + 1) % len(modes) if cur_mode in modes else 0
         player.loop_mode = modes[next_idx]
-        await interaction.response.send_message(f"Loop mode set to **{player.loop_mode.upper()}**.", ephemeral=True)
+        c = KyroContainer()
+        c.add_section(content=f"**Loop Mode**\n> Loop mode set to **{player.loop_mode.upper()}**.")
+        await send_container_response(interaction, c, ephemeral=True)
 
     @discord.ui.button(
         label="Autoplay",
@@ -225,12 +250,16 @@ class MusicControlView(discord.ui.View):
     async def btn_autoplay(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player:
-            await interaction.response.send_message("Player not active.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Player Notice**\n> Player not active.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         player.smart_autoplay = not player.smart_autoplay
         state = "Enabled" if player.smart_autoplay else "Disabled"
-        await interaction.response.send_message(f"Smart Autoplay **{state}**.", ephemeral=True)
+        c = KyroContainer()
+        c.add_section(content=f"**Smart Autoplay**\n> Smart Autoplay **{state}**.")
+        await send_container_response(interaction, c, ephemeral=True)
 
     @discord.ui.button(
         label="Queue",
@@ -241,7 +270,9 @@ class MusicControlView(discord.ui.View):
     async def btn_queue(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
         if not player or not player.queue:
-            await interaction.response.send_message("The playback queue is currently empty.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Queue Empty**\n> The playback queue is currently empty.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         q_lines = []
@@ -250,7 +281,8 @@ class MusicControlView(discord.ui.View):
 
         remaining = len(player.queue) - 10
         rem_text = f"\n*...and {remaining} more in queue*" if remaining > 0 else ""
-        await interaction.response.send_message(
-            f"**Upcoming Queue ({len(player.queue)} tracks):**\n" + "\n".join(q_lines) + rem_text,
-            ephemeral=True,
+        c = KyroContainer()
+        c.add_section(
+            content=f"**Upcoming Queue ({len(player.queue)} tracks)**\n" + "\n".join(q_lines) + rem_text
         )
+        await send_container_response(interaction, c, ephemeral=True)

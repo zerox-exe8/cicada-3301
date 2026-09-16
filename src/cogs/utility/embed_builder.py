@@ -1123,11 +1123,15 @@ class SaveModal(discord.ui.Modal, title="Save Template"):
         name = str(self.name_input.value).strip().lower()
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name)
         if not clean_name:
-            await interaction.response.send_message("Please provide a valid template name (alphanumeric and hyphens only).", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Template Error**\n> Please provide a valid template name (alphanumeric and hyphens only).")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         if not interaction.guild_id:
-            await interaction.response.send_message("Templates can only be saved inside a server.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Location Error**\n> Templates can only be saved inside a server.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         self.view_ref.template_name = clean_name
@@ -1140,7 +1144,9 @@ class SaveModal(discord.ui.Modal, title="Save Template"):
         if success:
             await self.view_ref.update_view(interaction)
         else:
-            await interaction.response.send_message(f"Failed to save template `{clean_name}`.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content=f"**Save Error**\n> Failed to save template `{clean_name}`.")
+            await send_container_response(interaction, c, ephemeral=True)
 
 
 class RawImportModal(discord.ui.Modal, title="Raw JSON / HTML Import"):
@@ -1164,14 +1170,18 @@ class RawImportModal(discord.ui.Modal, title="Raw JSON / HTML Import"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         raw = str(self.raw_input.value).strip()
         if not raw:
-            await interaction.response.send_message("No content provided.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Import Error**\n> No content provided.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         try:
             self.view_ref.draft = ContainerDraft.from_raw_payload(raw)
             await self.view_ref.update_view(interaction)
         except Exception as e:
-            await interaction.response.send_message(f"Failed to parse payload: {e}", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content=f"**Import Error**\n> Failed to parse payload: `{e}`")
+            await send_container_response(interaction, c, ephemeral=True)
 
 
 # ─── Dual-Container View (Builder Dashboard) ──────────────────────────────────
@@ -1217,10 +1227,11 @@ class EmbedBuilderView(discord.ui.View):
         if interaction.guild_id:
             self.guild_id = interaction.guild_id
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message(
-                f"Only {self.author.mention} can control this embed builder session.",
-                ephemeral=True,
+            c = KyroContainer()
+            c.add_section(
+                content=f"**Access Denied**\n> Only {self.author.mention} can control this embed builder session."
             )
+            await send_container_response(interaction, c, ephemeral=True)
             return False
         return True
 
@@ -1423,11 +1434,13 @@ class EmbedBuilderView(discord.ui.View):
                 logger.warning(f"edit_container_response in update_view: {err}")
         else:
             if not interaction.response.is_done():
+                upd_card = KyroContainer()
+                upd_card.add_section(content="**Card Builder**\n> Card updated.")
                 try:
-                    await interaction.response.edit_message(content="Card updated.", view=None)
+                    await interaction.response.edit_message(content=None, embed=upd_card.to_embed(), view=None)
                 except Exception:
                     try:
-                        await interaction.response.send_message("Card updated.", ephemeral=True)
+                        await send_container_response(interaction, upd_card, ephemeral=True)
                     except Exception:
                         pass
 
@@ -1506,12 +1519,16 @@ class EmbedBuilderView(discord.ui.View):
             await interaction.response.send_modal(VisualsModal(self))
         elif slide_key == "fields":
             if len(self.draft.fields) >= 25:
-                await interaction.response.send_message("Maximum 25 fields allowed.", ephemeral=True)
+                c = KyroContainer()
+                c.add_section(content="**Limit Reached**\n> Maximum 25 fields allowed.")
+                await send_container_response(interaction, c, ephemeral=True)
                 return
             await interaction.response.send_modal(AddFieldModal(self))
         elif slide_key == "interactive":
             if len(self.draft.modules) >= 25:
-                await interaction.response.send_message("Maximum 25 dropdown modules allowed.", ephemeral=True)
+                c = KyroContainer()
+                c.add_section(content="**Limit Reached**\n> Maximum 25 dropdown modules allowed.")
+                await send_container_response(interaction, c, ephemeral=True)
                 return
             await interaction.response.send_modal(AddModuleModal(self))
         elif slide_key == "dispatch":
@@ -1534,8 +1551,11 @@ class EmbedBuilderView(discord.ui.View):
             if not self.draft.fields:
                 await interaction.response.send_modal(AddFieldModal(self))
             else:
-                await interaction.response.send_message(
-                    "Select a field to edit or delete:",
+                c = KyroContainer()
+                c.add_section(content="**Field Management**\n> Select a field to edit or delete:")
+                await send_container_response(
+                    interaction,
+                    c,
                     view=FieldManagementPicker(self),
                     ephemeral=True,
                 )
@@ -1543,8 +1563,11 @@ class EmbedBuilderView(discord.ui.View):
             if not self.draft.modules:
                 await interaction.response.send_modal(AddModuleModal(self))
             else:
-                await interaction.response.send_message(
-                    "Select a module to edit or delete:",
+                c = KyroContainer()
+                c.add_section(content="**Module Management**\n> Select a module to edit or delete:")
+                await send_container_response(
+                    interaction,
+                    c,
                     view=ModuleManagementPicker(self),
                     ephemeral=True,
                 )
@@ -1568,7 +1591,9 @@ class EmbedBuilderView(discord.ui.View):
             await self.update_view(interaction)
         elif slide_key == "interactive":
             if len(self.draft.buttons) >= 5:
-                await interaction.response.send_message("Maximum 5 buttons allowed.", ephemeral=True)
+                c = KyroContainer()
+                c.add_section(content="**Limit Reached**\n> Maximum 5 buttons allowed.")
+                await send_container_response(interaction, c, ephemeral=True)
                 return
             await interaction.response.send_modal(AddButtonModal(self))
         elif slide_key == "dispatch":
@@ -1581,8 +1606,11 @@ class EmbedBuilderView(discord.ui.View):
             if not self.draft.buttons:
                 await interaction.response.send_modal(AddButtonModal(self))
             else:
-                await interaction.response.send_message(
-                    "Select a button to edit or delete:",
+                c = KyroContainer()
+                c.add_section(content="**Button Management**\n> Select a button to edit or delete:")
+                await send_container_response(
+                    interaction,
+                    c,
                     view=ButtonManagementPicker(self),
                     ephemeral=True,
                 )
@@ -1601,21 +1629,31 @@ class EmbedBuilderView(discord.ui.View):
         try:
             dm_channel = self.author.dm_channel or await self.author.create_dm()
             await send_container_response(dm_channel, container)
-            await interaction.response.send_message("Test embed dispatched to your DMs!", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**DM Dispatched**\n> Test embed dispatched to your DMs!")
+            await send_container_response(interaction, c, ephemeral=True)
         except discord.Forbidden:
-            await interaction.response.send_message("Could not send DM. Please enable DMs from server members.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**DM Failed**\n> Could not send DM. Please enable DMs from server members.")
+            await send_container_response(interaction, c, ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"Failed to send DM: {e}", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content=f"**DM Failed**\n> Failed to send DM: `{e}`")
+            await send_container_response(interaction, c, ephemeral=True)
 
     async def _open_send_picker(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
         if not guild:
-            await interaction.response.send_message("Cannot send in direct messages.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Environment Error**\n> Cannot send in direct messages.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         text_channels = [c for c in guild.text_channels if c.permissions_for(guild.me).send_messages][:25]
         if not text_channels:
-            await interaction.response.send_message("No accessible text channels found.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Channel Error**\n> No accessible text channels found.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         select_options = [
@@ -1637,7 +1675,9 @@ class EmbedBuilderView(discord.ui.View):
                 ch_id = int(sel.values[0])
                 target_ch = inter.guild.get_channel(ch_id) if inter.guild else None
                 if not target_ch or not isinstance(target_ch, discord.TextChannel):
-                    await inter.response.send_message("Target channel not found.", ephemeral=True)
+                    c = KyroContainer()
+                    c.add_section(content="**Channel Error**\n> Target channel not found.")
+                    await send_container_response(inter, c, ephemeral=True)
                     return
 
                 container = self.parent_view.draft.to_container(
@@ -1661,12 +1701,18 @@ class EmbedBuilderView(discord.ui.View):
                             template_name=self.parent_view.template_name,
                             payload=self.parent_view.draft.to_dict(),
                         )
-                    await inter.response.send_message(f"Card successfully posted to {target_ch.mention}.", ephemeral=True)
+                    c = KyroContainer()
+                    c.add_section(content=f"**Card Posted**\n> Card successfully posted to {target_ch.mention}.")
+                    await send_container_response(inter, c, ephemeral=True)
                 except Exception as e:
                     logger.error(f"Failed to post container card: {e}", exc_info=e)
-                    await inter.response.send_message(f"Failed to post card: {e}", ephemeral=True)
+                    c = KyroContainer()
+                    c.add_section(content=f"**Dispatch Error**\n> Failed to post card: `{e}`")
+                    await send_container_response(inter, c, ephemeral=True)
 
-        await interaction.response.send_message("Select target channel to post card:", view=ChannelPicker(self), ephemeral=True)
+        c = KyroContainer()
+        c.add_section(content="**Dispatch Card**\n> Select target channel to post card:")
+        await send_container_response(interaction, c, view=ChannelPicker(self), ephemeral=True)
 
 
 # ─── Cog Implementation ──────────────────────────────────────────────────────
@@ -1703,7 +1749,9 @@ class EmbedBuilder(commands.Cog):
             template_name = selected_id
             data = await self.bot.embed_mgr.get_template(interaction.guild_id or 0, template_name)
             if not data:
-                await interaction.response.send_message(f"Embed '{template_name}' not found.", ephemeral=True)
+                c = KyroContainer()
+                c.add_section(content=f"**Template Error**\n> Embed '{template_name}' not found.")
+                await send_container_response(interaction, c, ephemeral=True)
                 return
 
             draft = ContainerDraft.from_dict(data)
@@ -1725,7 +1773,9 @@ class EmbedBuilder(commands.Cog):
         if message.id in EmbedBuilderView.active_views:
             active_view = EmbedBuilderView.active_views[message.id]
             if interaction.user.id != active_view.author.id:
-                await interaction.response.send_message("Only the builder author can test the preview.", ephemeral=True)
+                c = KyroContainer()
+                c.add_section(content="**Access Denied**\n> Only the builder author can test the preview.")
+                await send_container_response(interaction, c, ephemeral=True)
                 return
             active_view.preview_module_id = selected_id
             await active_view.update_view(interaction)
@@ -1801,7 +1851,7 @@ class EmbedBuilder(commands.Cog):
         """Create a new named embed."""
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
         if not clean_name:
-            await ctx.send("Please provide a valid embed name (letters, numbers, hyphens). Example: `?embed create rules`")
+            await ctx.send_warning("Please provide a valid embed name (letters, numbers, hyphens). Example: `?embed create rules`")
             return
 
         existing = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
@@ -1838,7 +1888,7 @@ class EmbedBuilder(commands.Cog):
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
         template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
         if not template_data:
-            await ctx.send(f"Embed template `{clean_name}` not found. Create it using `?embed create {clean_name}`.")
+            await ctx.send_error(f"Embed template `{clean_name}` not found. Create it using `?embed create {clean_name}`.")
             return
 
         draft = ContainerDraft.from_dict(template_data)
@@ -1866,7 +1916,7 @@ class EmbedBuilder(commands.Cog):
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
         template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
         if not template_data:
-            await ctx.send(f"Embed template `{clean_name}` not found.")
+            await ctx.send_error(f"Embed template `{clean_name}` not found.")
             return
 
         draft = ContainerDraft.from_dict(template_data)
@@ -1920,14 +1970,14 @@ class EmbedBuilder(commands.Cog):
                 if found:
                     target_channel = found
                 else:
-                    await ctx.send(f"Channel '{target_or_name}' not found.")
+                    await ctx.send_error(f"Channel '{target_or_name}' not found.")
                     return
             actual_name = template_name
 
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", actual_name.lower())
         template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
         if not template_data:
-            await ctx.send(f"Saved template '{clean_name}' not found.")
+            await ctx.send_error(f"Saved template '{clean_name}' not found.")
             return
 
         draft = ContainerDraft.from_dict(template_data)
@@ -1968,7 +2018,7 @@ class EmbedBuilder(commands.Cog):
             await send_container_response(ctx, resp_container)
         except Exception as e:
             logger.error(f"Failed to post embed template '{clean_name}': {e}", exc_info=e)
-            await ctx.send(f"Failed to post card: {e}")
+            await ctx.send_error(f"Failed to post card: {e}")
 
     @embed_group.command(
         name="delete",

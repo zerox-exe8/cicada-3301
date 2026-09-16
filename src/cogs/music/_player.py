@@ -299,6 +299,11 @@ class GuildPlayer:
         self._current_gen: int = 0
         self._lock = asyncio.Lock()
 
+        # Voice Channel Inactivity & Auto-Pause/Resume State
+        self._empty_vc_task: Optional[asyncio.Task] = None
+        self._was_paused_for_empty_vc: bool = False
+        self._disconnect_announced: bool = False
+
     @property
     def elapsed_time(self) -> float:
         """Calculate exact playback elapsed seconds taking pauses into account."""
@@ -350,8 +355,40 @@ class GuildPlayer:
             self._next_stream.volume = self.volume
         return clamped
 
+    def cancel_empty_vc_timer(self, auto_resume: bool = True) -> bool:
+        """Cancel pending empty-channel disconnect timer and optionally auto-resume playback."""
+        timer_was_active = False
+        if self._empty_vc_task and not self._empty_vc_task.done():
+            self._empty_vc_task.cancel()
+            self._empty_vc_task = None
+            timer_was_active = True
+
+        if auto_resume and self._was_paused_for_empty_vc:
+            self._was_paused_for_empty_vc = False
+            if self.is_paused:
+                self.resume()
+                logger.info(f"Auto-resumed playback in guild {self.guild.id} because listener rejoined VC.")
+                return True
+
+        self._was_paused_for_empty_vc = False
+        return timer_was_active
+
     async def connect_voice(self, channel: discord.VoiceChannel) -> None:
         """Connect or move to voice channel safely with VoiceRecv support."""
+        self.cancel_empty_vc_timer(auto_resume=False)
+
+        # Restore 24/7 preference from database if available
+        if hasattr(self.bot, "db") and self.bot.db:
+            try:
+                row = await self.bot.db.fetchrow(
+                    "SELECT is_247 FROM guild_music_247 WHERE guild_id = ?",
+                    self.guild.id,
+                )
+                if row and row.get("is_247") is not None:
+                    self.is_247 = bool(row["is_247"])
+            except Exception as e:
+                logger.debug(f"Could not load 24/7 setting from DB: {e}")
+
         vc = self.guild.voice_client
         if vc and vc.is_connected():
             self.voice_client = vc
@@ -621,7 +658,9 @@ class GuildPlayer:
             except Exception as e:
                 logger.error(f"FFmpeg audio stream creation error: {e}", exc_info=True)
                 if self.home_channel:
-                    await self.home_channel.send(f"**Audio Stream Error:** `{e}`")
+                    c = KyroContainer(accent_color=15548997)
+                    c.add_section(content=f"**Audio Stream Error**\n> `{e}`")
+                    await send_container_response(self.home_channel, c)
                 return
 
         self._current_stream = audio_source
@@ -640,8 +679,10 @@ class GuildPlayer:
             if error:
                 logger.error(f"Voice playback error in guild {self.guild.id}: {error}", exc_info=True)
                 if self.home_channel:
+                    c = KyroContainer(accent_color=15548997)
+                    c.add_section(content=f"**Voice Playback Notice**\n> `{error}`")
                     asyncio.run_coroutine_threadsafe(
-                        self.home_channel.send(f"**Voice Playback Notice:** `{error}`"),
+                        send_container_response(self.home_channel, c),
                         self.bot.loop,
                     )
             asyncio.run_coroutine_threadsafe(self._handle_track_finish(gen), self.bot.loop)
@@ -829,6 +870,7 @@ class GuildPlayer:
 
     async def stop(self) -> None:
         """Clear queue and disconnect cleanly."""
+        self.cancel_empty_vc_timer(auto_resume=False)
         self._current_gen += 1
         if self._prebuffer_task and not self._prebuffer_task.done():
             self._prebuffer_task.cancel()

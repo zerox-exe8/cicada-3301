@@ -29,6 +29,7 @@ async def execute_stop(cog: Music, ctx: commands.Context) -> None:
         await send_container_response(ctx, container)
         return
 
+    player._disconnect_announced = True
     await player.stop()
     container = KyroContainer(accent_color=None)
     container.add_text("**Player stopped, queue cleared and disconnected from voice.**")

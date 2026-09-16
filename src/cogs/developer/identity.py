@@ -39,10 +39,11 @@ class BotEditView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                "**Access Denied:** Only the developer who initiated this console can interact.",
-                ephemeral=True,
+            c = KyroContainer()
+            c.add_section(
+                content="**Access Denied**\n> Only the developer who initiated this console can interact."
             )
+            await send_container_response(interaction, c, ephemeral=True)
             return False
         return True
 

@@ -56,6 +56,7 @@ async def execute_resume(cog: Music, ctx: commands.Context) -> None:
         return
 
     if player.resume():
+        player._was_paused_for_empty_vc = False
         await player.update_controller_message(force=True)
         container = KyroContainer(accent_color=None)
         container.add_text("**Playback resumed.**")

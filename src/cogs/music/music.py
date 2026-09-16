@@ -5,6 +5,7 @@ High-Fidelity in-process Discord Audio Engine with zero Lavalink dependencies.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Optional
 
@@ -57,52 +58,148 @@ class Music(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ) -> None:
-        """Auto-disconnect player if everyone leaves the voice channel."""
-        if member.id == self.bot.user.id and after.channel is None:
-            # Bot was disconnected
-            player = self.controller.get_player(member.guild.id)
-            if player:
-                if player.home_channel and before.channel:
-                    try:
-                        container = KyroContainer(accent_color=None)
-                        container.add_section(
-                            content=(
-                                "**Voice Disconnected**\n"
-                                f"> Kyro has disconnected from {before.channel.mention}."
-                            )
-                        )
-                        await send_container_response(player.home_channel, container)
-                    except Exception:
-                        pass
-                player.queue.clear()
-                player.current = None
-                player.voice_client = None
+        """Handle voice channel disconnects, empty VC timeouts, and 24/7 pause/resume."""
+        # 0. Ignore state updates where channel did not change (mute/unmute/deafen/stream)
+        if before.channel == after.channel:
             return
 
-        if before.channel and before.channel.guild:
-            guild = before.channel.guild
-            player = self.controller.get_player(guild.id)
-            if player and player.voice_client and player.voice_client.channel == before.channel:
-                # Count non-bot members
-                members = [m for m in before.channel.members if not m.bot]
-                if len(members) == 0:
-                    if getattr(player, "is_247", False):
-                        logger.info(f"Voice channel #{before.channel.name} empty, but 24/7 mode active. Remaining connected.")
-                        return
-                    logger.info(f"Voice channel #{before.channel.name} empty. Stopping player.")
-                    if player.home_channel:
+        # 1. Bot itself was disconnected from voice
+        if member.id == self.bot.user.id and after.channel is None:
+            player = self.controller.get_player(member.guild.id)
+            if player:
+                player.cancel_empty_vc_timer(auto_resume=False)
+                # Only announce disconnect if not already announced by empty timer or user command
+                if not getattr(player, "_disconnect_announced", False):
+                    if player.home_channel and before.channel:
                         try:
                             container = KyroContainer(accent_color=None)
                             container.add_section(
                                 content=(
-                                    "**Voice Channel Left**\n"
-                                    f"> Disconnected from {before.channel.mention} because the channel was empty."
+                                    "**Voice Disconnected**\n"
+                                    f"> Kyro has disconnected from {before.channel.mention}."
                                 )
                             )
                             await send_container_response(player.home_channel, container)
                         except Exception:
                             pass
-                    await player.stop()
+                player._disconnect_announced = False
+                player._was_paused_for_empty_vc = False
+                player.queue.clear()
+                player.current = None
+                player.voice_client = None
+            return
+
+        # 2. Non-bot member joined or moved into bot's voice channel
+        if after.channel and not member.bot:
+            player = self.controller.get_player(after.channel.guild.id)
+            if player and player.voice_client and player.voice_client.channel == after.channel:
+                was_auto_paused = player._was_paused_for_empty_vc
+                # Cancel pending empty VC disconnect timer and auto-resume if it was paused for empty VC
+                player.cancel_empty_vc_timer(auto_resume=True)
+                if was_auto_paused:
+                    if player.home_channel:
+                        try:
+                            container = KyroContainer(accent_color=None)
+                            container.add_section(
+                                content=(
+                                    "**Playback Resumed**\n"
+                                    f"> Listener joined {after.channel.mention}. Resuming music playback."
+                                )
+                            )
+                            await send_container_response(player.home_channel, container)
+                        except Exception:
+                            pass
+                    await player.update_controller_message(force=True)
+
+        # 3. Non-bot member left or moved out of bot's voice channel
+        if before.channel and not member.bot:
+            player = self.controller.get_player(before.channel.guild.id)
+            if player and player.voice_client and player.voice_client.channel == before.channel:
+                human_listeners = [m for m in before.channel.members if not m.bot]
+                if len(human_listeners) == 0:
+                    # Auto-pause playback if playing
+                    if player.is_playing:
+                        player.pause()
+                        player._was_paused_for_empty_vc = True
+                        await player.update_controller_message(force=True)
+
+                    # Check 24/7 mode
+                    if getattr(player, "is_247", False):
+                        logger.info(f"Voice channel #{before.channel.name} empty, but 24/7 active. Paused and staying connected.")
+                        if player.home_channel:
+                            try:
+                                container = KyroContainer(accent_color=None)
+                                container.add_section(
+                                    content=(
+                                        "**Voice Channel Empty (24/7 Mode Active)**\n"
+                                        f"> All listeners left {before.channel.mention}. Playback has been paused.\n"
+                                        "> Kyro will remain connected in voice (24/7 Mode Enabled)."
+                                    )
+                                )
+                                await send_container_response(player.home_channel, container)
+                            except Exception:
+                                pass
+                        return
+
+                    # 24/7 is OFF: start 2-minute countdown timer
+                    logger.info(f"Voice channel #{before.channel.name} empty. Starting 2-minute disconnect countdown.")
+                    player.cancel_empty_vc_timer(auto_resume=False)
+                    player._was_paused_for_empty_vc = True
+                    if player.home_channel:
+                        try:
+                            container = KyroContainer(accent_color=None)
+                            container.add_section(
+                                content=(
+                                    "**Voice Channel Empty**\n"
+                                    f"> All listeners left {before.channel.mention}. Playback has been paused.\n"
+                                    "> Kyro will disconnect in **2 minutes** if no one rejoins."
+                                )
+                            )
+                            await send_container_response(player.home_channel, container)
+                        except Exception:
+                            pass
+
+                    player._empty_vc_task = asyncio.create_task(
+                        self._empty_vc_timeout_worker(player, before.channel, timeout=120)
+                    )
+
+    async def _empty_vc_timeout_worker(
+        self, player: Any, channel: discord.VoiceChannel, timeout: int = 120
+    ) -> None:
+        """Disconnects player after specified inactivity timeout if channel remains empty."""
+        try:
+            await asyncio.sleep(timeout)
+            if not player.voice_client or player.voice_client.channel != channel:
+                return
+
+            human_listeners = [m for m in channel.members if not m.bot]
+            if len(human_listeners) > 0:
+                return
+
+            if getattr(player, "is_247", False):
+                return
+
+            logger.info(f"Empty VC timer expired for #{channel.name} in guild {player.guild.id}. Disconnecting.")
+            player._disconnect_announced = True
+
+            if player.home_channel:
+                try:
+                    container = KyroContainer(accent_color=None)
+                    container.add_section(
+                        content=(
+                            "**Voice Channel Inactivity Disconnect**\n"
+                            f"> Disconnected from {channel.mention} due to **2 minutes** of inactivity."
+                        )
+                    )
+                    await send_container_response(player.home_channel, container)
+                except Exception:
+                    pass
+
+            await player.stop()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Empty VC timeout worker error: {e}", exc_info=True)
 
     # ==========================================
     # Prefix & Slash Commands
@@ -114,7 +211,7 @@ class Music(commands.Cog):
         description="Connect Kyro to your current voice channel.",
     )
     async def join(self, ctx: CustomContext) -> None:
-        """Connect to voice channel."""
+        """Connect to voice channel with smart moving support."""
         if not ctx.author.voice or not ctx.author.voice.channel:
             container = KyroContainer(accent_color=None)
             container.add_text("**You must be in a voice channel to use this command.**")
@@ -125,24 +222,30 @@ class Music(commands.Cog):
         player = self.controller.get_or_create_player(ctx.guild)
         player.home_channel = ctx.channel
 
-        if ctx.guild.me.voice and ctx.guild.me.voice.channel:
-            if ctx.guild.me.voice.channel.id == target_channel.id:
+        bot_vc = ctx.guild.me.voice.channel if ctx.guild.me.voice else None
+        if bot_vc:
+            if bot_vc.id == target_channel.id:
                 container = KyroContainer(accent_color=None)
                 container.add_text(f"**Already connected to** {target_channel.mention}.")
                 await send_container_response(ctx, container)
                 return
-            elif player.is_playing:
+
+            current_listeners = [m for m in bot_vc.members if not m.bot]
+            # Only block moving if actively playing AND has active human listeners
+            if player.is_playing and len(current_listeners) > 0:
                 container = KyroContainer(accent_color=None)
                 container.add_section(
                     content=(
                         "**Voice Channel Conflict**\n"
-                        f"> I am currently streaming music in {ctx.guild.me.voice.channel.mention}. Please join that channel or stop playback first."
+                        f"> I am currently streaming music for {len(current_listeners)} listener(s) in {bot_vc.mention}.\n"
+                        "> Please join that channel or stop playback first."
                     )
                 )
                 await send_container_response(ctx, container)
                 return
 
         try:
+            player.cancel_empty_vc_timer(auto_resume=False)
             await player.connect_voice(target_channel)
             container = KyroContainer(accent_color=None)
             container.add_section(

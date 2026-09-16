@@ -492,7 +492,7 @@ class AutoEvents(commands.Cog):
         )
 
         if not success:
-            await ctx.send("Failed to save welcome configuration. Please try again.")
+            await ctx.send_error("Failed to save welcome configuration. Please try again.")
             return
 
         container = KyroContainer(accent_color=None)
@@ -525,7 +525,7 @@ class AutoEvents(commands.Cog):
         config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "welcome")
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         if not config or not config.get("channel_id"):
-            await ctx.send(f"Welcome is not configured yet! Use `{prefix}welcome set #channel {{user}} <embed_name>`.")
+            await ctx.send_warning(f"Welcome is not configured yet! Use `{prefix}welcome set #channel {{user}} <embed_name>`.")
             return
 
         ch_id = config["channel_id"]
@@ -537,7 +537,7 @@ class AutoEvents(commands.Cog):
                 target_ch = None
 
         if not target_ch or not isinstance(target_ch, (discord.TextChannel, discord.Thread)):
-            await ctx.send(f"Configured welcome channel not found. Please set a new channel with `{prefix}welcome set`.")
+            await ctx.send_error(f"Configured welcome channel not found. Please set a new channel with `{prefix}welcome set`.")
             return
 
         success, err = await self._send_event_card("welcome", ctx.guild, ctx.author, test_channel=target_ch)
@@ -574,11 +574,11 @@ class AutoEvents(commands.Cog):
         res = await self.bot.event_mgr.toggle_event(ctx.guild.id, "welcome")
         if res is None:
             prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-            await ctx.send(f"No welcome configuration found. Set it up using `{prefix}welcome set`.")
+            await ctx.send_warning(f"No welcome configuration found. Set it up using `{prefix}welcome set`.")
             return
 
         state = "Enabled" if res else "Disabled"
-        await ctx.send(f"Welcome event has been **{state}**.")
+        await ctx.send_success(f"Welcome event has been **{state}**.", title="Welcome Status")
 
     @welcome_group.command(
         name="reset",
@@ -589,7 +589,7 @@ class AutoEvents(commands.Cog):
     async def welcome_reset(self, ctx: CustomContext) -> None:
         """Clear welcome configuration."""
         await self.bot.event_mgr.delete_event_config(ctx.guild.id, "welcome")
-        await ctx.send("Welcome event configuration has been reset.")
+        await ctx.send_success("Welcome event configuration has been reset.", title="Welcome Reset")
 
     # ─── Leave / Goodbye Command Group ───────────────────────────────────────
 
@@ -707,7 +707,7 @@ class AutoEvents(commands.Cog):
         )
 
         if not success:
-            await ctx.send("Failed to save leave configuration.")
+            await ctx.send_error("Failed to save leave configuration.")
             return
 
         container = KyroContainer(accent_color=None)
@@ -740,7 +740,7 @@ class AutoEvents(commands.Cog):
         config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "leave")
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         if not config or not config.get("channel_id"):
-            await ctx.send(f"Leave is not configured yet! Use `{prefix}leave set #channel {{user.name}} <embed_name>`.")
+            await ctx.send_warning(f"Leave is not configured yet! Use `{prefix}leave set #channel {{user.name}} <embed_name>`.")
             return
 
         ch_id = config["channel_id"]
@@ -752,7 +752,7 @@ class AutoEvents(commands.Cog):
                 target_ch = None
 
         if not target_ch or not isinstance(target_ch, (discord.TextChannel, discord.Thread)):
-            await ctx.send(f"Configured leave channel not found. Set a new channel with `{prefix}leave set`.")
+            await ctx.send_error(f"Configured leave channel not found. Set a new channel with `{prefix}leave set`.")
             return
 
         success, err = await self._send_event_card("leave", ctx.guild, ctx.author, test_channel=target_ch)
@@ -789,11 +789,11 @@ class AutoEvents(commands.Cog):
         res = await self.bot.event_mgr.toggle_event(ctx.guild.id, "leave")
         if res is None:
             prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-            await ctx.send(f"No leave configuration found. Set it up using `{prefix}leave set`.")
+            await ctx.send_warning(f"No leave configuration found. Set it up using `{prefix}leave set`.")
             return
 
         state = "Enabled" if res else "Disabled"
-        await ctx.send(f"Leave event has been **{state}**.")
+        await ctx.send_success(f"Leave event has been **{state}**.", title="Leave Status")
 
     @leave_group.command(
         name="reset",
@@ -804,7 +804,7 @@ class AutoEvents(commands.Cog):
     async def leave_reset(self, ctx: CustomContext) -> None:
         """Clear leave configuration."""
         await self.bot.event_mgr.delete_event_config(ctx.guild.id, "leave")
-        await ctx.send("Leave event configuration has been reset.")
+        await ctx.send_success("Leave event configuration has been reset.", title="Leave Reset")
 
     # ─── Boost Command Group ─────────────────────────────────────────────────
 
@@ -921,7 +921,7 @@ class AutoEvents(commands.Cog):
         )
 
         if not success:
-            await ctx.send("Failed to save boost configuration.")
+            await ctx.send_error("Failed to save boost configuration.")
             return
 
         container = KyroContainer(accent_color=None)
@@ -954,7 +954,7 @@ class AutoEvents(commands.Cog):
         config = await self.bot.event_mgr.get_event_config(ctx.guild.id, "boost")
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         if not config or not config.get("channel_id"):
-            await ctx.send(f"Boost is not configured yet! Use `{prefix}boost set #channel {{user}} <embed_name>`.")
+            await ctx.send_warning(f"Boost is not configured yet! Use `{prefix}boost set #channel {{user}} <embed_name>`.")
             return
 
         ch_id = config["channel_id"]
@@ -966,7 +966,7 @@ class AutoEvents(commands.Cog):
                 target_ch = None
 
         if not target_ch or not isinstance(target_ch, (discord.TextChannel, discord.Thread)):
-            await ctx.send(f"Configured boost channel not found. Set a new channel with `{prefix}boost set`.")
+            await ctx.send_error(f"Configured boost channel not found. Set a new channel with `{prefix}boost set`.")
             return
 
         extra = {
@@ -1008,11 +1008,11 @@ class AutoEvents(commands.Cog):
         res = await self.bot.event_mgr.toggle_event(ctx.guild.id, "boost")
         if res is None:
             prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
-            await ctx.send(f"No boost configuration found. Set it up using `{prefix}boost set`.")
+            await ctx.send_warning(f"No boost configuration found. Set it up using `{prefix}boost set`.")
             return
 
         state = "Enabled" if res else "Disabled"
-        await ctx.send(f"Boost event has been **{state}**.")
+        await ctx.send_success(f"Boost event has been **{state}**.", title="Boost Status")
 
     @boost_group.command(
         name="reset",
@@ -1023,7 +1023,7 @@ class AutoEvents(commands.Cog):
     async def boost_reset(self, ctx: CustomContext) -> None:
         """Clear boost configuration."""
         await self.bot.event_mgr.delete_event_config(ctx.guild.id, "boost")
-        await ctx.send("Boost event configuration has been reset.")
+        await ctx.send_success("Boost event configuration has been reset.", title="Boost Reset")
 
 
 async def setup(bot: KyroBot) -> None:

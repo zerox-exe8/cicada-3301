@@ -60,20 +60,22 @@ async def execute_saved_playlist_playback(
 ) -> None:
     """Execute playback of a saved playlist with immediate full queueing and optional shuffle."""
     if not tracks:
-        msg = f"Playlist `{pl_row['playlist_name']}` is empty."
+        c = KyroContainer()
+        c.add_section(content=f"**Playlist Notice**\n> Playlist `{pl_row['playlist_name']}` is empty.")
         if interaction:
-            await interaction.response.send_message(msg, ephemeral=True)
+            await send_container_response(interaction, c, ephemeral=True)
         else:
-            await channel.send(msg)
+            await send_container_response(channel, c)
         return
 
     member = guild.get_member(user.id)
     if not member or not member.voice or not member.voice.channel:
-        msg = "You must be connected to a voice channel to play music."
+        c = KyroContainer()
+        c.add_section(content="**Voice Error**\n> You must be connected to a voice channel to play music.")
         if interaction:
-            await interaction.response.send_message(msg, ephemeral=True)
+            await send_container_response(interaction, c, ephemeral=True)
         else:
-            await channel.send(msg)
+            await send_container_response(channel, c)
         return
 
     if interaction and not interaction.response.is_done():
@@ -85,11 +87,12 @@ async def execute_saved_playlist_playback(
     try:
         await player.connect_voice(member.voice.channel)
     except Exception as e:
-        err_msg = f"Failed to connect to voice channel: `{e}`"
+        c = KyroContainer()
+        c.add_section(content=f"**Connection Error**\n> Failed to connect to voice channel: `{e}`")
         if interaction:
-            await interaction.followup.send(err_msg, ephemeral=True)
+            await interaction.followup.send(embed=c.to_embed(), ephemeral=True)
         else:
-            await channel.send(err_msg)
+            await send_container_response(channel, c)
         return
 
     # Shuffle track rows if requested
@@ -108,11 +111,12 @@ async def execute_saved_playlist_playback(
         first_track = await NativeExtractor.extract(alt_q, requester=user.display_name)
 
     if not first_track:
-        msg = f"Failed to load first track `{first_row.get('title')}`."
+        c = KyroContainer()
+        c.add_section(content=f"**Playback Error**\n> Failed to load first track `{first_row.get('title')}`.")
         if interaction:
-            await interaction.followup.send(msg, ephemeral=True)
+            await interaction.followup.send(embed=c.to_embed(), ephemeral=True)
         else:
-            await channel.send(msg)
+            await send_container_response(channel, c)
         return
 
     first_track.requester_id = user.id
@@ -212,7 +216,9 @@ class PlaylistSelectMenu(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         view: PlaylistHubView = self.view  # type: ignore
         if interaction.user.id != view.author_id:
-            await interaction.response.send_message("This playlist hub belongs to someone else.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Access Denied**\n> This playlist hub belongs to someone else.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         selected_id = int(self.values[0])
@@ -333,7 +339,9 @@ class PlaylistHubView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("This playlist hub belongs to someone else.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Access Denied**\n> This playlist hub belongs to someone else.")
+            await send_container_response(interaction, c, ephemeral=True)
             return False
         return True
 
@@ -346,7 +354,9 @@ class PlaylistHubView(discord.ui.View):
     async def btn_play(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         selected_pl = self._get_selected_pl()
         if not selected_pl or not interaction.guild:
-            await interaction.response.send_message("Please select a playlist first.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Selection Required**\n> Please select a playlist first.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         db = self.bot.db
@@ -375,7 +385,9 @@ class PlaylistHubView(discord.ui.View):
     async def btn_shuffle(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         selected_pl = self._get_selected_pl()
         if not selected_pl or not interaction.guild:
-            await interaction.response.send_message("Please select a playlist first.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Selection Required**\n> Please select a playlist first.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         db = self.bot.db
@@ -404,7 +416,9 @@ class PlaylistHubView(discord.ui.View):
     async def btn_view(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         selected_pl = self._get_selected_pl()
         if not selected_pl:
-            await interaction.response.send_message("Please select a playlist first.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Selection Required**\n> Please select a playlist first.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         db = self.bot.db
@@ -435,7 +449,9 @@ class PlaylistHubView(discord.ui.View):
     async def btn_delete(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         selected_pl = self._get_selected_pl()
         if not selected_pl:
-            await interaction.response.send_message("Please select a playlist first.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Selection Required**\n> Please select a playlist first.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         confirm_view = PlaylistDeleteConfirmView(
@@ -531,7 +547,9 @@ class PlaylistBrowseView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("This browser belongs to someone else.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Access Denied**\n> This browser belongs to someone else.")
+            await send_container_response(interaction, c, ephemeral=True)
             return False
         return True
 
@@ -593,7 +611,9 @@ class PlaylistDeleteConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("This prompt belongs to someone else.", ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Access Denied**\n> This prompt belongs to someone else.")
+            await send_container_response(interaction, c, ephemeral=True)
             return False
         return True
 

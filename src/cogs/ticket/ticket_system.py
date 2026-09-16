@@ -73,7 +73,9 @@ class TicketInsideControlsView(discord.ui.View):
     async def btn_close(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         ticket = await self.cog.bot.ticket_mgr.get_ticket(interaction.channel_id)
         if not ticket:
-            await interaction.response.send_message("This channel is not registered as an active ticket.", ephemeral=True)
+            container = KyroContainer()
+            container.add_section(content="**Ticket Error**\n> This channel is not registered as an active ticket.")
+            await send_container_response(interaction, container, ephemeral=True)
             return
 
         # Open close confirmation modal
@@ -88,7 +90,9 @@ class TicketInsideControlsView(discord.ui.View):
     async def btn_claim(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         ticket = await self.cog.bot.ticket_mgr.get_ticket(interaction.channel_id)
         if not ticket:
-            await interaction.response.send_message("This channel is not registered as an active ticket.", ephemeral=True)
+            container = KyroContainer()
+            container.add_section(content="**Ticket Error**\n> This channel is not registered as an active ticket.")
+            await send_container_response(interaction, container, ephemeral=True)
             return
 
         # Check if staff permissions or panel support role
@@ -100,18 +104,24 @@ class TicketInsideControlsView(discord.ui.View):
                 is_staff = True
 
         if not is_staff:
-            await interaction.response.send_message("Only staff members can claim tickets.", ephemeral=True)
+            container = KyroContainer()
+            container.add_section(content="**Permission Denied**\n> Only staff members can claim tickets.")
+            await send_container_response(interaction, container, ephemeral=True)
             return
 
         claimed_by = ticket.get("claimed_by")
         if claimed_by and claimed_by == interaction.user.id:
-            await interaction.response.send_message("You have already claimed this ticket.", ephemeral=True)
+            container = KyroContainer()
+            container.add_section(content="**Ticket Notice**\n> You have already claimed this ticket.")
+            await send_container_response(interaction, container, ephemeral=True)
             return
 
         await self.cog.bot.ticket_mgr.claim_ticket(interaction.channel_id, interaction.user.id)
-        await interaction.response.send_message(
-            f"**Ticket Claimed** • This ticket has been claimed by {interaction.user.mention}.",
+        claim_card = KyroContainer()
+        claim_card.add_section(
+            content=f"**Ticket Claimed**\n> This ticket has been claimed by {interaction.user.mention}."
         )
+        await send_container_response(interaction, claim_card)
 
     @discord.ui.button(
         label="Save Transcript",
@@ -121,14 +131,18 @@ class TicketInsideControlsView(discord.ui.View):
     )
     async def btn_transcript(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
-            await interaction.response.send_message("Transcripts are only supported in text channels.", ephemeral=True)
+            container = KyroContainer()
+            container.add_section(content="**Transcript Error**\n> Transcripts are only supported in text channels.")
+            await send_container_response(interaction, container, ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
         ticket = await self.cog.bot.ticket_mgr.get_ticket(interaction.channel_id)
         file = await generate_html_transcript(interaction.channel, ticket, bot=self.cog.bot)
+        t_card = KyroContainer()
+        t_card.add_section(content="**Ticket Transcript**\n> Here is the live HTML transcript for this ticket:")
         await interaction.followup.send(
-            content="Here is the live transcript for this ticket:",
+            embed=t_card.to_embed(),
             file=file,
             ephemeral=True,
         )
@@ -179,10 +193,11 @@ class TicketSetupWizard(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message(
-                f"Only {self.author.mention} can control this setup wizard session.",
-                ephemeral=True,
+            container = KyroContainer()
+            container.add_section(
+                content=f"**Access Denied**\n> Only {self.author.mention} can control this setup wizard session."
             )
+            await send_container_response(interaction, container, ephemeral=True)
             return False
         return True
 
@@ -446,12 +461,16 @@ class TicketSetupWizard(discord.ui.View):
 
     async def _on_deploy_clicked(self, interaction: discord.Interaction) -> None:
         if not self.selected_target_channel_id or not interaction.guild:
-            await interaction.response.send_message("Please select a target channel to deploy.", ephemeral=True)
+            container = KyroContainer()
+            container.add_section(content="**Deployment Error**\n> Please select a target channel to deploy.")
+            await send_container_response(interaction, container, ephemeral=True)
             return
 
         target_channel = interaction.guild.get_channel(self.selected_target_channel_id)
         if not isinstance(target_channel, discord.TextChannel):
-            await interaction.response.send_message("Invalid target text channel.", ephemeral=True)
+            container = KyroContainer()
+            container.add_section(content="**Channel Error**\n> Invalid target text channel.")
+            await send_container_response(interaction, container, ephemeral=True)
             return
 
         await interaction.response.defer()
@@ -591,7 +610,9 @@ class TicketSystem(commands.Cog):
 
         panel = await self.bot.ticket_mgr.get_panel_by_id(panel_id)
         if not panel:
-            await interaction.response.send_message("This ticket panel configuration was not found.", ephemeral=True)
+            container = KyroContainer()
+            container.add_section(content="**Configuration Error**\n> This ticket panel configuration was not found.")
+            await send_container_response(interaction, container, ephemeral=True)
             return
 
         # Check existing active ticket for user (Max 1 active ticket per panel/guild)
@@ -600,10 +621,11 @@ class TicketSystem(commands.Cog):
             ch_id = existing.get("channel_id")
             ch_obj = interaction.guild.get_channel(ch_id) if ch_id else None
             if ch_obj:
-                await interaction.response.send_message(
-                    f"You already have an open ticket in {ch_obj.mention}.",
-                    ephemeral=True,
+                container = KyroContainer()
+                container.add_section(
+                    content=f"**Ticket Limit Reached**\n> You already have an open ticket in {ch_obj.mention}."
                 )
+                await send_container_response(interaction, container, ephemeral=True)
                 return
             else:
                 # Ghost ticket (channel was deleted from Discord), auto-close in database
@@ -702,8 +724,12 @@ class TicketSystem(commands.Cog):
                 )
             except Exception as final_err:
                 logger.error(f"Final ticket channel creation failed: {final_err}", exc_info=final_err)
+                err_card = KyroContainer()
+                err_card.add_section(
+                    content=f"**Creation Failed**\n> Failed to create ticket channel: `{final_err}`.\n> Please ensure the bot has **Manage Channels** permission."
+                )
                 await interaction.followup.send(
-                    f"Failed to create ticket channel: `{final_err}`. Please ensure the bot has **Manage Channels** permission in this server.",
+                    embed=err_card.to_embed(),
                     ephemeral=True,
                 )
                 return
@@ -760,8 +786,12 @@ class TicketSystem(commands.Cog):
                 await send_container_response(log_ch, log_c)
 
         # Ephemeral confirmation to user
+        created_card = KyroContainer()
+        created_card.add_section(
+            content=f"**Ticket Created**\n> Your support ticket is ready: {ticket_channel.mention}"
+        )
         await interaction.followup.send(
-            f"Your ticket has been created: {ticket_channel.mention}",
+            embed=created_card.to_embed(),
             ephemeral=True,
         )
 
@@ -781,14 +811,11 @@ class TicketSystem(commands.Cog):
         if not guild or not isinstance(channel, (discord.TextChannel, discord.Thread)):
             return
 
-        if isinstance(interaction_or_ctx, discord.Interaction):
-            await interaction_or_ctx.response.send_message(
-                f"**Closing Ticket** • Transcript generating, channel will be deleted in 5 seconds...",
-            )
-        else:
-            await interaction_or_ctx.send(
-                f"**Closing Ticket** • Transcript generating, channel will be deleted in 5 seconds...",
-            )
+        closing_card = KyroContainer(accent_color=15548997)
+        closing_card.add_section(
+            content="**Closing Ticket**\n> Generating transcript, channel will be deleted in 5 seconds..."
+        )
+        await send_container_response(interaction_or_ctx, closing_card)
 
         ticket_num = ticket_data.get("ticket_number", channel.id)
         panel = await self.bot.ticket_mgr.get_panel_by_id(ticket_data.get("panel_id", 0))
@@ -915,7 +942,7 @@ class TicketSystem(commands.Cog):
         """Command to close active ticket channel."""
         ticket = await self.bot.ticket_mgr.get_ticket(ctx.channel.id)
         if not ticket:
-            await ctx.send("This channel is not an active ticket channel.")
+            await ctx.send_error("This channel is not an active ticket channel.")
             return
         await self.execute_ticket_close(ctx, ticket, reason=reason)
 
@@ -928,16 +955,18 @@ class TicketSystem(commands.Cog):
         """Command to claim active ticket."""
         ticket = await self.bot.ticket_mgr.get_ticket(ctx.channel.id)
         if not ticket:
-            await ctx.send("This channel is not an active ticket channel.")
+            await ctx.send_error("This channel is not an active ticket channel.")
             return
 
         claimed_by = ticket.get("claimed_by")
         if claimed_by and claimed_by == ctx.author.id:
-            await ctx.send("You have already claimed this ticket.")
+            await ctx.send_warning("You have already claimed this ticket.")
             return
 
         await self.bot.ticket_mgr.claim_ticket(ctx.channel.id, ctx.author.id)
-        await ctx.send(f"**Ticket Claimed** • {ctx.author.mention} is now handling this ticket.")
+        c = KyroContainer()
+        c.add_section(content=f"**Ticket Claimed**\n> {ctx.author.mention} is now handling this ticket.")
+        await send_container_response(ctx, c)
 
     @ticket_group.command(
         name="add",
@@ -948,7 +977,7 @@ class TicketSystem(commands.Cog):
         """Add user to ticket channel."""
         ticket = await self.bot.ticket_mgr.get_ticket(ctx.channel.id)
         if not ticket or not isinstance(ctx.channel, discord.TextChannel):
-            await ctx.send("This channel is not an active ticket channel.")
+            await ctx.send_error("This channel is not an active ticket channel.")
             return
 
         await ctx.channel.set_permissions(
@@ -960,7 +989,7 @@ class TicketSystem(commands.Cog):
             read_message_history=True,
             reason=f"Added to ticket by {ctx.author}",
         )
-        await ctx.send(f"Added {member.mention} to this ticket.")
+        await ctx.send_success(f"Added {member.mention} to this ticket.", title="Member Added")
 
     @ticket_group.command(
         name="remove",
@@ -971,15 +1000,15 @@ class TicketSystem(commands.Cog):
         """Remove user from ticket channel."""
         ticket = await self.bot.ticket_mgr.get_ticket(ctx.channel.id)
         if not ticket or not isinstance(ctx.channel, discord.TextChannel):
-            await ctx.send("This channel is not an active ticket channel.")
+            await ctx.send_error("This channel is not an active ticket channel.")
             return
 
         if member.id == ticket.get("user_id"):
-            await ctx.send("You cannot remove the ticket creator from their own ticket.")
+            await ctx.send_error("You cannot remove the ticket creator from their own ticket.")
             return
 
         await ctx.channel.set_permissions(member, overwrite=None, reason=f"Removed from ticket by {ctx.author}")
-        await ctx.send(f"Removed {member.mention} from this ticket.")
+        await ctx.send_success(f"Removed {member.mention} from this ticket.", title="Member Removed")
 
     @ticket_group.command(
         name="transcript",
@@ -989,12 +1018,14 @@ class TicketSystem(commands.Cog):
     async def ticket_transcript_cmd(self, ctx: CustomContext) -> None:
         """Generate and send transcript."""
         if not isinstance(ctx.channel, (discord.TextChannel, discord.Thread)):
-            await ctx.send("Transcripts are only supported in text channels.")
+            await ctx.send_error("Transcripts are only supported in text channels.")
             return
 
         ticket = await self.bot.ticket_mgr.get_ticket(ctx.channel.id)
         file = await generate_html_transcript(ctx.channel, ticket, bot=self.bot)
-        await ctx.send(content="Here is the transcript for this ticket:", file=file)
+        t_card = KyroContainer()
+        t_card.add_section(content="**Ticket Transcript**\n> Here is the generated HTML transcript for this ticket channel.")
+        await ctx.send(embed=t_card.to_embed(), file=file)
 
     @ticket_group.command(
         name="list",
@@ -1005,7 +1036,7 @@ class TicketSystem(commands.Cog):
         """List configured panels."""
         panels = await self.bot.ticket_mgr.list_panels(ctx.guild.id)
         if not panels:
-            await ctx.send("No ticket panels configured yet. Use `?ticket setup` to create one.")
+            await ctx.send_warning("No ticket panels configured yet. Use `?ticket setup` to create one.")
             return
 
         container = KyroContainer(accent_color=None)
@@ -1036,7 +1067,7 @@ class TicketSystem(commands.Cog):
         clean_name = panel_name.lower().strip()
         existing = await self.bot.ticket_mgr.get_panel(ctx.guild.id, clean_name)
         if not existing:
-            await ctx.send(f"Panel `{clean_name}` not found. Use `?ticket list` to see configured panels.")
+            await ctx.send_error(f"Panel `{clean_name}` not found. Use `?ticket list` to see configured panels.")
             return
 
         # Attempt to delete deployed message if possible
@@ -1052,7 +1083,7 @@ class TicketSystem(commands.Cog):
                 pass
 
         await self.bot.ticket_mgr.delete_panel(ctx.guild.id, clean_name)
-        await ctx.send(f"Ticket panel `{clean_name}` has been deleted.")
+        await ctx.send_success(f"Ticket panel `{clean_name}` has been deleted.", title="Panel Deleted")
 
 
 async def setup(bot: KyroBot) -> None:

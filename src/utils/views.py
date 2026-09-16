@@ -7,6 +7,8 @@ from __future__ import annotations
 import discord
 from discord.ext import commands
 
+from src.utils.containers import KyroContainer, send_container_response
+
 
 class ConfirmView(discord.ui.View):
     """Interactive confirmation prompt with Accept and Decline buttons."""
@@ -18,10 +20,9 @@ class ConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
-            await interaction.response.send_message(
-                "You are not authorized to interact with this prompt.",
-                ephemeral=True,
-            )
+            c = KyroContainer()
+            c.add_section(content="**Access Denied**\n> You are not authorized to interact with this prompt.")
+            await send_container_response(interaction, c, ephemeral=True)
             return False
         return True
 

@@ -84,7 +84,13 @@ class AutoEvents(commands.Cog):
         # 1. Resolve Outer Message Content (Ping message)
         outer_content = None
         if msg_template:
-            outer_content = resolve_placeholders(msg_template, user=member, guild=guild, extra=extra)
+            if msg_template.strip().lower() in ["none", "no_ping", "silent"]:
+                outer_content = None
+            else:
+                outer_content = resolve_placeholders(msg_template, user=member, guild=guild, extra=extra)
+        elif event_type == "welcome":
+            # If no custom ping message is set, default to pinging member directly so Discord triggers audio/push notification
+            outer_content = member.mention
 
         # 2. Build Container from saved embed or fallback container
         container = None
@@ -138,6 +144,7 @@ class AutoEvents(commands.Cog):
                 channel,
                 container,
                 content=outer_content,
+                allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
             )
             # If template has interactive modules, register card for page switching
             msg_id = None
@@ -587,6 +594,12 @@ class AutoEvents(commands.Cog):
 
         if not target_channel:
             target_channel = ctx.channel
+
+        # Convert any accidental literal mentions of command invoker or bot into dynamic {user} placeholder
+        if ctx.author:
+            raw_text = re.sub(rf"<@!?{ctx.author.id}>", "{user}", raw_text)
+        if self.bot.user:
+            raw_text = re.sub(rf"<@!?{self.bot.user.id}>", "{user}", raw_text)
 
         words = raw_text.split()
         embed_name = None

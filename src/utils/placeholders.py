@@ -7,6 +7,7 @@ Outer Ping Messages, Welcome/Leave/Boost events, and Embed Containers.
 from __future__ import annotations
 
 import datetime
+import re
 import time
 from typing import Any
 import discord
@@ -69,11 +70,29 @@ def resolve_placeholders(
 
     # 4. Replacements Mapping
     replacements = {
-        # User placeholders
-        "{user}": user_mention,
+        # Comprehensive User mention variations (longer specific patterns first)
+        "@{user.mention}": user_mention,
+        "@{member.mention}": user_mention,
+        "<@{user.mention}>": user_mention,
+        "<@{member.mention}>": user_mention,
+        "<@{user.id}>": user_mention,
+        "<@{member.id}>": user_mention,
+        "@{user.id}": user_mention,
+        "@{member.id}": user_mention,
+        "<@{user}>": user_mention,
+        "<@{member}>": user_mention,
+        "@{user}": user_mention,
+        "@{member}": user_mention,
+        "@{mention}": user_mention,
         "{user.mention}": user_mention,
-        "{member}": user_mention,
         "{member.mention}": user_mention,
+        "{user_mention}": user_mention,
+        "{member_mention}": user_mention,
+        "{user}": user_mention,
+        "{member}": user_mention,
+        "{mention}": user_mention,
+
+        # Standard User placeholders
         "{user.name}": user_name,
         "{user.username}": user_name,
         "{username}": user_name,
@@ -127,6 +146,13 @@ def resolve_placeholders(
     result = text
     for key, val in replacements.items():
         if key in result:
-            result = result.replace(key, val)
+            result = result.replace(key, str(val))
+
+    if user:
+        # Replace standalone un-bracketed @user or @member (e.g. "@user welcome!")
+        result = re.sub(r"(?i)(?<!<)@(?:user|member)\b", user_mention, result)
+        # Fix any duplicate @ or nested bracket artifacts (e.g. @<@123> -> <@123>, <@<@123>> -> <@123>, <<@123>> -> <@123>)
+        result = re.sub(r"@+<@!?(\d+)>", r"<@\1>", result)
+        result = re.sub(r"<+@*<@!?(\d+)>*>", r"<@\1>", result)
 
     return result

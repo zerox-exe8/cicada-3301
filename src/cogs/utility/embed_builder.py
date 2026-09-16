@@ -59,12 +59,29 @@ def apply_placeholders(
     }
 
     if user:
+        u_mention = user.mention
         created_ts = int(user.created_at.timestamp())
         replacements.update({
-            "{user}": user.mention,
-            "{user.mention}": user.mention,
-            "{member}": user.mention,
-            "{member.mention}": user.mention,
+            "@{user.mention}": u_mention,
+            "@{member.mention}": u_mention,
+            "<@{user.mention}>": u_mention,
+            "<@{member.mention}>": u_mention,
+            "<@{user.id}>": u_mention,
+            "<@{member.id}>": u_mention,
+            "@{user.id}": u_mention,
+            "@{member.id}": u_mention,
+            "<@{user}>": u_mention,
+            "<@{member}>": u_mention,
+            "@{user}": u_mention,
+            "@{member}": u_mention,
+            "@{mention}": u_mention,
+            "{user.mention}": u_mention,
+            "{member.mention}": u_mention,
+            "{user_mention}": u_mention,
+            "{member_mention}": u_mention,
+            "{user}": u_mention,
+            "{member}": u_mention,
+            "{mention}": u_mention,
             "{user.name}": user.name,
             "{user.display_name}": user.display_name,
             "{user.id}": str(user.id),
@@ -155,7 +172,13 @@ def apply_placeholders(
 
     result = text
     for key, val in replacements.items():
-        result = result.replace(key, val)
+        result = result.replace(key, str(val))
+
+    if user:
+        result = re.sub(r"(?i)(?<!<)@(?:user|member)\b", user.mention, result)
+        result = re.sub(r"@+<@!?(\d+)>", r"<@\1>", result)
+        result = re.sub(r"<+@*<@!?(\d+)>*>", r"<@\1>", result)
+
     return result
 
 

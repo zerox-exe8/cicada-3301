@@ -131,7 +131,7 @@ def build_container_payload(
     container: KyroContainer | list[KyroContainer],
     view: discord.ui.View | None = None,
     content: str | None = None,
-    allowed_mentions: dict[str, Any] | None = None,
+    allowed_mentions: discord.AllowedMentions | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate the full Discord REST payload supporting single or multiple stacked containers with root-level controls."""
     if isinstance(container, list):
@@ -140,11 +140,6 @@ def build_container_payload(
         container_list = [container]
 
     root_comps = []
-    if content and str(content).strip():
-        root_comps.append({
-            "type": 10,
-            "content": str(content).strip(),
-        })
 
     for c in container_list:
         c_dict: dict[str, Any] = {
@@ -168,16 +163,29 @@ def build_container_payload(
             else:
                 root_comps.extend(view_comps)
 
-    mentions_payload = allowed_mentions if allowed_mentions is not None else {
-        "parse": [],
-        "replied_user": False,
-    }
+    if allowed_mentions is not None:
+        if isinstance(allowed_mentions, discord.AllowedMentions):
+            mentions_payload = allowed_mentions.to_dict()
+        else:
+            mentions_payload = allowed_mentions
+    else:
+        # Default: allow parsing user mentions and replied user; suppress mass everyone/role pings
+        mentions_payload = {
+            "parse": ["users"],
+            "replied_user": True,
+        }
 
-    return {
+    payload: dict[str, Any] = {
         "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
         "components": root_comps[:5],  # Discord allows maximum 5 top-level items
         "allowed_mentions": mentions_payload,
     }
+
+    # Top-level message content outside the container (triggers real Discord notifications/mentions)
+    if content and str(content).strip():
+        payload["content"] = str(content).strip()
+
+    return payload
 
 
 async def send_container_response(
@@ -188,6 +196,7 @@ async def send_container_response(
     content: str | None = None,
     file: discord.File | None = None,
     files: list[discord.File] | None = None,
+    allowed_mentions: discord.AllowedMentions | dict[str, Any] | None = None,
 ) -> Any:
     """Send or edit a message using Components V2 Container(s) with optional file attachments."""
     # 1. Resolve hybrid context interaction if present
@@ -197,7 +206,12 @@ async def send_container_response(
     else:
         target = interaction_or_ctx
 
-    payload = build_container_payload(container, view=view, content=content)
+    payload = build_container_payload(
+        container,
+        view=view,
+        content=content,
+        allowed_mentions=allowed_mentions,
+    )
     file_list = [file] if file is not None else (files or [])
 
     if isinstance(target, discord.Interaction):
@@ -344,7 +358,7 @@ async def send_container_response(
                     "content": content,
                     "embed": primary.to_embed(content=content),
                     "view": fallback_view,
-                    "allowed_mentions": discord.AllowedMentions(users=True),
+                    "allowed_mentions": allowed_mentions or discord.AllowedMentions(users=True),
                 }
                 if file_list:
                     if len(file_list) == 1:

@@ -249,14 +249,22 @@ class PurgeCog(commands.Cog):
                 action_name = "Human Message Purge"
 
             try:
+                scope_str = "All Messages"
+                if filter_type == "bot":
+                    scope_str = "Bots Only"
+                elif filter_type == "human":
+                    scope_str = "Humans Only"
+
+                extra_details = f"Cleared {len(deleted)} message(s) • Filter: {scope_str}"
                 await dispatch_mod_log(
                     self.bot,
                     ctx.guild,
                     action_name,
-                    member or ctx.author,
-                    ctx.author,
-                    reason=f"Purged {len(deleted)} message(s) in #{ctx.channel.name}",
-                    extra=f"Count: {len(deleted)}" + (f" | Target: {member}" if member else f" | Type: {filter_type}"),
+                    target=member,
+                    moderator=ctx.author,
+                    channel=ctx.channel,
+                    reason=None,
+                    extra=extra_details,
                 )
             except Exception as e:
                 logger.debug(f"Purge mod log notice: {e}")

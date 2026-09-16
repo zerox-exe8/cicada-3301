@@ -51,7 +51,15 @@ class LockCog(commands.Cog):
         overwrite.send_messages = False
         await target_channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=f"{ctx.author}: {reason}")
 
-        await dispatch_mod_log(self.bot, ctx.guild, "Channel Lock", ctx.author, ctx.author, reason, extra=f"Channel: {target_channel.mention}")
+        await dispatch_mod_log(
+            self.bot,
+            ctx.guild,
+            "Channel Lock",
+            target=None,
+            moderator=ctx.author,
+            reason=reason,
+            channel=target_channel,
+        )
 
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
@@ -97,7 +105,15 @@ class LockCog(commands.Cog):
         overwrite.send_messages = None
         await target_channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=f"{ctx.author}: {reason}")
 
-        await dispatch_mod_log(self.bot, ctx.guild, "Channel Unlock", ctx.author, ctx.author, reason, extra=f"Channel: {target_channel.mention}")
+        await dispatch_mod_log(
+            self.bot,
+            ctx.guild,
+            "Channel Unlock",
+            target=None,
+            moderator=ctx.author,
+            reason=reason,
+            channel=target_channel,
+        )
 
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")

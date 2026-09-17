@@ -542,8 +542,31 @@ class TechNewsManager:
                                 if not real_summary and data.get("text"):
                                     real_summary = _clean_html(data["text"]).strip()
 
+                                # Extract destination domain for clean attribution
+                                domain = ""
+                                try:
+                                    from urllib.parse import urlparse
+                                    domain = urlparse(link).netloc.replace("www.", "")
+                                except Exception:
+                                    pass
+
+                                # Deep Gemini analysis if description is brief or missing
+                                what_is_inside = ""
+                                if not real_summary or len(real_summary) < 50:
+                                    ai_intel = await analyze_with_gemini(
+                                        session,
+                                        title,
+                                        f"Headline: {title}\nSource: {domain}\nContext: {real_summary}",
+                                        source_type="engineering news & discussion"
+                                    )
+                                    if ai_intel:
+                                        if ai_intel.get("what_it_does"):
+                                            real_summary = ai_intel["what_it_does"]
+                                        if ai_intel.get("what_is_inside"):
+                                            what_is_inside = ai_intel["what_is_inside"]
+
                                 if not real_summary:
-                                    real_summary = f"Technical analysis and engineering report regarding {title}."
+                                    real_summary = title
 
                                 is_crit = any(re.search(kw, title, re.IGNORECASE) for kw in CRITICAL_KEYWORDS)
                                 story_id = hashlib.sha256(f"hn:{link}".encode()).hexdigest()
@@ -554,8 +577,9 @@ class TechNewsManager:
                                     title=title,
                                     summary=_smart_truncate(real_summary, 320),
                                     url=link,
-                                    metadata={"score": score, "comments": data.get("descendants", 0)},
+                                    metadata={"score": score, "comments": data.get("descendants", 0), "domain": domain},
                                     is_critical=is_crit,
+                                    what_is_inside=what_is_inside,
                                 )
                                 self.register_story_memory(story_obj)
                                 stories.append(story_obj)
@@ -751,8 +775,11 @@ class TechNewsManager:
         accent = 0xFF0033 if story.is_critical else None
         container = KyroContainer(accent_color=accent)
 
-        # High-contrast white GitHub icon added by user in emoji2
+        # Dedicated verified icons per intelligence domain
         github_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/github.png"
+        globe_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_globe.png"
+        ai_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icon_bot.png"
+        lock_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_locked.png"
 
         if story.category == "github":
             accessory = {"type": 11, "media": {"url": github_icon_url}}
@@ -804,12 +831,12 @@ class TechNewsManager:
             primary_label = "View Repository"
 
         elif story.category == "ai":
-            accessory = {"type": 11, "media": {"url": github_icon_url}}
+            accessory = {"type": 11, "media": {"url": ai_icon_url}}
 
             # Section header contains Title & Badge next to icon
             header_content = (
                 f"**[{story.title}]({story.url})**\n"
-                f"> **Frontier AI Research** • *Peer-Reviewed Pre-print*"
+                f"> **Frontier AI Research** • *ArXiv Pre-print*"
             )
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
@@ -818,7 +845,7 @@ class TechNewsManager:
 
             # Full-width abstract and findings
             if story.summary:
-                body_elements.append(f"**Abstract & Core Findings:**\n{story.summary}")
+                body_elements.append(f"**Abstract & Core Breakthrough:**\n{story.summary}")
 
             if story.what_is_inside:
                 body_elements.append(f"**Methodology & Key Architecture:**\n> {story.what_is_inside}")
@@ -831,18 +858,48 @@ class TechNewsManager:
             container.add_text("-# Frontier AI Intelligence • Kyro Realtime Feed")
             primary_label = "Read Research Paper"
 
+        elif story.category == "systems":
+            accessory = {"type": 11, "media": {"url": globe_icon_url}}
+
+            header_content = (
+                f"**[{story.title}]({story.url})**\n"
+                f"> **Hacker News** • *Engineering Intel*"
+            )
+            container.add_section(content=header_content, accessory=accessory)
+            container.add_separator(divider=True)
+
+            body_elements: list[str] = []
+            if story.summary:
+                body_elements.append(f"**Discussion Context:**\n{story.summary}")
+
+            if story.what_is_inside:
+                body_elements.append(f"**Key Technical Takeaways:**\n> {story.what_is_inside}")
+
+            score = story.metadata.get("score", 0)
+            comments = story.metadata.get("comments", 0)
+            domain = story.metadata.get("domain", "")
+            meta_line = f"{dot} **HN Score:** `{score}` pts  {dot} **Comments:** `{comments}`"
+            if domain:
+                meta_line += f"  {dot} **Source:** `{domain}`"
+            body_elements.append(meta_line)
+
+            container.add_text("\n\n".join(body_elements))
+            container.add_separator(divider=True)
+            container.add_text("-# Hacker News Discussion • Kyro Realtime Feed")
+            primary_label = "Read Article"
+
         elif story.category == "security":
             header_content = (
                 f"**[{story.title}]({story.url})**\n"
                 f"> **Security Advisory** • *The Hacker News*"
             )
-            accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_locked.png"}}
+            accessory = {"type": 11, "media": {"url": lock_icon_url}}
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
             sev = story.metadata.get("severity", "General")
             body_elements = [
-                story.summary,
+                f"**Vulnerability Overview:**\n{story.summary}",
                 f"{dot} **Threat Level:** `{sev}`  {dot} **Source:** The Hacker News"
             ]
             container.add_text("\n\n".join(body_elements))
@@ -850,40 +907,40 @@ class TechNewsManager:
             container.add_text("-# Cyber Threat Intelligence • Kyro Realtime Feed")
             primary_label = "Read Advisory"
 
+        elif story.category == "hardware":
+            accessory = {"type": 11, "media": {"url": globe_icon_url}}
+
+            header_content = (
+                f"**[{story.title}]({story.url})**\n"
+                f"> **Phoronix** • *Silicon & Linux Intel*"
+            )
+            container.add_section(content=header_content, accessory=accessory)
+            container.add_separator(divider=True)
+
+            body_elements = [f"**Hardware Brief:**\n{story.summary}"]
+            if "type" in story.metadata:
+                body_elements.append(f"{dot} **Focus:** `{story.metadata['type']}`")
+
+            container.add_text("\n\n".join(body_elements))
+            container.add_separator(divider=True)
+            container.add_text("-# Silicon & Kernel Updates • Kyro Realtime Feed")
+            primary_label = "Read Article"
+
         else:
+            accessory = {"type": 11, "media": {"url": globe_icon_url}}
+
             header_content = (
                 f"**[{story.title}]({story.url})**\n"
                 f"> **{story.source}** • *Technical Intelligence*"
             )
-            if story.category == "hardware":
-                accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_globe.png"}}
-            else:
-                accessory = {"type": 11, "media": {"url": github_icon_url}}
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
-            meta_parts: list[str] = []
-            if "score" in story.metadata:
-                meta_parts.append(f"{dot} **HN Score:** `{story.metadata['score']}` pts")
-            if "type" in story.metadata:
-                meta_parts.append(f"{dot} **Focus:** `{story.metadata['type']}`")
-
             body_elements = [story.summary]
-            if meta_parts:
-                body_elements.append("  ".join(meta_parts))
             container.add_text("\n\n".join(body_elements))
             container.add_separator(divider=True)
             container.add_text(f"-# {story.source} • Kyro Realtime Feed")
             primary_label = "Read Article"
-
-            body_elements = [story.summary]
-            if meta_parts:
-                body_elements.append("  ".join(meta_parts))
-
-            container.add_text("\n\n".join(body_elements))
-            container.add_separator(divider=True)
-            container.add_text(f"-# {story.source} Intel • Kyro Realtime Feed")
-            primary_label = "View Origin"
 
         # Action row: Primary link button + Save to DM interactive button
         container.add_action_row([

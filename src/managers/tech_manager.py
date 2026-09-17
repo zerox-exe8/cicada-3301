@@ -550,14 +550,20 @@ class TechNewsManager:
                                 except Exception:
                                     pass
 
-                                # Deep Gemini analysis if description is brief or missing
+                                # Deep Gemini analysis if description is brief, missing, or identical to title
+                                is_headline_duplicate = (
+                                    not real_summary
+                                    or real_summary.strip().lower() == title.strip().lower()
+                                    or len(real_summary) < 80
+                                    or title.lower() in real_summary.lower() and len(real_summary) < 120
+                                )
                                 what_is_inside = ""
-                                if not real_summary or len(real_summary) < 50:
+                                if is_headline_duplicate:
                                     ai_intel = await analyze_with_gemini(
                                         session,
                                         title,
                                         f"Headline: {title}\nSource: {domain}\nContext: {real_summary}",
-                                        source_type="engineering news & discussion"
+                                        source_type="technical engineering news"
                                     )
                                     if ai_intel:
                                         if ai_intel.get("what_it_does"):
@@ -565,8 +571,8 @@ class TechNewsManager:
                                         if ai_intel.get("what_is_inside"):
                                             what_is_inside = ai_intel["what_is_inside"]
 
-                                if not real_summary:
-                                    real_summary = title
+                                if not real_summary or real_summary.strip().lower() == title.strip().lower():
+                                    real_summary = f"Technical developments, architecture analysis, and community discussion regarding {title}."
 
                                 is_crit = any(re.search(kw, title, re.IGNORECASE) for kw in CRITICAL_KEYWORDS)
                                 story_id = hashlib.sha256(f"hn:{link}".encode()).hexdigest()
@@ -775,27 +781,18 @@ class TechNewsManager:
         accent = 0xFF0033 if story.is_critical else None
         container = KyroContainer(accent_color=accent)
 
-        # Dedicated verified icons per intelligence domain
-        github_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/github.png"
-        globe_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_globe.png"
-        ai_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icon_bot.png"
-        lock_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_locked.png"
-
         if story.category == "github":
-            accessory = {"type": 11, "media": {"url": github_icon_url}}
-
             if "/" in story.title:
                 owner_part, repo_part = story.title.split("/", 1)
-                title_line = f"**[{owner_part.strip()}](https://github.com/{owner_part.strip()}) / [{repo_part.strip()}]({story.url})**"
+                title_line = f"### [{owner_part.strip()}](https://github.com/{owner_part.strip()}) / [{repo_part.strip()}]({story.url})"
             else:
-                title_line = f"**[{story.title}]({story.url})**"
+                title_line = f"### [{story.title}]({story.url})"
 
-            # Section header contains only Title & Subtitle next to 64px icon to avoid Discord line-clamp
             header_content = (
                 f"{title_line}\n"
                 f"> **GitHub Repository** • *Trending Open Source*"
             )
-            container.add_section(content=header_content, accessory=accessory)
+            container.add_text(header_content)
             container.add_separator(divider=True)
 
             body_elements: list[str] = []
@@ -831,14 +828,11 @@ class TechNewsManager:
             primary_label = "View Repository"
 
         elif story.category == "ai":
-            accessory = {"type": 11, "media": {"url": ai_icon_url}}
-
-            # Section header contains Title & Badge next to icon
             header_content = (
-                f"**[{story.title}]({story.url})**\n"
+                f"### [{story.title}]({story.url})\n"
                 f"> **Frontier AI Research** • *ArXiv Pre-print*"
             )
-            container.add_section(content=header_content, accessory=accessory)
+            container.add_text(header_content)
             container.add_separator(divider=True)
 
             body_elements: list[str] = []
@@ -859,13 +853,11 @@ class TechNewsManager:
             primary_label = "Read Research Paper"
 
         elif story.category == "systems":
-            accessory = {"type": 11, "media": {"url": globe_icon_url}}
-
             header_content = (
-                f"**[{story.title}]({story.url})**\n"
+                f"### [{story.title}]({story.url})\n"
                 f"> **Hacker News** • *Engineering Intel*"
             )
-            container.add_section(content=header_content, accessory=accessory)
+            container.add_text(header_content)
             container.add_separator(divider=True)
 
             body_elements: list[str] = []
@@ -873,7 +865,7 @@ class TechNewsManager:
                 body_elements.append(f"**Discussion Context:**\n{story.summary}")
 
             if story.what_is_inside:
-                body_elements.append(f"**Key Technical Takeaways:**\n> {story.what_is_inside}")
+                body_elements.append(f"**Key Technical Highlights & Specs:**\n> {story.what_is_inside}")
 
             score = story.metadata.get("score", 0)
             comments = story.metadata.get("comments", 0)
@@ -890,11 +882,10 @@ class TechNewsManager:
 
         elif story.category == "security":
             header_content = (
-                f"**[{story.title}]({story.url})**\n"
+                f"### [{story.title}]({story.url})\n"
                 f"> **Security Advisory** • *The Hacker News*"
             )
-            accessory = {"type": 11, "media": {"url": lock_icon_url}}
-            container.add_section(content=header_content, accessory=accessory)
+            container.add_text(header_content)
             container.add_separator(divider=True)
 
             sev = story.metadata.get("severity", "General")
@@ -908,13 +899,11 @@ class TechNewsManager:
             primary_label = "Read Advisory"
 
         elif story.category == "hardware":
-            accessory = {"type": 11, "media": {"url": globe_icon_url}}
-
             header_content = (
-                f"**[{story.title}]({story.url})**\n"
+                f"### [{story.title}]({story.url})\n"
                 f"> **Phoronix** • *Silicon & Linux Intel*"
             )
-            container.add_section(content=header_content, accessory=accessory)
+            container.add_text(header_content)
             container.add_separator(divider=True)
 
             body_elements = [f"**Hardware Brief:**\n{story.summary}"]
@@ -927,13 +916,11 @@ class TechNewsManager:
             primary_label = "Read Article"
 
         else:
-            accessory = {"type": 11, "media": {"url": globe_icon_url}}
-
             header_content = (
-                f"**[{story.title}]({story.url})**\n"
+                f"### [{story.title}]({story.url})\n"
                 f"> **{story.source}** • *Technical Intelligence*"
             )
-            container.add_section(content=header_content, accessory=accessory)
+            container.add_text(header_content)
             container.add_separator(divider=True)
 
             body_elements = [story.summary]

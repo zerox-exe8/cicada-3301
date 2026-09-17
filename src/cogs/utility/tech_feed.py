@@ -12,8 +12,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+import aiohttp
 from src.core.context import CustomContext
-from src.managers.tech_manager import TechStory
+from src.managers.tech_manager import TechStory, validate_url_live
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -125,10 +126,25 @@ class TechFeedCog(commands.Cog):
             logger.info(f"Discovered {len(fresh_stories)} new tech intelligence story/stories.")
             dispatched: list[TechStory] = []
 
-            # Prioritize critical threats first, followed by top fresh stories (max 3 per cycle)
+            # Prioritize critical threats first, followed by top fresh stories
             critical_items = [s for s in fresh_stories if s.is_critical]
             normal_items = [s for s in fresh_stories if not s.is_critical]
-            batch_to_send = (critical_items + normal_items)[:3]
+            candidate_batch = (critical_items + normal_items)[:5]
+
+            # Pre-flight health check: Verify candidate URLs live before broadcasting
+            batch_to_send: list[TechStory] = []
+            connector = aiohttp.TCPConnector(ssl=False)
+            timeout = aiohttp.ClientTimeout(total=4)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                for candidate in candidate_batch:
+                    if len(batch_to_send) >= 3:
+                        break
+                    is_alive = await validate_url_live(session, candidate.url)
+                    if is_alive:
+                        batch_to_send.append(candidate)
+                    else:
+                        logger.warning(f"Pre-flight check dropped unreachable URL: {candidate.url}")
+                        await self.bot.tech_mgr.mark_dispatched([candidate])
 
             for story in batch_to_send:
                 card = self.bot.tech_mgr.build_story_container(story, dot=dot)

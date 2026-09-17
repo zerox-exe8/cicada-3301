@@ -48,6 +48,11 @@ class TechStory:
     metadata: dict[str, Any] = field(default_factory=dict)
     published_at: float = field(default_factory=time.time)
     is_critical: bool = False
+    owner_avatar: Optional[str] = None
+    target_audience: str = ""
+    use_case: str = ""
+    license_info: str = ""
+    maturity: str = ""
 
 
 CATEGORY_COLORS: dict[str, int] = {
@@ -79,6 +84,62 @@ CRITICAL_KEYWORDS: list[str] = [
     r"infrastructure outage",
     r"catastrophic",
 ]
+
+
+def resolve_target_audience(topics: list[str], language: str) -> str:
+    """Heuristic mapping from repo topics and primary language to target developer audience."""
+    top_str = " ".join(topics).lower()
+    if any(k in top_str for k in ["llm", "ai", "machine-learning", "deep-learning", "gpt", "rag", "embedding"]):
+        return "AI Engineers & Model Builders"
+    elif any(k in top_str for k in ["frontend", "react", "vue", "svelte", "css", "ui", "web"]):
+        return "Frontend & Web Developers"
+    elif any(k in top_str for k in ["docker", "k8s", "kubernetes", "cloud", "devops", "ci-cd", "infra"]):
+        return "DevOps & Cloud Engineers"
+    elif any(k in top_str for k in ["security", "cve", "exploit", "pentest", "auth", "crypto"]):
+        return "Security Researchers & Pentesters"
+    elif any(k in top_str for k in ["flutter", "react-native", "android", "ios", "swift", "kotlin"]):
+        return "Mobile App Developers"
+    elif any(k in top_str for k in ["database", "sql", "redis", "postgres", "distributed", "backend", "api"]):
+        return "Backend & Database Architects"
+    elif language:
+        return f"{language} Developers & System Engineers"
+    return "Software Engineers & Tech Enthusiasts"
+
+
+def resolve_license(spdx_id: Optional[str]) -> str:
+    """Classify open-source license into clear commercial permissibility terms."""
+    if not spdx_id:
+        return "Unspecified License"
+    s = spdx_id.upper()
+    if any(k in s for k in ["MIT", "APACHE", "BSD", "ISC"]):
+        return f"{spdx_id} (Commercial Friendly)"
+    elif any(k in s for k in ["GPL", "AGPL", "LGPL"]):
+        return f"{spdx_id} (Open-Source Required)"
+    return spdx_id
+
+
+def resolve_maturity(stars: int, open_issues: int) -> str:
+    """Assess project readiness from traction and issue metrics."""
+    if stars >= 2500:
+        return "Battle-Tested Production"
+    elif stars >= 500:
+        return "Active & Stable Community"
+    elif stars >= 150:
+        return "Trending Emerging Tool"
+    return "Early Prototype"
+
+
+async def validate_url_live(session: aiohttp.ClientSession, url: str) -> bool:
+    """Pre-flight verification: ensure link returns HTTP 200/300 before publishing."""
+    try:
+        async with session.head(url, timeout=aiohttp.ClientTimeout(total=2.5), allow_redirects=True) as resp:
+            return resp.status < 400
+    except Exception:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.5), allow_redirects=True) as resp:
+                return resp.status < 400
+        except Exception:
+            return False
 
 
 class TechNewsManager:
@@ -274,23 +335,42 @@ class TechNewsManager:
                     for item in data.get("items", []):
                         full_name = item.get("full_name")
                         link = item.get("html_url")
-                        desc = _clean_html(item.get("description") or "Open-source development repository.")
+                        raw_desc = (item.get("description") or "").strip()
+                        desc = _clean_html(raw_desc) if raw_desc else ""
+                        if not desc or len(desc) < 15:
+                            desc = f"{full_name} developer toolkit and open-source implementation."
+
                         stars = item.get("stargazers_count", 0)
                         lang = item.get("language") or "General"
                         forks = item.get("forks_count", 0)
+                        open_issues = item.get("open_issues_count", 0)
+
+                        owner = item.get("owner") or {}
+                        owner_avatar = owner.get("avatar_url")
+                        topics = item.get("topics") or []
+                        license_dict = item.get("license") or {}
+                        spdx_id = license_dict.get("spdx_id") if isinstance(license_dict, dict) else None
+
+                        audience = resolve_target_audience(topics, lang)
+                        license_info = resolve_license(spdx_id)
+                        maturity = resolve_maturity(stars, open_issues)
 
                         story_id = hashlib.sha256(f"github:{link}".encode()).hexdigest()
-                        stories.append(
-                            TechStory(
-                                id=story_id,
-                                source="GitHub",
-                                category="github",
-                                title=f"{full_name}",
-                                summary=desc[:220],
-                                url=link,
-                                metadata={"stars": stars, "language": lang, "forks": forks},
-                            )
+                        story_obj = TechStory(
+                            id=story_id,
+                            source="GitHub",
+                            category="github",
+                            title=f"{full_name}",
+                            summary=desc[:240],
+                            url=link,
+                            metadata={"stars": stars, "language": lang, "forks": forks, "topics": topics[:4]},
+                            owner_avatar=owner_avatar,
+                            target_audience=audience,
+                            license_info=license_info,
+                            maturity=maturity,
                         )
+                        self.register_story_memory(story_obj)
+                        stories.append(story_obj)
         except Exception as e:
             logger.debug(f"Notice harvesting GitHub: {e}")
         return stories
@@ -501,41 +581,59 @@ class TechNewsManager:
             badge = CATEGORY_BADGES.get(story.category, "TECH INTEL")
 
         container = KyroContainer(accent_color=accent)
+
+        # Visual Identity: Repo owner avatar or platform fallback
+        accessory = None
+        if story.owner_avatar:
+            accessory = {"type": 11, "media": {"url": story.owner_avatar}}
+        elif story.category == "github":
+            accessory = {"type": 11, "media": {"url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"}}
+
         container.add_section(
             content=(
                 f"**[{badge}] {story.title}**\n"
                 f"> Source: **{story.source}**"
-            )
+            ),
+            accessory=accessory,
         )
         container.add_separator(divider=True)
 
-        # Body & Metrics
-        meta_parts: list[str] = []
-        if "stars" in story.metadata:
-            meta_parts.append(f"{dot} **Stars:** `{story.metadata['stars']:,}`")
-        if "language" in story.metadata:
-            meta_parts.append(f"{dot} **Language:** `{story.metadata['language']}`")
-        if "score" in story.metadata:
-            meta_parts.append(f"{dot} **HN Score:** `{story.metadata['score']}` pts")
-        if "upvotes" in story.metadata:
-            meta_parts.append(f"{dot} **Upvotes:** `{story.metadata['upvotes']}`")
-        if "severity" in story.metadata:
-            meta_parts.append(f"{dot} **Severity:** `{story.metadata['severity']}`")
-
-        content_lines = [f"{story.summary}"]
-        if meta_parts:
-            content_lines.append(" • ".join(meta_parts))
+        content_lines: list[str] = []
+        if story.category == "github":
+            content_lines.append(f"**What It Does:** {story.summary}")
+            if story.target_audience:
+                content_lines.append(f"**Best For:** {story.target_audience}")
+            lang = story.metadata.get("language", "General")
+            lic = story.license_info or "Open Source"
+            content_lines.append(f"**Stack & Terms:** `{lang}` • {lic}")
+            stars = story.metadata.get("stars", 0)
+            mat = story.maturity or "Active"
+            content_lines.append(f"**Traction:** {dot} Stars: `{stars:,}` • Maturity: `{mat}`")
+        else:
+            content_lines.append(f"**Summary:** {story.summary}")
+            meta_parts: list[str] = []
+            if "score" in story.metadata:
+                meta_parts.append(f"{dot} **HN Score:** `{story.metadata['score']}` pts")
+            if "upvotes" in story.metadata:
+                meta_parts.append(f"{dot} **Upvotes:** `{story.metadata['upvotes']}`")
+            if "severity" in story.metadata:
+                meta_parts.append(f"{dot} **Severity:** `{story.metadata['severity']}`")
+            if "type" in story.metadata:
+                meta_parts.append(f"{dot} **Focus:** `{story.metadata['type']}`")
+            if meta_parts:
+                content_lines.append(" • ".join(meta_parts))
 
         container.add_text("\n\n".join(content_lines))
         container.add_separator(divider=True)
         container.add_text("-# Kyro Tech Intelligence • Realtime Feed")
 
-        # Action row: External link button + Save to DM interactive button
+        # Action row: Primary link button + Save to DM interactive button
+        primary_label = "View Codebase" if story.category == "github" else ("Read Paper" if story.category == "ai" else "Read Origin")
         container.add_action_row([
             {
                 "type": 2,
                 "style": 5,
-                "label": "View Origin",
+                "label": primary_label,
                 "url": story.url,
             },
             {

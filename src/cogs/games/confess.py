@@ -41,7 +41,9 @@ class ConfessSubmitModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         text = self.confession_input.value.strip()
         if not text:
-            await interaction.response.send_message("Confession cannot be empty.", ephemeral=True)
+            err = KyroContainer(accent_color=None)
+            err.add_text("Confession cannot be empty.")
+            await send_container_response(interaction, err, ephemeral=True)
             return
 
         guild = interaction.guild
@@ -50,15 +52,16 @@ class ConfessSubmitModal(discord.ui.Modal):
 
         settings = await self.cog._get_settings(guild.id)
         if not settings or not settings.get("channel_id"):
-            await interaction.response.send_message(
-                "Confessions channel is not yet configured. Please ask a server admin to run `?confess setchannel #channel`.",
-                ephemeral=True,
-            )
+            err = KyroContainer(accent_color=None)
+            err.add_text("Confessions channel is not yet configured. Please ask a server admin to run `?confess setchannel #channel`.")
+            await send_container_response(interaction, err, ephemeral=True)
             return
 
         target_channel = guild.get_channel(settings["channel_id"])
         if not target_channel or not isinstance(target_channel, discord.TextChannel):
-            await interaction.response.send_message("Configured confessions channel was not found.", ephemeral=True)
+            err = KyroContainer(accent_color=None)
+            err.add_text("Configured confessions channel was not found or is invalid.")
+            await send_container_response(interaction, err, ephemeral=True)
             return
 
         clean_content = text.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
@@ -91,12 +94,20 @@ class ConfessSubmitModal(discord.ui.Modal):
 
         try:
             await send_container_response(target_channel, container)
-            await interaction.response.send_message(
-                f"Your confession has been posted anonymously as **Confession #{new_counter}** in {target_channel.mention}!",
-                ephemeral=True,
+            ack = KyroContainer(accent_color=None)
+            ack.add_section(
+                content=(
+                    "**Confession Submitted**\n"
+                    f"> Your confession has been posted anonymously as **Confession #{new_counter}** in {target_channel.mention}."
+                )
             )
+            ack.add_separator(divider=True)
+            ack.add_text("-# 100% Anonymous Submission | Identity Protected")
+            await send_container_response(interaction, ack, ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"Failed to post confession: {e}", ephemeral=True)
+            err = KyroContainer(accent_color=None)
+            err.add_text(f"Failed to post confession: {e}")
+            await send_container_response(interaction, err, ephemeral=True)
 
 
 class ConfessDashboardView(discord.ui.View):
@@ -257,17 +268,22 @@ class ConfessionsCog(commands.Cog, name="Games-Confessions"):
             await ctx.send_error(f"Failed to post confession to target channel: {err}")
             return
 
-        # Acknowledge author
-        if ctx.interaction:
-            await ctx.interaction.response.send_message(
-                f"Your confession has been posted anonymously as **Confession #{new_counter}** in {target_channel.mention}!",
-                ephemeral=True,
+        # Acknowledge author inside KyroContainer
+        ack = KyroContainer(accent_color=None)
+        ack.add_section(
+            content=(
+                "**Confession Dispatched**\n"
+                f"> Your confession has been posted anonymously as **Confession #{new_counter}** in {target_channel.mention}."
             )
+        )
+        ack.add_separator(divider=True)
+        ack.add_text("-# 100% Anonymous Submission | Identity Protected")
+
+        if ctx.interaction:
+            await send_container_response(ctx.interaction, ack, ephemeral=True)
         else:
             try:
-                await ctx.author.send(
-                    f"Your confession was posted anonymously as **Confession #{new_counter}** in **{guild.name}** ({target_channel.mention})!"
-                )
+                await send_container_response(ctx.author, ack)
             except discord.HTTPException:
                 pass
 

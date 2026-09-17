@@ -124,6 +124,25 @@ class WhisperCog(commands.Cog, name="Games-Whisper"):
             await send_container_response(ctx, container)
             return
 
+        if member.id == ctx.author.id:
+            c = KyroContainer(accent_color=None)
+            c.add_text("You cannot send a secret whisper to yourself.")
+            await send_container_response(ctx, c, ephemeral=True)
+            return
+
+        if member.bot:
+            c = KyroContainer(accent_color=None)
+            c.add_text("You cannot send a secret whisper to a bot.")
+            await send_container_response(ctx, c, ephemeral=True)
+            return
+
+        clean_message = message.strip()
+        if len(clean_message) > 1000:
+            c = KyroContainer(accent_color=None)
+            c.add_text("Whisper message is too long (maximum 1000 characters).")
+            await send_container_response(ctx, c, ephemeral=True)
+            return
+
         # Delete the trigger message if invoked via prefix so nobody sees the text
         if ctx.message:
             try:
@@ -150,8 +169,10 @@ class WhisperCog(commands.Cog, name="Games-Whisper"):
 
         # Handle interaction response vs prefix response
         if ctx.interaction:
-            # Ephemeral acknowledgment for the author in slash command
-            await ctx.interaction.response.send_message("Whisper dispatched privately.", ephemeral=True)
+            # Ephemeral acknowledgment inside KyroContainer (no raw plain text)
+            ack = KyroContainer(accent_color=None)
+            ack.add_text("Secret whisper dispatched to the channel.")
+            await send_container_response(ctx.interaction, ack, ephemeral=True)
             await send_container_response(ctx.channel, container, view=view)
         else:
             await send_container_response(ctx.channel, container, view=view)

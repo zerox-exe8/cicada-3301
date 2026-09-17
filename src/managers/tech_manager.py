@@ -38,6 +38,16 @@ def _clean_html(text: str) -> str:
     return text
 
 
+def _smart_truncate(text: str, max_len: int = 240) -> str:
+    """Safely truncate text at word boundaries without cutting off words mid-sentence."""
+    if not text or len(text) <= max_len:
+        return text.strip() if text else ""
+    truncated = text[:max_len]
+    if " " in truncated:
+        truncated = truncated.rsplit(" ", 1)[0]
+    return f"{truncated.rstrip(' ,;:-.')}..."
+
+
 @dataclass
 class TechStory:
     """Unified structure representing a verified tech intelligence story."""
@@ -453,7 +463,7 @@ class TechNewsManager:
                         else:
                             # Heuristic fallback if AI unavailable
                             if readme_summary and readme_summary.lower() != desc.lower():
-                                final_summary = f"{desc} • {readme_summary}"[:240] if desc else readme_summary[:240]
+                                final_summary = _smart_truncate(f"{desc} • {readme_summary}", 300) if desc else _smart_truncate(readme_summary, 300)
                             elif not final_summary:
                                 final_summary = f"{full_name} open-source implementation and development toolkit."
 
@@ -477,7 +487,7 @@ class TechNewsManager:
                             source="GitHub",
                             category="github",
                             title=f"{full_name}",
-                            summary=final_summary[:260],
+                            summary=_smart_truncate(final_summary, 320),
                             url=link,
                             metadata={"stars": stars, "language": lang, "forks": forks, "topics": topics[:4]},
                             owner_avatar=owner_avatar,
@@ -542,7 +552,7 @@ class TechNewsManager:
                                     source="Hacker News",
                                     category="systems",
                                     title=title,
-                                    summary=real_summary[:260],
+                                    summary=_smart_truncate(real_summary, 320),
                                     url=link,
                                     metadata={"score": score, "comments": data.get("descendants", 0)},
                                     is_critical=is_crit,
@@ -589,7 +599,7 @@ class TechNewsManager:
 
                         # AI Deep Analysis for real breakthrough context
                         what_is_inside = ""
-                        final_summary = abstract[:240] if abstract else f"Frontier AI paper analyzing novel machine learning methodologies in {title}."
+                        final_summary = _smart_truncate(abstract, 320) if abstract else f"Frontier AI paper analyzing novel machine learning methodologies in {title}."
                         ai_intel = await analyze_with_gemini(session, title, abstract or title, source_type="AI research paper")
                         if ai_intel:
                             if ai_intel.get("what_it_does"):
@@ -604,7 +614,7 @@ class TechNewsManager:
                             source="ArXiv & AI Frontier",
                             category="ai",
                             title=title,
-                            summary=final_summary[:260],
+                            summary=_smart_truncate(final_summary, 320),
                             url=link,
                             metadata={"upvotes": upvotes, "paper_id": paper_id},
                             what_is_inside=what_is_inside,
@@ -638,7 +648,7 @@ class TechNewsManager:
                             source="The Hacker News",
                             category="security",
                             title=title,
-                            summary=desc[:220],
+                            summary=_smart_truncate(desc, 300),
                             url=link,
                             metadata={"severity": "Critical Exploit" if is_crit else "Security Advisory"},
                             is_critical=is_crit,
@@ -671,7 +681,7 @@ class TechNewsManager:
                             source="Phoronix",
                             category="hardware",
                             title=title,
-                            summary=desc[:220],
+                            summary=_smart_truncate(desc, 300),
                             url=link,
                             metadata={"type": "Linux/Silicon"},
                         )
@@ -741,9 +751,11 @@ class TechNewsManager:
         accent = 0xFF0033 if story.is_critical else None
         container = KyroContainer(accent_color=accent)
 
+        # High-contrast GitHub branding badge for authentic developer style
+        github_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/branding/github_logo.png"
+
         if story.category == "github":
-            # Authentic GitHub Repository Presentation with official GitHub logo
-            accessory = {"type": 11, "media": {"url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"}}
+            accessory = {"type": 11, "media": {"url": github_icon_url}}
 
             if "/" in story.title:
                 owner_part, repo_part = story.title.split("/", 1)
@@ -751,16 +763,22 @@ class TechNewsManager:
             else:
                 title_line = f"**[{story.title}]({story.url})**"
 
-            # Fill vertical space next to the 80px thumbnail icon
+            # Fill vertical space next to the 80px thumbnail icon cleanly without mid-word cuts
+            short_tagline = _smart_truncate(story.summary, 115)
             header_content = (
                 f"{title_line}\n"
-                f"> **Public Repository** • *Trending on GitHub*\n"
-                f"{story.summary}"
+                f"> **GitHub Repository** • *Trending Open Source*\n"
+                f"{short_tagline}"
             )
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
             body_elements: list[str] = []
+
+            # Full deep overview if summary is longer than the top tagline
+            if len(story.summary) > len(short_tagline):
+                body_elements.append(f"**Overview:**\n{story.summary}")
+
             if story.what_is_inside:
                 body_elements.append(f"**Key Capabilities & Stack:**\n> {story.what_is_inside}")
 
@@ -788,18 +806,22 @@ class TechNewsManager:
             primary_label = "View Repository"
 
         elif story.category == "ai":
-            # Verified neural research icon
-            accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_richpresence.png"}}
+            # Verified high-contrast GitHub Mark as requested by user
+            accessory = {"type": 11, "media": {"url": github_icon_url}}
 
+            short_tagline = _smart_truncate(story.summary, 115)
             header_content = (
                 f"**[{story.title}]({story.url})**\n"
                 f"> **Frontier AI Research** • *Peer-Reviewed Pre-print*\n"
-                f"{story.summary}"
+                f"{short_tagline}"
             )
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
             body_elements: list[str] = []
+            if len(story.summary) > len(short_tagline):
+                body_elements.append(f"**Abstract & Core Findings:**\n{story.summary}")
+
             if story.what_is_inside:
                 body_elements.append(f"**Methodology & Key Architecture:**\n> {story.what_is_inside}")
 
@@ -838,7 +860,7 @@ class TechNewsManager:
             if story.category == "hardware":
                 accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_globe.png"}}
             else:
-                accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_richpresence.png"}}
+                accessory = {"type": 11, "media": {"url": github_icon_url}}
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
@@ -847,6 +869,14 @@ class TechNewsManager:
                 meta_parts.append(f"{dot} **HN Score:** `{story.metadata['score']}` pts")
             if "type" in story.metadata:
                 meta_parts.append(f"{dot} **Focus:** `{story.metadata['type']}`")
+
+            body_elements = [story.summary]
+            if meta_parts:
+                body_elements.append("  ".join(meta_parts))
+            container.add_text("\n\n".join(body_elements))
+            container.add_separator(divider=True)
+            container.add_text(f"-# {story.source} • Kyro Realtime Feed")
+            primary_label = "Read Article"
 
             body_elements = [story.summary]
             if meta_parts:

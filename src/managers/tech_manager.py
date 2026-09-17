@@ -572,63 +572,119 @@ class TechNewsManager:
     # -------------------------------------------------------------------------
     @staticmethod
     def build_story_container(story: TechStory, dot: str = "•") -> KyroContainer:
-        """Render a clean, high-signal Components V2 card with bookmark and direct actions."""
-        if story.is_critical:
-            accent = 0xFF0033  # Critical Alert Red
-            badge = "CRITICAL THREAT ALERT"
-        else:
-            accent = CATEGORY_COLORS.get(story.category, 0x5865F2)
-            badge = CATEGORY_BADGES.get(story.category, "TECH INTEL")
-
+        """Render an authentic, borderless Components V2 card matching GitHub and Nitro native style."""
+        # Default accent (None) removes the harsh side-border, blending seamlessly like Nitro
+        accent = 0xFF0033 if story.is_critical else None
         container = KyroContainer(accent_color=accent)
 
-        # Visual Identity: Repo owner avatar or platform fallback
-        accessory = None
-        if story.owner_avatar:
-            accessory = {"type": 11, "media": {"url": story.owner_avatar}}
-        elif story.category == "github":
-            accessory = {"type": 11, "media": {"url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"}}
-
-        container.add_section(
-            content=(
-                f"**[{badge}] {story.title}**\n"
-                f"> Source: **{story.source}**"
-            ),
-            accessory=accessory,
-        )
-        container.add_separator(divider=True)
-
-        content_lines: list[str] = []
         if story.category == "github":
-            content_lines.append(f"**What It Does:** {story.summary}")
+            # Authentic GitHub Repository Presentation
+            if "/" in story.title:
+                owner_part, repo_part = story.title.split("/", 1)
+                title_line = f"**[{owner_part.strip()}](https://github.com/{owner_part.strip()}) / [{repo_part.strip()}]({story.url})**"
+            else:
+                title_line = f"**[{story.title}]({story.url})**"
+
+            header_content = (
+                f"{title_line}\n"
+                f"> **Public Repository** • *Trending on GitHub*"
+            )
+            accessory = None
+            if story.owner_avatar:
+                accessory = {"type": 11, "media": {"url": story.owner_avatar}}
+            else:
+                accessory = {"type": 11, "media": {"url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"}}
+
+            container.add_section(content=header_content, accessory=accessory)
+            container.add_separator(divider=True)
+
+            # Clean natural description
+            body_elements = [story.summary]
+
+            # GitHub topic pills
+            topics = story.metadata.get("topics", [])
+            if topics:
+                tags = " ".join(f"`{t}`" for t in topics[:5])
+                body_elements.append(tags)
+
             if story.target_audience:
-                content_lines.append(f"**Best For:** {story.target_audience}")
+                body_elements.append(f"> *Engineered for {story.target_audience}*")
+
+            # Native GitHub metadata row (Language, Stars, License, Maturity)
             lang = story.metadata.get("language", "General")
-            lic = story.license_info or "Open Source"
-            content_lines.append(f"**Stack & Terms:** `{lang}` • {lic}")
             stars = story.metadata.get("stars", 0)
-            mat = story.maturity or "Active"
-            content_lines.append(f"**Traction:** {dot} Stars: `{stars:,}` • Maturity: `{mat}`")
+            lic = story.license_info or "Open Source"
+            mat = story.maturity or "Active Community"
+            stats_line = f"{dot} `{lang}`  {dot} `{stars:,}` stars  {dot} {lic}  {dot} `{mat}`"
+            body_elements.append(stats_line)
+
+            container.add_text("\n\n".join(body_elements))
+            container.add_separator(divider=True)
+            container.add_text("-# GitHub Open Source Intelligence • Kyro Realtime Feed")
+
+            primary_label = "View Repository"
+
+        elif story.category == "ai":
+            header_content = (
+                f"**[{story.title}]({story.url})**\n"
+                f"> **Daily AI Research** • *Hugging Face Papers*"
+            )
+            accessory = {"type": 11, "media": {"url": "https://huggingface.co/front/assets/huggingface_logo-noborder.png"}}
+            container.add_section(content=header_content, accessory=accessory)
+            container.add_separator(divider=True)
+
+            upvotes = story.metadata.get("upvotes", 0)
+            body_elements = [
+                story.summary,
+                f"{dot} **Platform:** Hugging Face Papers  {dot} **Community Upvotes:** `{upvotes}`"
+            ]
+            container.add_text("\n\n".join(body_elements))
+            container.add_separator(divider=True)
+            container.add_text("-# Frontier AI Intelligence • Kyro Realtime Feed")
+            primary_label = "Read Research Paper"
+
+        elif story.category == "security":
+            header_content = (
+                f"**[{story.title}]({story.url})**\n"
+                f"> **Security Advisory** • *The Hacker News*"
+            )
+            container.add_section(content=header_content)
+            container.add_separator(divider=True)
+
+            sev = story.metadata.get("severity", "General")
+            body_elements = [
+                story.summary,
+                f"{dot} **Threat Level:** `{sev}`  {dot} **Source:** The Hacker News"
+            ]
+            container.add_text("\n\n".join(body_elements))
+            container.add_separator(divider=True)
+            container.add_text("-# Cyber Threat Intelligence • Kyro Realtime Feed")
+            primary_label = "Read Advisory"
+
         else:
-            content_lines.append(f"**Summary:** {story.summary}")
+            header_content = (
+                f"**[{story.title}]({story.url})**\n"
+                f"> **{story.source}** • *Technical Intelligence*"
+            )
+            container.add_section(content=header_content)
+            container.add_separator(divider=True)
+
             meta_parts: list[str] = []
             if "score" in story.metadata:
                 meta_parts.append(f"{dot} **HN Score:** `{story.metadata['score']}` pts")
-            if "upvotes" in story.metadata:
-                meta_parts.append(f"{dot} **Upvotes:** `{story.metadata['upvotes']}`")
-            if "severity" in story.metadata:
-                meta_parts.append(f"{dot} **Severity:** `{story.metadata['severity']}`")
             if "type" in story.metadata:
                 meta_parts.append(f"{dot} **Focus:** `{story.metadata['type']}`")
-            if meta_parts:
-                content_lines.append(" • ".join(meta_parts))
 
-        container.add_text("\n\n".join(content_lines))
-        container.add_separator(divider=True)
-        container.add_text("-# Kyro Tech Intelligence • Realtime Feed")
+            body_elements = [story.summary]
+            if meta_parts:
+                body_elements.append("  ".join(meta_parts))
+
+            container.add_text("\n\n".join(body_elements))
+            container.add_separator(divider=True)
+            container.add_text(f"-# {story.source} Intel • Kyro Realtime Feed")
+            primary_label = "View Origin"
 
         # Action row: Primary link button + Save to DM interactive button
-        primary_label = "View Codebase" if story.category == "github" else ("Read Paper" if story.category == "ai" else "Read Origin")
         container.add_action_row([
             {
                 "type": 2,
@@ -649,7 +705,7 @@ class TechNewsManager:
     @staticmethod
     def build_digest_container(stories: list[TechStory], date_str: str, dot: str = "•") -> KyroContainer:
         """Render a unified Morning 9:00 AM Tech Briefing container card."""
-        container = KyroContainer(accent_color=0x00A8FC)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**[DAILY TECH BRIEFING] Top Global Intel**\n"

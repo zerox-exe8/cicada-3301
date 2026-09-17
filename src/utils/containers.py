@@ -66,6 +66,26 @@ class KyroContainer:
         self.add_text(f"{text}")
         return self
 
+    def add_media(self, url: str) -> KyroContainer:
+        """Add a full-width Media Gallery component (type: 12) inside the container."""
+        if not url or not str(url).strip():
+            return self
+        self.components.append({
+            "type": 12,
+            "items": [
+                {
+                    "media": {
+                        "url": str(url).strip()
+                    }
+                }
+            ]
+        })
+        return self
+
+    def add_image(self, url: str) -> KyroContainer:
+        """Alias for add_media."""
+        return self.add_media(url)
+
     def add_action_row(self, items: list[dict[str, Any]]) -> KyroContainer:
         """Add an Action Row (type: 1) containing Select Menus or Buttons inside the container."""
         self.components.append({

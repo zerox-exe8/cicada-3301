@@ -48,6 +48,20 @@ def _smart_truncate(text: str, max_len: int = 240) -> str:
     return f"{truncated.rstrip(' ,;:-.')}..."
 
 
+def clean_image_url(url: Optional[str]) -> Optional[str]:
+    """Clean, unescape, and validate image URL for seamless Discord rendering."""
+    if not url or not isinstance(url, str):
+        return None
+    cleaned = html.unescape(url.strip().strip("'\""))
+    if not cleaned or not cleaned.startswith(("http://", "https://")):
+        return None
+    # Filter out tracking pixels, badges, avatars, or spacers
+    lower = cleaned.lower()
+    if any(k in lower for k in ["tracking", "spacer.gif", "1x1", "pixel.gif", "badge", "shields.io", "avatar"]):
+        return None
+    return cleaned
+
+
 @dataclass
 class TechStory:
     """Unified structure representing a verified tech intelligence story."""
@@ -684,8 +698,8 @@ class TechNewsManager:
                                 what_is_inside = ai_intel["what_is_inside"]
 
                         link = f"https://arxiv.org/abs/{paper_id}"
-                        # Hugging Face provides auto-generated paper preview banners
-                        img_url = f"https://huggingface.co/papers/{paper_id}/thumbnail"
+                        # Hugging Face provides official social thumbnail gradient
+                        img_url = clean_image_url(item.get("thumbnailUrl")) or f"https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{paper_id}/gradient.png"
                         story_id = hashlib.sha256(f"arxiv:{link}".encode()).hexdigest()
                         story_obj = TechStory(
                             id=story_id,
@@ -919,7 +933,8 @@ class TechNewsManager:
     @staticmethod
     def build_story_container(story: TechStory, dot: str = "•") -> KyroContainer:
         """Render a visually stunning, high-signal Components V2 intelligence card with full-width hero media."""
-        accent = 0xFF0033 if story.is_critical else CATEGORY_COLORS.get(story.category, 0x00A8FC)
+        # Color set to None for seamless, native dark mode blending (red only for critical alerts)
+        accent = 0xFF0033 if story.is_critical else None
         container = KyroContainer(accent_color=accent)
 
         # Header Title and Subtitle Badge
@@ -995,8 +1010,9 @@ class TechNewsManager:
         container.add_text("\n\n".join(body_elements))
 
         # Full-Width Hero Media Gallery (Type 12 banner placed cleanly below text)
-        if story.image_url:
-            container.add_media(story.image_url)
+        valid_img = clean_image_url(story.image_url)
+        if valid_img:
+            container.add_media(valid_img)
 
         container.add_separator(divider=True)
         container.add_text(f"-# {story.source} • Kyro Realtime Feed")

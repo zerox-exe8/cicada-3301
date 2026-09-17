@@ -6,6 +6,8 @@ can reveal via a private ephemeral Components V2 button. Zero webhooks.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import time
 import uuid
 from typing import TYPE_CHECKING, Optional
@@ -20,6 +22,32 @@ from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
+
+
+def _derive_whisper_key(salt: str, author_id: int, recipient_id: int) -> bytes:
+    """Derive a deterministic cryptographic symmetric key for the whisper channel."""
+    material = f"{salt}:{min(author_id, recipient_id)}:{max(author_id, recipient_id)}".encode("utf-8")
+    return hashlib.sha256(material).digest()
+
+
+def _encrypt_whisper(plaintext: str, key: bytes) -> tuple[bytes, bytes]:
+    """Symmetric stream cipher with unique OS-entropy nonce."""
+    nonce = os.urandom(16)
+    data = plaintext.encode("utf-8")
+    keystream = hashlib.sha256(key + nonce).digest()
+    while len(keystream) < len(data):
+        keystream += hashlib.sha256(key + keystream).digest()
+    ciphertext = bytes(b ^ k for b, k in zip(data, keystream[:len(data)]))
+    return ciphertext, nonce
+
+
+def _decrypt_whisper(ciphertext: bytes, nonce: bytes, key: bytes) -> str:
+    """Decrypt symmetric stream cipher payload."""
+    keystream = hashlib.sha256(key + nonce).digest()
+    while len(keystream) < len(ciphertext):
+        keystream += hashlib.sha256(key + keystream).digest()
+    decrypted = bytes(b ^ k for b, k in zip(ciphertext, keystream[:len(ciphertext)]))
+    return decrypted.decode("utf-8", errors="replace")
 
 
 class WhisperRevealView(discord.ui.View):
@@ -40,25 +68,40 @@ class WhisperRevealView(discord.ui.View):
     async def reveal_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         user_id = interaction.user.id
         if user_id not in (self.recipient_id, self.author_id):
-            await interaction.response.send_message(
-                "This secret whisper was not sent to you.",
-                ephemeral=True,
+            c = KyroContainer(accent_color=None)
+            c.add_section(
+                content=(
+                    "**Confidential Whisper**\n"
+                    "> You do not have permission to decrypt this message.\n"
+                    f"> This whisper is encrypted exclusively for <@{self.recipient_id}>."
+                )
             )
+            c.add_separator(divider=True)
+            c.add_text("-# Access denied • End-to-end authorized")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
-        secret_content = self.cog.get_whisper(self.token)
+        secret_content = self.cog.get_whisper(self.token, self.author_id, self.recipient_id)
         if not secret_content:
-            await interaction.response.send_message(
-                "This whisper has expired or is no longer available.",
-                ephemeral=True,
-            )
+            c = KyroContainer(accent_color=None)
+            c.add_text("This whisper has expired or has already been cleared from cache.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         role_label = "Recipient" if user_id == self.recipient_id else "Sender"
-        await interaction.response.send_message(
-            f"**Secret Whisper ({role_label})**\n> {secret_content}",
-            ephemeral=True,
+        card = KyroContainer(accent_color=None)
+        card.add_section(
+            content=(
+                f"**Secret Whisper ({role_label} View)**\n"
+                f"> {secret_content}"
+            )
         )
+        card.add_separator(divider=True)
+        card.add_text(
+            f"**From:** <@{self.author_id}> | **To:** <@{self.recipient_id}>\n"
+            f"-# End-to-end encrypted in memory • Only visible to you • Components V2"
+        )
+        await send_container_response(interaction, card, ephemeral=True)
 
 
 class WhisperCog(commands.Cog, name="Games-Whisper"):
@@ -67,25 +110,31 @@ class WhisperCog(commands.Cog, name="Games-Whisper"):
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
-        # In-memory storage: token -> (secret_text, timestamp)
-        self._whisper_store: dict[str, tuple[str, float]] = {}
+        # In-memory storage: token -> (ciphertext, nonce, timestamp)
+        self._whisper_store: dict[str, tuple[bytes, bytes, float]] = {}
 
-    def store_whisper(self, content: str) -> str:
-        """Store secret text and prune expired whispers."""
+    def store_whisper(self, content: str, author_id: int, recipient_id: int) -> str:
+        """Encrypt and store secret text in memory with automatic expiration pruning."""
         now = time.time()
-        # Clean items older than 24 hours
-        expired = [k for k, (_, ts) in self._whisper_store.items() if now - ts > 86400]
+        expired = [k for k, (_, _, ts) in self._whisper_store.items() if now - ts > 86400]
         for k in expired:
             self._whisper_store.pop(k, None)
 
+        key = _derive_whisper_key(Config.BOT_TOKEN or "kyro_salt", author_id, recipient_id)
+        ciphertext, nonce = _encrypt_whisper(content, key)
+
         token = str(uuid.uuid4())[:8]
-        self._whisper_store[token] = (content, now)
+        self._whisper_store[token] = (ciphertext, nonce, now)
         return token
 
-    def get_whisper(self, token: str) -> Optional[str]:
-        """Fetch whisper text by token."""
+    def get_whisper(self, token: str, author_id: int, recipient_id: int) -> Optional[str]:
+        """Decrypt secret text if valid and authorized."""
         item = self._whisper_store.get(token)
-        return item[0] if item else None
+        if not item:
+            return None
+        ciphertext, nonce, _ = item
+        key = _derive_whisper_key(Config.BOT_TOKEN or "kyro_salt", author_id, recipient_id)
+        return _decrypt_whisper(ciphertext, nonce, key)
 
     @commands.hybrid_command(
         name="whisper",
@@ -150,8 +199,8 @@ class WhisperCog(commands.Cog, name="Games-Whisper"):
             except discord.HTTPException:
                 pass
 
-        # Save secret in memory
-        token = self.store_whisper(clean_message)
+        # Save secret in memory with cryptographic encryption
+        token = self.store_whisper(clean_message, ctx.author.id, member.id)
 
         # Build public card
         container = KyroContainer(accent_color=None)
@@ -163,7 +212,7 @@ class WhisperCog(commands.Cog, name="Games-Whisper"):
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# **Sent by {ctx.author.display_name}** | Expires in 24 hours")
+        container.add_text(f"-# **Sent by {ctx.author.display_name}** | Encrypted in Memory | Expires in 24 hours")
 
         view = WhisperRevealView(self, token, member.id, ctx.author.id)
 

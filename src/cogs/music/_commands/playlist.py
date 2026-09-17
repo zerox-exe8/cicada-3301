@@ -273,6 +273,51 @@ async def handle_playlist(
         await send_container_response(ctx, container, view=hub_view)
         return
 
+    # 1. CREATE EMPTY PLAYLIST
+    elif act in ("create", "new", "make"):
+        if not name:
+            await ctx.send_warning("Please specify a playlist name.\n> Example: `?playlist create Gym`")
+            return
+
+        clean_pl_name = f"{name} {query}".strip() if query else name.strip()
+        if len(clean_pl_name) > 50:
+            await ctx.send_warning("Playlist name cannot exceed 50 characters.")
+            return
+
+        existing = await db.fetch_one(
+            "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+            user_id,
+            clean_pl_name,
+        )
+        if existing:
+            await ctx.send_warning(f"You already have a playlist named `{clean_pl_name}`.")
+            return
+
+        count_row = await db.fetch_one(
+            "SELECT COUNT(*) as cnt FROM user_playlists WHERE user_id = $1;",
+            user_id,
+        )
+        if count_row and count_row["cnt"] >= 25:
+            await ctx.send_warning("You have reached the maximum limit of 25 playlists.")
+            return
+
+        await db.execute(
+            "INSERT INTO user_playlists (user_id, playlist_name) VALUES ($1, $2);",
+            user_id,
+            clean_pl_name,
+        )
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"**Playlist Created**\n"
+                f"> Name: `{clean_pl_name}`\n"
+                f"> Add songs: `{ctx.clean_prefix}playlist add {clean_pl_name} <song>`"
+            )
+        )
+        await send_container_response(ctx, container)
+        return
+
     # 2. ADD / IMPORT TRACK OR PLAYLIST
     elif act in ("add", "import"):
         if not name:
@@ -403,13 +448,10 @@ async def handle_playlist(
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Added to Playlist**\n"
-                f"> **Track:** [{title_to_save}]({url_to_save}) by `{author_to_save}`\n"
-                f"> **Playlist:** `{pl_row['playlist_name']}`"
+                f"**Added to `{pl_row['playlist_name']}`**\n"
+                f"> [{title_to_save}]({url_to_save}) by `{author_to_save}`"
             )
         )
-        container.add_separator(divider=True)
-        container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
 
     # 3. REMOVE TRACK FROM PLAYLIST
@@ -476,13 +518,10 @@ async def handle_playlist(
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Removed from Playlist**\n"
-                f"> **Track:** `{removed_track['title']}`\n"
-                f"> **Playlist:** `{pl_row['playlist_name']}`"
+                f"**Removed from `{pl_row['playlist_name']}`**\n"
+                f"> `{removed_track['title']}`"
             )
         )
-        container.add_separator(divider=True)
-        container.add_text("-# Powered by Kyro Studio")
         await send_container_response(ctx, container)
 
     # 4. PLAY / SHUFFLE PLAYLIST
@@ -687,9 +726,7 @@ async def handle_playlist(
             pl_row["id"],
         )
         container = KyroContainer(accent_color=None)
-        container.add_section(content=f"**Playlist Deleted**\n> Playlist `{pl_row['playlist_name']}` has been completely removed.")
-        container.add_separator(divider=True)
-        container.add_text("-# Powered by Kyro Studio")
+        container.add_section(content=f"**Playlist Deleted:** `{pl_row['playlist_name']}`")
         await send_container_response(ctx, container)
         return
 
@@ -697,5 +734,5 @@ async def handle_playlist(
         current_prefix = ctx.prefix or "?"
         await ctx.send_warning(
             f"Unknown playlist action `{action}`.\n"
-            f"> Available actions: `{current_prefix}playlist play`, `shuffle`, `view`, `add`, `import`, `export`, `removetrack`, `list`, `delete`"
+            f"> Available: `{current_prefix}playlist create`, `add`, `play`, `shuffle`, `view`, `delete`"
         )

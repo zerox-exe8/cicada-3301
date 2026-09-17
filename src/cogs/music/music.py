@@ -450,7 +450,7 @@ class Music(commands.Cog):
         description="Manage, play, view, and save custom song playlists.",
     )
     @app_commands.describe(
-        action="Action: add, play, list, view, delete",
+        action="Action: create, add, play, view, delete, list",
         name="Playlist name",
         query="Optional song title or URL (if adding a specific song)",
     )

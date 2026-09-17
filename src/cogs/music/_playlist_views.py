@@ -159,32 +159,97 @@ async def execute_saved_playlist_playback(
     upcoming_preview = "\n".join(upcoming_lines) if upcoming_lines else "No upcoming tracks."
     remaining_count = len(play_order) - (1 if was_idle else 0) - len(upcoming_lines)
 
-    mode_label = "Shuffled Playlist" if shuffle else "Playlist"
     container = KyroContainer(accent_color=None)
+    status_title = "Now Playing" if was_idle else "Queued Playlist"
+    mode_str = "Shuffle" if shuffle else "Sequential"
     container.add_section(
         content=(
-            f"**Playing {mode_label}: `{pl_row['playlist_name']}`**\n"
-            f"> **Total Queued:** `{len(play_order)}` songs\n"
-            f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
-            f"> **Mode:** `{'Shuffle Random' if shuffle else 'Normal Sequential'}`"
-        ) if was_idle else (
-            f"**Playing {mode_label}: `{pl_row['playlist_name']}`**\n"
-            f"> **Total Queued:** `{len(play_order)}` songs\n"
-            f"> **Next Track:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
-            f"> **Mode:** `{'Shuffle Random' if shuffle else 'Normal Sequential'}`"
+            f"**{status_title}: `{pl_row['playlist_name']}`**\n"
+            f"> **Track:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
+            f"> **Total Queued:** `{len(play_order)}` tracks • **Mode:** `{mode_str}`"
         )
-    )
-    container.add_separator(divider=True)
-    container.add_text(
-        f"**Upcoming Songs:**\n{upcoming_preview}\n"
-        + (f"-# ...and {remaining_count} more songs. Use `?queue` to view all pages.\n" if remaining_count > 0 else "")
-        + "-# Powered by Kyro Studio"
     )
 
     if interaction:
         await send_container_response(interaction, container)
     else:
         await send_container_response(channel, container)
+
+
+class PlaylistCreateModal(discord.ui.Modal, title="Create New Playlist"):
+    """Modal to quickly name and create a new playlist."""
+
+    name_input = discord.ui.TextInput(
+        label="Playlist Name",
+        placeholder="e.g. Gym, Chill, Favorites",
+        max_length=50,
+        required=True,
+    )
+
+    def __init__(self, hub_view: PlaylistHubView) -> None:
+        super().__init__(timeout=120)
+        self.hub_view = hub_view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        pl_name = self.name_input.value.strip()
+        if not pl_name:
+            c = KyroContainer()
+            c.add_section(content="**Error**\n> Playlist name cannot be empty.")
+            await send_container_response(interaction, c, ephemeral=True)
+            return
+
+        db = self.hub_view.bot.db
+        user_id = self.hub_view.author_id
+
+        # Check if already exists
+        existing = await db.fetch_one(
+            "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = LOWER($2);",
+            user_id,
+            pl_name,
+        )
+        if existing:
+            c = KyroContainer()
+            c.add_section(content=f"**Notice**\n> You already have a playlist named `{pl_name}`.")
+            await send_container_response(interaction, c, ephemeral=True)
+            return
+
+        # Check max 25 playlists
+        count_row = await db.fetch_one(
+            "SELECT COUNT(*) as cnt FROM user_playlists WHERE user_id = $1;",
+            user_id,
+        )
+        if count_row and count_row["cnt"] >= 25:
+            c = KyroContainer()
+            c.add_section(content="**Limit Reached**\n> You have reached the maximum limit of 25 playlists.")
+            await send_container_response(interaction, c, ephemeral=True)
+            return
+
+        await db.execute(
+            "INSERT INTO user_playlists (user_id, playlist_name) VALUES ($1, $2);",
+            user_id,
+            pl_name,
+        )
+
+        # Refresh user playlists
+        playlists = await db.fetch_all(
+            """
+            SELECT p.id, p.playlist_name, COUNT(t.id) as track_count, COALESCE(SUM(t.duration), 0) as total_duration
+            FROM user_playlists p
+            LEFT JOIN user_playlist_tracks t ON p.id = t.playlist_id
+            WHERE p.user_id = $1
+            GROUP BY p.id, p.playlist_name
+            ORDER BY p.created_at DESC;
+            """,
+            user_id,
+        )
+        self.hub_view.playlists = playlists
+        new_row = next((p for p in playlists if p["playlist_name"].lower() == pl_name.lower()), None)
+        if new_row:
+            self.hub_view.selected_playlist_id = int(new_row["id"])
+
+        self.hub_view._rebuild_items()
+        container = self.hub_view.build_container()
+        await edit_container_response(interaction, container, view=self.hub_view)
 
 
 class PlaylistSelectMenu(discord.ui.Select):
@@ -206,7 +271,7 @@ class PlaylistSelectMenu(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder="Select a playlist to manage or play...",
+            placeholder="Select a playlist...",
             min_values=1,
             max_values=1,
             options=options,
@@ -247,10 +312,18 @@ class PlaylistHubView(discord.ui.View):
         self.prefix = prefix
         self.selected_playlist_id: Optional[int] = int(playlists[0]["id"]) if playlists else None
 
-        # Build Select Menu
-        if playlists:
-            self.add_item(PlaylistSelectMenu(playlists, self.selected_playlist_id))
+        self._rebuild_items()
 
+    def _rebuild_items(self) -> None:
+        """Rebuild the dropdown menu and action buttons."""
+        self.clear_items()
+        if self.playlists:
+            self.add_item(PlaylistSelectMenu(self.playlists, self.selected_playlist_id))
+        self.add_item(self.btn_play)
+        self.add_item(self.btn_shuffle)
+        self.add_item(self.btn_view)
+        self.add_item(self.btn_new)
+        self.add_item(self.btn_delete)
         self._update_button_states()
 
     def _get_selected_pl(self) -> Optional[dict]:
@@ -269,27 +342,17 @@ class PlaylistHubView(discord.ui.View):
         self.btn_delete.disabled = not has_sel
 
     def build_container(self) -> KyroContainer:
-        """Construct the Components V2 card for the Playlist Hub."""
+        """Construct a sleek, compact Components V2 card for the Playlist Hub."""
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "### Music Playlist Hub\n"
-                f"> Personal collections of `{self.author_name}` • Lossless Native Engine"
-            )
-        )
-        container.add_separator(divider=True)
 
         if not self.playlists:
             container.add_section(
                 content=(
-                    "**You have no saved playlists yet.**\n"
-                    f"> • Use `{self.prefix}like` while a song is playing to save it to **Favorites**.\n"
-                    f"> • Use `{self.prefix}playlist add <name> <song>` to create a custom playlist.\n"
-                    f"> • Use `{self.prefix}playlist import <name> <Spotify/YouTube URL>` to import albums."
+                    "### Music Playlists\n"
+                    "> You have no saved playlists yet.\n"
+                    f"> Click **+ New** below or type `{self.prefix}playlist create <name>`."
                 )
             )
-            container.add_separator(divider=True)
-            container.add_text("-# Powered by Kyro Studio")
             return container
 
         selected_pl = self._get_selected_pl()
@@ -298,37 +361,25 @@ class PlaylistHubView(discord.ui.View):
             t_count = int(selected_pl.get("track_count") or 0)
             container.add_section(
                 content=(
-                    f"**Selected Playlist: `{selected_pl['playlist_name']}`**\n"
-                    f"> **Total Songs:** `{t_count}` songs\n"
-                    f"> **Total Duration:** `{dur_str}`\n"
-                    f"> **Curator:** `{self.author_name}`\n\n"
-                    f"-# Use the dropdown below to switch playlists, or buttons to play/browse."
+                    f"### Playlist: {selected_pl['playlist_name']}\n"
+                    f"> **Tracks:** `{t_count}` • **Duration:** `{dur_str}`"
                 )
             )
         else:
             container.add_section(
                 content=(
-                    f"**Your Saved Playlists ({len(self.playlists)})**\n"
+                    f"### Saved Playlists ({len(self.playlists)})\n"
                     + "\n".join(
-                        f"> • **{p['playlist_name']}** (`{p['track_count']} songs` • `{format_duration(int(p['total_duration']))}`)"
-                        for p in self.playlists[:8]
+                        f"> • **{p['playlist_name']}** ({p['track_count']} tracks)"
+                        for p in self.playlists[:6]
                     )
                 )
             )
-
-        container.add_separator(divider=True)
-        container.add_text(
-            f"**Quick Actions:**\n"
-            f"> `Play` Start sequential playback • `Shuffle` Randomized queue\n"
-            f"> `View Songs` Interactive page browser • `Delete` Remove collection\n"
-            f"-# Powered by Kyro Studio"
-        )
         return container
 
     async def update_hub_card(self, interaction: discord.Interaction) -> None:
         """Refresh the container card and dropdown selection on interaction."""
         self._update_button_states()
-        # Refresh dropdown default
         for item in self.children:
             if isinstance(item, PlaylistSelectMenu):
                 for opt in item.options:
@@ -441,6 +492,16 @@ class PlaylistHubView(discord.ui.View):
         await edit_container_response(interaction, container, view=browse_view)
 
     @discord.ui.button(
+        label="+ New",
+        style=discord.ButtonStyle.primary,
+        custom_id="kyro:playlist:btn_new",
+        row=1,
+    )
+    async def btn_new(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        modal = PlaylistCreateModal(self)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(
         label="Delete",
         style=discord.ButtonStyle.danger,
         custom_id="kyro:playlist:btn_delete",
@@ -465,12 +526,9 @@ class PlaylistHubView(discord.ui.View):
         c.add_section(
             content=(
                 f"**Confirm Deletion**\n"
-                f"> Are you sure you want to delete playlist **`{selected_pl['playlist_name']}`**?\n"
-                f"> This will permanently remove all `{selected_pl['track_count']}` saved songs."
+                f"> Delete playlist **`{selected_pl['playlist_name']}`** with `{selected_pl['track_count']}` songs?"
             )
         )
-        c.add_separator(divider=True)
-        c.add_text("-# This action cannot be undone.")
         await edit_container_response(interaction, c, view=confirm_view)
 
 
@@ -526,23 +584,16 @@ class PlaylistBrowseView(discord.ui.View):
             lines.append(f"> `{i}.` {link}{author} • `{dur_str}`")
 
         if not lines:
-            lines = ["> • This playlist has no songs yet."]
+            lines = ["> No songs in this playlist yet."]
 
         container.add_section(
             content=(
-                f"### Playlist: {display_name}\n"
-                f"> **Total Songs:** `{len(self.tracks)}` • **Duration:** `{total_dur}`\n"
-                f"> **Page:** `{self.current_page} of {self.total_pages}` • **Curator:** `{self.author_name}`"
+                f"### {display_name} ({len(self.tracks)} tracks • {total_dur})\n"
+                + "\n".join(lines)
             )
         )
         container.add_separator(divider=True)
-        container.add_section(content="\n".join(lines))
-        container.add_separator(divider=True)
-        container.add_text(
-            f"> • **Play Collection:** `{self.prefix}playlist play {display_name}`\n"
-            f"> • **Remove Song:** `{self.prefix}playlist removetrack {display_name} <#>`\n"
-            f"-# Powered by Kyro Studio"
-        )
+        container.add_text(f"-# Page {self.current_page} of {self.total_pages}")
         return container
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:

@@ -1019,7 +1019,7 @@ class TechNewsManager:
         if valid_img:
             container.add_media(valid_img)
 
-        # Action row: Primary link button + Save to DM interactive button
+        # Action row: Primary link button
         primary_label = "Open Tool" if story.category == "github" else "Read Article"
         container.add_action_row([
             {
@@ -1027,12 +1027,6 @@ class TechNewsManager:
                 "style": 5,
                 "label": primary_label,
                 "url": story.url,
-            },
-            {
-                "type": 2,
-                "style": 2,  # Secondary grey
-                "label": "Save to DM",
-                "custom_id": f"tech_bm:{story.id}",
             },
         ])
 

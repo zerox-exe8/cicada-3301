@@ -8,25 +8,357 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-import aiohttp
 from src.core.context import CustomContext
-from src.managers.tech_manager import TechStory, validate_url_live
-from src.utils.containers import KyroContainer, send_container_response
+from src.managers.tech_manager import CATEGORY_BADGES, TechStory, validate_url_live
+from src.utils.containers import (
+    KyroContainer,
+    edit_container_response,
+    send_container_response,
+)
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
 logger = logging.getLogger("Kyro.Utility.TechFeed")
 
-VALID_CATEGORIES: set[str] = {"all", "github", "ai", "security", "systems", "hardware"}
+VALID_CATEGORIES: set[str] = {"all", "github", "ai", "security", "systems", "hardware", "tech"}
+
+MODULE_OPTIONS: list[dict[str, str]] = [
+    {
+        "label": "GitHub",
+        "value": "github",
+        "description": "Trending repositories, open source tools & developer libraries",
+    },
+    {
+        "label": "AI Research",
+        "value": "ai",
+        "description": "Frontier models, research papers, LLMs & breakthrough tools",
+    },
+    {
+        "label": "Security Alerts",
+        "value": "security",
+        "description": "Zero-day disclosures, critical CVEs & cyber outage advisories",
+    },
+    {
+        "label": "Consumer Tech",
+        "value": "tech",
+        "description": "Product announcements, hardware culture & industry shifts",
+    },
+    {
+        "label": "Systems Intel",
+        "value": "systems",
+        "description": "Distributed architecture, databases, Linux kernel & backend",
+    },
+    {
+        "label": "Hardware & Silicon",
+        "value": "hardware",
+        "description": "Semiconductors, CPUs, GPUs, architectures & chip roadmaps",
+    },
+]
+
+
+class TechSetupChannelView(discord.ui.View):
+    """Step 1: Select text channel for tech intelligence broadcasts."""
+
+    def __init__(self, bot: KyroBot, author_id: int, timeout: float = 180.0) -> None:
+        super().__init__(timeout=timeout)
+        self.bot = bot
+        self.author_id = author_id
+        self.selected_channel: discord.TextChannel | None = None
+
+        self.channel_select = discord.ui.ChannelSelect(
+            channel_types=[discord.ChannelType.text],
+            placeholder="Select news broadcast channel...",
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+        self.channel_select.callback = self._on_channel_select
+        self.add_item(self.channel_select)
+
+        self.continue_button = discord.ui.Button(
+            label="Continue",
+            style=discord.ButtonStyle.primary,
+            row=1,
+        )
+        self.continue_button.callback = self._on_continue
+        self.add_item(self.continue_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id and not (
+            interaction.user.guild_permissions.manage_guild
+            if isinstance(interaction.user, discord.Member)
+            else False
+        ):
+            await interaction.response.send_message(
+                "Only the command author or server administrators can interact with this setup.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _on_channel_select(self, interaction: discord.Interaction) -> None:
+        if not self.channel_select.values:
+            return
+        selected = self.channel_select.values[0]
+        if isinstance(selected, discord.TextChannel):
+            self.selected_channel = selected
+        elif hasattr(selected, "id") and interaction.guild:
+            self.selected_channel = interaction.guild.get_channel(selected.id)
+        await interaction.response.defer()
+
+    async def _on_continue(self, interaction: discord.Interaction) -> None:
+        if not self.selected_channel:
+            await interaction.response.send_message(
+                "Please select a target text channel from the dropdown above before continuing.",
+                ephemeral=True,
+            )
+            return
+
+        if interaction.guild:
+            perms = self.selected_channel.permissions_for(interaction.guild.me)
+            if not (perms.send_messages and perms.embed_links):
+                await interaction.response.send_message(
+                    f"I require Send Messages and Embed Links permissions in {self.selected_channel.mention} to broadcast news.",
+                    ephemeral=True,
+                )
+                return
+
+        # Advance to Step 2: Modules Selection
+        modules_view = TechSetupModulesView(
+            bot=self.bot,
+            author_id=self.author_id,
+            channel=self.selected_channel,
+        )
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Feed Setup\n"
+                f"> Step 2 of 2: Select Modules"
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"Target Channel: {self.selected_channel.mention}\n\n"
+            f"Select which intelligence modules to stream into this channel. "
+            f"You can choose one or multiple modules using the menu below, then click Done."
+        )
+        await edit_container_response(interaction, container, view=modules_view)
+
+
+class TechSetupModulesView(discord.ui.View):
+    """Step 2: Multi-select intelligence categories and finalize feed setup."""
+
+    def __init__(
+        self,
+        bot: KyroBot,
+        author_id: int,
+        channel: discord.TextChannel,
+        timeout: float = 180.0,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self.bot = bot
+        self.author_id = author_id
+        self.channel = channel
+        self.selected_categories: list[str] = [opt["value"] for opt in MODULE_OPTIONS]
+
+        select_options = [
+            discord.SelectOption(
+                label=opt["label"],
+                value=opt["value"],
+                description=opt["description"][:100],
+                default=True,
+            )
+            for opt in MODULE_OPTIONS
+        ]
+
+        self.module_select = discord.ui.Select(
+            placeholder="Select modules (default: all)...",
+            min_values=1,
+            max_values=len(select_options),
+            options=select_options,
+            row=0,
+        )
+        self.module_select.callback = self._on_select_modules
+        self.add_item(self.module_select)
+
+        self.done_button = discord.ui.Button(
+            label="Done",
+            style=discord.ButtonStyle.success,
+            row=1,
+        )
+        self.done_button.callback = self._on_done
+        self.add_item(self.done_button)
+
+        self.back_button = discord.ui.Button(
+            label="Back",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.back_button.callback = self._on_back
+        self.add_item(self.back_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id and not (
+            interaction.user.guild_permissions.manage_guild
+            if isinstance(interaction.user, discord.Member)
+            else False
+        ):
+            await interaction.response.send_message(
+                "Only the command author or server administrators can interact with this setup.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _on_select_modules(self, interaction: discord.Interaction) -> None:
+        self.selected_categories = list(self.module_select.values)
+        await interaction.response.defer()
+
+    async def _on_back(self, interaction: discord.Interaction) -> None:
+        channel_view = TechSetupChannelView(bot=self.bot, author_id=self.author_id)
+        channel_view.selected_channel = self.channel
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Feed Setup\n"
+                f"> Step 1 of 2: Select Channel"
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"Select the text channel where real-time tech intelligence will be broadcast."
+        )
+        await edit_container_response(interaction, container, view=channel_view)
+
+    async def _on_done(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            return
+
+        cat_str = ",".join(self.selected_categories)
+        success = await self.bot.tech_mgr.set_channel(
+            guild_id=interaction.guild.id,
+            channel_id=self.channel.id,
+            categories=cat_str,
+            thread_enabled=False,
+        )
+
+        if not success:
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content="### Configuration Error\n> Failed to persist tech feed settings to database."
+            )
+            await edit_container_response(interaction, container, view=None)
+            return
+
+        formatted_mods = ", ".join(
+            CATEGORY_BADGES.get(c, c.title()) for c in self.selected_categories
+        )
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Feed Configured\n"
+                f"> Intelligence broadcasting is now active for this server."
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"• Target Channel: {self.channel.mention}\n"
+            f"• Active Modules: {formatted_mods}\n"
+            f"• Broadcast Cadence: Every 15 Minutes (Zero Spam Quality Gate)"
+        )
+        await edit_container_response(interaction, container, view=None)
+
+
+class TechStatusView(discord.ui.View):
+    """Status panel view with Edit and Disable buttons."""
+
+    def __init__(
+        self,
+        bot: KyroBot,
+        author_id: int,
+        guild_id: int,
+        is_active: bool,
+        timeout: float = 180.0,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self.bot = bot
+        self.author_id = author_id
+        self.guild_id = guild_id
+
+        if is_active:
+            self.edit_button = discord.ui.Button(
+                label="Edit Settings",
+                style=discord.ButtonStyle.secondary,
+                row=0,
+            )
+            self.edit_button.callback = self._on_edit
+            self.add_item(self.edit_button)
+
+            self.disable_button = discord.ui.Button(
+                label="Disable Feed",
+                style=discord.ButtonStyle.danger,
+                row=0,
+            )
+            self.disable_button.callback = self._on_disable
+            self.add_item(self.disable_button)
+        else:
+            self.setup_button = discord.ui.Button(
+                label="Configure Feed",
+                style=discord.ButtonStyle.primary,
+                row=0,
+            )
+            self.setup_button.callback = self._on_edit
+            self.add_item(self.setup_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id and not (
+            interaction.user.guild_permissions.manage_guild
+            if isinstance(interaction.user, discord.Member)
+            else False
+        ):
+            await interaction.response.send_message(
+                "Only server administrators can modify tech feed settings.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _on_edit(self, interaction: discord.Interaction) -> None:
+        channel_view = TechSetupChannelView(bot=self.bot, author_id=self.author_id)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Feed Setup\n"
+                f"> Step 1 of 2: Select Channel"
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"Select the text channel where real-time tech intelligence will be broadcast."
+        )
+        await edit_container_response(interaction, container, view=channel_view)
+
+    async def _on_disable(self, interaction: discord.Interaction) -> None:
+        await self.bot.tech_mgr.remove_channel(self.guild_id)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Feed Disabled\n"
+                f"> Automated broadcasting has been deactivated for this server."
+            )
+        )
+        await edit_container_response(interaction, container, view=None)
 
 
 class TechFeedCog(commands.Cog):
-    """Autonomous Tech Intelligence feed dispatcher and on-demand search."""
+    """Autonomous Tech Intelligence feed dispatcher and interactive setup."""
     category: str = "Utility"
 
     def __init__(self, bot: KyroBot) -> None:
@@ -36,45 +368,6 @@ class TechFeedCog(commands.Cog):
     def cog_unload(self) -> None:
         """Cancel background loop cleanly upon cog unload."""
         self._poller_task.cancel()
-
-    # -------------------------------------------------------------------------
-    # Interactive Bookmark Listener (Save to DM)
-    # -------------------------------------------------------------------------
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction) -> None:
-        """Handle 'Save to DM' bookmark button clicks across all tech news cards."""
-        custom_id = (interaction.data or {}).get("custom_id")
-        if not custom_id or not isinstance(custom_id, str) or not custom_id.startswith("tech_bm:"):
-            return
-
-        story_id = custom_id.replace("tech_bm:", "")
-        story = self.bot.tech_mgr.get_story(story_id)
-        if not story:
-            try:
-                await interaction.response.send_message(
-                    "This story has expired from active memory. You can view the original article using the View Origin button.",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
-            return
-
-        try:
-            dot = self.bot.custom_emojis.get("heart_dot", "•")
-            dm_card = self.bot.tech_mgr.build_story_container(story, dot=dot)
-            await send_container_response(interaction.user, dm_card)
-            await interaction.response.send_message(
-                "Saved this article to your private DM inbox!",
-                ephemeral=True,
-            )
-        except Exception:
-            try:
-                await interaction.response.send_message(
-                    "Could not send DM. Please make sure your DMs are open for server members.",
-                    ephemeral=True,
-                )
-            except Exception:
-                pass
 
     # -------------------------------------------------------------------------
     # Autonomous Background Dispatcher Loop (Every 15 minutes)
@@ -203,171 +496,132 @@ class TechFeedCog(commands.Cog):
             pass
 
     # -------------------------------------------------------------------------
-    # Command Group: technews
+    # Command Group: tech
     # -------------------------------------------------------------------------
     @commands.hybrid_group(
-        name="technews",
-        aliases=["techfeed", "techintel", "intel"],
-        description="Autonomous Tech Intelligence terminal and real-time feeds.",
+        name="tech",
+        aliases=["technews", "techfeed"],
+        description="Autonomous Tech Intelligence terminal & feed setup.",
         invoke_without_command=True,
     )
-    async def technews(self, ctx: CustomContext) -> None:
-        """Default view showing tech intelligence capabilities and status."""
-        await ctx.invoke(self.status)
-
-    @technews.command(
-        name="set",
-        aliases=["channel"],
-        description="Bind a channel for autonomous real-time tech news updates.",
-    )
-    @app_commands.describe(
-        channel="The text channel where tech intelligence will be broadcast",
-        categories="Category filter: all, github, ai, security, systems, hardware (default: all)",
-    )
-    @commands.has_permissions(manage_guild=True)
     @commands.guild_only()
-    async def set_channel(
-        self,
-        ctx: CustomContext,
-        channel: discord.TextChannel,
-        categories: str = "all",
-    ) -> None:
-        """Set up automated tech news broadcasting in a designated channel."""
-        cat_clean = categories.strip().lower()
-        cat_list = [c.strip() for c in cat_clean.split(",") if c.strip()]
-        for c in cat_list:
-            if c not in VALID_CATEGORIES:
-                container = KyroContainer(accent_color=0xFF3333)
-                container.add_section(
-                    content=(
-                        f"**Invalid Category: `{c}`**\n"
-                        f"> Supported: `all`, `github`, `ai`, `security`, `systems`, `hardware`\n"
-                        f"> Example: `{ctx.clean_prefix}technews set #{channel.name} ai,github`"
-                    )
-                )
-                await send_container_response(ctx, container)
-                return
-
-        bot_perms = channel.permissions_for(ctx.guild.me)
-        if not (bot_perms.send_messages and bot_perms.embed_links):
-            container = KyroContainer(accent_color=0xFF3333)
-            container.add_section(
-                content=f"**Missing Permissions**\n> I require `Send Messages` and `Embed Links` in {channel.mention}."
-            )
-            await send_container_response(ctx, container)
-            return
-
-        success = await self.bot.tech_mgr.set_channel(
-            guild_id=ctx.guild.id,
-            channel_id=channel.id,
-            categories=",".join(cat_list),
-            thread_enabled=False,
-        )
-
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
-        if success:
-            container = KyroContainer(accent_color=0x00FF66)
+    async def tech(self, ctx: CustomContext) -> None:
+        """Interactive 2-step setup: select channel, then select modules."""
+        # If user has manage_guild permissions, open setup flow directly
+        if ctx.author.guild_permissions.manage_guild:
+            channel_view = TechSetupChannelView(bot=self.bot, author_id=ctx.author.id)
+            container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"**Tech Intelligence Feed Activated**\n"
-                    f"> Real-time intelligence will now be broadcast to {channel.mention}."
+                    f"### Tech Feed Setup\n"
+                    f"> Step 1 of 2: Select Channel"
                 )
             )
             container.add_separator(divider=True)
             container.add_text(
-                f"{dot} **Channel:** {channel.mention} (`{channel.id}`)\n"
-                f"{dot} **Subscribed Fields:** `{', '.join(cat_list).upper()}`\n"
-                f"{dot} **Discussion Threads:** `Disabled` (Enable via `{ctx.clean_prefix}technews thread on`)\n"
-                f"{dot} **Cadence:** `Every 15 Minutes (Zero-Spam Quality Gate)`"
+                "Select the text channel where real-time tech intelligence will be broadcast."
+            )
+            await send_container_response(ctx, container, view=channel_view)
+        else:
+            await ctx.invoke(self.status)
+
+    @tech.command(
+        name="setup",
+        description="Configure tech news broadcasting channel and module filters.",
+    )
+    @commands.has_permissions(manage_guild=True)
+    @commands.guild_only()
+    async def setup_cmd(self, ctx: CustomContext) -> None:
+        """Interactive 2-step setup: select channel, then select modules."""
+        channel_view = TechSetupChannelView(bot=self.bot, author_id=ctx.author.id)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Feed Setup\n"
+                f"> Step 1 of 2: Select Channel"
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            "Select the text channel where real-time tech intelligence will be broadcast."
+        )
+        await send_container_response(ctx, container, view=channel_view)
+
+    @tech.command(
+        name="status",
+        aliases=["config", "info"],
+        description="View current tech broadcast configuration and settings.",
+    )
+    @commands.guild_only()
+    async def status(self, ctx: CustomContext) -> None:
+        """Display the active tech intelligence configuration with Edit & Disable options."""
+        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
+        container = KyroContainer(accent_color=None)
+
+        if not cfg:
+            container.add_section(
+                content=(
+                    f"### Tech Feed Status\n"
+                    f"> Status: Inactive on this server"
+                )
             )
             container.add_separator(divider=True)
-            container.add_text("-# Kyro Tech Sentinel • Autonomous Terminal")
-            await send_container_response(ctx, container)
-        else:
-            container = KyroContainer(accent_color=0xFF3333)
-            container.add_section(content="**Database Error**\n> Failed to persist tech news configuration.")
-            await send_container_response(ctx, container)
-
-    @technews.command(
-        name="disable",
-        aliases=["off", "stop", "remove"],
-        description="Disable automated tech news broadcasts in this server.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    @commands.guild_only()
-    async def disable(self, ctx: CustomContext) -> None:
-        """Stop and unbind the automated tech feed."""
-        existing = self.bot.tech_mgr.get_config(ctx.guild.id)
-        if not existing:
-            container = KyroContainer(accent_color=None)
-            container.add_section(content="**No Active Feed**\n> Tech news is not currently configured on this server.")
-            await send_container_response(ctx, container)
+            container.add_text(
+                f"Automated tech intelligence broadcasts are currently disabled.\n"
+                f"Use the button below or run `{ctx.clean_prefix}tech setup` to activate broadcasting."
+            )
+            view = TechStatusView(
+                bot=self.bot,
+                author_id=ctx.author.id,
+                guild_id=ctx.guild.id,
+                is_active=False,
+            )
+            await send_container_response(ctx, container, view=view)
             return
 
-        await self.bot.tech_mgr.remove_channel(ctx.guild.id)
-        container = KyroContainer(accent_color=0x00FF66)
+        channel = ctx.guild.get_channel(cfg["channel_id"])
+        ch_mention = channel.mention if channel else f"Unknown ({cfg['channel_id']})"
+        raw_cats = cfg.get("categories", "all").split(",")
+        formatted_mods = ", ".join(CATEGORY_BADGES.get(c.strip(), c.strip().title()) for c in raw_cats)
+
         container.add_section(
             content=(
-                f"**Tech Intelligence Feed Disabled**\n"
-                f"> Automated broadcasts have been deactivated for this server."
+                f"### Tech Feed Status\n"
+                f"> Status: Active & Broadcasting"
             )
         )
-        await send_container_response(ctx, container)
+        container.add_separator(divider=True)
+        container.add_text(
+            f"• Target Channel: {ch_mention}\n"
+            f"• Active Modules: {formatted_mods}\n"
+            f"• Broadcast Cadence: Every 15 Minutes (Zero Spam Quality Gate)"
+        )
 
-    @technews.command(
-        name="thread",
-        description="Toggle auto-creation of discussion threads under each news drop.",
-    )
-    @app_commands.describe(state="Enable or disable threads (on/off)")
-    @commands.has_permissions(manage_guild=True)
-    @commands.guild_only()
-    async def thread(self, ctx: CustomContext, state: str) -> None:
-        """Toggle automatic discussion threads for each dispatched news card."""
-        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
-        if not cfg:
-            container = KyroContainer(accent_color=0xFF3333)
-            container.add_section(
-                content=f"**No Active Feed**\n> Set up a channel first using `{ctx.clean_prefix}technews set #channel`."
-            )
-            await send_container_response(ctx, container)
-            return
-
-        enable = state.strip().lower() in {"on", "true", "enable", "yes"}
-        await self.bot.tech_mgr.set_channel(
+        view = TechStatusView(
+            bot=self.bot,
+            author_id=ctx.author.id,
             guild_id=ctx.guild.id,
-            channel_id=cfg["channel_id"],
-            categories=cfg["categories"],
-            thread_enabled=enable,
+            is_active=True,
         )
+        await send_container_response(ctx, container, view=view)
 
-        state_str = "Enabled" if enable else "Disabled"
-        container = KyroContainer(accent_color=0x00FF66)
-        container.add_section(
-            content=(
-                f"**Discussion Threads {state_str}**\n"
-                f"> New tech dispatches will {'now automatically attach' if enable else 'no longer create'} discussion threads."
-            )
-        )
-        await send_container_response(ctx, container)
-
-    @technews.command(
+    @tech.command(
         name="latest",
         aliases=["today", "pulse", "now"],
         description="Fetch fresh top tech stories on demand right now.",
     )
-    @app_commands.describe(category="Category: all, github, ai, security, systems, hardware (default: all)")
+    @app_commands.describe(category="Category: all, github, ai, security, systems, hardware, tech")
     async def latest(self, ctx: CustomContext, category: str = "all") -> None:
         """Instant on-demand intelligence brief."""
         cat_clean = category.strip().lower()
         if cat_clean not in VALID_CATEGORIES:
             cat_clean = "all"
 
-        # Temporary loading response
         stories = await self.bot.tech_mgr.fetch_category(cat_clean, limit=2)
         if not stories:
-            container = KyroContainer(accent_color=0xFFA500)
+            container = KyroContainer(accent_color=None)
             container.add_section(
-                content=f"**No Active Stories Found**\n> Could not retrieve fresh stories for `{cat_clean}` right now."
+                content=f"### No Stories Available\n> Could not retrieve fresh stories for {cat_clean} right now."
             )
             await send_container_response(ctx, container)
             return
@@ -376,135 +630,6 @@ class TechFeedCog(commands.Cog):
         for s in stories:
             card = self.bot.tech_mgr.build_story_container(s, dot=dot)
             await send_container_response(ctx, card)
-
-    @technews.command(
-        name="mode",
-        description="Switch delivery cadence: 'live' (real-time) or 'digest' (daily 9 AM briefing).",
-    )
-    @app_commands.describe(delivery_mode="Choose: live or digest")
-    @commands.has_permissions(manage_guild=True)
-    @commands.guild_only()
-    async def set_delivery_mode(self, ctx: CustomContext, delivery_mode: str) -> None:
-        """Switch between real-time stream and single morning digest."""
-        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
-        if not cfg:
-            container = KyroContainer(accent_color=0xFF3333)
-            container.add_section(
-                content=f"**No Active Feed**\n> Set up a channel first using `{ctx.clean_prefix}technews set #channel`."
-            )
-            await send_container_response(ctx, container)
-            return
-
-        m = delivery_mode.strip().lower()
-        if m not in {"live", "digest"}:
-            container = KyroContainer(accent_color=0xFF3333)
-            container.add_section(
-                content="**Invalid Mode**\n> Supported modes: `live` (every 15-30m) or `digest` (daily at 9:00 AM)."
-            )
-            await send_container_response(ctx, container)
-            return
-
-        await self.bot.tech_mgr.set_mode(ctx.guild.id, m)
-        container = KyroContainer(accent_color=0x00FF66)
-        if m == "live":
-            desc = "Real-time updates will be broadcast as fresh stories arrive."
-        else:
-            desc = "Channel will stay quiet during the day and receive a single curated briefing at 9:00 AM (critical threats still alert instantly)."
-
-        container.add_section(
-            content=(
-                f"**Delivery Mode Set to `{m.upper()}`**\n"
-                f"> {desc}"
-            )
-        )
-        await send_container_response(ctx, container)
-
-    @technews.command(
-        name="alertrole",
-        description="Bind a priority role to ping when critical zero-days or outages occur.",
-    )
-    @app_commands.describe(role="The role to mention on critical threat alerts (leave empty to clear)")
-    @commands.has_permissions(manage_guild=True)
-    @commands.guild_only()
-    async def set_alert_role(self, ctx: CustomContext, role: Optional[discord.Role] = None) -> None:
-        """Configure emergency alert role for high-severity threats."""
-        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
-        if not cfg:
-            container = KyroContainer(accent_color=0xFF3333)
-            container.add_section(
-                content=f"**No Active Feed**\n> Set up a channel first using `{ctx.clean_prefix}technews set #channel`."
-            )
-            await send_container_response(ctx, container)
-            return
-
-        role_id = role.id if role else None
-        await self.bot.tech_mgr.set_alert_role(ctx.guild.id, role_id)
-
-        container = KyroContainer(accent_color=0x00FF66)
-        if role:
-            container.add_section(
-                content=(
-                    f"**Emergency Alert Role Configured**\n"
-                    f"> {role.mention} will now be notified on critical threats and major outages."
-                )
-            )
-        else:
-            container.add_section(
-                content=(
-                    "**Emergency Alert Role Cleared**\n"
-                    "> Critical alerts will now be dispatched silently without role mentions."
-                )
-            )
-        await send_container_response(ctx, container)
-
-    @technews.command(
-        name="status",
-        aliases=["config", "info"],
-        description="View the current server tech news configuration.",
-    )
-    @commands.guild_only()
-    async def status(self, ctx: CustomContext) -> None:
-        """Display the active tech intelligence configuration."""
-        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
-
-        container = KyroContainer(accent_color=None)
-        if not cfg:
-            container.add_section(
-                content=(
-                    f"**Tech Intelligence Terminal**\n"
-                    f"> Status: `Inactive on this server`\n\n"
-                    f"{dot} **Setup Command:** `{ctx.clean_prefix}technews set #channel [category]`\n"
-                    f"{dot} **Supported Fields:** `GitHub Trending`, `AI Research`, `Security CVEs`, `Linux Kernel`, `Systems`\n"
-                    f"{dot} **Instant Query:** `{ctx.clean_prefix}technews latest`"
-                )
-            )
-        else:
-            channel = ctx.guild.get_channel(cfg["channel_id"])
-            ch_mention = channel.mention if channel else f"`Unknown ({cfg['channel_id']})`"
-            th_str = "Enabled" if cfg.get("thread_enabled") else "Disabled"
-            mode_str = cfg.get("mode", "live").upper()
-            alert_role = ctx.guild.get_role(cfg["alert_role_id"]) if cfg.get("alert_role_id") else None
-            role_str = alert_role.mention if alert_role else "`None (Silent)`"
-
-            container.add_section(
-                content=(
-                    f"**Tech Intelligence Terminal**\n"
-                    f"> Status: `Active & Broadcasting`"
-                )
-            )
-            container.add_separator(divider=True)
-            container.add_text(
-                f"{dot} **Target Channel:** {ch_mention}\n"
-                f"{dot} **Delivery Mode:** `{mode_str}` ({'Every 15 mins' if mode_str == 'LIVE' else 'Daily at 9:00 AM'})\n"
-                f"{dot} **Subscribed Fields:** `{cfg['categories'].upper()}`\n"
-                f"{dot} **Emergency Alert Role:** {role_str}\n"
-                f"{dot} **Auto-Threads:** `{th_str}`"
-            )
-
-        container.add_separator(divider=True)
-        container.add_text("-# Kyro Tech Intelligence • Enterprise Radar")
-        await send_container_response(ctx, container)
 
 
 async def setup(bot: KyroBot) -> None:

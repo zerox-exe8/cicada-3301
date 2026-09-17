@@ -374,14 +374,14 @@ class GuildPlayer:
         return timer_was_active
 
     async def connect_voice(self, channel: discord.VoiceChannel) -> None:
-        """Connect or move to voice channel safely with VoiceRecv support."""
+        """Connect or move to voice channel safely with VoiceRecv support and resilient fallback."""
         self.cancel_empty_vc_timer(auto_resume=False)
 
         # Restore 24/7 preference from database if available
         if hasattr(self.bot, "db") and self.bot.db:
             try:
                 row = await self.bot.db.fetchrow(
-                    "SELECT is_247 FROM guild_music_247 WHERE guild_id = ?",
+                    "SELECT is_247 FROM guild_music_247 WHERE guild_id = $1",
                     self.guild.id,
                 )
                 if row and row.get("is_247") is not None:
@@ -390,11 +390,31 @@ class GuildPlayer:
                 logger.debug(f"Could not load 24/7 setting from DB: {e}")
 
         vc = self.guild.voice_client
-        if vc and vc.is_connected():
-            self.voice_client = vc
-            if self.voice_client.channel != channel:
-                await self.voice_client.move_to(channel)
-            return
+        if vc:
+            if vc.is_connected():
+                self.voice_client = vc
+                if self.voice_client.channel != channel:
+                    await self.voice_client.move_to(channel)
+                return
+            else:
+                # Purge stale/disconnected voice client from discord.py internal state
+                try:
+                    await vc.disconnect(force=True)
+                except Exception:
+                    pass
+                self.voice_client = None
+
+        # Ensure no ghost voice client remains in discord.py state key
+        try:
+            key_id, _ = channel._get_voice_client_key()
+            existing_vc = channel._state._get_voice_client(key_id)
+            if existing_vc:
+                try:
+                    await existing_vc.disconnect(force=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         cls = discord.VoiceClient
         try:
@@ -403,7 +423,19 @@ class GuildPlayer:
         except Exception:
             pass
 
-        self.voice_client = await channel.connect(cls=cls, self_deaf=False, timeout=20.0, reconnect=True)
+        try:
+            self.voice_client = await channel.connect(cls=cls, self_deaf=False, timeout=15.0, reconnect=True)
+        except Exception as conn_err:
+            if cls is not discord.VoiceClient:
+                logger.warning(f"VoiceRecvClient connection failed ({conn_err}), falling back to standard VoiceClient...")
+                if self.guild.voice_client:
+                    try:
+                        await self.guild.voice_client.disconnect(force=True)
+                    except Exception:
+                        pass
+                self.voice_client = await channel.connect(cls=discord.VoiceClient, self_deaf=False, timeout=15.0, reconnect=True)
+            else:
+                raise conn_err
 
     async def _handle_voice_command(self, user: discord.Member, action: str, query: str) -> None:
         """Handle incoming recognized voice command from a speaking user."""

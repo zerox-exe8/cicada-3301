@@ -86,6 +86,11 @@ class Music(commands.Cog):
                 player._was_paused_for_empty_vc = False
                 player.queue.clear()
                 player.current = None
+                if player.voice_client:
+                    try:
+                        player.voice_client.cleanup()
+                    except Exception:
+                        pass
                 player.voice_client = None
             return
 

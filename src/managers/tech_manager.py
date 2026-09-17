@@ -337,8 +337,37 @@ class TechNewsManager:
                         link = item.get("html_url")
                         raw_desc = (item.get("description") or "").strip()
                         desc = _clean_html(raw_desc) if raw_desc else ""
-                        if not desc or len(desc) < 15:
-                            desc = f"{full_name} developer toolkit and open-source implementation."
+
+                        # Fetch author's actual README introductory context for real technical explanation
+                        readme_summary = ""
+                        try:
+                            readme_url = f"https://raw.githubusercontent.com/{full_name}/HEAD/README.md"
+                            async with session.get(readme_url, timeout=aiohttp.ClientTimeout(total=2.0)) as r_resp:
+                                if r_resp.status == 200:
+                                    r_text = await r_resp.text()
+                                    clean_md = re.sub(r'\[!\[.*?\]\(.*?\)\]\(.*?\)', '', r_text)
+                                    clean_md = re.sub(r'!\[.*?\]\(.*?\)', '', clean_md)
+                                    clean_md = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', clean_md)
+                                    clean_md = re.sub(r'#+\s*', '', clean_md)
+                                    clean_md = re.sub(r'<.*?>', '', clean_md)
+                                    clean_md = re.sub(r'```.*?```', '', clean_md, flags=re.DOTALL)
+                                    for line in clean_md.split('\n'):
+                                        l_str = line.strip()
+                                        if len(l_str) > 35 and not l_str.startswith(('---', '===', '>', '|', '*')):
+                                            if not any(k in l_str.lower() for k in ['license', 'badge', 'install', 'npm', 'pip']):
+                                                readme_summary = l_str
+                                                break
+                        except Exception:
+                            pass
+
+                        # Combine concise tagline with real functional description
+                        if readme_summary and readme_summary.lower() != desc.lower():
+                            if desc:
+                                final_summary = f"{desc} • {readme_summary}"[:260]
+                            else:
+                                final_summary = readme_summary[:260]
+                        else:
+                            final_summary = desc[:240] if desc else f"{full_name} open-source implementation and development toolkit."
 
                         stars = item.get("stargazers_count", 0)
                         lang = item.get("language") or "General"
@@ -361,7 +390,7 @@ class TechNewsManager:
                             source="GitHub",
                             category="github",
                             title=f"{full_name}",
-                            summary=desc[:240],
+                            summary=final_summary,
                             url=link,
                             metadata={"stars": stars, "language": lang, "forks": forks, "topics": topics[:4]},
                             owner_avatar=owner_avatar,
@@ -376,7 +405,7 @@ class TechNewsManager:
         return stories
 
     async def _harvest_hackernews(self, session: aiohttp.ClientSession) -> list[TechStory]:
-        """Harvest high-score technical stories from Hacker News Firebase API."""
+        """Harvest high-score technical stories from Hacker News Firebase API with real article context."""
         stories: list[TechStory] = []
         top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
         try:
@@ -396,6 +425,28 @@ class TechNewsManager:
                                 if not link or score < 80:
                                     continue
 
+                                # Fetch real OpenGraph/meta description from destination article
+                                real_summary = ""
+                                try:
+                                    art_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Kyro-Reader/1.0"}
+                                    async with session.get(link, headers=art_headers, timeout=aiohttp.ClientTimeout(total=2.5)) as art_resp:
+                                        if art_resp.status == 200:
+                                            raw_body = await art_resp.text()
+                                            m_desc = re.search(r'<meta\s+(?:property|name)=[\'"](?:og:description|description)[\'"]\s+content=[\'"](.*?)[\'"]', raw_body, re.I)
+                                            if not m_desc:
+                                                m_desc = re.search(r'<meta\s+content=[\'"](.*?)[\'"]\s+(?:property|name)=[\'"](?:og:description|description)[\'"]', raw_body, re.I)
+                                            if m_desc:
+                                                real_summary = _clean_html(m_desc.group(1)).strip()
+                                except Exception:
+                                    pass
+
+                                # If no meta description, check if story has author text (e.g. Ask HN / Show HN)
+                                if not real_summary and data.get("text"):
+                                    real_summary = _clean_html(data["text"]).strip()
+
+                                if not real_summary:
+                                    real_summary = f"Technical analysis and engineering report regarding {title}."
+
                                 is_crit = any(re.search(kw, title, re.IGNORECASE) for kw in CRITICAL_KEYWORDS)
                                 story_id = hashlib.sha256(f"hn:{link}".encode()).hexdigest()
                                 story_obj = TechStory(
@@ -403,7 +454,7 @@ class TechNewsManager:
                                     source="Hacker News",
                                     category="systems",
                                     title=title,
-                                    summary=f"Community technical debate with {score} points and {data.get('descendants', 0)} comments on Y Combinator Hacker News.",
+                                    summary=real_summary[:260],
                                     url=link,
                                     metadata={"score": score, "comments": data.get("descendants", 0)},
                                     is_critical=is_crit,
@@ -629,7 +680,7 @@ class TechNewsManager:
                 f"**[{story.title}]({story.url})**\n"
                 f"> **Daily AI Research** • *Hugging Face Papers*"
             )
-            accessory = {"type": 11, "media": {"url": "https://huggingface.co/front/assets/huggingface_logo-noborder.png"}}
+            accessory = {"type": 11, "media": {"url": "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.png"}}
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
@@ -648,7 +699,8 @@ class TechNewsManager:
                 f"**[{story.title}]({story.url})**\n"
                 f"> **Security Advisory** • *The Hacker News*"
             )
-            container.add_section(content=header_content)
+            accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_locked.png"}}
+            container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
             sev = story.metadata.get("severity", "General")
@@ -666,7 +718,11 @@ class TechNewsManager:
                 f"**[{story.title}]({story.url})**\n"
                 f"> **{story.source}** • *Technical Intelligence*"
             )
-            container.add_section(content=header_content)
+            if story.category == "hardware":
+                accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_globe.png"}}
+            else:
+                accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_richpresence.png"}}
+            container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
             meta_parts: list[str] = []

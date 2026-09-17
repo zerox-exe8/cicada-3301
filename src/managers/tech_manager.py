@@ -751,8 +751,8 @@ class TechNewsManager:
         accent = 0xFF0033 if story.is_critical else None
         container = KyroContainer(accent_color=accent)
 
-        # High-contrast GitHub branding badge for authentic developer style
-        github_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/branding/github_logo.png"
+        # High-contrast white GitHub icon added by user in emoji2
+        github_icon_url = "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/github.png"
 
         if story.category == "github":
             accessory = {"type": 11, "media": {"url": github_icon_url}}
@@ -763,21 +763,19 @@ class TechNewsManager:
             else:
                 title_line = f"**[{story.title}]({story.url})**"
 
-            # Fill vertical space next to the 80px thumbnail icon cleanly without mid-word cuts
-            short_tagline = _smart_truncate(story.summary, 115)
+            # Section header contains only Title & Subtitle next to 64px icon to avoid Discord line-clamp
             header_content = (
                 f"{title_line}\n"
-                f"> **GitHub Repository** • *Trending Open Source*\n"
-                f"{short_tagline}"
+                f"> **GitHub Repository** • *Trending Open Source*"
             )
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
             body_elements: list[str] = []
 
-            # Full deep overview if summary is longer than the top tagline
-            if len(story.summary) > len(short_tagline):
-                body_elements.append(f"**Overview:**\n{story.summary}")
+            # Full-width technical overview
+            if story.summary:
+                body_elements.append(f"**Technical Overview:**\n{story.summary}")
 
             if story.what_is_inside:
                 body_elements.append(f"**Key Capabilities & Stack:**\n> {story.what_is_inside}")
@@ -806,20 +804,20 @@ class TechNewsManager:
             primary_label = "View Repository"
 
         elif story.category == "ai":
-            # Verified high-contrast GitHub Mark as requested by user
             accessory = {"type": 11, "media": {"url": github_icon_url}}
 
-            short_tagline = _smart_truncate(story.summary, 115)
+            # Section header contains Title & Badge next to icon
             header_content = (
                 f"**[{story.title}]({story.url})**\n"
-                f"> **Frontier AI Research** • *Peer-Reviewed Pre-print*\n"
-                f"{short_tagline}"
+                f"> **Frontier AI Research** • *Peer-Reviewed Pre-print*"
             )
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
             body_elements: list[str] = []
-            if len(story.summary) > len(short_tagline):
+
+            # Full-width abstract and findings
+            if story.summary:
                 body_elements.append(f"**Abstract & Core Findings:**\n{story.summary}")
 
             if story.what_is_inside:

@@ -37,11 +37,50 @@ class TechFeedCog(commands.Cog):
         self._poller_task.cancel()
 
     # -------------------------------------------------------------------------
+    # Interactive Bookmark Listener (Save to DM)
+    # -------------------------------------------------------------------------
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        """Handle 'Save to DM' bookmark button clicks across all tech news cards."""
+        custom_id = (interaction.data or {}).get("custom_id")
+        if not custom_id or not isinstance(custom_id, str) or not custom_id.startswith("tech_bm:"):
+            return
+
+        story_id = custom_id.replace("tech_bm:", "")
+        story = self.bot.tech_mgr.get_story(story_id)
+        if not story:
+            try:
+                await interaction.response.send_message(
+                    "This story has expired from active memory. You can view the original article using the View Origin button.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+            return
+
+        try:
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            dm_card = self.bot.tech_mgr.build_story_container(story, dot=dot)
+            await send_container_response(interaction.user, dm_card)
+            await interaction.response.send_message(
+                "Saved this article to your private DM inbox!",
+                ephemeral=True,
+            )
+        except Exception:
+            try:
+                await interaction.response.send_message(
+                    "Could not send DM. Please make sure your DMs are open for server members.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    # -------------------------------------------------------------------------
     # Autonomous Background Dispatcher Loop (Every 15 minutes)
     # -------------------------------------------------------------------------
     @tasks.loop(minutes=15)
     async def _poller_task(self) -> None:
-        """Background poller harvesting fresh tech intelligence and broadcasting to subscribed channels."""
+        """Background poller harvesting tech intelligence, handling Live streams, Digests, and Critical Alerts."""
         try:
             await self.bot.wait_until_ready()
         except (RuntimeError, Exception):
@@ -56,7 +95,27 @@ class TechFeedCog(commands.Cog):
             if not stories:
                 return
 
-            # Filter unseen stories
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            now_utc = discord.utils.utcnow()
+            today_str = now_utc.strftime("%Y-%m-%d")
+
+            # 1. Handle Morning Digest for guilds configured in 'digest' mode (Trigger at or after 9 AM UTC)
+            if now_utc.hour >= 9:
+                for guild_id, cfg in list(guild_configs.items()):
+                    if cfg.get("mode") == "digest" and cfg.get("last_digest_date") != today_str:
+                        guild = self.bot.get_guild(guild_id)
+                        if not guild:
+                            continue
+                        channel = guild.get_channel(cfg["channel_id"])
+                        if isinstance(channel, discord.TextChannel):
+                            digest_card = self.bot.tech_mgr.build_digest_container(stories[:4], today_str, dot=dot)
+                            try:
+                                await send_container_response(channel, digest_card)
+                                await self.bot.tech_mgr.update_last_digest(guild_id, today_str)
+                            except Exception as d_err:
+                                logger.debug(f"Notice sending digest to guild {guild_id}: {d_err}")
+
+            # 2. Filter unseen stories for live feeds
             fresh_stories: list[TechStory] = [
                 s for s in stories if not self.bot.tech_mgr.is_hash_seen(s.id)
             ]
@@ -64,17 +123,23 @@ class TechFeedCog(commands.Cog):
                 return
 
             logger.info(f"Discovered {len(fresh_stories)} new tech intelligence story/stories.")
-
-            dot = self.bot.custom_emojis.get("heart_dot", "•")
             dispatched: list[TechStory] = []
 
-            # Staggered delivery: post top 3 freshest stories per cycle to prevent channel spam
-            for story in fresh_stories[:3]:
+            # Prioritize critical threats first, followed by top fresh stories (max 3 per cycle)
+            critical_items = [s for s in fresh_stories if s.is_critical]
+            normal_items = [s for s in fresh_stories if not s.is_critical]
+            batch_to_send = (critical_items + normal_items)[:3]
+
+            for story in batch_to_send:
                 card = self.bot.tech_mgr.build_story_container(story, dot=dot)
 
                 for guild_id, cfg in list(guild_configs.items()):
                     guild = self.bot.get_guild(guild_id)
                     if not guild:
+                        continue
+
+                    # In 'digest' mode, ONLY critical threat alerts are broadcast in real-time
+                    if cfg.get("mode") == "digest" and not story.is_critical:
                         continue
 
                     # Verify category matching
@@ -87,8 +152,13 @@ class TechFeedCog(commands.Cog):
                     if not isinstance(channel, discord.TextChannel):
                         continue
 
+                    # Priority ping role for critical alerts if configured
+                    mention_text = None
+                    if story.is_critical and cfg.get("alert_role_id"):
+                        mention_text = f"<@&{cfg['alert_role_id']}>"
+
                     try:
-                        msg = await send_container_response(channel, card)
+                        msg = await send_container_response(channel, card, content=mention_text)
 
                         # Auto-create discussion thread if enabled for this guild
                         if cfg.get("thread_enabled") and msg and isinstance(msg, discord.Message):
@@ -292,6 +362,86 @@ class TechFeedCog(commands.Cog):
             await send_container_response(ctx, card)
 
     @technews.command(
+        name="mode",
+        description="Switch delivery cadence: 'live' (real-time) or 'digest' (daily 9 AM briefing).",
+    )
+    @app_commands.describe(delivery_mode="Choose: live or digest")
+    @commands.has_permissions(manage_guild=True)
+    @commands.guild_only()
+    async def set_delivery_mode(self, ctx: CustomContext, delivery_mode: str) -> None:
+        """Switch between real-time stream and single morning digest."""
+        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
+        if not cfg:
+            container = KyroContainer(accent_color=0xFF3333)
+            container.add_section(
+                content=f"**No Active Feed**\n> Set up a channel first using `{ctx.clean_prefix}technews set #channel`."
+            )
+            await send_container_response(ctx, container)
+            return
+
+        m = delivery_mode.strip().lower()
+        if m not in {"live", "digest"}:
+            container = KyroContainer(accent_color=0xFF3333)
+            container.add_section(
+                content="**Invalid Mode**\n> Supported modes: `live` (every 15-30m) or `digest` (daily at 9:00 AM)."
+            )
+            await send_container_response(ctx, container)
+            return
+
+        await self.bot.tech_mgr.set_mode(ctx.guild.id, m)
+        container = KyroContainer(accent_color=0x00FF66)
+        if m == "live":
+            desc = "Real-time updates will be broadcast as fresh stories arrive."
+        else:
+            desc = "Channel will stay quiet during the day and receive a single curated briefing at 9:00 AM (critical threats still alert instantly)."
+
+        container.add_section(
+            content=(
+                f"**Delivery Mode Set to `{m.upper()}`**\n"
+                f"> {desc}"
+            )
+        )
+        await send_container_response(ctx, container)
+
+    @technews.command(
+        name="alertrole",
+        description="Bind a priority role to ping when critical zero-days or outages occur.",
+    )
+    @app_commands.describe(role="The role to mention on critical threat alerts (leave empty to clear)")
+    @commands.has_permissions(manage_guild=True)
+    @commands.guild_only()
+    async def set_alert_role(self, ctx: CustomContext, role: Optional[discord.Role] = None) -> None:
+        """Configure emergency alert role for high-severity threats."""
+        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
+        if not cfg:
+            container = KyroContainer(accent_color=0xFF3333)
+            container.add_section(
+                content=f"**No Active Feed**\n> Set up a channel first using `{ctx.clean_prefix}technews set #channel`."
+            )
+            await send_container_response(ctx, container)
+            return
+
+        role_id = role.id if role else None
+        await self.bot.tech_mgr.set_alert_role(ctx.guild.id, role_id)
+
+        container = KyroContainer(accent_color=0x00FF66)
+        if role:
+            container.add_section(
+                content=(
+                    f"**Emergency Alert Role Configured**\n"
+                    f"> {role.mention} will now be notified on critical threats and major outages."
+                )
+            )
+        else:
+            container.add_section(
+                content=(
+                    "**Emergency Alert Role Cleared**\n"
+                    "> Critical alerts will now be dispatched silently without role mentions."
+                )
+            )
+        await send_container_response(ctx, container)
+
+    @technews.command(
         name="status",
         aliases=["config", "info"],
         description="View the current server tech news configuration.",
@@ -317,6 +467,9 @@ class TechFeedCog(commands.Cog):
             channel = ctx.guild.get_channel(cfg["channel_id"])
             ch_mention = channel.mention if channel else f"`Unknown ({cfg['channel_id']})`"
             th_str = "Enabled" if cfg.get("thread_enabled") else "Disabled"
+            mode_str = cfg.get("mode", "live").upper()
+            alert_role = ctx.guild.get_role(cfg["alert_role_id"]) if cfg.get("alert_role_id") else None
+            role_str = alert_role.mention if alert_role else "`None (Silent)`"
 
             container.add_section(
                 content=(
@@ -327,9 +480,10 @@ class TechFeedCog(commands.Cog):
             container.add_separator(divider=True)
             container.add_text(
                 f"{dot} **Target Channel:** {ch_mention}\n"
-                f"{dot} **Categories:** `{cfg['categories'].upper()}`\n"
-                f"{dot} **Auto-Threads:** `{th_str}`\n"
-                f"{dot} **Cadence:** `Every 15 Minutes (Zero-Spam Curated)`"
+                f"{dot} **Delivery Mode:** `{mode_str}` ({'Every 15 mins' if mode_str == 'LIVE' else 'Daily at 9:00 AM'})\n"
+                f"{dot} **Subscribed Fields:** `{cfg['categories'].upper()}`\n"
+                f"{dot} **Emergency Alert Role:** {role_str}\n"
+                f"{dot} **Auto-Threads:** `{th_str}`"
             )
 
         container.add_separator(divider=True)

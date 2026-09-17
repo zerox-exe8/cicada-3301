@@ -455,8 +455,20 @@ class PostgresDatabase(BaseDatabase):
                 channel_id BIGINT NOT NULL,
                 categories TEXT DEFAULT 'all',
                 thread_enabled BOOLEAN DEFAULT FALSE,
+                mode VARCHAR(20) DEFAULT 'live',
+                alert_role_id BIGINT,
+                last_digest_date VARCHAR(10),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            """,
+            """
+            ALTER TABLE guild_tech_news ADD COLUMN IF NOT EXISTS mode VARCHAR(20) DEFAULT 'live';
+            """,
+            """
+            ALTER TABLE guild_tech_news ADD COLUMN IF NOT EXISTS alert_role_id BIGINT;
+            """,
+            """
+            ALTER TABLE guild_tech_news ADD COLUMN IF NOT EXISTS last_digest_date VARCHAR(10);
             """,
             # Dispatched Tech Intelligence Articles Registry for Deduplication
             """
@@ -466,8 +478,12 @@ class PostgresDatabase(BaseDatabase):
                 category VARCHAR(32) NOT NULL,
                 title TEXT NOT NULL,
                 url TEXT NOT NULL,
+                is_critical BOOLEAN DEFAULT FALSE,
                 dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            """,
+            """
+            ALTER TABLE tech_news_history ADD COLUMN IF NOT EXISTS is_critical BOOLEAN DEFAULT FALSE;
             """,
         ]
         if not self.pool or self.pool._closed:

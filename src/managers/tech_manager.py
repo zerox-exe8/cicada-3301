@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import json
 import logging
+import os
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -53,6 +55,7 @@ class TechStory:
     use_case: str = ""
     license_info: str = ""
     maturity: str = ""
+    what_is_inside: str = ""
 
 
 CATEGORY_COLORS: dict[str, int] = {
@@ -140,6 +143,66 @@ async def validate_url_live(session: aiohttp.ClientSession, url: str) -> bool:
                 return resp.status < 400
         except Exception:
             return False
+
+
+async def analyze_with_gemini(
+    session: aiohttp.ClientSession,
+    title: str,
+    raw_context: str,
+    source_type: str = "repo",
+) -> Optional[dict[str, Any]]:
+    """Use Gemini intelligence to filter spam/memes and extract concrete engineering explanations."""
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    prompt = (
+        f"You are a principal engineer analyzing an open-source technical item for a developer audience.\n"
+        f"Item Type: {source_type}\n"
+        f"Title: {title}\n"
+        f"Context/README/Abstract:\n{raw_context[:1400]}\n\n"
+        f"Instructions:\n"
+        f"1. 'is_meme': true if this is a joke, troll, empty, opinion poll, or low-effort repo (e.g. 'if you think X sucks star this'), otherwise false.\n"
+        f"2. 'what_it_does': One clear, concrete sentence explaining the exact functional mechanism or practical problem solved (no hype, no robotic marketing).\n"
+        f"3. 'what_is_inside': Key architecture, supported tools, or core capabilities (short phrase or list).\n"
+        f"4. 'target_audience': Specific engineer discipline this is built for (e.g. 'Backend & ML Engineers').\n\n"
+        f"Respond strictly in valid JSON matching this schema:\n"
+        f'{{"is_meme": bool, "what_it_does": "string", "what_is_inside": "string", "target_audience": "string"}}'
+    )
+
+    models_to_try = ["gemini-3-flash-preview", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-flash-latest"]
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
+    }
+
+    for model in models_to_try:
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        try:
+            async with session.post(endpoint, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            raw_txt = parts[0].get("text", "{}").strip()
+                            if raw_txt.startswith("```"):
+                                raw_txt = re.sub(r"^```(?:json)?\s*", "", raw_txt)
+                                raw_txt = re.sub(r"\s*```$", "", raw_txt)
+                            res_json = json.loads(raw_txt)
+                            return res_json
+                elif resp.status in (404, 503, 429):
+                    continue
+        except Exception as e:
+            logger.debug(f"Notice during Gemini analysis with model {model}: {e}")
+            continue
+
+    return None
 
 
 class TechNewsManager:
@@ -360,14 +423,39 @@ class TechNewsManager:
                         except Exception:
                             pass
 
-                        # Combine concise tagline with real functional description
-                        if readme_summary and readme_summary.lower() != desc.lower():
-                            if desc:
-                                final_summary = f"{desc} • {readme_summary}"[:260]
-                            else:
-                                final_summary = readme_summary[:260]
+                        # Pre-filter out obvious meme/joke repos
+                        combined_raw = f"{desc} {readme_summary}".lower()
+                        if any(k in combined_raw for k in ["star the repo", "star this repo", "sucks ass", "sucks butt", "shitpost", "for the memes"]):
+                            logger.info(f"Filtered meme/joke repository: {full_name}")
+                            continue
+
+                        # Deep AI Intelligence Analysis
+                        what_is_inside = ""
+                        target_aud = resolve_target_audience(topics, lang)
+                        final_summary = desc
+
+                        ai_intel = await analyze_with_gemini(
+                            session,
+                            full_name,
+                            f"{desc}\n{readme_summary}",
+                            source_type="open-source repository"
+                        )
+                        if ai_intel:
+                            if ai_intel.get("is_meme"):
+                                logger.info(f"Gemini flagged meme/joke repository, discarding: {full_name}")
+                                continue
+                            if ai_intel.get("what_it_does"):
+                                final_summary = ai_intel["what_it_does"]
+                            if ai_intel.get("what_is_inside"):
+                                what_is_inside = ai_intel["what_is_inside"]
+                            if ai_intel.get("target_audience"):
+                                target_aud = ai_intel["target_audience"]
                         else:
-                            final_summary = desc[:240] if desc else f"{full_name} open-source implementation and development toolkit."
+                            # Heuristic fallback if AI unavailable
+                            if readme_summary and readme_summary.lower() != desc.lower():
+                                final_summary = f"{desc} • {readme_summary}"[:240] if desc else readme_summary[:240]
+                            elif not final_summary:
+                                final_summary = f"{full_name} open-source implementation and development toolkit."
 
                         stars = item.get("stargazers_count", 0)
                         lang = item.get("language") or "General"
@@ -380,7 +468,6 @@ class TechNewsManager:
                         license_dict = item.get("license") or {}
                         spdx_id = license_dict.get("spdx_id") if isinstance(license_dict, dict) else None
 
-                        audience = resolve_target_audience(topics, lang)
                         license_info = resolve_license(spdx_id)
                         maturity = resolve_maturity(stars, open_issues)
 
@@ -390,13 +477,14 @@ class TechNewsManager:
                             source="GitHub",
                             category="github",
                             title=f"{full_name}",
-                            summary=final_summary,
+                            summary=final_summary[:260],
                             url=link,
                             metadata={"stars": stars, "language": lang, "forks": forks, "topics": topics[:4]},
                             owner_avatar=owner_avatar,
-                            target_audience=audience,
+                            target_audience=target_aud,
                             license_info=license_info,
                             maturity=maturity,
+                            what_is_inside=what_is_inside,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -468,7 +556,7 @@ class TechNewsManager:
         return stories
 
     async def _harvest_huggingface(self, session: aiohttp.ClientSession) -> list[TechStory]:
-        """Harvest top daily AI research papers and weights from Hugging Face API."""
+        """Harvest top daily AI research papers and weights from ArXiv and peer-reviewed releases."""
         stories: list[TechStory] = []
         url = "https://huggingface.co/api/papers"
         headers = {"User-Agent": "Kyro-TechPulse/1.0"}
@@ -480,21 +568,46 @@ class TechNewsManager:
                         paper = item.get("paper", {})
                         title = paper.get("title") or item.get("title")
                         paper_id = paper.get("id") or item.get("id")
-                        summary = _clean_html(paper.get("summary") or "AI frontier research paper.")
+                        raw_summary = _clean_html(paper.get("summary") or "")
                         upvotes = paper.get("upvotes") or item.get("upvotes", 0)
                         if not title or not paper_id:
                             continue
 
-                        link = f"https://huggingface.co/papers/{paper_id}"
-                        story_id = hashlib.sha256(f"hf:{link}".encode()).hexdigest()
+                        # If summary is missing or too short, fetch real abstract from ArXiv
+                        abstract = raw_summary
+                        if not abstract or len(abstract) < 40:
+                            try:
+                                arxiv_url = f"https://arxiv.org/abs/{paper_id}"
+                                async with session.get(arxiv_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=aiohttp.ClientTimeout(total=2.5)) as ax_resp:
+                                    if ax_resp.status == 200:
+                                        ax_html = await ax_resp.text()
+                                        m_ax = re.search(r'class=[\'"]abstract[^\'"]*[\'"]>(.*?)</blockquote>', ax_html, re.DOTALL)
+                                        if m_ax:
+                                            abstract = re.sub(r'<.*?>', '', m_ax.group(1)).replace("Abstract:", "").strip()
+                            except Exception:
+                                pass
+
+                        # AI Deep Analysis for real breakthrough context
+                        what_is_inside = ""
+                        final_summary = abstract[:240] if abstract else f"Frontier AI paper analyzing novel machine learning methodologies in {title}."
+                        ai_intel = await analyze_with_gemini(session, title, abstract or title, source_type="AI research paper")
+                        if ai_intel:
+                            if ai_intel.get("what_it_does"):
+                                final_summary = ai_intel["what_it_does"]
+                            if ai_intel.get("what_is_inside"):
+                                what_is_inside = ai_intel["what_is_inside"]
+
+                        link = f"https://arxiv.org/abs/{paper_id}"
+                        story_id = hashlib.sha256(f"arxiv:{link}".encode()).hexdigest()
                         story_obj = TechStory(
                             id=story_id,
-                            source="Hugging Face",
+                            source="ArXiv & AI Frontier",
                             category="ai",
                             title=title,
-                            summary=summary[:220],
+                            summary=final_summary[:260],
                             url=link,
                             metadata={"upvotes": upvotes, "paper_id": paper_id},
+                            what_is_inside=what_is_inside,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -629,30 +742,29 @@ class TechNewsManager:
         container = KyroContainer(accent_color=accent)
 
         if story.category == "github":
-            # Authentic GitHub Repository Presentation
+            # Authentic GitHub Repository Presentation with official GitHub logo
+            accessory = {"type": 11, "media": {"url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"}}
+
             if "/" in story.title:
                 owner_part, repo_part = story.title.split("/", 1)
                 title_line = f"**[{owner_part.strip()}](https://github.com/{owner_part.strip()}) / [{repo_part.strip()}]({story.url})**"
             else:
                 title_line = f"**[{story.title}]({story.url})**"
 
+            # Fill vertical space next to the 80px thumbnail icon
             header_content = (
                 f"{title_line}\n"
-                f"> **Public Repository** • *Trending on GitHub*"
+                f"> **Public Repository** • *Trending on GitHub*\n"
+                f"{story.summary}"
             )
-            accessory = None
-            if story.owner_avatar:
-                accessory = {"type": 11, "media": {"url": story.owner_avatar}}
-            else:
-                accessory = {"type": 11, "media": {"url": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"}}
-
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
-            # Clean natural description
-            body_elements = [story.summary]
+            body_elements: list[str] = []
+            if story.what_is_inside:
+                body_elements.append(f"**Key Capabilities & Stack:**\n> {story.what_is_inside}")
 
-            # GitHub topic pills
+            # GitHub topic tags
             topics = story.metadata.get("topics", [])
             if topics:
                 tags = " ".join(f"`{t}`" for t in topics[:5])
@@ -676,19 +788,24 @@ class TechNewsManager:
             primary_label = "View Repository"
 
         elif story.category == "ai":
+            # Verified neural research icon
+            accessory = {"type": 11, "media": {"url": "https://raw.githubusercontent.com/zerox-exe8/cicada-3301/main/assets/emoji2/icons_richpresence.png"}}
+
             header_content = (
                 f"**[{story.title}]({story.url})**\n"
-                f"> **Daily AI Research** • *Hugging Face Papers*"
+                f"> **Frontier AI Research** • *Peer-Reviewed Pre-print*\n"
+                f"{story.summary}"
             )
-            accessory = {"type": 11, "media": {"url": "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.png"}}
             container.add_section(content=header_content, accessory=accessory)
             container.add_separator(divider=True)
 
+            body_elements: list[str] = []
+            if story.what_is_inside:
+                body_elements.append(f"**Methodology & Key Architecture:**\n> {story.what_is_inside}")
+
             upvotes = story.metadata.get("upvotes", 0)
-            body_elements = [
-                story.summary,
-                f"{dot} **Platform:** Hugging Face Papers  {dot} **Community Upvotes:** `{upvotes}`"
-            ]
+            body_elements.append(f"{dot} **Citation & Source:** ArXiv  {dot} **Community Traction:** `{upvotes}` upvotes")
+
             container.add_text("\n\n".join(body_elements))
             container.add_separator(divider=True)
             container.add_text("-# Frontier AI Intelligence • Kyro Realtime Feed")

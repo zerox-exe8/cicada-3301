@@ -19,7 +19,7 @@ sys.path.insert(0, str(BASE_DIR))
 try:
     import static_ffmpeg
     static_ffmpeg.add_paths()
-except ImportError:
+except Exception:
     pass
 
 import discord

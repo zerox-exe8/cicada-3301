@@ -95,12 +95,12 @@ CATEGORY_COLORS: dict[str, int] = {
 }
 
 CATEGORY_BADGES: dict[str, str] = {
-    "github": "OPEN SOURCE GEM",
-    "tech": "CONSUMER TECH & CULTURE",
-    "ai": "AI BREAKTHROUGH & TOOLS",
-    "security": "SECURITY & OUTAGE ALERT",
-    "systems": "ENGINEERING & ARCHITECTURE",
-    "hardware": "SILICON & HARDWARE",
+    "github": "Open Source",
+    "tech": "Consumer Tech",
+    "ai": "AI Research",
+    "security": "Security Advisory",
+    "systems": "Engineering Intel",
+    "hardware": "Hardware & Silicon",
 }
 
 CRITICAL_KEYWORDS: list[str] = [
@@ -937,17 +937,22 @@ class TechNewsManager:
         accent = 0xFF0033 if story.is_critical else None
         container = KyroContainer(accent_color=accent)
 
-        # Header Title and Subtitle Badge
-        badge = CATEGORY_BADGES.get(story.category, "TECH INTEL")
+        # Header Title and Subtitle
         if story.category == "github" and "/" in story.title:
             owner_part, repo_part = story.title.split("/", 1)
             title_line = f"### [{owner_part.strip()}](https://github.com/{owner_part.strip()}) / [{repo_part.strip()}]({story.url})"
+            subtitle = "**GitHub Repository** • *Open Source*"
+        elif story.category == "github":
+            title_line = f"### [{story.title}]({story.url})"
+            subtitle = "**GitHub Repository** • *Open Source*"
         else:
             title_line = f"### [{story.title}]({story.url})"
+            badge = CATEGORY_BADGES.get(story.category, "Tech Intel")
+            subtitle = f"**{badge}** • *{story.source}*"
 
         header_content = (
             f"{title_line}\n"
-            f"> **{badge}** • *{story.source}*"
+            f"> {subtitle}"
         )
         container.add_text(header_content)
         container.add_separator(divider=True)
@@ -1013,9 +1018,6 @@ class TechNewsManager:
         valid_img = clean_image_url(story.image_url)
         if valid_img:
             container.add_media(valid_img)
-
-        container.add_separator(divider=True)
-        container.add_text(f"-# {story.source} • Kyro Realtime Feed")
 
         # Action row: Primary link button + Save to DM interactive button
         primary_label = "Open Tool" if story.category == "github" else "Read Article"

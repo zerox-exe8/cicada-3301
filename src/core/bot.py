@@ -25,6 +25,7 @@ from src.managers.premium_manager import PremiumManager
 from src.managers.embed_manager import EmbedManager
 from src.managers.event_manager import EventManager
 from src.managers.ticket_manager import TicketManager
+from src.managers.tech_manager import TechNewsManager
 from src.utils.emojis import EmojiRegistry
 
 logger = logging.getLogger("Kyro.Core")
@@ -89,6 +90,7 @@ class KyroBot(commands.Bot):
         self.embed_mgr: EmbedManager = EmbedManager(self.db)
         self.event_mgr: EventManager = EventManager(self.db)
         self.ticket_mgr: TicketManager = TicketManager(self.db)
+        self.tech_mgr: TechNewsManager = TechNewsManager(self.db)
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
         self.no_prefix_users: set[int] = set()
         self.custom_status: str | None = None
@@ -202,6 +204,7 @@ class KyroBot(commands.Bot):
         await self.log_mgr.load_cache()
         await self.premium_mgr.load_cache()
         await self.ticket_mgr.load_cache()
+        await self.tech_mgr.load_cache()
         await self.custom_emojis.load()
 
         # Load No-Prefix authorized users into memory

@@ -9,6 +9,7 @@ from src.managers.blacklist_manager import BlacklistManager
 from src.managers.system_manager import SystemManager
 from src.managers.log_manager import LogManager
 from src.managers.premium_manager import PremiumManager
+from src.managers.tech_manager import TechNewsManager
 
 __all__ = [
     "GuildManager",
@@ -17,4 +18,5 @@ __all__ = [
     "SystemManager",
     "LogManager",
     "PremiumManager",
+    "TechNewsManager",
 ]

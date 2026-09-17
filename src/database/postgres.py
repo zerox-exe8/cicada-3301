@@ -448,6 +448,27 @@ class PostgresDatabase(BaseDatabase):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
+            # Guild Tech Intelligence Feed Configuration
+            """
+            CREATE TABLE IF NOT EXISTS guild_tech_news (
+                guild_id BIGINT PRIMARY KEY,
+                channel_id BIGINT NOT NULL,
+                categories TEXT DEFAULT 'all',
+                thread_enabled BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Dispatched Tech Intelligence Articles Registry for Deduplication
+            """
+            CREATE TABLE IF NOT EXISTS tech_news_history (
+                article_hash VARCHAR(64) PRIMARY KEY,
+                source VARCHAR(32) NOT NULL,
+                category VARCHAR(32) NOT NULL,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL,
+                dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

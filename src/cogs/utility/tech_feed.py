@@ -576,62 +576,76 @@ class TechFeedCog(commands.Cog):
             pass
 
     # -------------------------------------------------------------------------
-    # Command Group: tech
+    # Unified Command: tech
     # -------------------------------------------------------------------------
-    @commands.hybrid_group(
+    @commands.hybrid_command(
         name="tech",
         aliases=["technews", "techfeed"],
-        description="Autonomous Tech Intelligence terminal & feed setup.",
-        invoke_without_command=True,
+        description="Autonomous Tech Intelligence terminal & feed dashboard.",
     )
     @commands.guild_only()
     async def tech(self, ctx: CustomContext) -> None:
-        """Dashboard overview: displays status and controls if configured, or launches setup if not set."""
+        """Unified Tech Dashboard: displays live controls if configured, or launches setup if not set."""
         cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
         if cfg:
-            # Feed is already configured on this server -> show status with Edit & Disable controls
-            await ctx.invoke(self.status)
-        elif ctx.author.guild_permissions.manage_guild:
-            # Not set yet and user has admin permissions -> launch Step 1 setup
-            await ctx.invoke(self.setup_cmd)
-        else:
-            # Not set yet and user is regular member -> show inactive status
-            await ctx.invoke(self.status)
+            channel = ctx.guild.get_channel(cfg["channel_id"])
+            ch_mention = channel.mention if channel else f"Unknown ({cfg['channel_id']})"
+            raw_cats = {c.strip() for c in cfg.get("categories", "all").split(",")}
 
-    @tech.command(
-        name="setup",
-        description="Configure tech news broadcasting channel and module filters.",
-    )
-    @commands.has_permissions(manage_guild=True)
-    @commands.guild_only()
-    async def setup_cmd(self, ctx: CustomContext) -> None:
-        """Interactive 2-step setup: select channel, then select modules."""
-        channel_view = TechSetupChannelView(bot=self.bot, author_id=ctx.author.id)
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"### Tech Dashboard\n"
-                f"> Step 1 of 2: Select Channel"
+            sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+            sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    f"### Tech Dashboard\n"
+                    f"> Status: Active & Broadcasting"
+                )
             )
-        )
-        container.add_separator(divider=True)
-        container.add_text(
-            "Select the text channel where real-time tech intelligence will be broadcast."
-        )
-        await send_container_response(ctx, container, view=channel_view)
+            container.add_separator(divider=True)
 
-    @tech.command(
-        name="status",
-        aliases=["config", "info"],
-        description="View current tech broadcast configuration and settings.",
-    )
-    @commands.guild_only()
-    async def status(self, ctx: CustomContext) -> None:
-        """Display the active tech intelligence configuration with Edit & Disable options."""
-        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
-        container = KyroContainer(accent_color=None)
+            top_lines = [
+                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`"
+            ]
+            container.add_text("\n".join(top_lines))
+            container.add_separator(divider=True)
 
-        if not cfg:
+            module_lines = ["**Active Modules:**"]
+            for opt in MODULE_OPTIONS:
+                val = opt["value"]
+                lbl = opt["label"]
+                is_active = ("all" in raw_cats) or (val in raw_cats)
+                emoji = sw_on if is_active else sw_off
+                module_lines.append(f"{emoji} **{lbl}**")
+
+            container.add_text("\n".join(module_lines))
+            container.add_separator(divider=True)
+
+            view = TechStatusView(
+                bot=self.bot,
+                author_id=ctx.author.id,
+                guild_id=ctx.guild.id,
+                is_active=True,
+            )
+            await send_container_response(ctx, container, view=view)
+        elif ctx.author.guild_permissions.manage_guild:
+            channel_view = TechSetupChannelView(bot=self.bot, author_id=ctx.author.id)
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    f"### Tech Dashboard\n"
+                    f"> Step 1 of 2: Select Channel"
+                )
+            )
+            container.add_separator(divider=True)
+            container.add_text(
+                "Select the text channel where real-time tech intelligence will be broadcast."
+            )
+            await send_container_response(ctx, container, view=channel_view)
+        else:
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
                     f"### Tech Dashboard\n"
@@ -640,84 +654,10 @@ class TechFeedCog(commands.Cog):
             )
             container.add_separator(divider=True)
             container.add_text(
-                f"Automated tech intelligence broadcasts are currently disabled.\n"
-                f"Use the button below or run `{ctx.clean_prefix}tech setup` to activate broadcasting."
-            )
-            view = TechStatusView(
-                bot=self.bot,
-                author_id=ctx.author.id,
-                guild_id=ctx.guild.id,
-                is_active=False,
-            )
-            await send_container_response(ctx, container, view=view)
-            return
-
-        channel = ctx.guild.get_channel(cfg["channel_id"])
-        ch_mention = channel.mention if channel else f"Unknown ({cfg['channel_id']})"
-        raw_cats = {c.strip() for c in cfg.get("categories", "all").split(",")}
-
-        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
-        sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
-
-        container.add_section(
-            content=(
-                f"### Tech Dashboard\n"
-                f"> Status: Active & Broadcasting"
-            )
-        )
-        container.add_separator(divider=True)
-
-        top_lines = [
-            f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`"
-        ]
-        container.add_text("\n".join(top_lines))
-        container.add_separator(divider=True)
-
-        module_lines = ["**Active Modules:**"]
-        for opt in MODULE_OPTIONS:
-            val = opt["value"]
-            lbl = opt["label"]
-            is_active = ("all" in raw_cats) or (val in raw_cats)
-            emoji = sw_on if is_active else sw_off
-            module_lines.append(f"{emoji} **{lbl}**")
-
-        container.add_text("\n".join(module_lines))
-        container.add_separator(divider=True)
-
-        view = TechStatusView(
-            bot=self.bot,
-            author_id=ctx.author.id,
-            guild_id=ctx.guild.id,
-            is_active=True,
-        )
-        await send_container_response(ctx, container, view=view)
-
-    @tech.command(
-        name="latest",
-        aliases=["today", "pulse", "now"],
-        description="Fetch fresh top tech stories on demand right now.",
-    )
-    @app_commands.describe(category="Category: all, github, ai, security, systems, hardware, tech")
-    async def latest(self, ctx: CustomContext, category: str = "all") -> None:
-        """Instant on-demand intelligence brief."""
-        cat_clean = category.strip().lower()
-        if cat_clean not in VALID_CATEGORIES:
-            cat_clean = "all"
-
-        stories = await self.bot.tech_mgr.fetch_category(cat_clean, limit=2)
-        if not stories:
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=f"### No Stories Available\n> Could not retrieve fresh stories for {cat_clean} right now."
+                f"{dot} Automated tech intelligence broadcasts are currently disabled.\n"
+                f"{dot} Server administrators can run `{ctx.clean_prefix}tech` to configure and activate broadcasting."
             )
             await send_container_response(ctx, container)
-            return
-
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
-        for s in stories:
-            card = self.bot.tech_mgr.build_story_container(s, dot=dot)
-            await send_container_response(ctx, card)
 
 
 async def setup(bot: KyroBot) -> None:

@@ -491,7 +491,7 @@ class DevFeedCog(commands.Cog):
             if not stories:
                 return
 
-            unseen = [s for s in stories if not self.bot.dev_mgr.is_seen(s.id)]
+            unseen = [s for s in stories if not self.bot.dev_mgr.is_seen(s)]
             if not unseen:
                 return
 

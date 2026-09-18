@@ -530,7 +530,7 @@ class TechFeedCog(commands.Cog):
 
             # 2. Filter unseen stories for live feeds
             fresh_stories: list[TechStory] = [
-                s for s in stories if not self.bot.tech_mgr.is_hash_seen(s.id)
+                s for s in stories if not self.bot.tech_mgr.is_hash_seen(s)
             ]
             if not fresh_stories:
                 return

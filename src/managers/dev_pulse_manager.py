@@ -54,6 +54,43 @@ def _smart_truncate(text: str, max_len: int = 280) -> str:
     return truncated + "..."
 
 
+def canonicalize_url(raw_url: str) -> str:
+    """Normalize URL by stripping tracking params (utm, ref, etc.), trailing slashes, and lowercasing domain."""
+    if not raw_url:
+        return ""
+    try:
+        from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+        parsed = urlparse(raw_url.strip())
+        netloc = parsed.netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        path = parsed.path.rstrip("/")
+        if not path:
+            path = "/"
+
+        drop_params = {
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+            "ref", "source", "fbclid", "gclid", "token", "_hsenc", "_hsmi", "mc_eid",
+            "campaign", "feature", "tracking"
+        }
+        filtered_q = [(k, v) for k, v in parse_qsl(parsed.query) if k.lower() not in drop_params]
+        query = urlencode(filtered_q)
+        return urlunparse((parsed.scheme.lower() or "https", netloc, path, "", query, ""))
+    except Exception:
+        return raw_url.strip().rstrip("/")
+
+
+def compute_title_fingerprint(raw_title: str) -> str:
+    """Compute normalized alphanumeric title fingerprint stripped of bracketed tags and punctuation."""
+    if not raw_title:
+        return ""
+    # Strip brackets e.g. [Bounty], [100% OFF], [Paid], (Remote)
+    t = re.sub(r"\[[^\]]*\]|\([^\)]*\)", " ", raw_title)
+    t = re.sub(r"[^a-zA-Z0-9\s]", " ", t).lower()
+    t = re.sub(r"\s+", " ", t).strip()
+    return hashlib.sha256(t.encode("utf-8")).hexdigest()
+
+
 def clean_image_url(url: Optional[str]) -> Optional[str]:
     """Sanitize, unescape, and validate image URLs for seamless Discord rendering."""
     if not url or not isinstance(url, str):
@@ -85,6 +122,8 @@ class DevPulseStory:
     highlights: list[str] = field(default_factory=list)
     why_it_matters: str = ""
     is_critical: bool = False
+    title_hash: str = ""
+    entity_hash: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -161,12 +200,14 @@ class DevPulseManager:
     def __init__(self, db: PostgresDatabase) -> None:
         self.db = db
         self._seen_hashes: set[str] = set()
+        self._seen_title_hashes: set[str] = set()
+        self._seen_entity_hashes: set[str] = set()
         self._guild_configs: dict[int, dict[str, Any]] = {}
         self._stories_by_id: dict[str, DevPulseStory] = {}
         self._lock = asyncio.Lock()
 
     async def load_cache(self) -> None:
-        """Load recent seen hashes and guild subscriptions into fast memory."""
+        """Load recent seen hashes, title hashes, entity hashes, and guild subscriptions into fast memory."""
         try:
             if not self.db:
                 return
@@ -185,13 +226,15 @@ class DevPulseManager:
                 }
 
             hash_rows = await self.db.fetch_all(
-                "SELECT item_hash FROM dev_pulse_history ORDER BY dispatched_at DESC LIMIT 3000;"
+                "SELECT item_hash, title_hash, entity_hash FROM dev_pulse_history ORDER BY dispatched_at DESC LIMIT 3000;"
             )
             async with self._lock:
-                self._seen_hashes = {str(r["item_hash"]) for r in hash_rows}
+                self._seen_hashes = {str(r["item_hash"]) for r in hash_rows if r.get("item_hash")}
+                self._seen_title_hashes = {str(r["title_hash"]) for r in hash_rows if r.get("title_hash")}
+                self._seen_entity_hashes = {str(r["entity_hash"]) for r in hash_rows if r.get("entity_hash")}
 
             logger.info(
-                f"DevPulseManager loaded {len(self._guild_configs)} guild feed(s) and {len(self._seen_hashes)} seen item hash(es)."
+                f"DevPulseManager loaded {len(self._guild_configs)} guild feed(s), {len(self._seen_hashes)} seen URL hash(es), and {len(self._seen_title_hashes)} title hash(es)."
             )
         except Exception as e:
             logger.error(f"Error loading DevPulseManager cache: {e}", exc_info=e)
@@ -260,26 +303,39 @@ class DevPulseManager:
         """Retrieve copy of all guild configurations for the dispatcher."""
         return dict(self._guild_configs)
 
-    def is_seen(self, story_id: str) -> bool:
-        """Check if an item has already been broadcast."""
-        return story_id in self._seen_hashes
+    def is_seen(self, story: DevPulseStory | str) -> bool:
+        """Check if an item has already been broadcast by URL hash, title fingerprint, or entity signature."""
+        if isinstance(story, str):
+            return story in self._seen_hashes or story in self._seen_title_hashes or story in self._seen_entity_hashes
+        if story.id in self._seen_hashes:
+            return True
+        if story.title_hash and story.title_hash in self._seen_title_hashes:
+            return True
+        if story.entity_hash and story.entity_hash in self._seen_entity_hashes:
+            return True
+        return False
 
     async def record_dispatched(self, stories: list[DevPulseStory]) -> None:
         """Store item hashes into history to prevent future duplicate broadcasts."""
         if not stories or not self.db:
             return
         insert_query = """
-        INSERT INTO dev_pulse_history (item_hash, source, category, title, url)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (item_hash) DO NOTHING;
+        INSERT INTO dev_pulse_history (item_hash, source, category, title, url, title_hash, entity_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (item_hash) DO UPDATE
+        SET title_hash = EXCLUDED.title_hash, entity_hash = EXCLUDED.entity_hash;
         """
         async with self._lock:
             for s in stories:
                 self._seen_hashes.add(s.id)
+                if s.title_hash:
+                    self._seen_title_hashes.add(s.title_hash)
+                if s.entity_hash:
+                    self._seen_entity_hashes.add(s.entity_hash)
 
         try:
             for s in stories:
-                await self.db.execute(insert_query, s.id, s.source, s.category, s.title, s.url)
+                await self.db.execute(insert_query, s.id, s.source, s.category, s.title, s.url, s.title_hash, s.entity_hash)
         except Exception as e:
             logger.error(f"Failed to write dispatched dev pulse history: {e}", exc_info=e)
 
@@ -289,7 +345,7 @@ class DevPulseManager:
     async def _harvest_bounties(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
         """Harvest active open-source GitHub issues with paid bounties ($50 - $500+)."""
         stories: list[DevPulseStory] = []
-        url = "https://api.github.com/search/issues?q=label:bounty+state:open+is:issue&sort=created&order=desc&per_page=10"
+        url = "https://api.github.com/search/issues?q=label:bounty+state:open+is:issue&sort=created&order=desc&per_page=12"
         headers = {"User-Agent": "Kyro-BountyRadar/1.0", "Accept": "application/vnd.github.v3+json"}
         try:
             async with session.get(url, headers=headers) as resp:
@@ -313,7 +369,11 @@ class DevPulseManager:
                         if m_repo:
                             repo_name = m_repo.group(1)
 
-                        if any(t in repo_name.lower() for t in ["test", "dummy", "practice", "playground", "demo"]):
+                        # Strict blacklist for mirror bots, aggregator repos, and troll bounties
+                        bad_repos = ["bountyfarmer", "bounty-plaza", "issue-mirror", "bounty-aggregator", "test", "dummy", "practice", "playground", "demo"]
+                        if any(b in repo_name.lower() for b in bad_repos):
+                            continue
+                        if any(b in title.lower() for b in ["bountyfarmer", "bounty-plaza", "239398281948585883", "give boxy its own"]):
                             continue
 
                         candidates.append(item)
@@ -372,18 +432,24 @@ class DevPulseManager:
                             why_matters = f"Contribute real code to {repo_name} and claim a {reward} bounty upon PR merge."
                             diff = "Intermediate"
 
-                        story_id = hashlib.sha256(f"bounty:{html_url}".encode()).hexdigest()
+                        canon_url = canonicalize_url(html_url)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"bounty:{repo_name.lower()}:{title_h[:16]}".encode()).hexdigest()
+
                         story_obj = DevPulseStory(
                             id=story_id,
                             source="GitHub Bounties",
                             category="bounties",
                             title=title,
                             summary=summary,
-                            url=html_url,
+                            url=canon_url,
                             metadata={"reward": reward, "repo": repo_name, "difficulty": diff},
                             image_url=f"https://github.com/{repo_name.split('/')[0] if '/' in repo_name else repo_name}.png?size=400",
                             highlights=highlights,
                             why_it_matters=why_matters,
+                            title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         return story_obj
@@ -472,18 +538,26 @@ class DevPulseManager:
                             summary = _smart_truncate(raw_desc, 280) if raw_desc else f"Remote engineering role open for {pos} at {comp}."
                             why_matters = f"Great engineering opportunity with remote flexibility at {comp}."
 
-                        story_id = hashlib.sha256(f"job:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(f"{pos} {comp}")
+                        clean_comp = re.sub(r"[^a-zA-Z0-9]", "", comp).lower()
+                        clean_pos = re.sub(r"[^a-zA-Z0-9]", "", pos).lower()
+                        entity_h = hashlib.sha256(f"job:{clean_comp}:{clean_pos}".encode()).hexdigest()
+
                         story_obj = DevPulseStory(
                             id=story_id,
                             source="Global Developer Careers",
                             category="jobs",
                             title=f"{pos} at {comp}",
                             summary=summary,
-                            url=link,
+                            url=canon_url,
                             metadata={"company": comp, "compensation": comp_str, "location": geo},
                             image_url=logo_url,
                             highlights=highlights,
                             why_it_matters=why_matters,
+                            title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         return story_obj
@@ -509,19 +583,26 @@ class DevPulseManager:
                             if not link:
                                 continue
                             clean_comp = re.sub(r"[^a-zA-Z0-9]", "", comp).lower()
+                            clean_pos = re.sub(r"[^a-zA-Z0-9]", "", pos).lower()
                             logo = f"https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://{clean_comp}.com&size=256"
-                            story_id = hashlib.sha256(f"job:{link}".encode()).hexdigest()
+                            canon_url = canonicalize_url(link)
+                            story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                            title_h = compute_title_fingerprint(f"{pos} {comp}")
+                            entity_h = hashlib.sha256(f"job:{clean_comp}:{clean_pos}".encode()).hexdigest()
+
                             story_obj = DevPulseStory(
                                 id=story_id,
                                 source="RemoteOK Careers",
                                 category="jobs",
                                 title=f"{pos} at {comp}",
                                 summary=f"Remote engineering opportunity for {pos} at {comp}.",
-                                url=link,
+                                url=canon_url,
                                 metadata={"company": comp, "compensation": "Paid / Competitive", "location": "Remote"},
                                 image_url=logo,
                                 highlights=[f"Company: {comp}", "Compensation: Competitive", "Status: Active Remote Listing"],
                                 why_it_matters=f"Join the engineering team at {comp}.",
+                                title_hash=title_h,
+                                entity_hash=entity_h,
                             )
                             self.register_story_memory(story_obj)
                             stories.append(story_obj)
@@ -566,18 +647,24 @@ class DevPulseManager:
                             f"Themes: {theme}",
                         ]
 
-                        story_id = hashlib.sha256(f"hack:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"hackathon:{title_h[:24]}".encode()).hexdigest()
+
                         story_obj = DevPulseStory(
                             id=story_id,
                             source="Devpost Global",
                             category="hackathons",
                             title=title,
                             summary=f"Global developer hackathon featuring {prize_clean} in prizes. Open for solo builders and teams.",
-                            url=link,
+                            url=canon_url,
                             metadata={"prize_pool": prize_clean, "deadline": sub_period},
                             image_url=hero_img,
                             highlights=highlights,
                             why_it_matters=f"Compete globally, build real portfolio projects, and earn from a {prize_clean} prize pool.",
+                            title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -616,18 +703,24 @@ class DevPulseManager:
                             "Expiry: Limited Redemptions (First Come First Served)",
                         ]
 
-                        story_id = hashlib.sha256(f"perk:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"perk:{title_h[:24]}".encode()).hexdigest()
+
                         story_obj = DevPulseStory(
                             id=story_id,
                             source="Developer Perks & Courses",
                             category="perks",
                             title=title,
                             summary=desc[:260] if desc else "Limited-time 100% free developer course coupon and certification voucher.",
-                            url=link,
+                            url=canon_url,
                             metadata={"value": "100% Free Lifetime Access", "expires": "Limited Coupons"},
                             image_url=img_url,
                             highlights=highlights,
                             why_it_matters="Upskill for free and claim certification without paying course fees.",
+                            title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -684,18 +777,24 @@ class DevPulseManager:
                             "Direct Launch via Product Hunt",
                         ]
 
-                        story_id = hashlib.sha256(f"tool:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"tool:{title_h[:24]}".encode()).hexdigest()
+
                         story_obj = DevPulseStory(
                             id=story_id,
                             source="Product Hunt AI",
                             category="tools",
                             title=title,
                             summary=_smart_truncate(desc, 280) if desc else f"New trending AI developer tool launched on Product Hunt: {title}.",
-                            url=link,
+                            url=canon_url,
                             metadata={"tier": "Free Tier Available", "replaces": "Productivity Booster"},
                             image_url=img_url,
                             highlights=highlights,
                             why_it_matters=f"Streamline your developer workflow and test {title} on the free tier.",
+                            title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -707,7 +806,7 @@ class DevPulseManager:
     # High-Level Orchestrators
     # -------------------------------------------------------------------------
     async def harvest_all(self) -> list[DevPulseStory]:
-        """Execute concurrent harvest across all developer opportunity sources."""
+        """Execute concurrent harvest across all developer opportunity sources with in-batch cross-deduplication."""
         connector = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=12)
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
@@ -720,13 +819,35 @@ class DevPulseManager:
                 return_exceptions=True,
             )
 
-        all_stories: list[DevPulseStory] = []
+        raw_stories: list[DevPulseStory] = []
         for res in results:
             if isinstance(res, list):
-                all_stories.extend(res)
-                for s in res:
-                    self.register_story_memory(s)
-        return all_stories
+                raw_stories.extend(res)
+
+        # In-batch cross-source multi-layer deduplication
+        deduped: list[DevPulseStory] = []
+        seen_urls: set[str] = set()
+        seen_titles: set[str] = set()
+        seen_entities: set[str] = set()
+
+        for s in raw_stories:
+            # Check against batch seen set AND historical database seen sets
+            if s.id in seen_urls or self.is_seen(s):
+                continue
+            if s.title_hash and (s.title_hash in seen_titles or s.title_hash in self._seen_title_hashes):
+                continue
+            if s.entity_hash and (s.entity_hash in seen_entities or s.entity_hash in self._seen_entity_hashes):
+                continue
+
+            seen_urls.add(s.id)
+            if s.title_hash:
+                seen_titles.add(s.title_hash)
+            if s.entity_hash:
+                seen_entities.add(s.entity_hash)
+            self.register_story_memory(s)
+            deduped.append(s)
+
+        return deduped
 
     async def fetch_category(self, category: str, limit: int = 4) -> list[DevPulseStory]:
         """Fetch fresh opportunity stories on-demand for a single category."""

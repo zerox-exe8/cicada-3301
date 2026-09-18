@@ -48,6 +48,42 @@ def _smart_truncate(text: str, max_len: int = 240) -> str:
     return f"{truncated.rstrip(' ,;:-.')}..."
 
 
+def canonicalize_url(raw_url: str) -> str:
+    """Normalize URL by stripping tracking params (utm, ref, etc.), trailing slashes, and lowercasing domain."""
+    if not raw_url:
+        return ""
+    try:
+        from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+        parsed = urlparse(raw_url.strip())
+        netloc = parsed.netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        path = parsed.path.rstrip("/")
+        if not path:
+            path = "/"
+
+        drop_params = {
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+            "ref", "source", "fbclid", "gclid", "token", "_hsenc", "_hsmi", "mc_eid",
+            "campaign", "feature", "tracking"
+        }
+        filtered_q = [(k, v) for k, v in parse_qsl(parsed.query) if k.lower() not in drop_params]
+        query = urlencode(filtered_q)
+        return urlunparse((parsed.scheme.lower() or "https", netloc, path, "", query, ""))
+    except Exception:
+        return raw_url.strip().rstrip("/")
+
+
+def compute_title_fingerprint(raw_title: str) -> str:
+    """Compute normalized alphanumeric title fingerprint stripped of editorial prefixes and punctuation."""
+    if not raw_title:
+        return ""
+    t = re.sub(r"\[[^\]]*\]|\([^\)]*\)", " ", raw_title)
+    t = re.sub(r"[^a-zA-Z0-9\s]", " ", t).lower()
+    t = re.sub(r"\s+", " ", t).strip()
+    return hashlib.sha256(t.encode("utf-8")).hexdigest()
+
+
 def clean_image_url(url: Optional[str]) -> Optional[str]:
     """Clean, unescape, and validate image URL for seamless Discord rendering."""
     if not url or not isinstance(url, str):
@@ -83,6 +119,7 @@ class TechStory:
     image_url: Optional[str] = None
     highlights: list[str] = field(default_factory=list)
     why_it_matters: str = ""
+    title_hash: str = ""
 
 
 CATEGORY_COLORS: dict[str, int] = {
@@ -241,12 +278,13 @@ class TechNewsManager:
     def __init__(self, db: PostgresDatabase) -> None:
         self.db = db
         self._seen_hashes: set[str] = set()
+        self._seen_title_hashes: set[str] = set()
         self._guild_configs: dict[int, dict[str, Any]] = {}
         self._stories_by_id: dict[str, TechStory] = {}
         self._lock = asyncio.Lock()
 
     async def load_cache(self) -> None:
-        """Load recent seen hashes and guild subscriptions into fast memory."""
+        """Load recent seen hashes, title hashes, and guild subscriptions into fast memory."""
         try:
             # 1. Load active guild channel configurations
             rows = await self.db.fetch_all(
@@ -265,15 +303,16 @@ class TechNewsManager:
                     for r in rows
                 }
 
-            # 2. Load recent dispatched article hashes (last 3,000 items)
+            # 2. Load recent dispatched article hashes and title hashes (last 3,000 items)
             hash_rows = await self.db.fetch_all(
-                "SELECT article_hash FROM tech_news_history ORDER BY dispatched_at DESC LIMIT 3000;"
+                "SELECT article_hash, title_hash FROM tech_news_history ORDER BY dispatched_at DESC LIMIT 3000;"
             )
             async with self._lock:
-                self._seen_hashes = {str(r["article_hash"]) for r in hash_rows}
+                self._seen_hashes = {str(r["article_hash"]) for r in hash_rows if r.get("article_hash")}
+                self._seen_title_hashes = {str(r["title_hash"]) for r in hash_rows if r.get("title_hash")}
 
             logger.info(
-                f"TechNewsManager loaded {len(self._guild_configs)} guild feed(s) and {len(self._seen_hashes)} seen article hash(es)."
+                f"TechNewsManager loaded {len(self._guild_configs)} guild feed(s), {len(self._seen_hashes)} seen article hash(es), and {len(self._seen_title_hashes)} title hash(es)."
             )
         except Exception as e:
             logger.error(f"Error loading TechNewsManager cache: {e}", exc_info=e)
@@ -388,9 +427,15 @@ class TechNewsManager:
         """Retrieve copy of all guild subscriptions."""
         return dict(self._guild_configs)
 
-    def is_hash_seen(self, article_hash: str) -> bool:
-        """Check if an article hash has already been dispatched."""
-        return article_hash in self._seen_hashes
+    def is_hash_seen(self, article: TechStory | str) -> bool:
+        """Check if an article has already been dispatched by canonical URL hash or title fingerprint."""
+        if isinstance(article, str):
+            return article in self._seen_hashes or article in self._seen_title_hashes
+        if article.id in self._seen_hashes:
+            return True
+        if article.title_hash and article.title_hash in self._seen_title_hashes:
+            return True
+        return False
 
     async def mark_dispatched(self, stories: list[TechStory]) -> None:
         """Record dispatched stories in database and memory cache."""
@@ -398,17 +443,20 @@ class TechNewsManager:
             return
 
         insert_query = """
-        INSERT INTO tech_news_history (article_hash, source, category, title, url)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (article_hash) DO NOTHING;
+        INSERT INTO tech_news_history (article_hash, source, category, title, url, is_critical, title_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (article_hash) DO UPDATE
+        SET is_critical = EXCLUDED.is_critical, title_hash = EXCLUDED.title_hash;
         """
         async with self._lock:
             for s in stories:
                 self._seen_hashes.add(s.id)
+                if s.title_hash:
+                    self._seen_title_hashes.add(s.title_hash)
 
         try:
             for s in stories:
-                await self.db.execute(insert_query, s.id, s.source, s.category, s.title, s.url)
+                await self.db.execute(insert_query, s.id, s.source, s.category, s.title, s.url, s.is_critical, s.title_hash)
         except Exception as e:
             logger.error(f"Failed to write dispatched tech news history: {e}", exc_info=e)
 
@@ -511,14 +559,17 @@ class TechNewsManager:
                             elif not final_summary:
                                 final_summary = f"{full_name} open-source implementation and development toolkit."
 
-                        story_id = hashlib.sha256(f"github:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(full_name)
+
                         story_obj = TechStory(
                             id=story_id,
                             source="GitHub",
                             category="github",
                             title=f"{full_name}",
                             summary=_smart_truncate(final_summary, 320),
-                            url=link,
+                            url=canon_url,
                             metadata={"stars": stars, "language": lang, "forks": forks, "topics": topics[:4]},
                             owner_avatar=owner_avatar,
                             target_audience=target_aud,
@@ -528,6 +579,7 @@ class TechNewsManager:
                             image_url=image_url,
                             highlights=highlights,
                             why_it_matters=why_it_matters,
+                            title_hash=title_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -620,20 +672,24 @@ class TechNewsManager:
                                     real_summary = f"Key systems engineering developments and architecture discussion regarding {title}."
 
                                 is_crit = any(re.search(kw, title, re.IGNORECASE) for kw in CRITICAL_KEYWORDS)
-                                story_id = hashlib.sha256(f"hn:{link}".encode()).hexdigest()
+                                canon_url = canonicalize_url(link)
+                                story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                                title_h = compute_title_fingerprint(title)
+
                                 story_obj = TechStory(
                                     id=story_id,
                                     source="Hacker News",
                                     category="systems",
                                     title=title,
                                     summary=_smart_truncate(real_summary, 320),
-                                    url=link,
+                                    url=canon_url,
                                     metadata={"score": score, "comments": data.get("descendants", 0), "domain": domain},
                                     is_critical=is_crit,
                                     what_is_inside=what_is_inside,
                                     image_url=article_img,
                                     highlights=highlights,
                                     why_it_matters=why_it_matters,
+                                    title_hash=title_h,
                                 )
                                 self.register_story_memory(story_obj)
                                 stories.append(story_obj)
@@ -700,19 +756,23 @@ class TechNewsManager:
                         link = f"https://arxiv.org/abs/{paper_id}"
                         # Hugging Face provides official social thumbnail gradient
                         img_url = clean_image_url(item.get("thumbnailUrl")) or f"https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{paper_id}/gradient.png"
-                        story_id = hashlib.sha256(f"arxiv:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+
                         story_obj = TechStory(
                             id=story_id,
                             source="ArXiv & AI Frontier",
                             category="ai",
                             title=title,
                             summary=_smart_truncate(final_summary, 320),
-                            url=link,
+                            url=canon_url,
                             metadata={"upvotes": upvotes, "paper_id": paper_id},
                             what_is_inside=what_is_inside,
                             image_url=img_url,
                             highlights=highlights,
                             why_it_matters=why_it_matters,
+                            title_hash=title_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -765,19 +825,23 @@ class TechNewsManager:
                             if ai_intel.get("why_it_matters"):
                                 why_it_matters = str(ai_intel["why_it_matters"]).strip()
 
-                        story_id = hashlib.sha256(f"bleeping:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+
                         story_obj = TechStory(
                             id=story_id,
                             source="BleepingComputer",
                             category="security",
                             title=title,
                             summary=_smart_truncate(final_summary, 300),
-                            url=link,
+                            url=canon_url,
                             metadata={"severity": "Critical Exploit / Outage" if is_crit else "Security Advisory"},
                             is_critical=is_crit,
                             image_url=img_url,
                             highlights=highlights,
                             why_it_matters=why_it_matters,
+                            title_hash=title_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -824,18 +888,22 @@ class TechNewsManager:
                             if ai_intel.get("why_it_matters"):
                                 why_it_matters = str(ai_intel["why_it_matters"]).strip()
 
-                        story_id = hashlib.sha256(f"verge:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+
                         story_obj = TechStory(
                             id=story_id,
                             source="The Verge",
                             category="tech",
                             title=title,
                             summary=_smart_truncate(final_summary, 320),
-                            url=link,
+                            url=canon_url,
                             metadata={"tag": "Consumer & Culture"},
                             image_url=img_url,
                             highlights=highlights,
                             why_it_matters=why_it_matters,
+                            title_hash=title_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -859,15 +927,18 @@ class TechNewsManager:
                         desc = _clean_html(item.findtext("description") or "")
                         if not title or not link:
                             continue
-                        story_id = hashlib.sha256(f"phoronix:{link}".encode()).hexdigest()
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
                         story_obj = TechStory(
                             id=story_id,
                             source="Phoronix",
                             category="hardware",
                             title=title,
                             summary=_smart_truncate(desc, 300),
-                            url=link,
+                            url=canon_url,
                             metadata={"type": "Linux/Silicon"},
+                            title_hash=title_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
@@ -879,7 +950,7 @@ class TechNewsManager:
     # High-Level Orchestrator
     # -------------------------------------------------------------------------
     async def harvest_all(self) -> list[TechStory]:
-        """Execute concurrent harvest across all high-signal sources."""
+        """Execute concurrent harvest across all high-signal sources with in-batch cross-deduplication."""
         connector = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
@@ -892,13 +963,29 @@ class TechNewsManager:
                 return_exceptions=True,
             )
 
-        all_stories: list[TechStory] = []
+        raw_stories: list[TechStory] = []
         for res in results:
             if isinstance(res, list):
-                all_stories.extend(res)
-                for s in res:
-                    self.register_story_memory(s)
-        return all_stories
+                raw_stories.extend(res)
+
+        # In-batch cross-source multi-layer deduplication
+        deduped: list[TechStory] = []
+        seen_urls: set[str] = set()
+        seen_titles: set[str] = set()
+
+        for s in raw_stories:
+            if s.id in seen_urls or self.is_hash_seen(s):
+                continue
+            if s.title_hash and (s.title_hash in seen_titles or s.title_hash in self._seen_title_hashes):
+                continue
+
+            seen_urls.add(s.id)
+            if s.title_hash:
+                seen_titles.add(s.title_hash)
+            self.register_story_memory(s)
+            deduped.append(s)
+
+        return deduped
 
     async def fetch_category(self, category: str, limit: int = 4) -> list[TechStory]:
         """Fetch fresh stories on-demand for a single category."""

@@ -485,6 +485,9 @@ class PostgresDatabase(BaseDatabase):
             """
             ALTER TABLE tech_news_history ADD COLUMN IF NOT EXISTS is_critical BOOLEAN DEFAULT FALSE;
             """,
+            """
+            ALTER TABLE tech_news_history ADD COLUMN IF NOT EXISTS title_hash VARCHAR(64);
+            """,
             # Guild Developer Opportunities Feed Configuration
             """
             CREATE TABLE IF NOT EXISTS guild_dev_pulse (
@@ -505,8 +508,16 @@ class PostgresDatabase(BaseDatabase):
                 category VARCHAR(32) NOT NULL,
                 title TEXT NOT NULL,
                 url TEXT NOT NULL,
+                title_hash VARCHAR(64),
+                entity_hash VARCHAR(64),
                 dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            """,
+            """
+            ALTER TABLE dev_pulse_history ADD COLUMN IF NOT EXISTS title_hash VARCHAR(64);
+            """,
+            """
+            ALTER TABLE dev_pulse_history ADD COLUMN IF NOT EXISTS entity_hash VARCHAR(64);
             """,
             # Community Projects Showcase Registry
             """

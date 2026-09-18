@@ -55,10 +55,12 @@ def _smart_truncate(text: str, max_len: int = 280) -> str:
 
 
 def clean_image_url(url: Optional[str]) -> Optional[str]:
-    """Sanitize and validate image URLs."""
+    """Sanitize, unescape, and validate image URLs for seamless Discord rendering."""
     if not url or not isinstance(url, str):
         return None
     url = url.strip()
+    if url.startswith("//"):
+        url = f"https:{url}"
     if not (url.startswith("http://") or url.startswith("https://")):
         return None
     url = url.replace("&#038;", "&").replace("&amp;", "&")
@@ -379,7 +381,7 @@ class DevPulseManager:
                             summary=summary,
                             url=html_url,
                             metadata={"reward": reward, "repo": repo_name, "difficulty": diff},
-                            image_url=f"https://opengraph.githubassets.com/1/{repo_name}",
+                            image_url=f"https://github.com/{repo_name.split('/')[0] if '/' in repo_name else repo_name}.png?size=400",
                             highlights=highlights,
                             why_it_matters=why_matters,
                         )
@@ -395,55 +397,56 @@ class DevPulseManager:
         return stories
 
     async def _harvest_jobs(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
-        """Harvest entry-level, fresher, and remote developer internships."""
+        """Harvest entry-level, fresher, and remote developer internships and jobs with authentic company logos."""
         stories: list[DevPulseStory] = []
-        url = "https://remoteok.com/api?tag=dev"
+        jobicy_url = "https://jobicy.com/api/v2/remote-jobs?count=15&tag=dev"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/json"}
         try:
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(jobicy_url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json(content_type=None)
-                    jobs = [j for j in data if isinstance(j, dict) and j.get("position")]
-                    tech_keywords = ["dev", "engineer", "software", "frontend", "backend", "python", "react", "fullstack", "data", "code", "intern", "web", "ai", "security", "mobile"]
+                    jobs = data.get("jobs", []) if isinstance(data, dict) else []
+                    candidates: list[dict[str, Any]] = []
                     exclude_keywords = ["recruiter", "sales", "hr", "marketing", "account executive", "copywriter", "customer support"]
 
-                    candidates: list[dict[str, Any]] = []
-                    for job in jobs[:20]:
-                        pos = job.get("position", "")
-                        link = job.get("url") or job.get("apply_url")
-                        tags = job.get("tags") or []
-
-                        combined_text = f"{pos} {' '.join(tags)}".lower()
-                        if any(ex in combined_text for ex in exclude_keywords):
+                    for job in jobs[:15]:
+                        pos = job.get("jobTitle", "")
+                        comp = job.get("companyName", "Tech Company")
+                        link = job.get("url")
+                        if not pos or not link:
                             continue
-                        if not any(k in combined_text for k in tech_keywords):
+                        if any(ex in pos.lower() for ex in exclude_keywords):
                             continue
-                        if not link:
-                            continue
-
                         candidates.append(job)
                         if len(candidates) >= 4:
                             break
 
-                    async def _process_job(job: dict[str, Any]) -> Optional[DevPulseStory]:
-                        pos = job.get("position", "")
-                        comp = job.get("company", "Tech Startup")
-                        link = job.get("url") or job.get("apply_url")
-                        raw_desc = _clean_html(job.get("description") or "")
-                        salary_min = job.get("salary_min")
-                        salary_max = job.get("salary_max")
+                    async def _process_jobicy_job(job: dict[str, Any]) -> Optional[DevPulseStory]:
+                        pos = job.get("jobTitle", "")
+                        comp = job.get("companyName", "Tech Company")
+                        link = job.get("url")
+                        raw_desc = _clean_html(job.get("jobDescription") or "")
+                        geo = job.get("jobGeo") or "Worldwide Remote"
+
+                        salary_min = job.get("annualSalaryMin")
+                        salary_max = job.get("annualSalaryMax")
+                        curr = job.get("salaryCurrency", "USD")
                         comp_str = "Paid / Competitive"
                         if salary_min and salary_max:
-                            comp_str = f"${salary_min:,} - ${salary_max:,}/yr"
+                            comp_str = f"${salary_min:,} - ${salary_max:,} {curr}/yr"
                         elif salary_min:
-                            comp_str = f"${salary_min:,}+"
+                            comp_str = f"${salary_min:,}+ {curr}"
 
-                        location = job.get("location") or "Worldwide Remote"
+                        # High-resolution authentic company logo
+                        logo_url = job.get("companyLogo")
+                        if not logo_url:
+                            clean_name = re.sub(r"[^a-zA-Z0-9]", "", comp).lower()
+                            logo_url = f"https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://{clean_name}.com&size=256"
 
                         ai_data = await analyze_opportunity_with_gemini(
                             session=session,
                             title=f"{pos} at {comp}",
-                            raw_context=f"Role: {pos}\nCompany: {comp}\nCompensation: {comp_str}\nLocation: {location}\nDescription: {raw_desc[:800]}",
+                            raw_context=f"Role: {pos}\nCompany: {comp}\nCompensation: {comp_str}\nLocation: {geo}\nDescription: {raw_desc[:800]}",
                             category="Developer Job / Internship",
                         )
 
@@ -455,42 +458,76 @@ class DevPulseManager:
                             highlights = ai_data.get("highlights", [])
                             if not highlights:
                                 highlights = [
-                                    f"Company: {comp} ({location})",
+                                    f"Company: {comp} ({geo})",
                                     f"Compensation: {comp_str}",
                                     "Experience Level: Entry-Level / Internship / Junior",
                                 ]
-                            why_matters = ai_data.get("why_it_matters", f"Great entry-level career opportunity with remote flexibility at {comp}.")
+                            why_matters = ai_data.get("why_it_matters", f"Great engineering opportunity with remote flexibility at {comp}.")
                         else:
                             highlights = [
-                                f"Company: {comp} ({location})",
+                                f"Company: {comp} ({geo})",
                                 f"Compensation: {comp_str}",
                                 "Experience Level: Entry-Level / Internship / Junior",
                             ]
-                            summary = _smart_truncate(raw_desc, 280) if raw_desc else f"Remote engineering role open for {pos} at {comp}. 0-1 YOE friendly."
-                            why_matters = f"Great entry-level career opportunity with remote flexibility at {comp}."
+                            summary = _smart_truncate(raw_desc, 280) if raw_desc else f"Remote engineering role open for {pos} at {comp}."
+                            why_matters = f"Great engineering opportunity with remote flexibility at {comp}."
 
                         story_id = hashlib.sha256(f"job:{link}".encode()).hexdigest()
                         story_obj = DevPulseStory(
                             id=story_id,
-                            source="RemoteOK Careers",
+                            source="Global Developer Careers",
                             category="jobs",
                             title=f"{pos} at {comp}",
                             summary=summary,
                             url=link,
-                            metadata={"company": comp, "compensation": comp_str, "location": location},
-                            image_url=job.get("company_logo"),
+                            metadata={"company": comp, "compensation": comp_str, "location": geo},
+                            image_url=logo_url,
                             highlights=highlights,
                             why_it_matters=why_matters,
                         )
                         self.register_story_memory(story_obj)
                         return story_obj
 
-                    results = await asyncio.gather(*[_process_job(c) for c in candidates], return_exceptions=True)
+                    results = await asyncio.gather(*[_process_jobicy_job(c) for c in candidates], return_exceptions=True)
                     for r in results:
                         if isinstance(r, DevPulseStory):
                             stories.append(r)
         except Exception as e:
             logger.debug(f"Notice harvesting jobs: {e}")
+
+        # Fallback to RemoteOK if Jobicy yielded zero
+        if not stories:
+            try:
+                async with session.get("https://remoteok.com/api?tag=dev", headers=headers) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        jobs = [j for j in data if isinstance(j, dict) and j.get("position")]
+                        for job in jobs[:4]:
+                            pos = job.get("position", "")
+                            comp = job.get("company", "Tech Startup")
+                            link = job.get("url") or job.get("apply_url")
+                            if not link:
+                                continue
+                            clean_comp = re.sub(r"[^a-zA-Z0-9]", "", comp).lower()
+                            logo = f"https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://{clean_comp}.com&size=256"
+                            story_id = hashlib.sha256(f"job:{link}".encode()).hexdigest()
+                            story_obj = DevPulseStory(
+                                id=story_id,
+                                source="RemoteOK Careers",
+                                category="jobs",
+                                title=f"{pos} at {comp}",
+                                summary=f"Remote engineering opportunity for {pos} at {comp}.",
+                                url=link,
+                                metadata={"company": comp, "compensation": "Paid / Competitive", "location": "Remote"},
+                                image_url=logo,
+                                highlights=[f"Company: {comp}", "Compensation: Competitive", "Status: Active Remote Listing"],
+                                why_it_matters=f"Join the engineering team at {comp}.",
+                            )
+                            self.register_story_memory(story_obj)
+                            stories.append(story_obj)
+            except Exception as e:
+                logger.debug(f"Notice during RemoteOK fallback: {e}")
+
         return stories
 
     async def _harvest_hackathons(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
@@ -504,7 +541,7 @@ class DevPulseManager:
         try:
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
                     for h in data.get("hackathons", [])[:6]:
                         title = h.get("title", "")
                         link = h.get("url", "")
@@ -514,7 +551,11 @@ class DevPulseManager:
 
                         sub_period = h.get("submission_period_dates") or "Registration Open"
                         theme = ", ".join([t.get("name") for t in h.get("themes", [])[:3]]) if h.get("themes") else "Open Innovation"
+                        
+                        # Authentic AWS CloudFront challenge banner
                         hero_img = h.get("thumbnail_url")
+                        if hero_img and hero_img.startswith("//"):
+                            hero_img = f"https:{hero_img}"
 
                         if not title or not link:
                             continue
@@ -561,10 +602,13 @@ class DevPulseManager:
                         if not title or not link:
                             continue
 
+                        # Extract authentic high-resolution course thumbnail from enclosure
                         img_url = None
-                        m_img = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', item.findtext("description") or "")
-                        if m_img:
-                            img_url = m_img.group(1)
+                        enc = item.find("enclosure")
+                        if enc is not None and enc.get("url"):
+                            raw_u = enc.get("url")
+                            # Rewrite udemy-images.udemy.com to public unauthenticated CDN
+                            img_url = raw_u.replace("udemy-images.udemy.com", "img-c.udemycdn.com")
 
                         highlights = [
                             "Discount: 100% Free Coupon Code Included",
@@ -592,10 +636,13 @@ class DevPulseManager:
         return stories
 
     async def _harvest_ai_tools(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
-        """Harvest daily top practical AI developer tools with generous free tiers from ProductHunt."""
+        """Harvest daily top practical AI developer tools with authentic hero images from tool websites."""
         stories: list[DevPulseStory] = []
         feed_url = "https://www.producthunt.com/feed"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
         try:
             async with session.get(feed_url, headers=headers) as resp:
                 if resp.status == 200:
@@ -610,10 +657,26 @@ class DevPulseManager:
                         if not title or not link:
                             continue
 
+                        # Extract authentic tool launch banner from official product site
                         img_url = None
-                        m_img = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_content)
-                        if m_img:
-                            img_url = m_img.group(1).split("?")[0]
+                        m_redir = re.search(r'href=["\'](https://www\.producthunt\.com/r/p/[^"\']+)["\']', raw_content)
+                        if m_redir:
+                            redir_url = m_redir.group(1).replace("&amp;", "&")
+                            try:
+                                async with session.get(redir_url, headers=headers, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=2.5)) as pr:
+                                    if pr.status == 200:
+                                        p_html = await pr.text()
+                                        m_og = re.search(r'<meta[^>]+(?:property|name)=[\'"](?:og:image)[\'"][^>]+content=[\'"]([^\'"]+)[\'"]', p_html, re.I)
+                                        if not m_og:
+                                            m_og = re.search(r'<meta[^>]+content=[\'"]([^\'"]+)[\'"][^>]+(?:property|name)=[\'"](?:og:image)[\'"]', p_html, re.I)
+                                        if m_og:
+                                            from urllib.parse import urljoin
+                                            raw_img = m_og.group(1).replace("&amp;", "&")
+                                            img_url = urljoin(str(pr.url), raw_img)
+                                        else:
+                                            img_url = f"https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url={str(pr.url)}&size=256"
+                            except Exception:
+                                pass
 
                         highlights = [
                             "Tier: Generous Free Tier / Free Trials Available",

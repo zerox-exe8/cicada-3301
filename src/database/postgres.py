@@ -542,6 +542,44 @@ class PostgresDatabase(BaseDatabase):
                 PRIMARY KEY (project_id, user_id)
             );
             """,
+            # Real-Time Cloud Infrastructure Outages Tracking Registry for Self-Healing Embeds
+            """
+            CREATE TABLE IF NOT EXISTS active_tech_incidents (
+                incident_id VARCHAR(64) NOT NULL,
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL,
+                provider VARCHAR(32) NOT NULL,
+                title TEXT NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                impact VARCHAR(32) DEFAULT 'minor',
+                url TEXT NOT NULL,
+                started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP,
+                last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (incident_id, guild_id)
+            );
+            """,
+            # Critical Zero-Day CVEs and Supply Chain Threat Alerts Registry
+            """
+            CREATE TABLE IF NOT EXISTS tech_cve_history (
+                cve_id VARCHAR(64) PRIMARY KEY,
+                title TEXT NOT NULL,
+                severity VARCHAR(32) NOT NULL,
+                cvss_score FLOAT DEFAULT 9.0,
+                affected_package VARCHAR(120),
+                dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Major Runtimes and Frameworks Release Radar Registry
+            """
+            CREATE TABLE IF NOT EXISTS tech_releases_history (
+                release_id VARCHAR(120) PRIMARY KEY,
+                project VARCHAR(64) NOT NULL,
+                tag_name VARCHAR(64) NOT NULL,
+                dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

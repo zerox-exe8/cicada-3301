@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional
 
+from datetime import datetime, timezone
 import aiohttp
 import discord
 from discord import app_commands
@@ -15,6 +16,7 @@ from discord.ext import commands, tasks
 
 from src.core.context import CustomContext
 from src.managers.tech_manager import CATEGORY_BADGES, TechStory, validate_url_live
+from src.managers.tech_realtime_manager import OutageIncident
 from src.utils.containers import (
     KyroContainer,
     edit_container_response,
@@ -388,6 +390,14 @@ class TechStatusView(discord.ui.View):
             )
             self.disable_button.callback = self._on_disable
             self.add_item(self.disable_button)
+
+            self.health_button = discord.ui.Button(
+                label="Cloud Health",
+                style=discord.ButtonStyle.secondary,
+                row=0,
+            )
+            self.health_button.callback = self._on_health_check
+            self.add_item(self.health_button)
         else:
             self.setup_button = discord.ui.Button(
                 label="Configure Feed",
@@ -436,6 +446,30 @@ class TechStatusView(discord.ui.View):
         )
         await edit_container_response(interaction, container, view=None)
 
+    async def _on_health_check(self, interaction: discord.Interaction) -> None:
+        """Display detailed live cloud telemetry matrix."""
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        health = await self.bot.tech_realtime_mgr.get_global_health_summary()
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "### Global Infrastructure Telemetry\n"
+                "> Real-time Health Radar for Developer Platforms"
+            )
+        )
+        container.add_separator(divider=True)
+
+        lines = []
+        for prov, stat in health.items():
+            st_upper = stat.upper()
+            lines.append(f"{dot} **{prov}:** `{st_upper}`")
+
+        container.add_text("\n".join(lines))
+        container.add_separator(divider=True)
+        container.add_text("-# Live telemetry polled from official status engines every 60s.")
+        await send_container_response(interaction, container, ephemeral=True)
+
 
 class TechFeedCog(commands.Cog):
     """Autonomous Tech Intelligence feed dispatcher and interactive setup."""
@@ -444,10 +478,12 @@ class TechFeedCog(commands.Cog):
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
         self._poller_task.start()
+        self._realtime_pulse_task.start()
 
     def cog_unload(self) -> None:
-        """Cancel background loop cleanly upon cog unload."""
+        """Cancel background loops cleanly upon cog unload."""
         self._poller_task.cancel()
+        self._realtime_pulse_task.cancel()
 
     # -------------------------------------------------------------------------
     # Interactive Bookmark Listener (Save to DM)
@@ -615,6 +651,162 @@ class TechFeedCog(commands.Cog):
             pass
 
     # -------------------------------------------------------------------------
+    # Autonomous Real-Time Engine (Every 60 seconds)
+    # Outages (Self-Healing Embeds), Zero-Day CVEs, Major Releases
+    # -------------------------------------------------------------------------
+    @tasks.loop(seconds=60)
+    async def _realtime_pulse_task(self) -> None:
+        """High-frequency 60s real-time engine tracking cloud outages, CVEs, and framework releases."""
+        try:
+            await self.bot.wait_until_ready()
+        except (RuntimeError, Exception):
+            return
+
+        guild_configs = self.bot.tech_mgr.get_all_configs()
+        if not guild_configs:
+            return
+
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        timeout = aiohttp.ClientTimeout(total=8.0)
+        connector = aiohttp.TCPConnector(ssl=False)
+
+        try:
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                # 1. Feature A: Outage Radar & Self-Healing Message Updates
+                detected_outages = await self.bot.tech_realtime_mgr.poll_active_outages(session)
+                tracked_records = await self.bot.tech_realtime_mgr.get_tracked_active_incidents()
+                tracked_map: dict[str, list[dict]] = {}
+                for rec in tracked_records:
+                    tracked_map.setdefault(rec["incident_id"], []).append(rec)
+
+                current_detected_ids: set[str] = set()
+                for incident in detected_outages:
+                    current_detected_ids.add(incident.incident_id)
+                    existing_posts = tracked_map.get(incident.incident_id, [])
+
+                    if not existing_posts:
+                        # New outage incident detected -> broadcast to active channels
+                        container = self.bot.tech_realtime_mgr.build_outage_container(incident, dot=dot)
+                        for guild_id, cfg in list(guild_configs.items()):
+                            guild = self.bot.get_guild(guild_id)
+                            if not guild:
+                                continue
+                            channel = guild.get_channel(cfg["channel_id"])
+                            if not isinstance(channel, discord.TextChannel):
+                                continue
+
+                            mention = f"<@&{cfg['alert_role_id']}>" if cfg.get("alert_role_id") else None
+                            try:
+                                msg = await send_container_response(channel, container, content=mention)
+                                if msg and isinstance(msg, discord.Message):
+                                    await self.bot.tech_realtime_mgr.record_incident_post(
+                                        incident, guild_id, channel.id, msg.id
+                                    )
+                            except Exception as post_err:
+                                logger.debug(f"Failed to broadcast outage to guild {guild_id}: {post_err}")
+                    else:
+                        # Existing tracked incident -> check if status progressed for in-place edit
+                        for post in existing_posts:
+                            old_status = str(post.get("status", "")).lower()
+                            if old_status != incident.status.lower():
+                                guild = self.bot.get_guild(post["guild_id"])
+                                if not guild:
+                                    continue
+                                channel = guild.get_channel(post["channel_id"])
+                                if not isinstance(channel, discord.TextChannel):
+                                    continue
+                                try:
+                                    msg = await channel.fetch_message(post["message_id"])
+                                    if msg:
+                                        updated_container = self.bot.tech_realtime_mgr.build_outage_container(incident, dot=dot)
+                                        await edit_container_response(msg, updated_container)
+                                except Exception as edit_err:
+                                    logger.debug(f"Notice self-healing incident embed: {edit_err}")
+
+                        await self.bot.tech_realtime_mgr.update_incident_record(
+                            incident.incident_id, incident.status, incident.impact
+                        )
+                        if incident.status == "resolved":
+                            await self.bot.tech_realtime_mgr.mark_incident_resolved(incident.incident_id)
+
+                # Check for incidents resolved upstream that were not caught
+                for inc_id, posts in tracked_map.items():
+                    if inc_id not in current_detected_ids:
+                        for post in posts:
+                            guild = self.bot.get_guild(post["guild_id"])
+                            if not guild:
+                                continue
+                            channel = guild.get_channel(post["channel_id"])
+                            if not isinstance(channel, discord.TextChannel):
+                                continue
+                            try:
+                                msg = await channel.fetch_message(post["message_id"])
+                                if msg:
+                                    resolved_inc = OutageIncident(
+                                        incident_id=inc_id,
+                                        provider=post.get("provider", "Cloud Platform"),
+                                        title=post.get("title", "Service Disruption"),
+                                        status="resolved",
+                                        impact="none",
+                                        url=post.get("url", ""),
+                                        created_at="",
+                                        updated_at="",
+                                        latest_update="Incident resolved. All operational telemetry verified nominal.",
+                                        resolved_at=datetime.now(timezone.utc).isoformat(),
+                                    )
+                                    updated_container = self.bot.tech_realtime_mgr.build_outage_container(resolved_inc, dot=dot)
+                                    await edit_container_response(msg, updated_container)
+                            except Exception:
+                                pass
+                        await self.bot.tech_realtime_mgr.mark_incident_resolved(inc_id)
+
+                # 2. Feature B: Critical Zero-Day CVE Alerts (CISA KEV)
+                critical_cves = await self.bot.tech_realtime_mgr.poll_critical_cves(session)
+                for cve in critical_cves:
+                    cve_card = self.bot.tech_realtime_mgr.build_cve_container(cve, dot=dot)
+                    for guild_id, cfg in list(guild_configs.items()):
+                        guild = self.bot.get_guild(guild_id)
+                        if not guild:
+                            continue
+                        channel = guild.get_channel(cfg["channel_id"])
+                        if not isinstance(channel, discord.TextChannel):
+                            continue
+                        mention = f"<@&{cfg['alert_role_id']}>" if cfg.get("alert_role_id") else None
+                        try:
+                            await send_container_response(channel, cve_card, content=mention)
+                        except Exception as cve_err:
+                            logger.debug(f"Failed to dispatch CVE alert: {cve_err}")
+                    await self.bot.tech_realtime_mgr.mark_cve_dispatched(cve)
+
+                # 3. Feature D: Major Framework & Runtime Releases
+                major_releases = await self.bot.tech_realtime_mgr.poll_major_releases(session)
+                for rel in major_releases:
+                    rel_card = self.bot.tech_realtime_mgr.build_release_container(rel, dot=dot)
+                    for guild_id, cfg in list(guild_configs.items()):
+                        guild = self.bot.get_guild(guild_id)
+                        if not guild:
+                            continue
+                        channel = guild.get_channel(cfg["channel_id"])
+                        if not isinstance(channel, discord.TextChannel):
+                            continue
+                        try:
+                            await send_container_response(channel, rel_card)
+                        except Exception as rel_err:
+                            logger.debug(f"Failed to dispatch release radar: {rel_err}")
+                    await self.bot.tech_realtime_mgr.mark_release_dispatched(rel)
+
+        except Exception as loop_err:
+            logger.debug(f"Notice in real-time tech pulse task: {loop_err}")
+
+    @_realtime_pulse_task.before_loop
+    async def _before_realtime_pulse(self) -> None:
+        """Wait until the bot gateway is ready before starting real-time loop."""
+        try:
+            await self.bot.wait_until_ready()
+        except (RuntimeError, Exception):
+            pass
+
+    # -------------------------------------------------------------------------
     # Unified Command: tech
     # -------------------------------------------------------------------------
     @commands.hybrid_command(
@@ -644,8 +836,13 @@ class TechFeedCog(commands.Cog):
             )
             container.add_separator(divider=True)
 
+            health = await self.bot.tech_realtime_mgr.get_global_health_summary()
+            health_summary_parts = [f"{prov} `{stat}`" for prov, stat in health.items()]
+            health_line = f"**Cloud Health:** " + f"  {dot}  ".join(health_summary_parts)
+
             top_lines = [
-                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`"
+                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`",
+                health_line,
             ]
             container.add_text("\n".join(top_lines))
             container.add_separator(divider=True)

@@ -322,7 +322,7 @@ class DevSetupModulesView(discord.ui.View):
         container.add_separator(divider=True)
 
         top_lines = [
-            f"**Channel:** {self.channel.mention}  {dot}  **Cadence:** `Every 20m`  {dot}  **Status:** `Active`"
+            f"**Channel:** {self.channel.mention}  {dot}  **Cadence:** `Every 10m`  {dot}  **Status:** `Active`"
         ]
         container.add_text("\n".join(top_lines))
         container.add_separator(divider=True)
@@ -472,11 +472,11 @@ class DevFeedCog(commands.Cog):
                 pass
 
     # -------------------------------------------------------------------------
-    # Background Ingestion & Dispatch Loop (Every 20 Minutes)
+    # Background Ingestion & Dispatch Loop (Every 10 Minutes with Pacing)
     # -------------------------------------------------------------------------
-    @tasks.loop(minutes=20)
+    @tasks.loop(minutes=10)
     async def _poller_task(self) -> None:
-        """Background loop harvesting bounties, jobs, hackathons, perks, and AI tools."""
+        """Background loop harvesting bounties, jobs, hackathons, perks, and AI tools with anti-flood pacing."""
         try:
             await self.bot.wait_until_ready()
         except (RuntimeError, Exception):
@@ -498,7 +498,10 @@ class DevFeedCog(commands.Cog):
             dot = self.bot.custom_emojis.get("heart_dot", "•")
             dispatched: list[DevPulseStory] = []
 
-            for story in unseen[:8]:
+            # Throttled pacing: Send maximum 2 items per 10-minute cycle to avoid channel flooding
+            candidates = unseen[:2]
+
+            for index, story in enumerate(candidates):
                 card = self.bot.dev_mgr.build_story_container(story, dot=dot)
                 dispatched_any = False
 
@@ -524,6 +527,10 @@ class DevFeedCog(commands.Cog):
                 if dispatched_any:
                     dispatched.append(story)
 
+                # Intentional spacing between items so cards never spam simultaneously
+                if index < len(candidates) - 1:
+                    await asyncio.sleep(5)
+
             if dispatched:
                 await self.bot.dev_mgr.record_dispatched(dispatched)
 
@@ -538,9 +545,31 @@ class DevFeedCog(commands.Cog):
         aliases=["devpulse", "opportunities", "bounties", "devjobs"],
         description="Autonomous Developer Opportunities & Career Dashboard.",
     )
+    @app_commands.describe(
+        category="Optional category to fetch live right now (bounties, jobs, hackathons, perks, tools)"
+    )
     @commands.guild_only()
-    async def dev(self, ctx: CustomContext) -> None:
-        """Unified Dev Dashboard: displays live controls if configured, or launches setup if not set."""
+    async def dev(self, ctx: CustomContext, category: Optional[str] = None) -> None:
+        """Unified Dev Dashboard: displays live controls, launches setup, or fetches live opportunities on demand."""
+        if category:
+            cat_clean = category.strip().lower()
+            valid_cats = {"bounties", "bounty", "jobs", "job", "careers", "internships", "hackathons", "hackathon", "perks", "perk", "tools", "tool"}
+            if cat_clean in valid_cats:
+                await ctx.defer(ephemeral=False)
+                stories = await self.bot.dev_mgr.fetch_category(cat_clean, limit=1)
+                if not stories:
+                    container = KyroContainer(accent_color=None)
+                    container.add_section(
+                        content=f"### Dev Radar\n> No fresh opportunities found right now for `{cat_clean}`. Please check back shortly."
+                    )
+                    await send_container_response(ctx, container)
+                    return
+
+                dot = self.bot.custom_emojis.get("heart_dot", "•")
+                card = self.bot.dev_mgr.build_story_container(stories[0], dot=dot)
+                await send_container_response(ctx, card)
+                return
+
         cfg = self.bot.dev_mgr.get_guild_config(ctx.guild.id)
         if cfg:
             channel = ctx.guild.get_channel(cfg["channel_id"])
@@ -561,7 +590,7 @@ class DevFeedCog(commands.Cog):
             container.add_separator(divider=True)
 
             top_lines = [
-                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 20m`  {dot}  **Status:** `Active`"
+                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 10m`  {dot}  **Status:** `Active`"
             ]
             container.add_text("\n".join(top_lines))
             container.add_separator(divider=True)

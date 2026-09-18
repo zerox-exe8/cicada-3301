@@ -86,6 +86,73 @@ class DevPulseStory:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+async def analyze_opportunity_with_gemini(
+    session: aiohttp.ClientSession,
+    title: str,
+    raw_context: str,
+    category: str,
+) -> Optional[dict[str, Any]]:
+    """Use Gemini intelligence to analyze developer opportunities, filter spam/meme tasks,
+    and extract crisp engineering deliverables, tech stack tags, difficulty, and why it matters."""
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    prompt = (
+        f"You are a principal software engineer evaluating real-world developer opportunities.\n"
+        f"Category: {category}\n"
+        f"Title: {title}\n"
+        f"Context/Details:\n{raw_context[:1400]}\n\n"
+        f"Instructions:\n"
+        f"1. 'is_valid': true if this is a genuine, actionable developer opportunity (bounty, job/internship, hackathon, perk, or tool). Set false if it is spam, scam, closed task, troll post, or zero-context listing.\n"
+        f"2. 'summary': A punchy 1-2 sentence executive explanation of what this opportunity is and what code/task is involved. No marketing fluff.\n"
+        f"3. 'highlights': Exactly 2 to 3 concise bullet points with concrete technical details (e.g. 'Tech Stack: Python, FastAPI', 'Eligibility: Global Remote, 0-1 YOE', 'Bounty: $150 Paid via Stripe upon PR merge').\n"
+        f"4. 'difficulty': One of: 'Beginner-Friendly', 'Intermediate', 'Advanced'.\n"
+        f"5. 'why_it_matters': Exactly 1 strong sentence explaining why a developer or student should jump on this right now.\n\n"
+        f"Respond strictly in valid JSON matching this schema:\n"
+        f'{{"is_valid": bool, "summary": "string", "highlights": ["string", "string"], "difficulty": "string", "why_it_matters": "string"}}'
+    )
+
+    models_to_try = ["gemini-flash-lite-latest", "gemma-4-26b-a4b-it", "gemini-flash-latest"]
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
+    }
+
+    for model in models_to_try:
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        try:
+            async with session.post(
+                endpoint,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=6.0),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            raw_txt = parts[0].get("text", "{}").strip()
+                            if raw_txt.startswith("```"):
+                                raw_txt = re.sub(r"^```(?:json)?\s*", "", raw_txt)
+                                raw_txt = re.sub(r"\s*```$", "", raw_txt)
+                            res_json = json.loads(raw_txt)
+                            return res_json
+                elif resp.status in (404, 503, 429):
+                    continue
+        except Exception as e:
+            logger.debug(f"Notice during Gemini opportunity analysis with model {model}: {e}")
+            continue
+
+    return None
+
+
 class DevPulseManager:
     """Central manager handling developer opportunities ingestion, deduplication, and feeds."""
 
@@ -102,7 +169,7 @@ class DevPulseManager:
             if not self.db:
                 return
             rows = await self.db.fetch_all(
-                "SELECT guild_id, channel_id, categories, thread_enabled, mode, alert_role_id FROM guild_dev_pulse;"
+                "SELECT guild_id, channel_id, categories, thread_enabled, mode FROM guild_dev_pulse;"
             )
             async with self._lock:
                 self._guild_configs = {
@@ -111,7 +178,6 @@ class DevPulseManager:
                         "categories": str(r["categories"] or "all"),
                         "thread_enabled": bool(r.get("thread_enabled", False)),
                         "mode": str(r.get("mode") or "live"),
-                        "alert_role_id": int(r["alert_role_id"]) if r.get("alert_role_id") else None,
                     }
                     for r in rows
                 }
@@ -166,7 +232,6 @@ class DevPulseManager:
                     "categories": cat_clean,
                     "thread_enabled": thread_enabled,
                     "mode": existing.get("mode", "live"),
-                    "alert_role_id": existing.get("alert_role_id"),
                 }
             return True
         except Exception as e:
@@ -222,19 +287,41 @@ class DevPulseManager:
     async def _harvest_bounties(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
         """Harvest active open-source GitHub issues with paid bounties ($50 - $500+)."""
         stories: list[DevPulseStory] = []
-        url = "https://api.github.com/search/issues?q=label:bounty+state:open+is:issue&sort=created&order=desc&per_page=6"
+        url = "https://api.github.com/search/issues?q=label:bounty+state:open+is:issue&sort=created&order=desc&per_page=10"
         headers = {"User-Agent": "Kyro-BountyRadar/1.0", "Accept": "application/vnd.github.v3+json"}
         try:
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    candidates: list[dict[str, Any]] = []
                     for item in data.get("items", []):
+                        if item.get("state") != "open":
+                            continue
+                        if item.get("assignee") is not None or bool(item.get("assignees")):
+                            continue
+                        if item.get("pull_request") is not None:
+                            continue
                         title = item.get("title", "")
                         html_url = item.get("html_url", "")
-                        body = _clean_html(item.get("body") or "")
                         if not title or not html_url:
                             continue
 
+                        repo_name = "Open Source Repo"
+                        m_repo = re.search(r"github\.com/([^/]+/[^/]+)/issues", html_url)
+                        if m_repo:
+                            repo_name = m_repo.group(1)
+
+                        if any(t in repo_name.lower() for t in ["test", "dummy", "practice", "playground", "demo"]):
+                            continue
+
+                        candidates.append(item)
+                        if len(candidates) >= 4:
+                            break
+
+                    async def _process_bounty(item: dict[str, Any]) -> Optional[DevPulseStory]:
+                        title = item.get("title", "")
+                        html_url = item.get("html_url", "")
+                        body = _clean_html(item.get("body") or "")
                         repo_name = "Open Source Repo"
                         m_repo = re.search(r"github\.com/([^/]+/[^/]+)/issues", html_url)
                         if m_repo:
@@ -252,12 +339,36 @@ class DevPulseManager:
                                         reward = m_l.group(1)
                                         break
 
-                        highlights = [
-                            f"Repository: {repo_name}",
-                            f"Verified Cash Bounty: {reward}",
-                            "Submit a pull request solving this issue to claim reward",
-                        ]
-                        summary = _smart_truncate(body, 280) if len(body) > 30 else f"Open-source engineering bounty available for resolving {title} in {repo_name}."
+                        ai_data = await analyze_opportunity_with_gemini(
+                            session=session,
+                            title=f"{title} ({repo_name})",
+                            raw_context=f"Bounty: {reward}\nRepository: {repo_name}\nDescription: {body[:800]}",
+                            category="GitHub Bounty",
+                        )
+
+                        if ai_data and not ai_data.get("is_valid", True):
+                            return None
+
+                        if ai_data and ai_data.get("summary"):
+                            summary = ai_data["summary"]
+                            highlights = ai_data.get("highlights", [])
+                            if not highlights:
+                                highlights = [
+                                    f"Repository: {repo_name}",
+                                    f"Verified Cash Bounty: {reward}",
+                                    "Status: Unassigned & Open for Solutions",
+                                ]
+                            why_matters = ai_data.get("why_it_matters", f"Contribute code to {repo_name} and claim {reward} upon PR merge.")
+                            diff = ai_data.get("difficulty", "Intermediate")
+                        else:
+                            highlights = [
+                                f"Repository: {repo_name}",
+                                f"Verified Cash Bounty: {reward}",
+                                "Status: Unassigned & Open for Solutions",
+                            ]
+                            summary = _smart_truncate(body, 280) if len(body) > 30 else f"Open-source engineering bounty available for resolving {title} in {repo_name}."
+                            why_matters = f"Contribute real code to {repo_name} and claim a {reward} bounty upon PR merge."
+                            diff = "Intermediate"
 
                         story_id = hashlib.sha256(f"bounty:{html_url}".encode()).hexdigest()
                         story_obj = DevPulseStory(
@@ -267,13 +378,18 @@ class DevPulseManager:
                             title=title,
                             summary=summary,
                             url=html_url,
-                            metadata={"reward": reward, "repo": repo_name},
+                            metadata={"reward": reward, "repo": repo_name, "difficulty": diff},
                             image_url=f"https://opengraph.githubassets.com/1/{repo_name}",
                             highlights=highlights,
-                            why_it_matters=f"Contribute real code to {repo_name} and claim a {reward} bounty upon PR merge.",
+                            why_it_matters=why_matters,
                         )
                         self.register_story_memory(story_obj)
-                        stories.append(story_obj)
+                        return story_obj
+
+                    results = await asyncio.gather(*[_process_bounty(c) for c in candidates], return_exceptions=True)
+                    for r in results:
+                        if isinstance(r, DevPulseStory):
+                            stories.append(r)
         except Exception as e:
             logger.debug(f"Notice harvesting bounties: {e}")
         return stories
@@ -281,27 +397,39 @@ class DevPulseManager:
     async def _harvest_jobs(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
         """Harvest entry-level, fresher, and remote developer internships."""
         stories: list[DevPulseStory] = []
-        url = "https://remoteok.com/api?tag=internship"
-        headers = {"User-Agent": "Kyro-JobRadar/1.0", "Accept": "application/json"}
+        url = "https://remoteok.com/api?tag=dev"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "application/json"}
         try:
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
                     jobs = [j for j in data if isinstance(j, dict) and j.get("position")]
-                    tech_keywords = ["dev", "engineer", "software", "frontend", "backend", "python", "react", "fullstack", "data", "code", "intern", "web"]
-                    for job in jobs[:12]:
+                    tech_keywords = ["dev", "engineer", "software", "frontend", "backend", "python", "react", "fullstack", "data", "code", "intern", "web", "ai", "security", "mobile"]
+                    exclude_keywords = ["recruiter", "sales", "hr", "marketing", "account executive", "copywriter", "customer support"]
+
+                    candidates: list[dict[str, Any]] = []
+                    for job in jobs[:20]:
                         pos = job.get("position", "")
-                        comp = job.get("company", "Tech Startup")
                         link = job.get("url") or job.get("apply_url")
-                        raw_desc = _clean_html(job.get("description") or "")
                         tags = job.get("tags") or []
 
                         combined_text = f"{pos} {' '.join(tags)}".lower()
+                        if any(ex in combined_text for ex in exclude_keywords):
+                            continue
                         if not any(k in combined_text for k in tech_keywords):
                             continue
                         if not link:
                             continue
 
+                        candidates.append(job)
+                        if len(candidates) >= 4:
+                            break
+
+                    async def _process_job(job: dict[str, Any]) -> Optional[DevPulseStory]:
+                        pos = job.get("position", "")
+                        comp = job.get("company", "Tech Startup")
+                        link = job.get("url") or job.get("apply_url")
+                        raw_desc = _clean_html(job.get("description") or "")
                         salary_min = job.get("salary_min")
                         salary_max = job.get("salary_max")
                         comp_str = "Paid / Competitive"
@@ -311,11 +439,35 @@ class DevPulseManager:
                             comp_str = f"${salary_min:,}+"
 
                         location = job.get("location") or "Worldwide Remote"
-                        highlights = [
-                            f"Company: {comp} ({location})",
-                            f"Compensation: {comp_str}",
-                            "Experience Level: Entry-Level / Internship / Junior",
-                        ]
+
+                        ai_data = await analyze_opportunity_with_gemini(
+                            session=session,
+                            title=f"{pos} at {comp}",
+                            raw_context=f"Role: {pos}\nCompany: {comp}\nCompensation: {comp_str}\nLocation: {location}\nDescription: {raw_desc[:800]}",
+                            category="Developer Job / Internship",
+                        )
+
+                        if ai_data and not ai_data.get("is_valid", True):
+                            return None
+
+                        if ai_data and ai_data.get("summary"):
+                            summary = ai_data["summary"]
+                            highlights = ai_data.get("highlights", [])
+                            if not highlights:
+                                highlights = [
+                                    f"Company: {comp} ({location})",
+                                    f"Compensation: {comp_str}",
+                                    "Experience Level: Entry-Level / Internship / Junior",
+                                ]
+                            why_matters = ai_data.get("why_it_matters", f"Great entry-level career opportunity with remote flexibility at {comp}.")
+                        else:
+                            highlights = [
+                                f"Company: {comp} ({location})",
+                                f"Compensation: {comp_str}",
+                                "Experience Level: Entry-Level / Internship / Junior",
+                            ]
+                            summary = _smart_truncate(raw_desc, 280) if raw_desc else f"Remote engineering role open for {pos} at {comp}. 0-1 YOE friendly."
+                            why_matters = f"Great entry-level career opportunity with remote flexibility at {comp}."
 
                         story_id = hashlib.sha256(f"job:{link}".encode()).hexdigest()
                         story_obj = DevPulseStory(
@@ -323,17 +475,20 @@ class DevPulseManager:
                             source="RemoteOK Careers",
                             category="jobs",
                             title=f"{pos} at {comp}",
-                            summary=_smart_truncate(raw_desc, 280) if raw_desc else f"Remote engineering role open for {pos} at {comp}. 0-1 YOE friendly.",
+                            summary=summary,
                             url=link,
                             metadata={"company": comp, "compensation": comp_str, "location": location},
                             image_url=job.get("company_logo"),
                             highlights=highlights,
-                            why_it_matters=f"Great entry-level career opportunity with remote flexibility at {comp}.",
+                            why_it_matters=why_matters,
                         )
                         self.register_story_memory(story_obj)
-                        stories.append(story_obj)
-                        if len(stories) >= 4:
-                            break
+                        return story_obj
+
+                    results = await asyncio.gather(*[_process_job(c) for c in candidates], return_exceptions=True)
+                    for r in results:
+                        if isinstance(r, DevPulseStory):
+                            stories.append(r)
         except Exception as e:
             logger.debug(f"Notice harvesting jobs: {e}")
         return stories
@@ -575,7 +730,10 @@ class DevPulseManager:
         if story.category == "bounties":
             reward = story.metadata.get("reward", "Paid Bounty")
             repo = story.metadata.get("repo", "")
+            diff = story.metadata.get("difficulty")
             meta_items = [f"**Bounty:** `{reward}`", f"**Repo:** `{repo}`"]
+            if diff:
+                meta_items.append(f"**Level:** `{diff}`")
         elif story.category == "jobs":
             comp = story.metadata.get("company", "")
             salary = story.metadata.get("compensation", "Paid")

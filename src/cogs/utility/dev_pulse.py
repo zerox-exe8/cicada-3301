@@ -1,5 +1,5 @@
 """
-Kyro Discord Bot - Developer Opportunities & Career Autonomous Feed Cog
+Kyro Discord Bot - Dev Dashboard & Opportunities Autonomous Feed Cog
 Background ingestion delivering live paid bounties, fresher jobs, hackathons, free perks, and AI tools.
 """
 
@@ -23,11 +23,11 @@ from src.utils.containers import (
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
-logger = logging.getLogger("Kyro.Utility.DevPulse")
+logger = logging.getLogger("Kyro.Utility.DevFeed")
 
 VALID_CATEGORIES: set[str] = {"all", "bounties", "jobs", "hackathons", "perks", "tools"}
 
-DEV_MODULE_OPTIONS: list[dict[str, str]] = [
+MODULE_OPTIONS: list[dict[str, str]] = [
     {
         "label": "Paid Bounties",
         "value": "bounties",
@@ -67,7 +67,7 @@ class DevSetupChannelView(discord.ui.View):
 
         self.channel_select = discord.ui.ChannelSelect(
             channel_types=[discord.ChannelType.text],
-            placeholder="Select developer opportunities channel...",
+            placeholder="Select a channel...",
             min_values=1,
             max_values=1,
             row=0,
@@ -120,8 +120,8 @@ class DevSetupChannelView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Developer Pulse Setup Cancelled**\n"
-                "> No changes were saved to server feed configurations."
+                f"### Dev Dashboard\n"
+                f"> Setup cancelled. No changes were saved."
             )
         )
         await edit_container_response(interaction, container, view=None)
@@ -135,14 +135,17 @@ class DevSetupChannelView(discord.ui.View):
             return
 
         self.stop()
-        channel = self.selected_channel
-        step2_view = DevSetupModuleView(self.bot, self.author_id, channel)
-        step2_container = step2_view.build_step2_container()
-        await edit_container_response(interaction, step2_container, view=step2_view)
+        modules_view = DevSetupModulesView(
+            bot=self.bot,
+            author_id=self.author_id,
+            channel=self.selected_channel,
+        )
+        container = modules_view.build_container()
+        await edit_container_response(interaction, container, view=modules_view)
 
 
-class DevSetupModuleView(discord.ui.View):
-    """Step 2: Multi-select modules with live switch state display."""
+class DevSetupModulesView(discord.ui.View):
+    """Step 2: Toggle developer modules individually with switch emojis."""
 
     def __init__(
         self,
@@ -155,37 +158,45 @@ class DevSetupModuleView(discord.ui.View):
         self.bot = bot
         self.author_id = author_id
         self.channel = channel
-        
+
         existing = self.bot.dev_mgr.get_guild_config(channel.guild.id) if channel.guild else None
-        if existing and existing.get("categories") and existing.get("categories") != "all":
-            self.active_modules: set[str] = set(existing["categories"].split(","))
+        if existing and existing.get("categories"):
+            saved = [c.strip() for c in existing["categories"].split(",") if c.strip() in VALID_CATEGORIES]
+            self.active_categories: set[str] = set(saved) if saved else set()
         else:
-            self.active_modules: set[str] = {opt["value"] for opt in DEV_MODULE_OPTIONS}
+            self.active_categories: set[str] = set()
 
         self._build_components()
 
     def _build_components(self) -> None:
         self.clear_items()
 
-        options = [
+        select_options = [
             discord.SelectOption(
                 label=opt["label"],
                 value=opt["value"],
-                description=opt["description"],
-                default=(opt["value"] in self.active_modules),
+                description=opt["description"][:100],
             )
-            for opt in DEV_MODULE_OPTIONS
+            for opt in MODULE_OPTIONS
         ]
 
         self.module_select = discord.ui.Select(
-            placeholder="Choose modules to enable or disable...",
-            min_values=0,
-            max_values=len(DEV_MODULE_OPTIONS),
-            options=options,
+            placeholder="Select a module...",
+            min_values=1,
+            max_values=1,
+            options=select_options,
             row=0,
         )
-        self.module_select.callback = self._on_module_select
+        self.module_select.callback = self._on_toggle_module
         self.add_item(self.module_select)
+
+        self.done_button = discord.ui.Button(
+            label="Done",
+            style=discord.ButtonStyle.success,
+            row=1,
+        )
+        self.done_button.callback = self._on_done
+        self.add_item(self.done_button)
 
         self.back_button = discord.ui.Button(
             label="Back",
@@ -195,39 +206,37 @@ class DevSetupModuleView(discord.ui.View):
         self.back_button.callback = self._on_back
         self.add_item(self.back_button)
 
-        self.save_button = discord.ui.Button(
-            label="Save Feed",
-            style=discord.ButtonStyle.secondary,
-            row=1,
-        )
-        self.save_button.callback = self._on_save
-        self.add_item(self.save_button)
-
-    def build_step2_container(self) -> KyroContainer:
-        """Render clean Step 2 configuration view."""
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
-        sw_on = self.bot.custom_emojis.get("switch_on", "[ON]")
-        sw_off = self.bot.custom_emojis.get("switch_off", "[OFF]")
-
-        module_lines: list[str] = []
-        for opt in DEV_MODULE_OPTIONS:
-            is_on = opt["value"] in self.active_modules
-            status_icon = sw_on if is_on else sw_off
-            module_lines.append(
-                f"{status_icon} **{opt['label']}**\n"
-                f"> {dot} *{opt['description']}*"
-            )
+    def build_container(self) -> KyroContainer:
+        """Render container showing module state with switch emojis only."""
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+        sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Developer Pulse Dashboard — Opportunities Setup (Step 2/2)**\n"
-                f"> Broadcast Target: {self.channel.mention}\n"
-                "> Toggle the developer modules you want active in your community feed:"
+                f"### Dev Dashboard\n"
+                f"> Step 2 of 2: Select Modules"
             )
         )
         container.add_separator(divider=True)
-        container.add_text("\n\n".join(module_lines))
+
+        info_lines = [
+            f"**Target Channel:** {self.channel.mention}\n",
+            "Select which developer modules to stream into this channel. "
+            "Choose modules from the menu below to activate:",
+        ]
+        container.add_text("\n".join(info_lines))
+        container.add_separator(divider=True)
+
+        module_lines = []
+        for opt in MODULE_OPTIONS:
+            val = opt["value"]
+            lbl = opt["label"]
+            is_active = val in self.active_categories
+            emoji = sw_on if is_active else sw_off
+            module_lines.append(f"{emoji} **{lbl}**")
+
+        container.add_text("\n".join(module_lines))
         return container
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -237,92 +246,140 @@ class DevSetupModuleView(discord.ui.View):
             else False
         ):
             await interaction.response.send_message(
-                "Only the command author or server administrators can modify feed settings.",
+                "Only the command author or server administrators can interact with this setup.",
                 ephemeral=True,
             )
             return False
         return True
 
-    async def _on_module_select(self, interaction: discord.Interaction) -> None:
-        self.active_modules = set(self.module_select.values)
+    async def _on_toggle_module(self, interaction: discord.Interaction) -> None:
+        if not self.module_select.values:
+            return
+        chosen = self.module_select.values[0]
+        if chosen in self.active_categories:
+            self.active_categories.remove(chosen)
+        else:
+            self.active_categories.add(chosen)
+
         self._build_components()
-        container = self.build_step2_container()
+        container = self.build_container()
         await edit_container_response(interaction, container, view=self)
 
     async def _on_back(self, interaction: discord.Interaction) -> None:
-        self.stop()
-        step1_view = DevSetupChannelView(self.bot, self.author_id)
+        channel_view = DevSetupChannelView(bot=self.bot, author_id=self.author_id)
+        channel_view.selected_channel = self.channel
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Developer Pulse Dashboard — Step 1/2**\n"
-                "> Select a text channel where developer opportunities should be broadcasted:"
+                f"### Dev Dashboard\n"
+                f"> Step 1 of 2: Select Channel"
             )
         )
-        await edit_container_response(interaction, container, view=step1_view)
-
-    async def _on_save(self, interaction: discord.Interaction) -> None:
-        self.stop()
-        if not self.active_modules:
-            cat_string = "none"
-        elif len(self.active_modules) == len(DEV_MODULE_OPTIONS):
-            cat_string = "all"
-        else:
-            cat_string = ",".join(sorted(self.active_modules))
-
-        guild_id = self.channel.guild.id
-        channel_id = self.channel.id
-
-        success = await self.bot.dev_mgr.set_channel(
-            guild_id=guild_id,
-            channel_id=channel_id,
-            categories=cat_string,
+        container.add_separator(divider=True)
+        container.add_text(
+            f"Select the text channel where real-time developer opportunities will be broadcast."
         )
+        await edit_container_response(interaction, container, view=channel_view)
+
+    async def _on_done(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            return
+
+        if not self.active_categories:
+            await interaction.response.send_message(
+                "Please enable at least one module before completing setup.",
+                ephemeral=True,
+            )
+            return
+
+        cat_str = ",".join(self.active_categories)
+        success = await self.bot.dev_mgr.set_channel(
+            guild_id=interaction.guild.id,
+            channel_id=self.channel.id,
+            categories=cat_str,
+            thread_enabled=False,
+        )
+
+        if not success:
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content="### Configuration Error\n> Failed to persist dev feed settings to database."
+            )
+            await edit_container_response(interaction, container, view=None)
+            return
+
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+        sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
-        if success:
-            dot = self.bot.custom_emojis.get("heart_dot", "•")
-            sw_on = self.bot.custom_emojis.get("switch_on", "[ON]")
-            active_labels = [
-                opt["label"]
-                for opt in DEV_MODULE_OPTIONS
-                if opt["value"] in self.active_modules
-            ]
-            cats_display = f" {dot} ".join(active_labels) if active_labels else "None (Feed Muted)"
+        container.add_section(
+            content=(
+                f"### Dev Dashboard\n"
+                f"> Opportunities broadcasting is now active."
+            )
+        )
+        container.add_separator(divider=True)
 
-            container.add_section(
-                content=(
-                    f"**{sw_on} Developer Pulse Feed Active**\n"
-                    f"> **Channel:** {self.channel.mention}\n"
-                    f"> **Modules:** {cats_display}\n"
-                    f"> **Mode:** Real-time Autonomous Live Stream"
-                )
-            )
-            container.add_separator(divider=True)
-            container.add_text(
-                f"> {dot} Verified opportunities will be broadcasted here automatically.\n"
-                f"> {dot} Members can save cards directly to DMs using the **Save to DM** button.\n"
-                f"> {dot} Use `/devpulse` or `!devpulse` anytime to edit modules or disable feed."
-            )
-        else:
-            container.add_section(
-                content=(
-                    "**Database Error Encountered**\n"
-                    "> Failed to save developer opportunities preferences. Please try again later."
-                )
-            )
+        top_lines = [
+            f"**Channel:** {self.channel.mention}  {dot}  **Cadence:** `Every 20m`  {dot}  **Status:** `Active`"
+        ]
+        container.add_text("\n".join(top_lines))
+        container.add_separator(divider=True)
 
+        module_lines = ["**Active Modules:**"]
+        for opt in MODULE_OPTIONS:
+            val = opt["value"]
+            lbl = opt["label"]
+            is_active = val in self.active_categories
+            emoji = sw_on if is_active else sw_off
+            module_lines.append(f"{emoji} **{lbl}**")
+
+        container.add_text("\n".join(module_lines))
+        container.add_separator(divider=True)
         await edit_container_response(interaction, container, view=None)
 
 
-class DevDashboardView(discord.ui.View):
-    """Active Dev Dashboard control view."""
+class DevStatusView(discord.ui.View):
+    """Status panel view with Edit Settings and Disable Feed buttons matching Tech design."""
 
-    def __init__(self, bot: KyroBot, author_id: int, guild_id: int, timeout: float = 180.0) -> None:
+    def __init__(
+        self,
+        bot: KyroBot,
+        author_id: int,
+        guild_id: int,
+        is_active: bool,
+        timeout: float = 180.0,
+    ) -> None:
         super().__init__(timeout=timeout)
         self.bot = bot
         self.author_id = author_id
         self.guild_id = guild_id
+
+        if is_active:
+            self.edit_button = discord.ui.Button(
+                label="Edit Settings",
+                style=discord.ButtonStyle.secondary,
+                row=0,
+            )
+            self.edit_button.callback = self._on_edit
+            self.add_item(self.edit_button)
+
+            self.disable_button = discord.ui.Button(
+                label="Disable Feed",
+                style=discord.ButtonStyle.danger,
+                row=0,
+            )
+            self.disable_button.callback = self._on_disable
+            self.add_item(self.disable_button)
+        else:
+            self.setup_button = discord.ui.Button(
+                label="Configure Feed",
+                style=discord.ButtonStyle.secondary,
+                row=0,
+            )
+            self.setup_button.callback = self._on_edit
+            self.add_item(self.setup_button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id and not (
@@ -331,49 +388,42 @@ class DevDashboardView(discord.ui.View):
             else False
         ):
             await interaction.response.send_message(
-                "Only the command author or server administrators can manage this feed.",
+                "Only server administrators can modify dev feed settings.",
                 ephemeral=True,
             )
             return False
         return True
 
-    @discord.ui.button(label="Edit Settings", style=discord.ButtonStyle.secondary, row=0)
-    async def edit_settings(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.stop()
-        cfg = self.bot.dev_mgr.get_guild_config(self.guild_id)
-        current_ch = interaction.guild.get_channel(cfg["channel_id"]) if (interaction.guild and cfg) else None
-        
-        if current_ch and isinstance(current_ch, discord.TextChannel):
-            step2_view = DevSetupModuleView(self.bot, self.author_id, current_ch)
-            container = step2_view.build_step2_container()
-            await edit_container_response(interaction, container, view=step2_view)
-        else:
-            step1_view = DevSetupChannelView(self.bot, self.author_id)
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    "**Developer Pulse Dashboard — Setup (Step 1/2)**\n"
-                    "> Select a text channel where developer opportunities should be broadcasted:"
-                )
+    async def _on_edit(self, interaction: discord.Interaction) -> None:
+        channel_view = DevSetupChannelView(bot=self.bot, author_id=self.author_id)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Dev Dashboard\n"
+                f"> Step 1 of 2: Select Channel"
             )
-            await edit_container_response(interaction, container, view=step1_view)
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"Select the text channel where real-time developer opportunities will be broadcast."
+        )
+        await edit_container_response(interaction, container, view=channel_view)
 
-    @discord.ui.button(label="Disable Feed", style=discord.ButtonStyle.secondary, row=0)
-    async def disable_feed(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.stop()
+    async def _on_disable(self, interaction: discord.Interaction) -> None:
         await self.bot.dev_mgr.disable_feed(self.guild_id)
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Developer Pulse Feed Disabled**\n"
-                "> Broadcasts have been stopped. Use `/devpulse` anytime to re-enable."
+                f"### Dev Dashboard\n"
+                f"> Automated broadcasting has been deactivated for this server."
             )
         )
         await edit_container_response(interaction, container, view=None)
 
 
-class DevPulseCog(commands.Cog):
-    """Developer Pulse Autonomous Broadcast and Management Cog."""
+class DevFeedCog(commands.Cog):
+    """Autonomous Developer Opportunities & Career feed dispatcher."""
+    category: str = "Utility"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
@@ -478,77 +528,80 @@ class DevPulseCog(commands.Cog):
                 await self.bot.dev_mgr.record_dispatched(dispatched)
 
         except Exception as e:
-            logger.error(f"Error in DevPulse background poller: {e}", exc_info=e)
+            logger.error(f"Error in DevFeed background poller: {e}", exc_info=e)
 
     # -------------------------------------------------------------------------
-    # Unified Command
+    # Single Unified Command: dev
     # -------------------------------------------------------------------------
     @commands.hybrid_command(
-        name="devpulse",
-        aliases=["dev", "opportunities", "bounties", "devjobs"],
-        description="Configure or view the real-time developer opportunities feed (bounties, jobs, hackathons, perks).",
+        name="dev",
+        aliases=["devpulse", "opportunities", "bounties", "devjobs"],
+        description="Autonomous Developer Opportunities & Career Dashboard.",
     )
-    @commands.has_permissions(manage_guild=True)
-    async def devpulse(self, ctx: CustomContext) -> None:
-        """Open the Developer Pulse Dashboard."""
-        if not ctx.guild:
-            await ctx.send("This command can only be used inside a server.")
-            return
-
+    @commands.guild_only()
+    async def dev(self, ctx: CustomContext) -> None:
+        """Unified Dev Dashboard: displays live controls if configured, or launches setup if not set."""
         cfg = self.bot.dev_mgr.get_guild_config(ctx.guild.id)
-
-        if cfg and cfg.get("channel_id"):
+        if cfg:
             channel = ctx.guild.get_channel(cfg["channel_id"])
-            channel_str = channel.mention if channel else f"<#{cfg['channel_id']}>"
+            ch_mention = channel.mention if channel else f"Unknown ({cfg['channel_id']})"
+            raw_cats = {c.strip() for c in cfg.get("categories", "all").split(",")}
+
+            sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+            sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
             dot = self.bot.custom_emojis.get("heart_dot", "•")
-            sw_on = self.bot.custom_emojis.get("switch_on", "[ON]")
-
-            cats_raw = cfg.get("categories", "all")
-            if cats_raw == "all":
-                active_labels = [opt["label"] for opt in DEV_MODULE_OPTIONS]
-            elif cats_raw == "none":
-                active_labels = []
-            else:
-                active_labels = [
-                    opt["label"]
-                    for opt in DEV_MODULE_OPTIONS
-                    if opt["value"] in cats_raw.split(",")
-                ]
-
-            cats_display = f" {dot} ".join(active_labels) if active_labels else "None (Feed Muted)"
 
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"**{sw_on} Developer Pulse Dashboard**\n"
-                    f"> **Channel:** {channel_str}\n"
-                    f"> **Active Modules:** {cats_display}\n"
-                    f"> **Broadcast Frequency:** Real-time Autonomous Stream"
+                    f"### Dev Dashboard\n"
+                    f"> Status: Active & Broadcasting"
                 )
             )
             container.add_separator(divider=True)
-            container.add_text(
-                f"> {dot} Verified developer opportunities are streamed into your configured channel.\n"
-                f"> {dot} Click **Edit Settings** below to toggle modules or change channel.\n"
-                f"> {dot} Click **Disable Feed** to stop opportunity broadcasts."
-            )
 
-            view = DevDashboardView(self.bot, ctx.author.id, ctx.guild.id)
+            top_lines = [
+                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 20m`  {dot}  **Status:** `Active`"
+            ]
+            container.add_text("\n".join(top_lines))
+            container.add_separator(divider=True)
+
+            module_lines = ["**Active Modules:**"]
+            for opt in MODULE_OPTIONS:
+                val = opt["value"]
+                lbl = opt["label"]
+                is_active = ("all" in raw_cats) or (val in raw_cats)
+                emoji = sw_on if is_active else sw_off
+                module_lines.append(f"{emoji} **{lbl}**")
+
+            container.add_text("\n".join(module_lines))
+            container.add_separator(divider=True)
+
+            view = DevStatusView(
+                bot=self.bot,
+                author_id=ctx.author.id,
+                guild_id=ctx.guild.id,
+                is_active=True,
+            )
             await send_container_response(ctx, container, view=view)
             return
 
         # Not configured yet -> Launch Step 1
-        view = DevSetupChannelView(self.bot, ctx.author.id)
+        channel_view = DevSetupChannelView(bot=self.bot, author_id=ctx.author.id)
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Developer Pulse Dashboard — Setup (Step 1/2)**\n"
-                "> Select a text channel where developer opportunities should be broadcasted:"
+                f"### Dev Dashboard\n"
+                f"> Step 1 of 2: Select Channel"
             )
         )
-        await send_container_response(ctx, container, view=view)
+        container.add_separator(divider=True)
+        container.add_text(
+            f"Select the text channel where real-time developer opportunities will be broadcast."
+        )
+        await send_container_response(ctx, container, view=channel_view)
 
 
 async def setup(bot: KyroBot) -> None:
     """Standard extension loader entrypoint."""
-    await bot.add_cog(DevPulseCog(bot))
+    await bot.add_cog(DevFeedCog(bot))

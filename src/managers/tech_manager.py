@@ -120,6 +120,7 @@ class TechStory:
     highlights: list[str] = field(default_factory=list)
     why_it_matters: str = ""
     title_hash: str = ""
+    entity_hash: str = ""
 
 
 CATEGORY_COLORS: dict[str, int] = {
@@ -279,12 +280,13 @@ class TechNewsManager:
         self.db = db
         self._seen_hashes: set[str] = set()
         self._seen_title_hashes: set[str] = set()
+        self._seen_entity_hashes: set[str] = set()
         self._guild_configs: dict[int, dict[str, Any]] = {}
         self._stories_by_id: dict[str, TechStory] = {}
         self._lock = asyncio.Lock()
 
     async def load_cache(self) -> None:
-        """Load recent seen hashes, title hashes, and guild subscriptions into fast memory."""
+        """Load recent seen hashes, title hashes, entity hashes, and guild subscriptions into fast memory."""
         try:
             # 1. Load active guild channel configurations
             rows = await self.db.fetch_all(
@@ -303,16 +305,17 @@ class TechNewsManager:
                     for r in rows
                 }
 
-            # 2. Load recent dispatched article hashes and title hashes (last 3,000 items)
+            # 2. Load recent dispatched article hashes, title hashes, and entity hashes (last 3,000 items)
             hash_rows = await self.db.fetch_all(
-                "SELECT article_hash, title_hash FROM tech_news_history ORDER BY dispatched_at DESC LIMIT 3000;"
+                "SELECT article_hash, title_hash, entity_hash FROM tech_news_history ORDER BY dispatched_at DESC LIMIT 3000;"
             )
             async with self._lock:
                 self._seen_hashes = {str(r["article_hash"]) for r in hash_rows if r.get("article_hash")}
                 self._seen_title_hashes = {str(r["title_hash"]) for r in hash_rows if r.get("title_hash")}
+                self._seen_entity_hashes = {str(r["entity_hash"]) for r in hash_rows if r.get("entity_hash")}
 
             logger.info(
-                f"TechNewsManager loaded {len(self._guild_configs)} guild feed(s), {len(self._seen_hashes)} seen article hash(es), and {len(self._seen_title_hashes)} title hash(es)."
+                f"TechNewsManager loaded {len(self._guild_configs)} guild feed(s), {len(self._seen_hashes)} seen article hash(es), {len(self._seen_title_hashes)} title hash(es), and {len(self._seen_entity_hashes)} entity hash(es)."
             )
         except Exception as e:
             logger.error(f"Error loading TechNewsManager cache: {e}", exc_info=e)
@@ -428,12 +431,14 @@ class TechNewsManager:
         return dict(self._guild_configs)
 
     def is_hash_seen(self, article: TechStory | str) -> bool:
-        """Check if an article has already been dispatched by canonical URL hash or title fingerprint."""
+        """Check if an article has already been dispatched by canonical URL hash, title fingerprint, or entity hash."""
         if isinstance(article, str):
-            return article in self._seen_hashes or article in self._seen_title_hashes
+            return article in self._seen_hashes or article in self._seen_title_hashes or article in self._seen_entity_hashes
         if article.id in self._seen_hashes:
             return True
         if article.title_hash and article.title_hash in self._seen_title_hashes:
+            return True
+        if article.entity_hash and article.entity_hash in self._seen_entity_hashes:
             return True
         return False
 
@@ -443,20 +448,22 @@ class TechNewsManager:
             return
 
         insert_query = """
-        INSERT INTO tech_news_history (article_hash, source, category, title, url, is_critical, title_hash)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO tech_news_history (article_hash, source, category, title, url, is_critical, title_hash, entity_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (article_hash) DO UPDATE
-        SET is_critical = EXCLUDED.is_critical, title_hash = EXCLUDED.title_hash;
+        SET is_critical = EXCLUDED.is_critical, title_hash = EXCLUDED.title_hash, entity_hash = EXCLUDED.entity_hash;
         """
         async with self._lock:
             for s in stories:
                 self._seen_hashes.add(s.id)
                 if s.title_hash:
                     self._seen_title_hashes.add(s.title_hash)
+                if s.entity_hash:
+                    self._seen_entity_hashes.add(s.entity_hash)
 
         try:
             for s in stories:
-                await self.db.execute(insert_query, s.id, s.source, s.category, s.title, s.url, s.is_critical, s.title_hash)
+                await self.db.execute(insert_query, s.id, s.source, s.category, s.title, s.url, s.is_critical, s.title_hash, s.entity_hash)
         except Exception as e:
             logger.error(f"Failed to write dispatched tech news history: {e}", exc_info=e)
 
@@ -467,7 +474,7 @@ class TechNewsManager:
         """Harvest top trending open-source repositories created recently."""
         stories: list[TechStory] = []
         since_date = (datetime.now(timezone.utc) - timedelta(days=14)).strftime("%Y-%m-%d")
-        url = f"https://api.github.com/search/repositories?q=created:>{since_date}+stars:>40&sort=stars&order=desc&per_page=6"
+        url = f"https://api.github.com/search/repositories?q=created:>{since_date}+stars:>40&sort=stars&order=desc&per_page=30"
         headers = {"User-Agent": "Kyro-TechPulse/1.0", "Accept": "application/vnd.github.v3+json"}
         try:
             async with session.get(url, headers=headers) as resp:
@@ -476,6 +483,17 @@ class TechNewsManager:
                     for item in data.get("items", []):
                         full_name = item.get("full_name")
                         link = item.get("html_url")
+                        if not full_name or not link:
+                            continue
+
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(full_name)
+                        entity_h = hashlib.sha256(f"github:{full_name.lower()}".encode()).hexdigest()
+
+                        if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
+                            continue
+
                         raw_desc = (item.get("description") or "").strip()
                         desc = _clean_html(raw_desc) if raw_desc else ""
 
@@ -559,10 +577,6 @@ class TechNewsManager:
                             elif not final_summary:
                                 final_summary = f"{full_name} open-source implementation and development toolkit."
 
-                        canon_url = canonicalize_url(link)
-                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
-                        title_h = compute_title_fingerprint(full_name)
-
                         story_obj = TechStory(
                             id=story_id,
                             source="GitHub",
@@ -580,9 +594,12 @@ class TechNewsManager:
                             highlights=highlights,
                             why_it_matters=why_it_matters,
                             title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
+                        if len(stories) >= 4:
+                            break
         except Exception as e:
             logger.debug(f"Notice harvesting GitHub: {e}")
         return stories
@@ -594,7 +611,7 @@ class TechNewsManager:
         try:
             async with session.get(top_url) as resp:
                 if resp.status == 200:
-                    ids = (await resp.json())[:12]
+                    ids = (await resp.json())[:30]
                     for item_id in ids:
                         detail_url = f"https://hacker-news.firebaseio.com/v0/item/{item_id}.json"
                         async with session.get(detail_url) as d_resp:
@@ -605,7 +622,15 @@ class TechNewsManager:
                                 title = data.get("title", "")
                                 link = data.get("url")
                                 score = data.get("score", 0)
-                                if not link or score < 80:
+                                if not link or score < 60:
+                                    continue
+
+                                canon_url = canonicalize_url(link)
+                                story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                                title_h = compute_title_fingerprint(title)
+                                entity_h = hashlib.sha256(f"tech:{title_h[:24]}".encode()).hexdigest()
+
+                                if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
                                     continue
 
                                 # Fetch real OpenGraph/meta description and image from destination article
@@ -672,9 +697,6 @@ class TechNewsManager:
                                     real_summary = f"Key systems engineering developments and architecture discussion regarding {title}."
 
                                 is_crit = any(re.search(kw, title, re.IGNORECASE) for kw in CRITICAL_KEYWORDS)
-                                canon_url = canonicalize_url(link)
-                                story_id = hashlib.sha256(canon_url.encode()).hexdigest()
-                                title_h = compute_title_fingerprint(title)
 
                                 story_obj = TechStory(
                                     id=story_id,
@@ -690,10 +712,11 @@ class TechNewsManager:
                                     highlights=highlights,
                                     why_it_matters=why_it_matters,
                                     title_hash=title_h,
+                                    entity_hash=entity_h,
                                 )
                                 self.register_story_memory(story_obj)
                                 stories.append(story_obj)
-                                if len(stories) >= 3:
+                                if len(stories) >= 4:
                                     break
         except Exception as e:
             logger.debug(f"Notice harvesting Hacker News: {e}")
@@ -708,14 +731,24 @@ class TechNewsManager:
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    for item in data[:6]:
+                    for item in data:
                         paper = item.get("paper", {})
                         title = paper.get("title") or item.get("title")
                         paper_id = paper.get("id") or item.get("id")
-                        raw_summary = _clean_html(paper.get("summary") or "")
-                        upvotes = paper.get("upvotes") or item.get("upvotes", 0)
                         if not title or not paper_id:
                             continue
+
+                        link = f"https://arxiv.org/abs/{paper_id}"
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"arxiv:{paper_id.lower()}".encode()).hexdigest()
+
+                        if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
+                            continue
+
+                        raw_summary = _clean_html(paper.get("summary") or "")
+                        upvotes = paper.get("upvotes") or item.get("upvotes", 0)
 
                         # If summary is missing or too short, fetch real abstract from ArXiv
                         abstract = raw_summary
@@ -753,12 +786,8 @@ class TechNewsManager:
                             if ai_intel.get("what_is_inside"):
                                 what_is_inside = ai_intel["what_is_inside"]
 
-                        link = f"https://arxiv.org/abs/{paper_id}"
                         # Hugging Face provides official social thumbnail gradient
                         img_url = clean_image_url(item.get("thumbnailUrl")) or f"https://cdn-thumbnails.huggingface.co/social-thumbnails/papers/{paper_id}/gradient.png"
-                        canon_url = canonicalize_url(link)
-                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
-                        title_h = compute_title_fingerprint(title)
 
                         story_obj = TechStory(
                             id=story_id,
@@ -773,9 +802,12 @@ class TechNewsManager:
                             highlights=highlights,
                             why_it_matters=why_it_matters,
                             title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
+                        if len(stories) >= 4:
+                            break
         except Exception as e:
             logger.debug(f"Notice harvesting Hugging Face: {e}")
         return stories
@@ -790,11 +822,19 @@ class TechNewsManager:
                 if resp.status == 200:
                     xml_data = await resp.text()
                     root = ET.fromstring(xml_data)
-                    for item in root.findall(".//item")[:4]:
+                    for item in root.findall(".//item"):
                         title = _clean_html(item.findtext("title") or "")
                         link = item.findtext("link") or ""
                         desc = _clean_html(item.findtext("description") or "")
                         if not title or not link:
+                            continue
+
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"tech:{title_h[:24]}".encode()).hexdigest()
+
+                        if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
                             continue
 
                         # Extract hero image from destination article
@@ -825,10 +865,6 @@ class TechNewsManager:
                             if ai_intel.get("why_it_matters"):
                                 why_it_matters = str(ai_intel["why_it_matters"]).strip()
 
-                        canon_url = canonicalize_url(link)
-                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
-                        title_h = compute_title_fingerprint(title)
-
                         story_obj = TechStory(
                             id=story_id,
                             source="BleepingComputer",
@@ -842,38 +878,77 @@ class TechNewsManager:
                             highlights=highlights,
                             why_it_matters=why_it_matters,
                             title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
+                        if len(stories) >= 4:
+                            break
         except Exception as e:
             logger.debug(f"Notice harvesting Security RSS: {e}")
         return stories
 
     async def _harvest_verge_tech(self, session: aiohttp.ClientSession) -> list[TechStory]:
-        """Harvest mainstream consumer tech, gadgets, AI tools, and gaming from The Verge."""
+        """Harvest mainstream consumer tech, gadgets, AI tools, and frontier culture from The Verge, Wired, and Engadget."""
         stories: list[TechStory] = []
-        feed_url = "https://www.theverge.com/rss/index.xml"
-        headers = {"User-Agent": "Mozilla/5.0 Kyro-TechPulse/1.0"}
-        try:
-            async with session.get(feed_url, headers=headers) as resp:
-                if resp.status == 200:
+        feeds = [
+            ("The Verge", "https://www.theverge.com/rss/index.xml", "atom"),
+            ("Wired", "https://www.wired.com/feed/rss", "rss"),
+            ("Engadget", "https://www.engadget.com/rss.xml", "rss"),
+        ]
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Kyro-TechPulse/1.0"}
+
+        for source_name, feed_url, feed_type in feeds:
+            try:
+                async with session.get(feed_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+                    if resp.status != 200:
+                        continue
                     xml_data = await resp.text()
                     root = ET.fromstring(xml_data)
-                    for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry")[:5]:
-                        title = _clean_html(entry.findtext("{http://www.w3.org/2005/Atom}title") or "")
-                        link_elem = entry.find("{http://www.w3.org/2005/Atom}link")
-                        link = link_elem.get("href") if link_elem is not None else ""
-                        raw_content = entry.findtext("{http://www.w3.org/2005/Atom}content") or ""
-                        desc = _clean_html(raw_content)
+
+                    items = root.findall(".//{http://www.w3.org/2005/Atom}entry") if feed_type == "atom" else root.findall(".//item")
+                    for entry in items:
+                        if feed_type == "atom":
+                            title = _clean_html(entry.findtext("{http://www.w3.org/2005/Atom}title") or "")
+                            link_elem = entry.find("{http://www.w3.org/2005/Atom}link")
+                            link = link_elem.get("href") if link_elem is not None else ""
+                            raw_content = entry.findtext("{http://www.w3.org/2005/Atom}content") or ""
+                            desc = _clean_html(raw_content)
+                            img_url = None
+                            m_img = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_content)
+                            if m_img:
+                                img_url = m_img.group(1).split("?")[0]
+                        else:
+                            title = _clean_html(entry.findtext("title") or "")
+                            link = entry.findtext("link") or ""
+                            desc = _clean_html(entry.findtext("description") or "")
+                            img_url = None
+                            thumb = entry.find("{http://search.yahoo.com/mrss/}thumbnail")
+                            if thumb is not None and thumb.get("url"):
+                                img_url = thumb.get("url")
+                            if not img_url:
+                                enc = entry.find("enclosure")
+                                if enc is not None and enc.get("url"):
+                                    img_url = enc.get("url")
+                            if not img_url and desc:
+                                m_img = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', entry.findtext("description") or "")
+                                if m_img:
+                                    img_url = m_img.group(1).split("?")[0]
 
                         if not title or not link:
                             continue
 
-                        # Extract hero image from atom content
-                        img_url = None
-                        m_img = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_content)
-                        if m_img:
-                            img_url = m_img.group(1).split("?")[0]
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"tech:{title_h[:24]}".encode()).hexdigest()
+
+                        if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
+                            continue
+
+                        # Avoid duplicates within this batch
+                        if any(s.id == story_id or s.title_hash == title_h or s.entity_hash == entity_h for s in stories):
+                            continue
 
                         highlights: list[str] = []
                         why_it_matters = ""
@@ -888,27 +963,28 @@ class TechNewsManager:
                             if ai_intel.get("why_it_matters"):
                                 why_it_matters = str(ai_intel["why_it_matters"]).strip()
 
-                        canon_url = canonicalize_url(link)
-                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
-                        title_h = compute_title_fingerprint(title)
-
                         story_obj = TechStory(
                             id=story_id,
-                            source="The Verge",
+                            source=source_name,
                             category="tech",
                             title=title,
                             summary=_smart_truncate(final_summary, 320),
                             url=canon_url,
                             metadata={"tag": "Consumer & Culture"},
-                            image_url=img_url,
+                            image_url=clean_image_url(img_url),
                             highlights=highlights,
                             why_it_matters=why_it_matters,
                             title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
-        except Exception as e:
-            logger.debug(f"Notice harvesting The Verge: {e}")
+                        if len(stories) >= 4:
+                            break
+            except Exception as e:
+                logger.debug(f"Notice harvesting {source_name}: {e}")
+            if len(stories) >= 4:
+                break
         return stories
 
     async def _harvest_phoronix(self, session: aiohttp.ClientSession) -> list[TechStory]:
@@ -921,15 +997,21 @@ class TechNewsManager:
                 if resp.status == 200:
                     xml_data = await resp.text()
                     root = ET.fromstring(xml_data)
-                    for item in root.findall(".//item")[:3]:
+                    for item in root.findall(".//item"):
                         title = _clean_html(item.findtext("title") or "")
                         link = item.findtext("link") or ""
                         desc = _clean_html(item.findtext("description") or "")
                         if not title or not link:
                             continue
+
                         canon_url = canonicalize_url(link)
                         story_id = hashlib.sha256(canon_url.encode()).hexdigest()
                         title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"tech:{title_h[:24]}".encode()).hexdigest()
+
+                        if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
+                            continue
+
                         story_obj = TechStory(
                             id=story_id,
                             source="Phoronix",
@@ -939,9 +1021,12 @@ class TechNewsManager:
                             url=canon_url,
                             metadata={"type": "Linux/Silicon"},
                             title_hash=title_h,
+                            entity_hash=entity_h,
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
+                        if len(stories) >= 4:
+                            break
         except Exception as e:
             logger.debug(f"Notice harvesting Phoronix: {e}")
         return stories
@@ -972,47 +1057,53 @@ class TechNewsManager:
         deduped: list[TechStory] = []
         seen_urls: set[str] = set()
         seen_titles: set[str] = set()
+        seen_entities: set[str] = set()
 
         for s in raw_stories:
             if s.id in seen_urls or self.is_hash_seen(s):
                 continue
             if s.title_hash and (s.title_hash in seen_titles or s.title_hash in self._seen_title_hashes):
                 continue
+            if s.entity_hash and (s.entity_hash in seen_entities or s.entity_hash in self._seen_entity_hashes):
+                continue
 
             seen_urls.add(s.id)
             if s.title_hash:
                 seen_titles.add(s.title_hash)
+            if s.entity_hash:
+                seen_entities.add(s.entity_hash)
             self.register_story_memory(s)
             deduped.append(s)
 
         return deduped
 
     async def fetch_category(self, category: str, limit: int = 4) -> list[TechStory]:
-        """Fetch fresh stories on-demand for a single category."""
+        """Fetch fresh stories on-demand for a single category, filtering out seen items."""
         connector = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=10)
         cat = category.strip().lower()
 
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             if cat == "github":
-                res = (await self._harvest_github(session))[:limit]
+                res = await self._harvest_github(session)
             elif cat in {"tech", "gadgets"}:
-                res = (await self._harvest_verge_tech(session))[:limit]
+                res = await self._harvest_verge_tech(session)
             elif cat == "ai":
-                res = (await self._harvest_huggingface(session))[:limit]
+                res = await self._harvest_huggingface(session)
             elif cat == "security":
-                res = (await self._harvest_security_rss(session))[:limit]
+                res = await self._harvest_security_rss(session)
             elif cat in {"systems", "hn"}:
-                res = (await self._harvest_hackernews(session))[:limit]
+                res = await self._harvest_hackernews(session)
             elif cat == "hardware":
-                res = (await self._harvest_phoronix(session))[:limit]
+                res = await self._harvest_phoronix(session)
             else:
-                all_s = await self.harvest_all()
-                res = all_s[:limit]
+                res = await self.harvest_all()
 
-        for s in res:
+        unseen = [s for s in res if not self.is_hash_seen(s)]
+        final_res = unseen[:limit] if unseen else res[:limit]
+        for s in final_res:
             self.register_story_memory(s)
-        return res
+        return final_res
 
     # -------------------------------------------------------------------------
     # Components V2 Card Formatters

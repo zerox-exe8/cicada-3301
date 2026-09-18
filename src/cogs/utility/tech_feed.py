@@ -591,12 +591,20 @@ class TechFeedCog(commands.Cog):
                         logger.warning(f"Pre-flight check dropped unreachable URL: {candidate.url}")
                         await self.bot.tech_mgr.mark_dispatched([candidate])
 
-            for story in batch_to_send:
+            for index, story in enumerate(batch_to_send):
                 card = self.bot.tech_mgr.build_story_container(story, dot=dot)
+                dispatched_any = False
 
                 for guild_id, cfg in list(guild_configs.items()):
                     guild = self.bot.get_guild(guild_id)
-                    if not guild:
+                    channel = guild.get_channel(cfg.get("channel_id")) if guild else None
+                    if not channel:
+                        try:
+                            channel = await self.bot.fetch_channel(cfg.get("channel_id"))
+                        except Exception:
+                            channel = None
+
+                    if not channel or not isinstance(channel, discord.TextChannel):
                         continue
 
                     # In 'digest' mode, do not post real-time updates
@@ -608,13 +616,9 @@ class TechFeedCog(commands.Cog):
                     if "all" not in allowed_cats and story.category not in allowed_cats:
                         continue
 
-                    channel_id = cfg.get("channel_id")
-                    channel = guild.get_channel(channel_id)
-                    if not isinstance(channel, discord.TextChannel):
-                        continue
-
                     try:
                         msg = await send_container_response(channel, card)
+                        dispatched_any = True
 
                         # Auto-create discussion thread if enabled for this guild
                         if cfg.get("thread_enabled") and msg and isinstance(msg, discord.Message):
@@ -626,11 +630,18 @@ class TechFeedCog(commands.Cog):
                     except Exception as ch_err:
                         logger.debug(f"Failed to dispatch tech story to guild {guild_id}: {ch_err}")
 
-                dispatched.append(story)
+                if dispatched_any:
+                    dispatched.append(story)
+                    await self.bot.tech_mgr.mark_dispatched([story])
+                else:
+                    self.bot.tech_mgr._seen_hashes.add(story.id)
+                    if story.title_hash:
+                        self.bot.tech_mgr._seen_title_hashes.add(story.title_hash)
+                    if story.entity_hash:
+                        self.bot.tech_mgr._seen_entity_hashes.add(story.entity_hash)
 
-            # Record dispatched stories in memory and PostgreSQL
-            if dispatched:
-                await self.bot.tech_mgr.mark_dispatched(dispatched)
+                if index < len(batch_to_send) - 1:
+                    await asyncio.sleep(4)
         except Exception as exc:
             logger.error(f"Unexpected exception in tech news background poller: {exc}", exc_info=exc)
 

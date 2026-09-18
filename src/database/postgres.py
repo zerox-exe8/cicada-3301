@@ -488,6 +488,9 @@ class PostgresDatabase(BaseDatabase):
             """
             ALTER TABLE tech_news_history ADD COLUMN IF NOT EXISTS title_hash VARCHAR(64);
             """,
+            """
+            ALTER TABLE tech_news_history ADD COLUMN IF NOT EXISTS entity_hash VARCHAR(64);
+            """,
             # Guild Developer Opportunities Feed Configuration
             """
             CREATE TABLE IF NOT EXISTS guild_dev_pulse (

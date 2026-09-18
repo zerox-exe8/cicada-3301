@@ -235,20 +235,23 @@ class TechSetupModulesView(discord.ui.View):
         )
         container.add_separator(divider=True)
 
-        lines = [
+        info_lines = [
             f"**Target Channel:** {self.channel.mention}\n",
             "Select which intelligence modules to stream into this channel. "
-            "Choose modules from the menu below to activate:\n",
+            "Choose modules from the menu below to activate:",
         ]
+        container.add_text("\n".join(info_lines))
+        container.add_separator(divider=True)
 
+        module_lines = []
         for opt in MODULE_OPTIONS:
             val = opt["value"]
             lbl = opt["label"]
             is_active = val in self.active_categories
             emoji = sw_on if is_active else sw_off
-            lines.append(f"{emoji} **{lbl}**")
+            module_lines.append(f"{emoji} **{lbl}**")
 
-        container.add_text("\n".join(lines))
+        container.add_text("\n".join(module_lines))
         return container
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -334,19 +337,21 @@ class TechSetupModulesView(discord.ui.View):
         )
         container.add_separator(divider=True)
 
-        lines = [
-            f"**Channel:** {self.channel.mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`\n",
-            "**Active Modules:**",
+        top_lines = [
+            f"**Channel:** {self.channel.mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`"
         ]
+        container.add_text("\n".join(top_lines))
+        container.add_separator(divider=True)
 
+        module_lines = ["**Active Modules:**"]
         for opt in MODULE_OPTIONS:
             val = opt["value"]
             lbl = opt["label"]
             is_active = val in self.active_categories
             emoji = sw_on if is_active else sw_off
-            lines.append(f"{emoji} **{lbl}**")
+            module_lines.append(f"{emoji} **{lbl}**")
 
-        container.add_text("\n".join(lines))
+        container.add_text("\n".join(module_lines))
         container.add_separator(divider=True)
         await edit_container_response(interaction, container, view=None)
 
@@ -581,22 +586,16 @@ class TechFeedCog(commands.Cog):
     )
     @commands.guild_only()
     async def tech(self, ctx: CustomContext) -> None:
-        """Interactive 2-step setup: select channel, then select modules."""
-        if ctx.author.guild_permissions.manage_guild:
-            channel_view = TechSetupChannelView(bot=self.bot, author_id=ctx.author.id)
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"### Tech Dashboard\n"
-                    f"> Step 1 of 2: Select Channel"
-                )
-            )
-            container.add_separator(divider=True)
-            container.add_text(
-                "Select the text channel where real-time tech intelligence will be broadcast."
-            )
-            await send_container_response(ctx, container, view=channel_view)
+        """Dashboard overview: displays status and controls if configured, or launches setup if not set."""
+        cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
+        if cfg:
+            # Feed is already configured on this server -> show status with Edit & Disable controls
+            await ctx.invoke(self.status)
+        elif ctx.author.guild_permissions.manage_guild:
+            # Not set yet and user has admin permissions -> launch Step 1 setup
+            await ctx.invoke(self.setup_cmd)
         else:
+            # Not set yet and user is regular member -> show inactive status
             await ctx.invoke(self.status)
 
     @tech.command(
@@ -669,19 +668,21 @@ class TechFeedCog(commands.Cog):
         )
         container.add_separator(divider=True)
 
-        lines = [
-            f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`\n",
-            "**Active Modules:**",
+        top_lines = [
+            f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`"
         ]
+        container.add_text("\n".join(top_lines))
+        container.add_separator(divider=True)
 
+        module_lines = ["**Active Modules:**"]
         for opt in MODULE_OPTIONS:
             val = opt["value"]
             lbl = opt["label"]
             is_active = ("all" in raw_cats) or (val in raw_cats)
             emoji = sw_on if is_active else sw_off
-            lines.append(f"{emoji} **{lbl}**")
+            module_lines.append(f"{emoji} **{lbl}**")
 
-        container.add_text("\n".join(lines))
+        container.add_text("\n".join(module_lines))
         container.add_separator(divider=True)
 
         view = TechStatusView(

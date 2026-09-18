@@ -376,6 +376,14 @@ class DevPulseManager:
                         if any(b in title.lower() for b in ["bountyfarmer", "bounty-plaza", "239398281948585883", "give boxy its own"]):
                             continue
 
+                        canon_u = canonicalize_url(html_url)
+                        item_id = hashlib.sha256(canon_u.encode()).hexdigest()
+                        t_hash = compute_title_fingerprint(title)
+                        ent_hash = hashlib.sha256(f"bounty:{t_hash[:24]}".encode()).hexdigest()
+
+                        if item_id in self._seen_hashes or t_hash in self._seen_title_hashes or ent_hash in self._seen_entity_hashes:
+                            continue
+
                         candidates.append(item)
                         if len(candidates) >= 4:
                             break
@@ -435,7 +443,7 @@ class DevPulseManager:
                         canon_url = canonicalize_url(html_url)
                         story_id = hashlib.sha256(canon_url.encode()).hexdigest()
                         title_h = compute_title_fingerprint(title)
-                        entity_h = hashlib.sha256(f"bounty:{repo_name.lower()}:{title_h[:16]}".encode()).hexdigest()
+                        entity_h = hashlib.sha256(f"bounty:{title_h[:24]}".encode()).hexdigest()
 
                         story_obj = DevPulseStory(
                             id=story_id,
@@ -475,7 +483,7 @@ class DevPulseManager:
                     candidates: list[dict[str, Any]] = []
                     exclude_keywords = ["recruiter", "sales", "hr", "marketing", "account executive", "copywriter", "customer support"]
 
-                    for job in jobs[:15]:
+                    for job in jobs:
                         pos = job.get("jobTitle", "")
                         comp = job.get("companyName", "Tech Company")
                         link = job.get("url")
@@ -483,6 +491,17 @@ class DevPulseManager:
                             continue
                         if any(ex in pos.lower() for ex in exclude_keywords):
                             continue
+
+                        canon_u = canonicalize_url(link)
+                        s_id = hashlib.sha256(canon_u.encode()).hexdigest()
+                        t_hash = compute_title_fingerprint(f"{pos} {comp}")
+                        clean_comp = re.sub(r"[^a-zA-Z0-9]", "", comp).lower()
+                        clean_pos = re.sub(r"[^a-zA-Z0-9]", "", pos).lower()
+                        ent_hash = hashlib.sha256(f"job:{clean_comp}:{clean_pos}".encode()).hexdigest()
+
+                        if s_id in self._seen_hashes or t_hash in self._seen_title_hashes or ent_hash in self._seen_entity_hashes:
+                            continue
+
                         candidates.append(job)
                         if len(candidates) >= 4:
                             break
@@ -576,19 +595,21 @@ class DevPulseManager:
                     if resp.status == 200:
                         data = await resp.json(content_type=None)
                         jobs = [j for j in data if isinstance(j, dict) and j.get("position")]
-                        for job in jobs[:4]:
+                        for job in jobs:
                             pos = job.get("position", "")
                             comp = job.get("company", "Tech Startup")
                             link = job.get("url") or job.get("apply_url")
-                            if not link:
+                            if not link or not pos:
                                 continue
-                            clean_comp = re.sub(r"[^a-zA-Z0-9]", "", comp).lower()
-                            clean_pos = re.sub(r"[^a-zA-Z0-9]", "", pos).lower()
-                            logo = f"https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://{clean_comp}.com&size=256"
                             canon_url = canonicalize_url(link)
                             story_id = hashlib.sha256(canon_url.encode()).hexdigest()
                             title_h = compute_title_fingerprint(f"{pos} {comp}")
+                            clean_comp = re.sub(r"[^a-zA-Z0-9]", "", comp).lower()
+                            clean_pos = re.sub(r"[^a-zA-Z0-9]", "", pos).lower()
                             entity_h = hashlib.sha256(f"job:{clean_comp}:{clean_pos}".encode()).hexdigest()
+
+                            if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
+                                continue
 
                             story_obj = DevPulseStory(
                                 id=story_id,
@@ -606,6 +627,8 @@ class DevPulseManager:
                             )
                             self.register_story_memory(story_obj)
                             stories.append(story_obj)
+                            if len(stories) >= 4:
+                                break
             except Exception as e:
                 logger.debug(f"Notice during RemoteOK fallback: {e}")
 
@@ -623,9 +646,20 @@ class DevPulseManager:
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
                     data = await resp.json(content_type=None)
-                    for h in data.get("hackathons", [])[:6]:
+                    for h in data.get("hackathons", []):
                         title = h.get("title", "")
                         link = h.get("url", "")
+                        if not title or not link:
+                            continue
+
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"hackathon:{title_h[:24]}".encode()).hexdigest()
+
+                        if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
+                            continue
+
                         raw_prize = h.get("prize_amount", "Cash & Swags")
                         prize_clean = _clean_html(raw_prize).replace("data-currency-value", "").replace("<", "").replace(">", "").strip()
                         prize_clean = re.sub(r"\s+", " ", prize_clean) or "$10,000+ Prize Pool"
@@ -637,9 +671,6 @@ class DevPulseManager:
                         hero_img = h.get("thumbnail_url")
                         if hero_img and hero_img.startswith("//"):
                             hero_img = f"https:{hero_img}"
-
-                        if not title or not link:
-                            continue
 
                         highlights = [
                             f"Prize Pool: {prize_clean}",
@@ -682,11 +713,19 @@ class DevPulseManager:
                 if resp.status == 200:
                     xml_data = await resp.text()
                     root = ET.fromstring(xml_data)
-                    for item in root.findall(".//item")[:5]:
+                    for item in root.findall(".//item"):
                         title = _clean_html(item.findtext("title") or "").strip()
                         link = item.findtext("link") or ""
                         desc = _clean_html(item.findtext("description") or "").strip()
                         if not title or not link:
+                            continue
+
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"perk:{title_h[:24]}".encode()).hexdigest()
+
+                        if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
                             continue
 
                         # Extract authentic high-resolution course thumbnail from enclosure
@@ -741,13 +780,21 @@ class DevPulseManager:
                 if resp.status == 200:
                     xml_data = await resp.text()
                     root = ET.fromstring(xml_data)
-                    for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry")[:5]:
+                    for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry"):
                         title = _clean_html(entry.findtext("{http://www.w3.org/2005/Atom}title") or "").strip()
                         link_el = entry.find("{http://www.w3.org/2005/Atom}link")
                         link = link_el.get("href") if link_el is not None else ""
                         raw_content = entry.findtext("{http://www.w3.org/2005/Atom}content") or ""
                         desc = _clean_html(raw_content).strip()
                         if not title or not link:
+                            continue
+
+                        canon_url = canonicalize_url(link)
+                        story_id = hashlib.sha256(canon_url.encode()).hexdigest()
+                        title_h = compute_title_fingerprint(title)
+                        entity_h = hashlib.sha256(f"tool:{title_h[:24]}".encode()).hexdigest()
+
+                        if story_id in self._seen_hashes or title_h in self._seen_title_hashes or entity_h in self._seen_entity_hashes:
                             continue
 
                         # Extract authentic tool launch banner from official product site
@@ -850,29 +897,30 @@ class DevPulseManager:
         return deduped
 
     async def fetch_category(self, category: str, limit: int = 4) -> list[DevPulseStory]:
-        """Fetch fresh opportunity stories on-demand for a single category."""
+        """Fetch fresh opportunity stories on-demand for a single category, filtering out seen items."""
         connector = aiohttp.TCPConnector(ssl=False)
         timeout = aiohttp.ClientTimeout(total=10)
         cat = category.strip().lower()
 
         async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             if cat in {"bounties", "bounty"}:
-                res = (await self._harvest_bounties(session))[:limit]
+                res = await self._harvest_bounties(session)
             elif cat in {"jobs", "careers", "internships"}:
-                res = (await self._harvest_jobs(session))[:limit]
+                res = await self._harvest_jobs(session)
             elif cat in {"hackathons", "hackathon"}:
-                res = (await self._harvest_hackathons(session))[:limit]
+                res = await self._harvest_hackathons(session)
             elif cat in {"perks", "courses"}:
-                res = (await self._harvest_perks(session))[:limit]
+                res = await self._harvest_perks(session)
             elif cat in {"tools", "aitools"}:
-                res = (await self._harvest_ai_tools(session))[:limit]
+                res = await self._harvest_ai_tools(session)
             else:
-                all_s = await self.harvest_all()
-                res = all_s[:limit]
+                res = await self.harvest_all()
 
-        for s in res:
+        unseen = [s for s in res if not self.is_seen(s)]
+        final_res = unseen[:limit] if unseen else res[:limit]
+        for s in final_res:
             self.register_story_memory(s)
-        return res
+        return final_res
 
     # -------------------------------------------------------------------------
     # Components V2 Card Formatters

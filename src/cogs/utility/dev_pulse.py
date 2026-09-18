@@ -514,7 +514,14 @@ class DevFeedCog(commands.Cog):
                     if cats_allowed != "all" and story.category not in cats_allowed.split(","):
                         continue
 
-                    channel = self.bot.get_channel(channel_id)
+                    guild = self.bot.get_guild(guild_id)
+                    channel = guild.get_channel(channel_id) if guild else None
+                    if not channel:
+                        try:
+                            channel = await self.bot.fetch_channel(channel_id)
+                        except Exception:
+                            channel = None
+
                     if not channel or not isinstance(channel, discord.TextChannel):
                         continue
 
@@ -526,13 +533,19 @@ class DevFeedCog(commands.Cog):
 
                 if dispatched_any:
                     dispatched.append(story)
+                    # Persist immediately to prevent repeats or race conditions
+                    await self.bot.dev_mgr.record_dispatched([story])
+                else:
+                    # Advance past this story in memory so queue does not stall
+                    self.bot.dev_mgr._seen_hashes.add(story.id)
+                    if story.title_hash:
+                        self.bot.dev_mgr._seen_title_hashes.add(story.title_hash)
+                    if story.entity_hash:
+                        self.bot.dev_mgr._seen_entity_hashes.add(story.entity_hash)
 
                 # Intentional spacing between items so cards never spam simultaneously
                 if index < len(candidates) - 1:
                     await asyncio.sleep(5)
-
-            if dispatched:
-                await self.bot.dev_mgr.record_dispatched(dispatched)
 
         except Exception as e:
             logger.error(f"Error in DevFeed background poller: {e}", exc_info=e)
@@ -565,9 +578,12 @@ class DevFeedCog(commands.Cog):
                     await send_container_response(ctx, container)
                     return
 
+                story_to_send = stories[0]
                 dot = self.bot.custom_emojis.get("heart_dot", "•")
-                card = self.bot.dev_mgr.build_story_container(stories[0], dot=dot)
+                card = self.bot.dev_mgr.build_story_container(story_to_send, dot=dot)
                 await send_container_response(ctx, card)
+                # Mark dispatched so subsequent calls or background cycles never repeat this story
+                await self.bot.dev_mgr.record_dispatched([story_to_send])
                 return
 
         cfg = self.bot.dev_mgr.get_guild_config(ctx.guild.id)

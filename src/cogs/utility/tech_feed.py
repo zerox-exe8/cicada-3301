@@ -172,26 +172,31 @@ class TechSetupModulesView(discord.ui.View):
         self.bot = bot
         self.author_id = author_id
         self.channel = channel
-        # Start with all modules active so user can easily toggle off/on individually
-        self.active_categories: set[str] = {opt["value"] for opt in MODULE_OPTIONS}
+        
+        # If guild already has saved categories, load them; otherwise start empty so user selects to turn ON
+        existing = self.bot.tech_mgr.get_config(channel.guild.id) if channel.guild else None
+        if existing and existing.get("categories"):
+            saved = [c.strip() for c in existing["categories"].split(",") if c.strip() in VALID_CATEGORIES]
+            self.active_categories: set[str] = set(saved) if saved else set()
+        else:
+            self.active_categories: set[str] = set()
 
         self._build_components()
 
     def _build_components(self) -> None:
         self.clear_items()
 
-        # Single-select toggle picker: user selects a module one by one to toggle ON / OFF
         select_options = [
             discord.SelectOption(
                 label=opt["label"],
                 value=opt["value"],
-                description=f"Toggle {opt['label']} ON / OFF",
+                description=opt["description"][:100],
             )
             for opt in MODULE_OPTIONS
         ]
 
         self.module_select = discord.ui.Select(
-            placeholder="Select a module to toggle ON / OFF...",
+            placeholder="Select a module...",
             min_values=1,
             max_values=1,
             options=select_options,
@@ -217,7 +222,7 @@ class TechSetupModulesView(discord.ui.View):
         self.add_item(self.back_button)
 
     def build_container(self) -> KyroContainer:
-        """Render container showing module toggle state upar with switch emojis."""
+        """Render container showing module state with switch emojis only (no redundant on/off text)."""
         sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
         sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
 
@@ -233,7 +238,7 @@ class TechSetupModulesView(discord.ui.View):
         lines = [
             f"**Target Channel:** {self.channel.mention}\n",
             "Select which intelligence modules to stream into this channel. "
-            "Use the menu below to toggle modules ON or OFF individually:\n",
+            "Choose modules from the menu below to activate:\n",
         ]
 
         for opt in MODULE_OPTIONS:
@@ -241,8 +246,7 @@ class TechSetupModulesView(discord.ui.View):
             lbl = opt["label"]
             is_active = val in self.active_categories
             emoji = sw_on if is_active else sw_off
-            status = "**ON**" if is_active else "*OFF*"
-            lines.append(f"{emoji} **{lbl}** • {status}")
+            lines.append(f"{emoji} **{lbl}**")
 
         container.add_text("\n".join(lines))
         return container

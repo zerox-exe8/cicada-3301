@@ -28,6 +28,9 @@ from src.managers.ticket_manager import TicketManager
 from src.managers.tech_manager import TechNewsManager
 from src.managers.dev_pulse_manager import DevPulseManager
 from src.managers.tech_realtime_manager import TechRealtimeManager
+from src.managers.temp_voice_manager import TempVoiceManager
+from src.managers.translator_manager import TranslatorManager
+from src.managers.sticky_manager import StickyManager
 from src.utils.emojis import EmojiRegistry
 
 logger = logging.getLogger("Kyro.Core")
@@ -95,6 +98,9 @@ class KyroBot(commands.Bot):
         self.tech_mgr: TechNewsManager = TechNewsManager(self.db)
         self.dev_mgr: DevPulseManager = DevPulseManager(self.db)
         self.tech_realtime_mgr: TechRealtimeManager = TechRealtimeManager(self.db)
+        self.temp_voice_mgr: TempVoiceManager = TempVoiceManager(self.db)
+        self.translator_mgr: TranslatorManager = TranslatorManager(self.db)
+        self.sticky_mgr: StickyManager = StickyManager(self.db)
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
         self.no_prefix_users: set[int] = set()
         self.custom_status: str | None = None
@@ -211,6 +217,9 @@ class KyroBot(commands.Bot):
         await self.tech_mgr.load_cache()
         await self.dev_mgr.load_cache()
         await self.tech_realtime_mgr.initialize()
+        await self.temp_voice_mgr.load_cache()
+        await self.translator_mgr.load_cache()
+        await self.sticky_mgr.load_cache()
         await self.custom_emojis.load()
 
         # Load No-Prefix authorized users into memory

@@ -12,6 +12,9 @@ from src.managers.premium_manager import PremiumManager
 from src.managers.tech_manager import TechNewsManager
 from src.managers.dev_pulse_manager import DevPulseManager
 from src.managers.tech_realtime_manager import TechRealtimeManager
+from src.managers.temp_voice_manager import TempVoiceManager
+from src.managers.translator_manager import TranslatorManager
+from src.managers.sticky_manager import StickyManager
 
 __all__ = [
     "GuildManager",
@@ -23,4 +26,7 @@ __all__ = [
     "TechNewsManager",
     "DevPulseManager",
     "TechRealtimeManager",
+    "TempVoiceManager",
+    "TranslatorManager",
+    "StickyManager",
 ]

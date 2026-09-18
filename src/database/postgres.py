@@ -583,6 +583,54 @@ class PostgresDatabase(BaseDatabase):
                 dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
+            # Dynamic Temp Voice Channels Configuration
+            """
+            CREATE TABLE IF NOT EXISTS guild_temp_voice_settings (
+                guild_id BIGINT PRIMARY KEY,
+                category_id BIGINT NOT NULL,
+                master_channel_id BIGINT NOT NULL,
+                default_name_format VARCHAR(100) DEFAULT '{user}''s Room',
+                default_user_limit INT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Active Temp Voice Channels Tracking for Persistence & Cleanup
+            """
+            CREATE TABLE IF NOT EXISTS active_temp_voice_channels (
+                channel_id BIGINT PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                owner_id BIGINT NOT NULL,
+                control_message_id BIGINT,
+                is_locked BOOLEAN DEFAULT FALSE,
+                is_hidden BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Sticky Messages Configuration & State
+            """
+            CREATE TABLE IF NOT EXISTS guild_sticky_messages (
+                channel_id BIGINT PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                content TEXT NOT NULL,
+                embed_title VARCHAR(256),
+                embed_color VARCHAR(16),
+                last_message_id BIGINT,
+                is_enabled BOOLEAN DEFAULT TRUE,
+                created_by BIGINT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Reaction Flag Translator Configuration
+            """
+            CREATE TABLE IF NOT EXISTS guild_translator_settings (
+                guild_id BIGINT PRIMARY KEY,
+                is_enabled BOOLEAN DEFAULT TRUE,
+                reaction_enabled BOOLEAN DEFAULT TRUE,
+                target_mode VARCHAR(16) DEFAULT 'ephemeral',
+                disabled_channels BIGINT[] DEFAULT '{}',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

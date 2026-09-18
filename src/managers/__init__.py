@@ -10,6 +10,7 @@ from src.managers.system_manager import SystemManager
 from src.managers.log_manager import LogManager
 from src.managers.premium_manager import PremiumManager
 from src.managers.tech_manager import TechNewsManager
+from src.managers.dev_pulse_manager import DevPulseManager
 
 __all__ = [
     "GuildManager",
@@ -19,4 +20,5 @@ __all__ = [
     "LogManager",
     "PremiumManager",
     "TechNewsManager",
+    "DevPulseManager",
 ]

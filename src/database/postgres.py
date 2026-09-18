@@ -485,6 +485,52 @@ class PostgresDatabase(BaseDatabase):
             """
             ALTER TABLE tech_news_history ADD COLUMN IF NOT EXISTS is_critical BOOLEAN DEFAULT FALSE;
             """,
+            # Guild Developer Opportunities Feed Configuration
+            """
+            CREATE TABLE IF NOT EXISTS guild_dev_pulse (
+                guild_id BIGINT PRIMARY KEY,
+                channel_id BIGINT NOT NULL,
+                categories TEXT DEFAULT 'all',
+                thread_enabled BOOLEAN DEFAULT FALSE,
+                mode VARCHAR(20) DEFAULT 'live',
+                alert_role_id BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Dispatched Developer Opportunities Registry for Deduplication
+            """
+            CREATE TABLE IF NOT EXISTS dev_pulse_history (
+                item_hash VARCHAR(64) PRIMARY KEY,
+                source VARCHAR(32) NOT NULL,
+                category VARCHAR(32) NOT NULL,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL,
+                dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Community Projects Showcase Registry
+            """
+            CREATE TABLE IF NOT EXISTS community_projects (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                title VARCHAR(120) NOT NULL,
+                description TEXT NOT NULL,
+                demo_url TEXT NOT NULL,
+                image_url TEXT,
+                message_id BIGINT,
+                channel_id BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS community_project_upvotes (
+                project_id INT REFERENCES community_projects(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (project_id, user_id)
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

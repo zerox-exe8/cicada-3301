@@ -450,6 +450,45 @@ class TechFeedCog(commands.Cog):
         self._poller_task.cancel()
 
     # -------------------------------------------------------------------------
+    # Interactive Bookmark Listener (Save to DM)
+    # -------------------------------------------------------------------------
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        """Handle 'Save to DM' bookmark button clicks on tech news cards."""
+        custom_id = (interaction.data or {}).get("custom_id")
+        if not custom_id or not isinstance(custom_id, str) or not custom_id.startswith("tech_bm:"):
+            return
+
+        story_id = custom_id.replace("tech_bm:", "")
+        story = self.bot.tech_mgr.get_story(story_id)
+        if not story:
+            try:
+                await interaction.response.send_message(
+                    "This story has expired from active cache. You can view it directly using the article link button.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+            return
+
+        try:
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            dm_card = self.bot.tech_mgr.build_story_container(story, dot=dot)
+            await send_container_response(interaction.user, dm_card)
+            await interaction.response.send_message(
+                "Saved this article to your private DM inbox!",
+                ephemeral=True,
+            )
+        except Exception:
+            try:
+                await interaction.response.send_message(
+                    "Could not send DM. Please make sure your DMs are open for server members.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+    # -------------------------------------------------------------------------
     # Autonomous Background Dispatcher Loop (Every 15 minutes)
     # -------------------------------------------------------------------------
     @tasks.loop(minutes=15)

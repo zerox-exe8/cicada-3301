@@ -321,23 +321,32 @@ class TechSetupModulesView(discord.ui.View):
             await edit_container_response(interaction, container, view=None)
             return
 
-        formatted_mods = ", ".join(
-            CATEGORY_BADGES.get(c, c.title()) for c in self.active_categories
-        )
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+        sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"### Tech Dashboard\n"
-                f"> Intelligence broadcasting is now active for this server."
+                f"> Intelligence broadcasting is now active."
             )
         )
         container.add_separator(divider=True)
-        container.add_text(
-            f"• Target Channel: {self.channel.mention}\n"
-            f"• Active Modules: {formatted_mods}\n"
-            f"• Broadcast Cadence: Every 15 Minutes (Zero Spam Quality Gate)"
-        )
+
+        lines = [
+            f"**Channel:** {self.channel.mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`\n",
+            "**Active Modules:**",
+        ]
+
+        for opt in MODULE_OPTIONS:
+            val = opt["value"]
+            lbl = opt["label"]
+            is_active = val in self.active_categories
+            emoji = sw_on if is_active else sw_off
+            lines.append(f"{emoji} **{lbl}**")
+
+        container.add_text("\n".join(lines))
         await edit_container_response(interaction, container, view=None)
 
 
@@ -645,8 +654,11 @@ class TechFeedCog(commands.Cog):
 
         channel = ctx.guild.get_channel(cfg["channel_id"])
         ch_mention = channel.mention if channel else f"Unknown ({cfg['channel_id']})"
-        raw_cats = cfg.get("categories", "all").split(",")
-        formatted_mods = ", ".join(CATEGORY_BADGES.get(c.strip(), c.strip().title()) for c in raw_cats)
+        raw_cats = {c.strip() for c in cfg.get("categories", "all").split(",")}
+
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+        sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
 
         container.add_section(
             content=(
@@ -655,11 +667,20 @@ class TechFeedCog(commands.Cog):
             )
         )
         container.add_separator(divider=True)
-        container.add_text(
-            f"• Target Channel: {ch_mention}\n"
-            f"• Active Modules: {formatted_mods}\n"
-            f"• Broadcast Cadence: Every 15 Minutes (Zero Spam Quality Gate)"
-        )
+
+        lines = [
+            f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`\n",
+            "**Active Modules:**",
+        ]
+
+        for opt in MODULE_OPTIONS:
+            val = opt["value"]
+            lbl = opt["label"]
+            is_active = ("all" in raw_cats) or (val in raw_cats)
+            emoji = sw_on if is_active else sw_off
+            lines.append(f"{emoji} **{lbl}**")
+
+        container.add_text("\n".join(lines))
 
         view = TechStatusView(
             bot=self.bot,

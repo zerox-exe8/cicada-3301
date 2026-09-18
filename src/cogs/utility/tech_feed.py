@@ -347,6 +347,7 @@ class TechSetupModulesView(discord.ui.View):
             lines.append(f"{emoji} **{lbl}**")
 
         container.add_text("\n".join(lines))
+        container.add_separator(divider=True)
         await edit_container_response(interaction, container, view=None)
 
 
@@ -681,6 +682,7 @@ class TechFeedCog(commands.Cog):
             lines.append(f"{emoji} **{lbl}**")
 
         container.add_text("\n".join(lines))
+        container.add_separator(divider=True)
 
         view = TechStatusView(
             bot=self.bot,

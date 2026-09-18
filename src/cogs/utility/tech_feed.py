@@ -81,9 +81,18 @@ class TechSetupChannelView(discord.ui.View):
         self.channel_select.callback = self._on_channel_select
         self.add_item(self.channel_select)
 
+        # Cancel on the left, Continue on the right (both secondary grey style, zero blue color)
+        self.cancel_button = discord.ui.Button(
+            label="Cancel",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.cancel_button.callback = self._on_cancel
+        self.add_item(self.cancel_button)
+
         self.continue_button = discord.ui.Button(
             label="Continue",
-            style=discord.ButtonStyle.primary,
+            style=discord.ButtonStyle.secondary,
             row=1,
         )
         self.continue_button.callback = self._on_continue
@@ -112,6 +121,16 @@ class TechSetupChannelView(discord.ui.View):
             self.selected_channel = interaction.guild.get_channel(selected.id)
         await interaction.response.defer()
 
+    async def _on_cancel(self, interaction: discord.Interaction) -> None:
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Dashboard\n"
+                f"> Setup cancelled."
+            )
+        )
+        await edit_container_response(interaction, container, view=None)
+
     async def _on_continue(self, interaction: discord.Interaction) -> None:
         if not self.selected_channel:
             await interaction.response.send_message(
@@ -135,24 +154,12 @@ class TechSetupChannelView(discord.ui.View):
             author_id=self.author_id,
             channel=self.selected_channel,
         )
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"### Tech Feed Setup\n"
-                f"> Step 2 of 2: Select Modules"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(
-            f"Target Channel: {self.selected_channel.mention}\n\n"
-            f"Select which intelligence modules to stream into this channel. "
-            f"You can choose one or multiple modules using the menu below, then click Done."
-        )
+        container = modules_view.build_container()
         await edit_container_response(interaction, container, view=modules_view)
 
 
 class TechSetupModulesView(discord.ui.View):
-    """Step 2: Multi-select intelligence categories and finalize feed setup."""
+    """Step 2: Toggle intelligence modules individually with switch emojis."""
 
     def __init__(
         self,
@@ -165,26 +172,32 @@ class TechSetupModulesView(discord.ui.View):
         self.bot = bot
         self.author_id = author_id
         self.channel = channel
-        self.selected_categories: list[str] = [opt["value"] for opt in MODULE_OPTIONS]
+        # Start with all modules active so user can easily toggle off/on individually
+        self.active_categories: set[str] = {opt["value"] for opt in MODULE_OPTIONS}
 
+        self._build_components()
+
+    def _build_components(self) -> None:
+        self.clear_items()
+
+        # Single-select toggle picker: user selects a module one by one to toggle ON / OFF
         select_options = [
             discord.SelectOption(
                 label=opt["label"],
                 value=opt["value"],
-                description=opt["description"][:100],
-                default=True,
+                description=f"Toggle {opt['label']} ON / OFF",
             )
             for opt in MODULE_OPTIONS
         ]
 
         self.module_select = discord.ui.Select(
-            placeholder="Select modules (default: all)...",
+            placeholder="Select a module to toggle ON / OFF...",
             min_values=1,
-            max_values=len(select_options),
+            max_values=1,
             options=select_options,
             row=0,
         )
-        self.module_select.callback = self._on_select_modules
+        self.module_select.callback = self._on_toggle_module
         self.add_item(self.module_select)
 
         self.done_button = discord.ui.Button(
@@ -203,6 +216,37 @@ class TechSetupModulesView(discord.ui.View):
         self.back_button.callback = self._on_back
         self.add_item(self.back_button)
 
+    def build_container(self) -> KyroContainer:
+        """Render container showing module toggle state upar with switch emojis."""
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+        sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Dashboard\n"
+                f"> Step 2 of 2: Select Modules"
+            )
+        )
+        container.add_separator(divider=True)
+
+        lines = [
+            f"**Target Channel:** {self.channel.mention}\n",
+            "Select which intelligence modules to stream into this channel. "
+            "Use the menu below to toggle modules ON or OFF individually:\n",
+        ]
+
+        for opt in MODULE_OPTIONS:
+            val = opt["value"]
+            lbl = opt["label"]
+            is_active = val in self.active_categories
+            emoji = sw_on if is_active else sw_off
+            status = "**ON**" if is_active else "*OFF*"
+            lines.append(f"{emoji} **{lbl}** • {status}")
+
+        container.add_text("\n".join(lines))
+        return container
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id and not (
             interaction.user.guild_permissions.manage_guild
@@ -216,9 +260,19 @@ class TechSetupModulesView(discord.ui.View):
             return False
         return True
 
-    async def _on_select_modules(self, interaction: discord.Interaction) -> None:
-        self.selected_categories = list(self.module_select.values)
-        await interaction.response.defer()
+    async def _on_toggle_module(self, interaction: discord.Interaction) -> None:
+        if not self.module_select.values:
+            return
+        chosen = self.module_select.values[0]
+        if chosen in self.active_categories:
+            self.active_categories.remove(chosen)
+        else:
+            self.active_categories.add(chosen)
+
+        # Rebuild view components to reset dropdown selection placeholder cleanly
+        self._build_components()
+        container = self.build_container()
+        await edit_container_response(interaction, container, view=self)
 
     async def _on_back(self, interaction: discord.Interaction) -> None:
         channel_view = TechSetupChannelView(bot=self.bot, author_id=self.author_id)
@@ -226,7 +280,7 @@ class TechSetupModulesView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Feed Setup\n"
+                f"### Tech Dashboard\n"
                 f"> Step 1 of 2: Select Channel"
             )
         )
@@ -240,7 +294,14 @@ class TechSetupModulesView(discord.ui.View):
         if not interaction.guild:
             return
 
-        cat_str = ",".join(self.selected_categories)
+        if not self.active_categories:
+            await interaction.response.send_message(
+                "Please enable at least one intelligence module before completing setup.",
+                ephemeral=True,
+            )
+            return
+
+        cat_str = ",".join(self.active_categories)
         success = await self.bot.tech_mgr.set_channel(
             guild_id=interaction.guild.id,
             channel_id=self.channel.id,
@@ -257,13 +318,13 @@ class TechSetupModulesView(discord.ui.View):
             return
 
         formatted_mods = ", ".join(
-            CATEGORY_BADGES.get(c, c.title()) for c in self.selected_categories
+            CATEGORY_BADGES.get(c, c.title()) for c in self.active_categories
         )
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Feed Configured\n"
+                f"### Tech Dashboard\n"
                 f"> Intelligence broadcasting is now active for this server."
             )
         )
@@ -311,7 +372,7 @@ class TechStatusView(discord.ui.View):
         else:
             self.setup_button = discord.ui.Button(
                 label="Configure Feed",
-                style=discord.ButtonStyle.primary,
+                style=discord.ButtonStyle.secondary,
                 row=0,
             )
             self.setup_button.callback = self._on_edit
@@ -335,7 +396,7 @@ class TechStatusView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Feed Setup\n"
+                f"### Tech Dashboard\n"
                 f"> Step 1 of 2: Select Channel"
             )
         )
@@ -350,7 +411,7 @@ class TechStatusView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Feed Disabled\n"
+                f"### Tech Dashboard\n"
                 f"> Automated broadcasting has been deactivated for this server."
             )
         )
@@ -507,13 +568,12 @@ class TechFeedCog(commands.Cog):
     @commands.guild_only()
     async def tech(self, ctx: CustomContext) -> None:
         """Interactive 2-step setup: select channel, then select modules."""
-        # If user has manage_guild permissions, open setup flow directly
         if ctx.author.guild_permissions.manage_guild:
             channel_view = TechSetupChannelView(bot=self.bot, author_id=ctx.author.id)
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"### Tech Feed Setup\n"
+                    f"### Tech Dashboard\n"
                     f"> Step 1 of 2: Select Channel"
                 )
             )
@@ -537,7 +597,7 @@ class TechFeedCog(commands.Cog):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Feed Setup\n"
+                f"### Tech Dashboard\n"
                 f"> Step 1 of 2: Select Channel"
             )
         )
@@ -561,7 +621,7 @@ class TechFeedCog(commands.Cog):
         if not cfg:
             container.add_section(
                 content=(
-                    f"### Tech Feed Status\n"
+                    f"### Tech Dashboard\n"
                     f"> Status: Inactive on this server"
                 )
             )
@@ -586,7 +646,7 @@ class TechFeedCog(commands.Cog):
 
         container.add_section(
             content=(
-                f"### Tech Feed Status\n"
+                f"### Tech Dashboard\n"
                 f"> Status: Active & Broadcasting"
             )
         )

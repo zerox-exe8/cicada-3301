@@ -157,10 +157,12 @@ class Help(commands.Cog):
         )
         container.add_separator(divider=True)
 
+        modules_list = ", ".join([f"`{c}`" for c in visible_categories.keys()])
         container.add_text(
             f"{dot} **Latency:** `{ws_ping}ms`\n"
             f"{dot} **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
-            f"{dot} **Available Commands:** `{total_commands}`"
+            f"{dot} **Available Commands:** `{total_commands}`\n"
+            f"{dot} **Modules:** {modules_list}"
         )
         container.add_separator(divider=True)
 

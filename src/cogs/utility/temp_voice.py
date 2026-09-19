@@ -37,9 +37,9 @@ class TempVoiceRenameModal(discord.ui.Modal, title="Rename Voice Room"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         name = self.new_name.value.strip()
         try:
-            await self.channel.edit(name=f"🔊 {name}", reason=f"Temp voice renamed by {interaction.user}")
+            await self.channel.edit(name=name, reason=f"Temp voice renamed by {interaction.user}")
             await interaction.response.send_message(
-                f"**Room Renamed**: Voice channel updated to **🔊 {name}**.",
+                f"**Room Renamed**: Voice channel updated to **{name}**.",
                 ephemeral=True,
             )
         except discord.HTTPException as e:
@@ -248,7 +248,7 @@ class PersistentVoiceMasterView(discord.ui.View):
 
     # ── ROW 0: PRIVACY & CAPACITY ──
 
-    @discord.ui.button(label="Lock", style=discord.ButtonStyle.primary, custom_id="pvm_lock", emoji="🔒", row=0)
+    @discord.ui.button(label="Lock", style=discord.ButtonStyle.secondary, custom_id="pvm_lock", row=0)
     async def btn_lock(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
@@ -263,7 +263,7 @@ class PersistentVoiceMasterView(discord.ui.View):
         except discord.HTTPException as e:
             await interaction.response.send_message(f"Failed to lock room: {e}", ephemeral=True)
 
-    @discord.ui.button(label="Unlock", style=discord.ButtonStyle.secondary, custom_id="pvm_unlock", emoji="🔓", row=0)
+    @discord.ui.button(label="Unlock", style=discord.ButtonStyle.secondary, custom_id="pvm_unlock", row=0)
     async def btn_unlock(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
@@ -276,7 +276,7 @@ class PersistentVoiceMasterView(discord.ui.View):
         except discord.HTTPException as e:
             await interaction.response.send_message(f"Failed to unlock room: {e}", ephemeral=True)
 
-    @discord.ui.button(label="Ghost", style=discord.ButtonStyle.secondary, custom_id="pvm_hide", emoji="👁️", row=0)
+    @discord.ui.button(label="Hide", style=discord.ButtonStyle.secondary, custom_id="pvm_hide", row=0)
     async def btn_hide(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
@@ -291,7 +291,7 @@ class PersistentVoiceMasterView(discord.ui.View):
         except discord.HTTPException as e:
             await interaction.response.send_message(f"Failed to hide room: {e}", ephemeral=True)
 
-    @discord.ui.button(label="Unhide", style=discord.ButtonStyle.secondary, custom_id="pvm_unhide", emoji="👀", row=0)
+    @discord.ui.button(label="Unhide", style=discord.ButtonStyle.secondary, custom_id="pvm_unhide", row=0)
     async def btn_unhide(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
@@ -304,39 +304,47 @@ class PersistentVoiceMasterView(discord.ui.View):
         except discord.HTTPException as e:
             await interaction.response.send_message(f"Failed to unhide room: {e}", ephemeral=True)
 
-    @discord.ui.button(label="Limit", style=discord.ButtonStyle.secondary, custom_id="pvm_limit", emoji="👥", row=0)
+    @discord.ui.button(label="Limit", style=discord.ButtonStyle.secondary, custom_id="pvm_limit", row=0)
     async def btn_limit(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
         await interaction.response.send_modal(TempVoiceLimitModal(channel))
 
-    # ── ROW 1: PERSONALIZATION & MEMBERS ──
+    # ── ROW 1: CONTROLS & QUALITY ──
 
-    @discord.ui.button(label="Rename", style=discord.ButtonStyle.secondary, custom_id="pvm_rename", emoji="✏️", row=1)
+    @discord.ui.button(label="Rename", style=discord.ButtonStyle.secondary, custom_id="pvm_rename", row=1)
     async def btn_rename(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
         await interaction.response.send_modal(TempVoiceRenameModal(channel))
 
-    @discord.ui.button(label="Permit", style=discord.ButtonStyle.success, custom_id="pvm_permit", emoji="⭐", row=1)
+    @discord.ui.button(label="Permit", style=discord.ButtonStyle.secondary, custom_id="pvm_permit", row=1)
     async def btn_permit(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
         view = TrustMemberView(channel)
-        await interaction.response.send_message("**Trust / Permit a Member:**", view=view, ephemeral=True)
+        await interaction.response.send_message("**Permit a Member:**", view=view, ephemeral=True)
 
-    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, custom_id="pvm_block", emoji="🚫", row=1)
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.secondary, custom_id="pvm_block", row=1)
     async def btn_block(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
         view = BlockMemberView(channel)
-        await interaction.response.send_message("**Kick and Block a Member:**", view=view, ephemeral=True)
+        await interaction.response.send_message("**Reject and Block a Member:**", view=view, ephemeral=True)
 
-    @discord.ui.button(label="Transfer", style=discord.ButtonStyle.secondary, custom_id="pvm_transfer", emoji="👑", row=1)
+    @discord.ui.button(label="Bitrate", style=discord.ButtonStyle.secondary, custom_id="pvm_bitrate", row=1)
+    async def btn_bitrate(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        channel, data = await self._resolve_room_for_interaction(interaction)
+        if not channel or not data or not await self._verify_owner(interaction, channel, data):
+            return
+        view = BitrateQualityView(channel)
+        await interaction.response.send_message("**Adjust Audio Bitrate:**", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Transfer", style=discord.ButtonStyle.secondary, custom_id="pvm_transfer", row=1)
     async def btn_transfer(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
@@ -344,14 +352,15 @@ class PersistentVoiceMasterView(discord.ui.View):
         view = TransferHostView(self.bot, channel)
         await interaction.response.send_message("**Transfer Room Ownership:**", view=view, ephemeral=True)
 
-    @discord.ui.button(label="Claim", style=discord.ButtonStyle.success, custom_id="pvm_claim", emoji="🏆", row=1)
+    # ── ROW 2: OWNERSHIP & SESSION ──
+
+    @discord.ui.button(label="Claim", style=discord.ButtonStyle.secondary, custom_id="pvm_claim", row=2)
     async def btn_claim(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data:
             return
 
         current_owner_id = data["owner_id"]
-        # Check if current owner is still connected
         owner_connected = any(m.id == current_owner_id for m in channel.members)
         if owner_connected and interaction.user.id != current_owner_id:
             await interaction.response.send_message(
@@ -380,17 +389,7 @@ class PersistentVoiceMasterView(discord.ui.View):
             ephemeral=False,
         )
 
-    # ── ROW 2: QUALITY & SESSION ──
-
-    @discord.ui.button(label="Bitrate Quality", style=discord.ButtonStyle.secondary, custom_id="pvm_bitrate", emoji="🎧", row=2)
-    async def btn_bitrate(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        channel, data = await self._resolve_room_for_interaction(interaction)
-        if not channel or not data or not await self._verify_owner(interaction, channel, data):
-            return
-        view = BitrateQualityView(channel)
-        await interaction.response.send_message("**Adjust Audio Bitrate Quality:**", view=view, ephemeral=True)
-
-    @discord.ui.button(label="Delete Room", style=discord.ButtonStyle.danger, custom_id="pvm_delete", emoji="🗑️", row=2)
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, custom_id="pvm_delete", row=2)
     async def btn_delete(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
@@ -483,7 +482,7 @@ class TempVoice(commands.Cog):
             category = master_channel.category
 
         name_fmt = settings.get("default_name_format") or "{user}'s Room"
-        channel_name = f"🔊 {name_fmt.replace('{user}', member.display_name)}"
+        channel_name = name_fmt.replace("{user}", member.display_name)
 
         overwrites: dict[Any, discord.PermissionOverwrite] = {
             guild.default_role: discord.PermissionOverwrite(
@@ -529,7 +528,7 @@ class TempVoice(commands.Cog):
                 content=(
                     f"### {channel_name}\n"
                     f"> Welcome {member.mention}! You are the host of this room.\n"
-                    f"> Use the buttons below or the master interface channel to manage your room."
+                    f"> Use the controls below or the Interface channel to manage your room."
                 )
             )
             container.add_separator(divider=True)
@@ -538,8 +537,10 @@ class TempVoice(commands.Cog):
             container.add_field("Auto-Delete", "When Empty", inline=True)
 
             view = PersistentVoiceMasterView(self.bot)
-            panel_msg = await new_channel.send(embed=container.to_embed(), view=view)
-            await self.bot.temp_voice_mgr.update_control_message(new_channel.id, panel_msg.id)
+            panel_msg = await send_container_response(new_channel, container, view=view)
+            p_msg_id = panel_msg.id if isinstance(panel_msg, discord.Message) else (int(panel_msg["id"]) if isinstance(panel_msg, dict) and "id" in panel_msg else None)
+            if p_msg_id:
+                await self.bot.temp_voice_mgr.update_control_message(new_channel.id, p_msg_id)
 
         except discord.HTTPException as e:
             logger.error(f"Failed creating J2C room in guild {guild.id}: {e}", exc_info=e)
@@ -572,18 +573,18 @@ class TempVoice(commands.Cog):
         description="Setup Join-to-Create voice infrastructure with automated channel generator and control dashboard.",
     )
     @app_commands.describe(
-        category_name="Optional custom category name (default: 🔊 Custom Voice)",
-        voice_name="Optional custom master channel name (default: ➕ Join to Create)",
-        interface_name="Optional custom control channel name (default: 🎛️・voice-control)",
+        category_name="Optional custom category name (default: Custom Voice)",
+        voice_name="Optional custom master channel name (default: Join to Create)",
+        interface_name="Optional custom control channel name (default: Interface)",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
     async def j2c(
         self,
         ctx: CustomContext,
-        category_name: Optional[str] = "🔊 Custom Voice",
-        voice_name: Optional[str] = "➕ Join to Create",
-        interface_name: Optional[str] = "🎛️・voice-control",
+        category_name: Optional[str] = "Custom Voice",
+        voice_name: Optional[str] = "Join to Create",
+        interface_name: Optional[str] = "Interface",
     ) -> None:
         """Automated J2C infrastructure generator."""
         if ctx.interaction and not ctx.interaction.response.is_done():
@@ -593,9 +594,9 @@ class TempVoice(commands.Cog):
         if not guild:
             return
 
-        cat_title = category_name.strip() if category_name else "🔊 Custom Voice"
-        v_title = voice_name.strip() if voice_name else "➕ Join to Create"
-        i_title = interface_name.strip() if interface_name else "🎛️・voice-control"
+        cat_title = category_name.strip() if category_name else "Custom Voice"
+        v_title = voice_name.strip() if voice_name else "Join to Create"
+        i_title = interface_name.strip() if interface_name else "Interface"
 
         try:
             # 1. Create Category
@@ -636,27 +637,27 @@ class TempVoice(commands.Cog):
             dashboard_container = KyroContainer(accent_color=None)
             dashboard_container.add_section(
                 content=(
-                    f"### 🎛️ Voice Master Control Dashboard\n"
-                    f"> Welcome to the server's central voice customization interface.\n"
-                    f"> Click any button below to manage your active temporary voice room in real time.\n\n"
-                    f"**Quick Instructions:**\n"
-                    f"1. Join {master_channel.mention} to automatically spawn your personal room.\n"
-                    f"2. Use the controls below to lock, hide, rename, limit, permit friends, or kick unwanted members.\n"
-                    f"3. When all members disconnect, your room will automatically delete itself."
+                    f"### Voice Interface\n"
+                    f"> Join {master_channel.mention} to create your private voice room.\n"
+                    f"> Manage room access and settings using the controls below."
                 )
             )
             dashboard_container.add_separator(divider=True)
             dashboard_container.add_text(
-                "**Access Controls**\n"
-                "> 🔒 Lock • 🔓 Unlock • 👁️ Ghost • 👀 Unhide • 👥 Limit\n\n"
-                "**Customization**\n"
-                "> ✏️ Rename • ⭐ Permit • 🚫 Block • 👑 Transfer • 🏆 Claim\n\n"
-                "**Audio & Session**\n"
-                "> 🎧 Quality Bitrate • 🗑️ Delete Room"
+                "**Controls**\n"
+                "• Lock / Unlock : Manage room access\n"
+                "• Hide / Unhide : Toggle channel visibility\n"
+                "• Limit : Set room capacity\n"
+                "• Rename : Update room name\n"
+                "• Permit / Reject : Manage member permissions\n"
+                "• Bitrate : Adjust streaming quality\n"
+                "• Transfer / Claim : Room ownership controls\n"
+                "• Delete : Close voice room"
             )
 
             view = PersistentVoiceMasterView(self.bot)
-            master_msg = await interface_channel.send(embed=dashboard_container.to_embed(), view=view)
+            master_msg = await send_container_response(interface_channel, dashboard_container, view=view)
+            msg_id = master_msg.id if isinstance(master_msg, discord.Message) else (int(master_msg["id"]) if isinstance(master_msg, dict) and "id" in master_msg else None)
 
             # 5. Save Configuration to Database and Cache
             await self.bot.temp_voice_mgr.set_settings(
@@ -664,22 +665,22 @@ class TempVoice(commands.Cog):
                 category_id=category.id,
                 master_channel_id=master_channel.id,
                 interface_channel_id=interface_channel.id,
-                interface_message_id=master_msg.id,
+                interface_message_id=msg_id,
             )
 
             # 6. Respond with Success Card to Administrator
             resp_container = KyroContainer(accent_color=None)
             resp_container.add_section(
                 content=(
-                    f"### Join to Create (J2C) Configured Successfully!\n"
-                    f"> The complete temporary voice infrastructure has been deployed."
+                    f"### Join to Create Configured\n"
+                    f"> Voice infrastructure has been deployed successfully."
                 )
             )
             resp_container.add_separator(divider=True)
             resp_container.add_text(
                 f"• **Category:** `{category.name}`\n"
                 f"• **Master Voice:** {master_channel.mention}\n"
-                f"• **Interface Channel:** {interface_channel.mention}"
+                f"• **Interface:** {interface_channel.mention}"
             )
 
             await send_container_response(ctx, resp_container, ephemeral=True)

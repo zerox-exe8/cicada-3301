@@ -565,46 +565,22 @@ class TempVoice(commands.Cog):
                 except Exception:
                     pass
 
-    # ─── HYBRID COMMAND: /vc setup [type: j2c] ────────────────────────────────
-    @commands.hybrid_group(
-        name="vc",
-        description="Voice channel management and Join-to-Create configuration.",
+    # ─── HYBRID COMMAND: /j2c ─────────────────────────────────────────────────
+    @commands.hybrid_command(
+        name="j2c",
+        aliases=["jointocreate", "join-to-create"],
+        description="Setup Join-to-Create voice infrastructure with automated channel generator and control dashboard.",
     )
-    @commands.guild_only()
-    async def vc_group(self, ctx: CustomContext) -> None:
-        """Voice channel management commands."""
-        if ctx.invoked_subcommand is None:
-            prefix = ctx.clean_prefix
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    "**Join to Create Voice Management**\n"
-                    "> Deploy automated temporary voice infrastructure with master control dashboard.\n\n"
-                    f"> **Prefix Command:** `{prefix}vc setup [type]`\n"
-                    f"> **Slash Command:** `/vc setup type:Join to Create (J2C)`"
-                )
-            )
-            container.add_separator(divider=True)
-            container.add_text(f"-# Requested by {ctx.author.display_name}")
-            await send_container_response(ctx, container, ephemeral=True)
-
-    @vc_group.command(name="setup", description="Setup voice infrastructure (J2C Join-to-Create)")
     @app_commands.describe(
-        type="Voice system type to configure",
         category_name="Optional custom category name (default: 🔊 Custom Voice)",
         voice_name="Optional custom master channel name (default: ➕ Join to Create)",
         interface_name="Optional custom control channel name (default: 🎛️・voice-control)",
     )
-    @app_commands.choices(
-        type=[
-            app_commands.Choice(name="Join to Create (J2C)", value="j2c"),
-        ]
-    )
+    @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
-    async def vc_setup(
+    async def j2c(
         self,
         ctx: CustomContext,
-        type: Optional[str] = "j2c",
         category_name: Optional[str] = "🔊 Custom Voice",
         voice_name: Optional[str] = "➕ Join to Create",
         interface_name: Optional[str] = "🎛️・voice-control",
@@ -615,14 +591,6 @@ class TempVoice(commands.Cog):
 
         guild = ctx.guild
         if not guild:
-            return
-
-        raw_val = getattr(type, "value", type)
-        chosen_type = str(raw_val or "j2c").lower().strip()
-        if chosen_type != "j2c":
-            err_c = KyroContainer(accent_color=None)
-            err_c.add_section("**Error**: Unsupported voice system type. Please use `j2c`.")
-            await send_container_response(ctx, err_c, ephemeral=True)
             return
 
         cat_title = category_name.strip() if category_name else "🔊 Custom Voice"

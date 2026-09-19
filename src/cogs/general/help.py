@@ -319,31 +319,6 @@ class Help(commands.Cog):
         if command_or_module:
             query = command_or_module.lower().strip()
 
-            # Direct module / category lookup (e.g. ?help j2c, ?help "join to create")
-            category_aliases = {
-                "j2c": "Join to Create",
-                "jointocreate": "Join to Create",
-                "join to create": "Join to Create",
-                "join-to-create": "Join to Create",
-                "voice": "Join to Create",
-                "tempvoice": "Join to Create",
-                "mod": "Moderation",
-                "welcome": "Welcomer",
-            }
-            target_cat_name = category_aliases.get(query)
-            if not target_cat_name:
-                target_cat_name = next((c for c in visible_categories.keys() if c.lower() == query), None)
-
-            if target_cat_name:
-                matched_cat = next((c for c in visible_categories.keys() if c.lower() == target_cat_name.lower()), None)
-                if matched_cat:
-                    custom_id_prefix = f"help_console:{ctx.author.id}:{ctx.guild.id if ctx.guild else 0}:{ctx.message.id if ctx.message else 0}"
-                    container = self._build_category_container(
-                        ctx, matched_cat, visible_categories[matched_cat], visible_categories, custom_id_prefix
-                    )
-                    await send_container_response(ctx, container)
-                    return
-
             target_cmd = self.bot.get_command(query)
             if target_cmd and await self._can_run_command(target_cmd, ctx):
                 current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
@@ -374,6 +349,30 @@ class Help(commands.Cog):
                 container.add_text(f"-# Requested by {ctx.author.display_name}")
                 await send_container_response(ctx, container)
                 return
+
+            # Direct module / category lookup (e.g. ?help "join to create", ?help mod, ?help voice)
+            category_aliases = {
+                "jointocreate": "Join to Create",
+                "join to create": "Join to Create",
+                "join-to-create": "Join to Create",
+                "voice": "Join to Create",
+                "tempvoice": "Join to Create",
+                "mod": "Moderation",
+                "welcome": "Welcomer",
+            }
+            target_cat_name = category_aliases.get(query)
+            if not target_cat_name:
+                target_cat_name = next((c for c in visible_categories.keys() if c.lower() == query), None)
+
+            if target_cat_name:
+                matched_cat = next((c for c in visible_categories.keys() if c.lower() == target_cat_name.lower()), None)
+                if matched_cat:
+                    custom_id_prefix = f"help_console:{ctx.author.id}:{ctx.guild.id if ctx.guild else 0}:{ctx.message.id if ctx.message else 0}"
+                    container = self._build_category_container(
+                        ctx, matched_cat, visible_categories[matched_cat], visible_categories, custom_id_prefix
+                    )
+                    await send_container_response(ctx, container)
+                    return
 
         # 2. Main Help Console
         custom_id_prefix = f"help_console:{ctx.author.id}:{ctx.guild.id if ctx.guild else 0}:{ctx.message.id if ctx.message else 0}"

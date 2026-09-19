@@ -427,6 +427,7 @@ class DevFeedCog(commands.Cog):
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
+        self._is_dispatching: bool = False
         self._poller_task.start()
 
     def cog_unload(self) -> None:
@@ -472,11 +473,11 @@ class DevFeedCog(commands.Cog):
                 pass
 
     # -------------------------------------------------------------------------
-    # Background Ingestion & Dispatch Loop (Every 10 Minutes with Pacing)
+    # Background Ingestion & Dispatch Loop (Hourly Batch: 10 Items, 1m Delay)
     # -------------------------------------------------------------------------
-    @tasks.loop(minutes=10)
+    @tasks.loop(hours=1)
     async def _poller_task(self) -> None:
-        """Background loop harvesting bounties, jobs, hackathons, perks, and AI tools with anti-flood pacing."""
+        """Background loop harvesting a balanced 10-item developer opportunities batch with 1-minute pacing."""
         try:
             await self.bot.wait_until_ready()
         except (RuntimeError, Exception):
@@ -486,21 +487,20 @@ class DevFeedCog(commands.Cog):
         if not configs:
             return
 
-        try:
-            stories = await self.bot.dev_mgr.harvest_all()
-            if not stories:
-                return
+        if self._is_dispatching:
+            return
 
-            unseen = [s for s in stories if not self.bot.dev_mgr.is_seen(s)]
-            if not unseen:
+        self._is_dispatching = True
+        try:
+            # 1. Harvest balanced batch of up to 10 top-signal items across all categories
+            candidates = await self.bot.dev_mgr.harvest_balanced_batch(target_total=10)
+            if not candidates:
                 return
 
             dot = self.bot.custom_emojis.get("heart_dot", "•")
-            dispatched: list[DevPulseStory] = []
+            logger.info(f"Dispatching batch of {len(candidates)} balanced dev opportunities with 60s pacing delay.")
 
-            # Throttled pacing: Send maximum 2 items per 10-minute cycle to avoid channel flooding
-            candidates = unseen[:2]
-
+            # 2. Dispatch 10 items one by one with strict 1-minute (60s) delay between each post
             for index, story in enumerate(candidates):
                 card = self.bot.dev_mgr.build_story_container(story, dot=dot)
                 dispatched_any = False
@@ -532,23 +532,23 @@ class DevFeedCog(commands.Cog):
                         logger.debug(f"Notice dispatching opportunity {story.id} to guild {guild_id}: {send_err}")
 
                 if dispatched_any:
-                    dispatched.append(story)
                     # Persist immediately to prevent repeats or race conditions
                     await self.bot.dev_mgr.record_dispatched([story])
                 else:
-                    # Advance past this story in memory so queue does not stall
                     self.bot.dev_mgr._seen_hashes.add(story.id)
                     if story.title_hash:
                         self.bot.dev_mgr._seen_title_hashes.add(story.title_hash)
                     if story.entity_hash:
                         self.bot.dev_mgr._seen_entity_hashes.add(story.entity_hash)
 
-                # Intentional spacing between items so cards never spam simultaneously
+                # Exactly 1 minute (60 seconds) delay between each of the 10 posts
                 if index < len(candidates) - 1:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(60)
 
         except Exception as e:
             logger.error(f"Error in DevFeed background poller: {e}", exc_info=e)
+        finally:
+            self._is_dispatching = False
 
     # -------------------------------------------------------------------------
     # Single Unified Command: dev
@@ -606,7 +606,7 @@ class DevFeedCog(commands.Cog):
             container.add_separator(divider=True)
 
             top_lines = [
-                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 10m`  {dot}  **Status:** `Active`"
+                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Hourly Batch (10 Items • 1m Delay)`  {dot}  **Status:** `Active`"
             ]
             container.add_text("\n".join(top_lines))
             container.add_separator(divider=True)

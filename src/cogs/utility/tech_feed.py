@@ -476,6 +476,7 @@ class TechFeedCog(commands.Cog):
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
+        self._is_dispatching: bool = False
         self._poller_task.start()
 
     def cog_unload(self) -> None:
@@ -522,11 +523,11 @@ class TechFeedCog(commands.Cog):
                 pass
 
     # -------------------------------------------------------------------------
-    # Autonomous Background Dispatcher Loop (Every 15 minutes)
+    # Autonomous Background Dispatcher Loop (Hourly Batch: 10 Items, 1m Delay)
     # -------------------------------------------------------------------------
-    @tasks.loop(minutes=15)
+    @tasks.loop(hours=1)
     async def _poller_task(self) -> None:
-        """Background poller harvesting tech intelligence, handling Live streams, Digests, and Critical Alerts."""
+        """Background poller harvesting a balanced 10-item tech intelligence batch and dispatching with 1-minute pacing."""
         try:
             await self.bot.wait_until_ready()
         except (RuntimeError, Exception):
@@ -536,8 +537,13 @@ class TechFeedCog(commands.Cog):
         if not guild_configs:
             return  # Zero active subscriptions; avoid unnecessary network requests
 
+        if self._is_dispatching:
+            return
+
+        self._is_dispatching = True
         try:
-            stories = await self.bot.tech_mgr.harvest_all()
+            # 1. Harvest balanced batch of up to 10 top-signal items across all categories
+            stories = await self.bot.tech_mgr.harvest_balanced_batch(target_total=10)
             if not stories:
                 return
 
@@ -545,7 +551,7 @@ class TechFeedCog(commands.Cog):
             now_utc = discord.utils.utcnow()
             today_str = now_utc.strftime("%Y-%m-%d")
 
-            # 1. Handle Morning Digest for guilds configured in 'digest' mode (Trigger at or after 9 AM UTC)
+            # 2. Handle Morning Digest for guilds configured in 'digest' mode (Trigger at or after 9 AM UTC)
             if now_utc.hour >= 9:
                 for guild_id, cfg in list(guild_configs.items()):
                     if cfg.get("mode") == "digest" and cfg.get("last_digest_date") != today_str:
@@ -561,28 +567,13 @@ class TechFeedCog(commands.Cog):
                             except Exception as d_err:
                                 logger.debug(f"Notice sending digest to guild {guild_id}: {d_err}")
 
-            # 2. Filter unseen stories for live feeds
-            fresh_stories: list[TechStory] = [
-                s for s in stories if not self.bot.tech_mgr.is_hash_seen(s)
-            ]
-            if not fresh_stories:
-                return
-
-            logger.info(f"Discovered {len(fresh_stories)} new tech intelligence story/stories.")
-            dispatched: list[TechStory] = []
-
-            # Prioritize critical threats first, followed by top fresh stories
-            critical_items = [s for s in fresh_stories if s.is_critical]
-            normal_items = [s for s in fresh_stories if not s.is_critical]
-            candidate_batch = (critical_items + normal_items)[:5]
-
-            # Pre-flight health check: Verify candidate URLs live before broadcasting
+            # 3. Pre-flight health check: Verify candidate URLs live before broadcasting
             batch_to_send: list[TechStory] = []
             connector = aiohttp.TCPConnector(ssl=False)
             timeout = aiohttp.ClientTimeout(total=4)
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                for candidate in candidate_batch:
-                    if len(batch_to_send) >= 3:
+                for candidate in stories:
+                    if len(batch_to_send) >= 10:
                         break
                     is_alive = await validate_url_live(session, candidate.url)
                     if is_alive:
@@ -591,6 +582,9 @@ class TechFeedCog(commands.Cog):
                         logger.warning(f"Pre-flight check dropped unreachable URL: {candidate.url}")
                         await self.bot.tech_mgr.mark_dispatched([candidate])
 
+            logger.info(f"Dispatching batch of {len(batch_to_send)} balanced tech story/stories with 60s pacing delay.")
+
+            # 4. Dispatch 10 items one by one with strict 1-minute (60s) delay between each post
             for index, story in enumerate(batch_to_send):
                 card = self.bot.tech_mgr.build_story_container(story, dot=dot)
                 dispatched_any = False
@@ -631,7 +625,6 @@ class TechFeedCog(commands.Cog):
                         logger.debug(f"Failed to dispatch tech story to guild {guild_id}: {ch_err}")
 
                 if dispatched_any:
-                    dispatched.append(story)
                     await self.bot.tech_mgr.mark_dispatched([story])
                 else:
                     self.bot.tech_mgr._seen_hashes.add(story.id)
@@ -640,10 +633,13 @@ class TechFeedCog(commands.Cog):
                     if story.entity_hash:
                         self.bot.tech_mgr._seen_entity_hashes.add(story.entity_hash)
 
+                # Exactly 1 minute (60 seconds) delay between each of the 10 posts
                 if index < len(batch_to_send) - 1:
-                    await asyncio.sleep(4)
+                    await asyncio.sleep(60)
         except Exception as exc:
             logger.error(f"Unexpected exception in tech news background poller: {exc}", exc_info=exc)
+        finally:
+            self._is_dispatching = False
 
     @_poller_task.before_loop
     async def _before_poller(self) -> None:
@@ -690,7 +686,7 @@ class TechFeedCog(commands.Cog):
             health_line = f"**Cloud Health:** " + f"  {dot}  ".join(health_summary_parts)
 
             top_lines = [
-                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`",
+                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Hourly Batch (10 Items • 1m Delay)`  {dot}  **Status:** `Active`",
                 health_line,
             ]
             container.add_text("\n".join(top_lines))

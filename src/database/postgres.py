@@ -522,6 +522,18 @@ class PostgresDatabase(BaseDatabase):
             """
             ALTER TABLE dev_pulse_history ADD COLUMN IF NOT EXISTS entity_hash VARCHAR(64);
             """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_tech_news_title_hash ON tech_news_history(title_hash);
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_tech_news_entity_hash ON tech_news_history(entity_hash);
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_dev_pulse_title_hash ON dev_pulse_history(title_hash);
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_dev_pulse_entity_hash ON dev_pulse_history(entity_hash);
+            """,
             # Community Projects Showcase Registry
             """
             CREATE TABLE IF NOT EXISTS community_projects (

@@ -305,9 +305,9 @@ class TechNewsManager:
                     for r in rows
                 }
 
-            # 2. Load recent dispatched article hashes, title hashes, and entity hashes (last 3,000 items)
+            # 2. Load recent dispatched article hashes, title hashes, and entity hashes (up to 50,000 items)
             hash_rows = await self.db.fetch_all(
-                "SELECT article_hash, title_hash, entity_hash FROM tech_news_history ORDER BY dispatched_at DESC LIMIT 3000;"
+                "SELECT article_hash, title_hash, entity_hash FROM tech_news_history ORDER BY dispatched_at DESC LIMIT 50000;"
             )
             async with self._lock:
                 self._seen_hashes = {str(r["article_hash"]) for r in hash_rows if r.get("article_hash")}
@@ -470,7 +470,7 @@ class TechNewsManager:
     # -------------------------------------------------------------------------
     # Ingestion Adapters (High-Signal Zero-Scraping Harvesters)
     # -------------------------------------------------------------------------
-    async def _harvest_github(self, session: aiohttp.ClientSession) -> list[TechStory]:
+    async def _harvest_github(self, session: aiohttp.ClientSession, limit: int = 6) -> list[TechStory]:
         """Harvest top trending open-source repositories created recently."""
         stories: list[TechStory] = []
         since_date = (datetime.now(timezone.utc) - timedelta(days=14)).strftime("%Y-%m-%d")
@@ -598,14 +598,14 @@ class TechNewsManager:
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
-                        if len(stories) >= 4:
+                        if len(stories) >= limit:
                             break
         except Exception as e:
             logger.debug(f"Notice harvesting GitHub: {e}")
         return stories
 
-    async def _harvest_hackernews(self, session: aiohttp.ClientSession) -> list[TechStory]:
-        """Harvest high-score technical stories from Hacker News Firebase API with real article context."""
+    async def _harvest_hackernews(self, session: aiohttp.ClientSession, limit: int = 6) -> list[TechStory]:
+        """Harvest top trending engineering and systems architecture stories from Hacker News. Firebase API with real article context."""
         stories: list[TechStory] = []
         top_url = "https://hacker-news.firebaseio.com/v0/topstories.json"
         try:
@@ -716,13 +716,13 @@ class TechNewsManager:
                                 )
                                 self.register_story_memory(story_obj)
                                 stories.append(story_obj)
-                                if len(stories) >= 4:
+                                if len(stories) >= limit:
                                     break
         except Exception as e:
             logger.debug(f"Notice harvesting Hacker News: {e}")
         return stories
 
-    async def _harvest_huggingface(self, session: aiohttp.ClientSession) -> list[TechStory]:
+    async def _harvest_huggingface(self, session: aiohttp.ClientSession, limit: int = 6) -> list[TechStory]:
         """Harvest top daily AI research papers and weights from ArXiv and peer-reviewed releases."""
         stories: list[TechStory] = []
         url = "https://huggingface.co/api/papers"
@@ -806,13 +806,13 @@ class TechNewsManager:
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
-                        if len(stories) >= 4:
+                        if len(stories) >= limit:
                             break
         except Exception as e:
             logger.debug(f"Notice harvesting Hugging Face: {e}")
         return stories
 
-    async def _harvest_security_rss(self, session: aiohttp.ClientSession) -> list[TechStory]:
+    async def _harvest_security_rss(self, session: aiohttp.ClientSession, limit: int = 6) -> list[TechStory]:
         """Harvest critical cybersecurity bulletins, zero-days, and scams from BleepingComputer and THN."""
         stories: list[TechStory] = []
         feed_url = "https://www.bleepingcomputer.com/feed/"
@@ -882,13 +882,13 @@ class TechNewsManager:
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
-                        if len(stories) >= 4:
+                        if len(stories) >= limit:
                             break
         except Exception as e:
             logger.debug(f"Notice harvesting Security RSS: {e}")
         return stories
 
-    async def _harvest_verge_tech(self, session: aiohttp.ClientSession) -> list[TechStory]:
+    async def _harvest_verge_tech(self, session: aiohttp.ClientSession, limit: int = 6) -> list[TechStory]:
         """Harvest mainstream consumer tech, gadgets, AI tools, and frontier culture from The Verge, Wired, and Engadget."""
         stories: list[TechStory] = []
         feeds = [
@@ -979,15 +979,15 @@ class TechNewsManager:
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
-                        if len(stories) >= 4:
+                        if len(stories) >= limit:
                             break
             except Exception as e:
                 logger.debug(f"Notice harvesting {source_name}: {e}")
-            if len(stories) >= 4:
+            if len(stories) >= limit:
                 break
         return stories
 
-    async def _harvest_phoronix(self, session: aiohttp.ClientSession) -> list[TechStory]:
+    async def _harvest_phoronix(self, session: aiohttp.ClientSession, limit: int = 6) -> list[TechStory]:
         """Harvest silicon architecture, Linux kernel patches, and hardware updates."""
         stories: list[TechStory] = []
         feed_url = "https://www.phoronix.com/rss.php"
@@ -1025,7 +1025,7 @@ class TechNewsManager:
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
-                        if len(stories) >= 4:
+                        if len(stories) >= limit:
                             break
         except Exception as e:
             logger.debug(f"Notice harvesting Phoronix: {e}")
@@ -1076,6 +1076,95 @@ class TechNewsManager:
             deduped.append(s)
 
         return deduped
+
+    async def harvest_balanced_batch(self, target_total: int = 10) -> list[TechStory]:
+        """Harvest high-signal tech stories across all 5 key categories (AI, GitHub, Security, Consumer Tech, Systems/Hardware),
+        enforcing strict multi-layer deduplication and balanced distribution (2 per category to total 10 items)."""
+        connector = aiohttp.TCPConnector(ssl=False)
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            ai_res, gh_res, sec_res, tech_res, hn_res, phor_res = await asyncio.gather(
+                self._harvest_huggingface(session, limit=6),
+                self._harvest_github(session, limit=6),
+                self._harvest_security_rss(session, limit=6),
+                self._harvest_verge_tech(session, limit=6),
+                self._harvest_hackernews(session, limit=6),
+                self._harvest_phoronix(session, limit=6),
+                return_exceptions=True,
+            )
+
+        def _clean_pool(raw: Any) -> list[TechStory]:
+            if not isinstance(raw, list):
+                return []
+            return [s for s in raw if isinstance(s, TechStory)]
+
+        ai_items = _clean_pool(ai_res)
+        gh_items = _clean_pool(gh_res)
+        sec_items = _clean_pool(sec_res)
+        tech_items = _clean_pool(tech_res)
+        sys_items = _clean_pool(hn_res) + _clean_pool(phor_res)
+
+        seen_urls: set[str] = set()
+        seen_titles: set[str] = set()
+        seen_entities: set[str] = set()
+
+        def _filter_unseen(items: list[TechStory]) -> list[TechStory]:
+            result: list[TechStory] = []
+            for s in items:
+                if s.id in seen_urls or self.is_hash_seen(s):
+                    continue
+                if s.title_hash and (s.title_hash in seen_titles or s.title_hash in self._seen_title_hashes):
+                    continue
+                if s.entity_hash and (s.entity_hash in seen_entities or s.entity_hash in self._seen_entity_hashes):
+                    continue
+                seen_urls.add(s.id)
+                if s.title_hash:
+                    seen_titles.add(s.title_hash)
+                if s.entity_hash:
+                    seen_entities.add(s.entity_hash)
+                result.append(s)
+            return result
+
+        pools: dict[str, list[TechStory]] = {
+            "ai": _filter_unseen(ai_items),
+            "github": _filter_unseen(gh_items),
+            "security": _filter_unseen(sec_items),
+            "tech": _filter_unseen(tech_items),
+            "systems": _filter_unseen(sys_items),
+        }
+
+        selected: list[TechStory] = []
+        target_per_cat = max(1, target_total // len(pools))
+
+        for cat_name, items in pools.items():
+            chosen = items[:target_per_cat]
+            selected.extend(chosen)
+            pools[cat_name] = items[target_per_cat:]
+
+        if len(selected) < target_total:
+            remaining: list[TechStory] = []
+            for items in pools.values():
+                remaining.extend(items)
+
+            def _score_key(s: TechStory) -> int:
+                if s.is_critical:
+                    return 1_000_000
+                if s.category == "github":
+                    return int(s.metadata.get("stars", 0))
+                if s.category == "systems":
+                    return int(s.metadata.get("score", 0))
+                if s.category == "ai":
+                    return int(s.metadata.get("upvotes", 0))
+                return 100
+
+            remaining.sort(key=_score_key, reverse=True)
+            needed = target_total - len(selected)
+            selected.extend(remaining[:needed])
+
+        for s in selected:
+            self.register_story_memory(s)
+
+        return selected[:target_total]
 
     async def fetch_category(self, category: str, limit: int = 4) -> list[TechStory]:
         """Fetch fresh stories on-demand for a single category, filtering out seen items."""

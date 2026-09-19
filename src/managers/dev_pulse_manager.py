@@ -226,7 +226,7 @@ class DevPulseManager:
                 }
 
             hash_rows = await self.db.fetch_all(
-                "SELECT item_hash, title_hash, entity_hash FROM dev_pulse_history ORDER BY dispatched_at DESC LIMIT 3000;"
+                "SELECT item_hash, title_hash, entity_hash FROM dev_pulse_history ORDER BY dispatched_at DESC LIMIT 50000;"
             )
             async with self._lock:
                 self._seen_hashes = {str(r["item_hash"]) for r in hash_rows if r.get("item_hash")}
@@ -342,7 +342,7 @@ class DevPulseManager:
     # -------------------------------------------------------------------------
     # Ingestion Adapters
     # -------------------------------------------------------------------------
-    async def _harvest_bounties(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
+    async def _harvest_bounties(self, session: aiohttp.ClientSession, limit: int = 6) -> list[DevPulseStory]:
         """Harvest active open-source GitHub issues with paid bounties ($50 - $500+)."""
         stories: list[DevPulseStory] = []
         url = "https://api.github.com/search/issues?q=label:bounty+state:open+is:issue&sort=created&order=desc&per_page=12"
@@ -385,7 +385,7 @@ class DevPulseManager:
                             continue
 
                         candidates.append(item)
-                        if len(candidates) >= 4:
+                        if len(candidates) >= limit:
                             break
 
                     async def _process_bounty(item: dict[str, Any]) -> Optional[DevPulseStory]:
@@ -470,7 +470,7 @@ class DevPulseManager:
             logger.debug(f"Notice harvesting bounties: {e}")
         return stories
 
-    async def _harvest_jobs(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
+    async def _harvest_jobs(self, session: aiohttp.ClientSession, limit: int = 6) -> list[DevPulseStory]:
         """Harvest entry-level, fresher, and remote developer internships and jobs with authentic company logos."""
         stories: list[DevPulseStory] = []
         jobicy_url = "https://jobicy.com/api/v2/remote-jobs?count=15&tag=dev"
@@ -503,7 +503,7 @@ class DevPulseManager:
                             continue
 
                         candidates.append(job)
-                        if len(candidates) >= 4:
+                        if len(candidates) >= limit:
                             break
 
                     async def _process_jobicy_job(job: dict[str, Any]) -> Optional[DevPulseStory]:
@@ -627,14 +627,14 @@ class DevPulseManager:
                             )
                             self.register_story_memory(story_obj)
                             stories.append(story_obj)
-                            if len(stories) >= 4:
+                            if len(stories) >= limit:
                                 break
             except Exception as e:
                 logger.debug(f"Notice during RemoteOK fallback: {e}")
 
         return stories
 
-    async def _harvest_hackathons(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
+    async def _harvest_hackathons(self, session: aiohttp.ClientSession, limit: int = 6) -> list[DevPulseStory]:
         """Harvest active global and student hackathons with verified cash prize pools from Devpost."""
         stories: list[DevPulseStory] = []
         url = "https://devpost.com/api/hackathons"
@@ -699,11 +699,13 @@ class DevPulseManager:
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
+                        if len(stories) >= limit:
+                            break
         except Exception as e:
             logger.debug(f"Notice harvesting hackathons: {e}")
         return stories
 
-    async def _harvest_perks(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
+    async def _harvest_perks(self, session: aiohttp.ClientSession, limit: int = 6) -> list[DevPulseStory]:
         """Harvest free developer perks, 100% off tech courses, and cloud vouchers."""
         stories: list[DevPulseStory] = []
         feed_url = "https://www.discudemy.com/feed"
@@ -763,11 +765,13 @@ class DevPulseManager:
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
+                        if len(stories) >= limit:
+                            break
         except Exception as e:
             logger.debug(f"Notice harvesting perks: {e}")
         return stories
 
-    async def _harvest_ai_tools(self, session: aiohttp.ClientSession) -> list[DevPulseStory]:
+    async def _harvest_ai_tools(self, session: aiohttp.ClientSession, limit: int = 6) -> list[DevPulseStory]:
         """Harvest daily top practical AI developer tools with authentic hero images from tool websites."""
         stories: list[DevPulseStory] = []
         feed_url = "https://www.producthunt.com/feed"
@@ -845,6 +849,8 @@ class DevPulseManager:
                         )
                         self.register_story_memory(story_obj)
                         stories.append(story_obj)
+                        if len(stories) >= limit:
+                            break
         except Exception as e:
             logger.debug(f"Notice harvesting AI tools: {e}")
         return stories
@@ -895,6 +901,102 @@ class DevPulseManager:
             deduped.append(s)
 
         return deduped
+
+    async def harvest_balanced_batch(self, target_total: int = 10) -> list[DevPulseStory]:
+        """Harvest high-signal developer opportunities across all 4 key categories (Tools, Free Perks/Coupons, Remote Jobs, Bounties/Hackathons),
+        enforcing strict multi-layer deduplication and balanced distribution (3 tools, 3 perks, 2 jobs, 2 bounties/hackathons)."""
+        connector = aiohttp.TCPConnector(ssl=False)
+        timeout = aiohttp.ClientTimeout(total=12)
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            tools_res, perks_res, jobs_res, bounties_res, hackathons_res = await asyncio.gather(
+                self._harvest_ai_tools(session, limit=6),
+                self._harvest_perks(session, limit=6),
+                self._harvest_jobs(session, limit=6),
+                self._harvest_bounties(session, limit=6),
+                self._harvest_hackathons(session, limit=6),
+                return_exceptions=True,
+            )
+
+        def _clean_pool(raw: Any) -> list[DevPulseStory]:
+            if not isinstance(raw, list):
+                return []
+            return [s for s in raw if isinstance(s, DevPulseStory)]
+
+        tools_items = _clean_pool(tools_res)
+        perks_items = _clean_pool(perks_res)
+        jobs_items = _clean_pool(jobs_res)
+        comm_items = _clean_pool(bounties_res) + _clean_pool(hackathons_res)
+
+        seen_urls: set[str] = set()
+        seen_titles: set[str] = set()
+        seen_entities: set[str] = set()
+
+        def _filter_unseen(items: list[DevPulseStory]) -> list[DevPulseStory]:
+            result: list[DevPulseStory] = []
+            for s in items:
+                if s.id in seen_urls or self.is_seen(s):
+                    continue
+                if s.title_hash and (s.title_hash in seen_titles or s.title_hash in self._seen_title_hashes):
+                    continue
+                if s.entity_hash and (s.entity_hash in seen_entities or s.entity_hash in self._seen_entity_hashes):
+                    continue
+                seen_urls.add(s.id)
+                if s.title_hash:
+                    seen_titles.add(s.title_hash)
+                if s.entity_hash:
+                    seen_entities.add(s.entity_hash)
+                result.append(s)
+            return result
+
+        pools: dict[str, list[DevPulseStory]] = {
+            "tools": _filter_unseen(tools_items),
+            "perks": _filter_unseen(perks_items),
+            "jobs": _filter_unseen(jobs_items),
+            "community": _filter_unseen(comm_items),
+        }
+
+        # Quota allocation: 3 tools, 3 perks, 2 jobs, 2 community (bounties/hackathons)
+        quotas: dict[str, int] = {
+            "tools": 3,
+            "perks": 3,
+            "jobs": 2,
+            "community": 2,
+        }
+
+        selected: list[DevPulseStory] = []
+        for cat_name, quota in quotas.items():
+            items = pools.get(cat_name, [])
+            chosen = items[:quota]
+            selected.extend(chosen)
+            pools[cat_name] = items[quota:]
+
+        # Backfill if any pool fell short
+        if len(selected) < target_total:
+            remaining: list[DevPulseStory] = []
+            for items in pools.values():
+                remaining.extend(items)
+
+            def _score_key(s: DevPulseStory) -> int:
+                if s.is_critical:
+                    return 1_000_000
+                if s.category == "bounties":
+                    return 500
+                if s.category == "perks":
+                    return 400
+                if s.category == "jobs":
+                    return 300
+                if s.category == "tools":
+                    return 200
+                return 100
+
+            remaining.sort(key=_score_key, reverse=True)
+            needed = target_total - len(selected)
+            selected.extend(remaining[:needed])
+
+        for s in selected:
+            self.register_story_memory(s)
+
+        return selected[:target_total]
 
     async def fetch_category(self, category: str, limit: int = 4) -> list[DevPulseStory]:
         """Fetch fresh opportunity stories on-demand for a single category, filtering out seen items."""

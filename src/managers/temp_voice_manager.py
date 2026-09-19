@@ -41,6 +41,8 @@ class TempVoiceManager:
                     self._guild_settings[gid] = {
                         "category_id": int(r["category_id"]),
                         "master_channel_id": mid,
+                        "interface_channel_id": int(r["interface_channel_id"]) if r.get("interface_channel_id") else None,
+                        "interface_message_id": int(r["interface_message_id"]) if r.get("interface_message_id") else None,
                         "default_name_format": str(r.get("default_name_format") or "{user}'s Room"),
                         "default_user_limit": int(r.get("default_user_limit") or 0),
                     }
@@ -80,6 +82,13 @@ class TempVoiceManager:
         """Get state of an active temporary voice channel."""
         return self._active_channels.get(channel_id)
 
+    def get_active_room_for_user(self, guild_id: int, user_id: int) -> Optional[int]:
+        """Find the active temporary room owned by the user in this guild."""
+        for cid, data in self._active_channels.items():
+            if data["guild_id"] == guild_id and data["owner_id"] == user_id:
+                return cid
+        return None
+
     def get_all_active_channels(self) -> list[tuple[int, dict[str, Any]]]:
         """Return all active temp channels for startup audits."""
         return list(self._active_channels.items())
@@ -89,20 +98,35 @@ class TempVoiceManager:
         guild_id: int,
         category_id: int,
         master_channel_id: int,
+        interface_channel_id: Optional[int] = None,
+        interface_message_id: Optional[int] = None,
         default_name_format: str = "{user}'s Room",
         default_user_limit: int = 0,
     ) -> None:
         """Save or update guild temp voice configuration."""
         query = """
-        INSERT INTO guild_temp_voice_settings (guild_id, category_id, master_channel_id, default_name_format, default_user_limit)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO guild_temp_voice_settings (
+            guild_id, category_id, master_channel_id, interface_channel_id, interface_message_id, default_name_format, default_user_limit
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (guild_id) DO UPDATE SET
             category_id = EXCLUDED.category_id,
             master_channel_id = EXCLUDED.master_channel_id,
+            interface_channel_id = EXCLUDED.interface_channel_id,
+            interface_message_id = EXCLUDED.interface_message_id,
             default_name_format = EXCLUDED.default_name_format,
             default_user_limit = EXCLUDED.default_user_limit;
         """
-        await self.db.execute(query, guild_id, category_id, master_channel_id, default_name_format, default_user_limit)
+        await self.db.execute(
+            query,
+            guild_id,
+            category_id,
+            master_channel_id,
+            interface_channel_id,
+            interface_message_id,
+            default_name_format,
+            default_user_limit,
+        )
 
         async with self._lock:
             # Clean old master mapping if changed
@@ -113,10 +137,22 @@ class TempVoiceManager:
             self._guild_settings[guild_id] = {
                 "category_id": category_id,
                 "master_channel_id": master_channel_id,
+                "interface_channel_id": interface_channel_id,
+                "interface_message_id": interface_message_id,
                 "default_name_format": default_name_format,
                 "default_user_limit": default_user_limit,
             }
             self._master_to_guild[master_channel_id] = guild_id
+
+    async def set_interface_message(self, guild_id: int, message_id: int) -> None:
+        """Update the interface message ID in database and cache."""
+        await self.db.execute(
+            "UPDATE guild_temp_voice_settings SET interface_message_id = $1 WHERE guild_id = $2;",
+            message_id, guild_id
+        )
+        async with self._lock:
+            if guild_id in self._guild_settings:
+                self._guild_settings[guild_id]["interface_message_id"] = message_id
 
     async def disable_settings(self, guild_id: int) -> None:
         """Remove temp voice configuration for a guild."""

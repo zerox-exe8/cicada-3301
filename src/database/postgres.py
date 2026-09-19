@@ -589,10 +589,18 @@ class PostgresDatabase(BaseDatabase):
                 guild_id BIGINT PRIMARY KEY,
                 category_id BIGINT NOT NULL,
                 master_channel_id BIGINT NOT NULL,
+                interface_channel_id BIGINT,
+                interface_message_id BIGINT,
                 default_name_format VARCHAR(100) DEFAULT '{user}''s Room',
                 default_user_limit INT DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            """,
+            """
+            ALTER TABLE guild_temp_voice_settings ADD COLUMN IF NOT EXISTS interface_channel_id BIGINT;
+            """,
+            """
+            ALTER TABLE guild_temp_voice_settings ADD COLUMN IF NOT EXISTS interface_message_id BIGINT;
             """,
             # Active Temp Voice Channels Tracking for Persistence & Cleanup
             """

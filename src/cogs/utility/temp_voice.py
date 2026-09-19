@@ -31,14 +31,25 @@ class TempVoiceRenameModal(discord.ui.Modal, title="Rename Voice Room"):
         required=True,
     )
 
-    def __init__(self, channel: discord.VoiceChannel) -> None:
+    def __init__(self, bot: KyroBot, channel: discord.VoiceChannel) -> None:
         super().__init__()
+        self.bot = bot
         self.channel = channel
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         name = self.new_name.value.strip()
+        cog = self.bot.get_cog("TempVoice")
+        if cog and hasattr(cog, "is_rename_rate_limited") and cog.is_rename_rate_limited(self.channel.id):
+            await interaction.response.send_message(
+                "Discord allows renaming a voice room only twice every 10 minutes. Please wait a few minutes before renaming again.",
+                ephemeral=True,
+            )
+            return
+
         try:
             await self.channel.edit(name=name, reason=f"Temp voice renamed by {interaction.user}")
+            if cog and hasattr(cog, "mark_custom_renamed"):
+                cog.mark_custom_renamed(self.channel.id)
             await interaction.response.send_message(
                 f"**Room Renamed**: Voice channel updated to **{name}**.",
                 ephemeral=True,
@@ -319,7 +330,7 @@ class PersistentVoiceMasterView(discord.ui.View):
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
-        await interaction.response.send_modal(TempVoiceRenameModal(channel))
+        await interaction.response.send_modal(TempVoiceRenameModal(self.bot, channel))
 
     @discord.ui.button(label="Permit", style=discord.ButtonStyle.secondary, custom_id="pvm_permit", row=1)
     async def btn_permit(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -415,8 +426,21 @@ class TempVoice(commands.Cog):
         # Anti-spam cooldown and in-flight creation tracking
         self._creation_cooldowns: dict[int, float] = {}
         self._creating_users: set[int] = set()
+        # Custom renamed rooms and rate-limit tracking for dynamic renames
+        self._custom_renamed_rooms: set[int] = set()
+        self._last_channel_renames: dict[int, float] = {}
         # Register persistent view so buttons work across restarts
         self.bot.add_view(PersistentVoiceMasterView(self.bot))
+
+    def is_rename_rate_limited(self, channel_id: int) -> bool:
+        """Check if channel rename is rate-limited (Discord allows 2 edits per 10 mins)."""
+        last = self._last_channel_renames.get(channel_id, 0.0)
+        return (time.time() - last) < 300.0
+
+    def mark_custom_renamed(self, channel_id: int) -> None:
+        """Track that the host gave a custom topic so automatic renames don't override it."""
+        self._custom_renamed_rooms.add(channel_id)
+        self._last_channel_renames[channel_id] = time.time()
 
     async def cog_load(self) -> None:
         asyncio.create_task(self._audit_temp_channels_on_startup())
@@ -580,25 +604,77 @@ class TempVoice(commands.Cog):
             self._creating_users.discard(member.id)
 
     async def _handle_temp_channel_leave(self, channel: discord.VoiceChannel, member: discord.Member) -> None:
-        """Clean up empty room or alert if host leaves."""
-        await asyncio.sleep(1.0)
-        current_members = channel.members
+        """Clean up empty room or transfer ownership and rename if host leaves."""
+        await asyncio.sleep(1.5)
 
+        # Re-fetch channel to verify it still exists in the guild
+        guild = channel.guild
+        current_channel = guild.get_channel(channel.id)
+        if not current_channel or not isinstance(current_channel, discord.VoiceChannel):
+            await self.bot.temp_voice_mgr.unregister_temp_channel(channel.id)
+            self._custom_renamed_rooms.discard(channel.id)
+            self._last_channel_renames.pop(channel.id, None)
+            return
+
+        current_members = [m for m in current_channel.members if not m.bot]
+
+        # Scenario A: Room is completely empty
         if len(current_members) == 0:
             try:
-                await channel.delete(reason="J2C temporary room is empty")
+                await current_channel.delete(reason="J2C temporary room is empty")
             except Exception:
                 pass
             await self.bot.temp_voice_mgr.unregister_temp_channel(channel.id)
-        else:
-            data = self.bot.temp_voice_mgr.get_channel_data(channel.id)
-            if data and data.get("owner_id") == member.id:
-                try:
-                    await channel.send(
-                        f"**Host Left**: {member.mention} has left. Any remaining member can click **Claim** on the control panel to become the new host!"
-                    )
-                except Exception:
-                    pass
+            self._custom_renamed_rooms.discard(channel.id)
+            self._last_channel_renames.pop(channel.id, None)
+            return
+
+        # Scenario B: Host left, but members are still inside
+        data = self.bot.temp_voice_mgr.get_channel_data(channel.id)
+        if data and data.get("owner_id") == member.id:
+            new_host = current_members[0]
+            await self.bot.temp_voice_mgr.transfer_ownership(channel.id, new_host.id)
+
+            # Assign elevated permissions to new host
+            try:
+                await current_channel.set_permissions(
+                    new_host,
+                    connect=True,
+                    speak=True,
+                    stream=True,
+                    move_members=True,
+                    mute_members=True,
+                    deafen_members=True,
+                    manage_channels=True,
+                )
+            except discord.HTTPException:
+                pass
+
+            # Smart Dynamic Rename: Only if channel was not custom-renamed by original host
+            renamed = False
+            new_name = None
+            if channel.id not in self._custom_renamed_rooms:
+                settings = self.bot.temp_voice_mgr.get_settings(guild.id)
+                name_fmt = settings.get("default_name_format") or "{user}'s Room" if settings else "{user}'s Room"
+                new_name = name_fmt.replace("{user}", new_host.display_name)
+
+                last_rename = self._last_channel_renames.get(channel.id, 0.0)
+                if (time.time() - last_rename) >= 300.0:
+                    try:
+                        await current_channel.edit(name=new_name, reason=f"Host transferred to {new_host}")
+                        self._last_channel_renames[channel.id] = time.time()
+                        renamed = True
+                    except discord.HTTPException as e:
+                        logger.warning(f"Could not rename channel {channel.id} due to rate limit: {e}")
+
+            # Notify in room text chat
+            try:
+                msg = f"**Host Transferred**: {member.mention} has left. {new_host.mention} is now the host of this room!"
+                if renamed and new_name:
+                    msg += f"\n> Room name updated to **{new_name}**."
+                await current_channel.send(msg)
+            except Exception:
+                pass
 
     # ─── HYBRID COMMAND: /j2c ─────────────────────────────────────────────────
     @commands.hybrid_command(
@@ -610,7 +686,9 @@ class TempVoice(commands.Cog):
         category_name="Optional custom category name (default: Custom Voice)",
         voice_name="Optional custom master channel name (default: Join to Create)",
         interface_name="Optional custom control channel name (default: Interface)",
+        reset="Reset and clean recreate existing J2C infrastructure if already configured (default: False)",
     )
+    @commands.cooldown(1, 10, commands.BucketType.guild)
     @commands.guild_only()
     @commands.has_permissions(manage_channels=True)
     async def j2c(
@@ -619,14 +697,56 @@ class TempVoice(commands.Cog):
         category_name: Optional[str] = "Custom Voice",
         voice_name: Optional[str] = "Join to Create",
         interface_name: Optional[str] = "Interface",
+        reset: Optional[bool] = False,
     ) -> None:
-        """Automated J2C infrastructure generator."""
+        """Automated J2C infrastructure generator with duplicate prevention."""
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.defer(ephemeral=True)
 
         guild = ctx.guild
         if not guild:
             return
+
+        # 1. Check existing configuration to prevent accidental spam / duplicates
+        existing_settings = self.bot.temp_voice_mgr.get_settings(guild.id)
+        if existing_settings and not reset:
+            old_cat = guild.get_channel(existing_settings.get("category_id") or 0)
+            old_master = guild.get_channel(existing_settings.get("master_channel_id") or 0)
+            old_interface = guild.get_channel(existing_settings.get("interface_channel_id") or 0)
+
+            # If existing channels are still alive on the server
+            if old_cat or old_master or old_interface:
+                alert_c = KyroContainer(accent_color=None)
+                alert_c.add_section(
+                    content=(
+                        f"### Join to Create Already Configured\n"
+                        f"> An active voice infrastructure already exists in this server."
+                    )
+                )
+                alert_c.add_separator(divider=True)
+                cat_desc = f"`{old_cat.name}`" if old_cat else "Not Found"
+                v_desc = old_master.mention if old_master else "Not Found"
+                i_desc = old_interface.mention if old_interface else "Not Found"
+                alert_c.add_text(
+                    f"• **Category:** {cat_desc}\n"
+                    f"• **Master Voice:** {v_desc}\n"
+                    f"• **Interface:** {i_desc}\n\n"
+                    f"> To clean up and recreate fresh, run **/j2c reset:True**."
+                )
+                await send_container_response(ctx, alert_c, ephemeral=True)
+                return
+
+        # 2. If reset=True and old channels exist, clean them up safely
+        if reset and existing_settings:
+            old_cat = guild.get_channel(existing_settings.get("category_id") or 0)
+            old_master = guild.get_channel(existing_settings.get("master_channel_id") or 0)
+            old_interface = guild.get_channel(existing_settings.get("interface_channel_id") or 0)
+            for ch in [old_interface, old_master, old_cat]:
+                if ch:
+                    try:
+                        await ch.delete(reason=f"J2C reset initiated by {ctx.author}")
+                    except discord.HTTPException:
+                        pass
 
         cat_title = category_name.strip() if category_name else "Custom Voice"
         v_title = voice_name.strip() if voice_name else "Join to Create"
@@ -710,6 +830,24 @@ class TempVoice(commands.Cog):
         except discord.HTTPException as e:
             err_c = KyroContainer(accent_color=None)
             err_c.add_section(f"**Error**: Failed to setup voice infrastructure: {e}")
+            await send_container_response(ctx, err_c, ephemeral=True)
+
+    @j2c.error
+    async def j2c_error(self, ctx: CustomContext, error: Exception) -> None:
+        if isinstance(error, commands.CommandOnCooldown):
+            err_c = KyroContainer(accent_color=None)
+            err_c.add_section(
+                content=(
+                    f"### Command Cooldown\n"
+                    f"> Please wait {error.retry_after:.1f}s before running the setup command again."
+                )
+            )
+            await send_container_response(ctx, err_c, ephemeral=True)
+        elif isinstance(error, commands.MissingPermissions):
+            err_c = KyroContainer(accent_color=None)
+            err_c.add_section(
+                content="**Access Denied**: You need **Manage Channels** permission to configure Join to Create."
+            )
             await send_container_response(ctx, err_c, ephemeral=True)
 
 

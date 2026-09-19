@@ -179,38 +179,6 @@ class TransferHostView(discord.ui.View):
         await send_container_response(interaction, c, ephemeral=False)
 
 
-class BitrateQualityView(discord.ui.View):
-    def __init__(self, channel: discord.VoiceChannel) -> None:
-        super().__init__(timeout=60)
-        self.channel = channel
-
-    @discord.ui.select(
-        placeholder="Choose audio bitrate quality",
-        options=[
-            discord.SelectOption(label="Normal Voice (64 kbps)", value="64000", description="Clean bandwidth-efficient audio"),
-            discord.SelectOption(label="High Fidelity (96 kbps)", value="96000", description="Crisp vocal clarity"),
-            discord.SelectOption(label="Music / Studio (128 kbps)", value="128000", description="Lossless gaming and music streaming"),
-            discord.SelectOption(label="Pro Audio (256 kbps)", value="256000", description="Requires Server Boost Level 2"),
-            discord.SelectOption(label="Mastering Tier (384 kbps)", value="384000", description="Requires Server Boost Level 3"),
-        ]
-    )
-    async def select_bitrate(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
-        val = int(select.values[0])
-        max_bitrate = interaction.guild.bitrate_limit if interaction.guild else 96000
-        target_bitrate = min(val, max_bitrate)
-
-        try:
-            await self.channel.edit(bitrate=target_bitrate, reason=f"Bitrate adjusted by {interaction.user}")
-            kbps = target_bitrate // 1000
-            c = KyroContainer(accent_color=None)
-            c.add_section(f"**Audio Bitrate Set**\n> Streaming quality is now **{kbps} kbps**.")
-            await send_container_response(interaction, c, ephemeral=True)
-        except discord.HTTPException as e:
-            c = KyroContainer(accent_color=None)
-            c.add_section(f"**Error**: Failed to set bitrate: {e}")
-            await send_container_response(interaction, c, ephemeral=True)
-
-
 # ─── MASTER INTERFACE & ROOM VIEW ─────────────────────────────────────────────
 
 class PersistentVoiceMasterView(discord.ui.View):
@@ -390,19 +358,6 @@ class PersistentVoiceMasterView(discord.ui.View):
         )
         await send_container_response(interaction, container, view=view, ephemeral=True)
 
-    @discord.ui.button(label="Bitrate", style=discord.ButtonStyle.secondary, custom_id="pvm_bitrate", row=1)
-    async def btn_bitrate(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        channel, data = await self._resolve_room_for_interaction(interaction)
-        if not channel or not data or not await self._verify_owner(interaction, channel, data):
-            return
-        view = BitrateQualityView(channel)
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            "### Audio Bitrate\n"
-            "> Choose audio streaming quality for your room from the menu below."
-        )
-        await send_container_response(interaction, container, view=view, ephemeral=True)
-
     @discord.ui.button(label="Transfer", style=discord.ButtonStyle.secondary, custom_id="pvm_transfer", row=1)
     async def btn_transfer(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
@@ -416,48 +371,7 @@ class PersistentVoiceMasterView(discord.ui.View):
         )
         await send_container_response(interaction, container, view=view, ephemeral=True)
 
-    # ── ROW 2: OWNERSHIP & SESSION ──
-
-    @discord.ui.button(label="Claim", style=discord.ButtonStyle.secondary, custom_id="pvm_claim", row=2)
-    async def btn_claim(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        channel, data = await self._resolve_room_for_interaction(interaction)
-        if not channel or not data:
-            return
-
-        current_owner_id = data["owner_id"]
-        owner_connected = any(m.id == current_owner_id for m in channel.members)
-        if owner_connected and interaction.user.id != current_owner_id:
-            await self._send_card(
-                interaction,
-                "Host Still Present",
-                f"The current host (<@{current_owner_id}>) is still connected in **{channel.name}**.",
-                ephemeral=True,
-            )
-            return
-
-        await self.bot.temp_voice_mgr.transfer_ownership(channel.id, interaction.user.id)
-        try:
-            await channel.set_permissions(
-                interaction.user,
-                connect=True,
-                speak=True,
-                stream=True,
-                move_members=True,
-                mute_members=True,
-                deafen_members=True,
-                manage_channels=True,
-            )
-        except Exception:
-            pass
-
-        await self._send_card(
-            interaction,
-            "Room Claimed",
-            f"{interaction.user.mention} is now the host of **{channel.name}**!",
-            ephemeral=False,
-        )
-
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, custom_id="pvm_delete", row=2)
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, custom_id="pvm_delete", row=1)
     async def btn_delete(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         channel, data = await self._resolve_room_for_interaction(interaction)
         if not channel or not data or not await self._verify_owner(interaction, channel, data):

@@ -534,6 +534,18 @@ class PostgresDatabase(BaseDatabase):
             """
             CREATE INDEX IF NOT EXISTS idx_dev_pulse_entity_hash ON dev_pulse_history(entity_hash);
             """,
+            """
+            ALTER TABLE guild_tech_news ADD COLUMN IF NOT EXISTS cadence VARCHAR(32) DEFAULT 'hourly';
+            """,
+            """
+            ALTER TABLE guild_tech_news ADD COLUMN IF NOT EXISTS last_dispatch_ts TIMESTAMP;
+            """,
+            """
+            ALTER TABLE guild_dev_pulse ADD COLUMN IF NOT EXISTS cadence VARCHAR(32) DEFAULT 'hourly';
+            """,
+            """
+            ALTER TABLE guild_dev_pulse ADD COLUMN IF NOT EXISTS last_dispatch_ts TIMESTAMP;
+            """,
             # Community Projects Showcase Registry
             """
             CREATE TABLE IF NOT EXISTS community_projects (

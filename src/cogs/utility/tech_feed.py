@@ -5,8 +5,10 @@ Background ingestion and dispatch engine delivering zero-noise engineering, AI, 
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import TYPE_CHECKING, Optional
+import re
+from typing import TYPE_CHECKING, Optional, Any
 
 from datetime import datetime, timezone
 import aiohttp
@@ -28,6 +30,154 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Kyro.Utility.TechFeed")
 
 VALID_CATEGORIES: set[str] = {"all", "github", "ai", "security", "systems", "hardware", "tech"}
+
+CADENCE_OPTIONS: list[dict[str, str]] = [
+    {
+        "label": "Every 15 Minutes",
+        "value": "15m",
+        "description": "Continuous real-time stream as tech stories break",
+    },
+    {
+        "label": "Hourly Batch (Default)",
+        "value": "hourly",
+        "description": "10 curated top stories delivered hourly with 1m pacing",
+    },
+    {
+        "label": "Morning 9:00 AM UTC",
+        "value": "09:00",
+        "description": "Daily morning intelligence briefing drop at 9:00 AM UTC",
+    },
+    {
+        "label": "Midnight 12:00 AM UTC",
+        "value": "00:00",
+        "description": "Daily midnight intelligence recap drop at 12:00 AM UTC",
+    },
+    {
+        "label": "Custom Time (UTC)",
+        "value": "custom",
+        "description": "Specify custom 24-hour daily delivery time (HH:MM UTC)",
+    },
+]
+
+
+def format_cadence_label(cadence: str) -> str:
+    c = str(cadence or "hourly").lower().strip()
+    if c == "15m":
+        return "Every 15 Minutes"
+    if c == "hourly":
+        return "Hourly Batch (1h)"
+    if c == "09:00":
+        return "Morning 9:00 AM UTC"
+    if c == "00:00":
+        return "Midnight 12:00 AM UTC"
+    if c.startswith("custom:") or ":" in c:
+        raw_time = c.replace("custom:", "").strip()
+        return f"Daily at {raw_time} UTC"
+    return "Hourly Batch (1h)"
+
+
+def is_cadence_eligible(cfg: dict[str, Any], now_utc: datetime) -> bool:
+    cadence = str(cfg.get("cadence") or "hourly").lower().strip()
+    last_dispatch = cfg.get("last_dispatch_ts")
+    today_str = now_utc.strftime("%Y-%m-%d")
+
+    if isinstance(last_dispatch, str):
+        try:
+            last_dispatch = datetime.fromisoformat(last_dispatch)
+        except Exception:
+            last_dispatch = None
+
+    if last_dispatch and last_dispatch.tzinfo is None:
+        last_dispatch = last_dispatch.replace(tzinfo=timezone.utc)
+
+    # 1. Real-time every 15 minutes
+    if cadence == "15m":
+        if last_dispatch is None:
+            return True
+        return (now_utc - last_dispatch).total_seconds() >= 800
+
+    # 2. Morning 9:00 AM UTC
+    if cadence == "09:00":
+        if now_utc.hour == 9:
+            if last_dispatch is None:
+                return True
+            return last_dispatch.strftime("%Y-%m-%d") != today_str
+        return False
+
+    # 3. Midnight 12:00 AM UTC
+    if cadence == "00:00":
+        if now_utc.hour == 0:
+            if last_dispatch is None:
+                return True
+            return last_dispatch.strftime("%Y-%m-%d") != today_str
+        return False
+
+    # 4. Custom 24h Time: "custom:HH:MM" or "HH:MM"
+    if cadence.startswith("custom:") or ":" in cadence:
+        raw_time = cadence.replace("custom:", "").strip()
+        try:
+            parts = raw_time.split(":")
+            h, m = int(parts[0]), int(parts[1])
+            target_mins = h * 60 + m
+            curr_mins = now_utc.hour * 60 + now_utc.minute
+            diff = curr_mins - target_mins
+            if 0 <= diff < 30:
+                if last_dispatch is None:
+                    return True
+                return last_dispatch.strftime("%Y-%m-%d") != today_str
+            return False
+        except Exception:
+            return False
+
+    # 5. Default fallback: Hourly batch
+    if last_dispatch is None:
+        return True
+    return (now_utc - last_dispatch).total_seconds() >= 3500
+
+
+async def build_tech_dashboard(bot: KyroBot, guild: discord.Guild, cfg: dict[str, Any]) -> KyroContainer:
+    channel = guild.get_channel(cfg["channel_id"])
+    ch_mention = channel.mention if channel else f"Unknown ({cfg['channel_id']})"
+    raw_cats = {c.strip() for c in cfg.get("categories", "all").split(",")}
+
+    sw_on = bot.custom_emojis.get("icon_switch_on", "[ON]")
+    sw_off = bot.custom_emojis.get("icon_switch_off", "[OFF]")
+    dot = bot.custom_emojis.get("heart_dot", "•")
+
+    container = KyroContainer(accent_color=None)
+    container.add_section(
+        content=(
+            f"### Tech Dashboard\n"
+            f"> Status: Active & Broadcasting"
+        )
+    )
+    container.add_separator(divider=True)
+
+    health = await bot.tech_realtime_mgr.get_global_health_summary()
+    health_summary_parts = [f"{prov} `{stat}`" for prov, stat in health.items()]
+    health_line = f"**Cloud Health:** " + f"  {dot}  ".join(health_summary_parts)
+
+    cadence_raw = cfg.get("cadence", "hourly")
+    cadence_label = format_cadence_label(cadence_raw)
+
+    top_lines = [
+        f"**Channel:** {ch_mention}  {dot}  **Cadence:** `{cadence_label} (10 Items • 1m Delay)`  {dot}  **Status:** `Active`",
+        health_line,
+    ]
+    container.add_text("\n".join(top_lines))
+    container.add_separator(divider=True)
+
+    module_lines = ["**Active Modules:**"]
+    for opt in MODULE_OPTIONS:
+        val = opt["value"]
+        lbl = opt["label"]
+        is_active = ("all" in raw_cats) or (val in raw_cats)
+        emoji = sw_on if is_active else sw_off
+        module_lines.append(f"{emoji} **{lbl}**")
+
+    container.add_text("\n".join(module_lines))
+    container.add_separator(divider=True)
+    return container
 
 MODULE_OPTIONS: list[dict[str, str]] = [
     {
@@ -338,8 +488,10 @@ class TechSetupModulesView(discord.ui.View):
         )
         container.add_separator(divider=True)
 
+        cfg = self.bot.tech_mgr.get_config(interaction.guild.id) or {}
+        cadence_label = format_cadence_label(cfg.get("cadence", "hourly"))
         top_lines = [
-            f"**Channel:** {self.channel.mention}  {dot}  **Cadence:** `Every 15m`  {dot}  **Status:** `Active`"
+            f"**Channel:** {self.channel.mention}  {dot}  **Cadence:** `{cadence_label}`  {dot}  **Status:** `Active`"
         ]
         container.add_text("\n".join(top_lines))
         container.add_separator(divider=True)
@@ -357,8 +509,171 @@ class TechSetupModulesView(discord.ui.View):
         await edit_container_response(interaction, container, view=None)
 
 
+class CustomTechCadenceModal(discord.ui.Modal, title="Custom Delivery Schedule"):
+    time_input = discord.ui.TextInput(
+        label="Delivery Time (24-Hour UTC)",
+        placeholder="e.g. 14:30 or 21:00",
+        min_length=3,
+        max_length=5,
+        required=True,
+    )
+
+    def __init__(self, bot: KyroBot, author_id: int, guild_id: int) -> None:
+        super().__init__()
+        self.bot = bot
+        self.author_id = author_id
+        self.guild_id = guild_id
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        val = self.time_input.value.strip()
+        m = re.match(r"^([0-9]|0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$", val)
+        if not m:
+            await interaction.response.send_message(
+                "Invalid time format. Please enter a valid 24-hour time between 00:00 and 23:59 (e.g., 09:00, 14:30, 21:15).",
+                ephemeral=True,
+            )
+            return
+
+        h = int(m.group(1))
+        mins = int(m.group(2))
+        cadence_val = f"custom:{h:02d}:{mins:02d}"
+        await self.bot.tech_mgr.set_cadence(self.guild_id, cadence_val)
+
+        cadence_view = TechCadenceView(self.bot, self.author_id, self.guild_id)
+        container = cadence_view.build_container(note=f"Schedule updated to **Daily at {h:02d}:{mins:02d} UTC**.")
+        await edit_container_response(interaction, container, view=cadence_view)
+
+
+class TechCadenceView(discord.ui.View):
+    """View to select dispatch cadence/timing for Tech Intelligence."""
+
+    def __init__(self, bot: KyroBot, author_id: int, guild_id: int, timeout: float = 180.0) -> None:
+        super().__init__(timeout=timeout)
+        self.bot = bot
+        self.author_id = author_id
+        self.guild_id = guild_id
+        self._build_components()
+
+    def _build_components(self) -> None:
+        self.clear_items()
+        cfg = self.bot.tech_mgr.get_config(self.guild_id) or {}
+        active_cadence = cfg.get("cadence", "hourly")
+
+        select_options = []
+        for opt in CADENCE_OPTIONS:
+            is_def = (opt["value"] == active_cadence) or (opt["value"] == "custom" and active_cadence.startswith("custom:"))
+            select_options.append(
+                discord.SelectOption(
+                    label=opt["label"],
+                    value=opt["value"],
+                    description=opt["description"][:100],
+                    default=is_def,
+                )
+            )
+
+        self.cadence_select = discord.ui.Select(
+            placeholder="Select delivery schedule...",
+            min_values=1,
+            max_values=1,
+            options=select_options,
+            row=0,
+        )
+        self.cadence_select.callback = self._on_select_cadence
+        self.add_item(self.cadence_select)
+
+        self.custom_button = discord.ui.Button(
+            label="Custom Time",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.custom_button.callback = self._on_custom_button
+        self.add_item(self.custom_button)
+
+        self.back_button = discord.ui.Button(
+            label="Back",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        self.back_button.callback = self._on_back
+        self.add_item(self.back_button)
+
+    def build_container(self, note: str | None = None) -> KyroContainer:
+        cfg = self.bot.tech_mgr.get_config(self.guild_id) or {}
+        current_label = format_cadence_label(cfg.get("cadence", "hourly"))
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Tech Intelligence Feed\n"
+                f"> Schedule & Cadence Settings"
+            )
+        )
+        container.add_separator(divider=True)
+
+        lines = [
+            f"**Current Schedule:** `{current_label}`\n",
+            "Choose how frequently intelligence reports are broadcast to your channel:",
+            f"{dot} **Every 15 Minutes:** Continuous real-time updates as stories break.",
+            f"{dot} **Hourly Batch:** Top 10 stories delivered hourly with 1-minute pacing.",
+            f"{dot} **Morning 9:00 AM:** Daily morning briefing drop at 9:00 AM UTC.",
+            f"{dot} **Midnight 12:00 AM:** Daily midnight intelligence recap at 12:00 AM UTC.",
+            f"{dot} **Custom Time:** Specify any exact daily delivery time in 24-hour UTC.",
+        ]
+        if note:
+            lines.append(f"\n> {note}")
+
+        container.add_text("\n".join(lines))
+        container.add_separator(divider=True)
+        return container
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id and not (
+            interaction.user.guild_permissions.manage_guild
+            if isinstance(interaction.user, discord.Member)
+            else False
+        ):
+            await interaction.response.send_message(
+                "Only server administrators can modify tech feed settings.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _on_select_cadence(self, interaction: discord.Interaction) -> None:
+        if not self.cadence_select.values:
+            return
+        chosen = self.cadence_select.values[0]
+        if chosen == "custom":
+            modal = CustomTechCadenceModal(self.bot, self.author_id, self.guild_id)
+            await interaction.response.send_modal(modal)
+            return
+
+        await self.bot.tech_mgr.set_cadence(self.guild_id, chosen)
+        self._build_components()
+        container = self.build_container(note=f"Schedule successfully updated to **{format_cadence_label(chosen)}**.")
+        await edit_container_response(interaction, container, view=self)
+
+    async def _on_custom_button(self, interaction: discord.Interaction) -> None:
+        modal = CustomTechCadenceModal(self.bot, self.author_id, self.guild_id)
+        await interaction.response.send_modal(modal)
+
+    async def _on_back(self, interaction: discord.Interaction) -> None:
+        if interaction.guild:
+            cfg = self.bot.tech_mgr.get_config(self.guild_id)
+            if cfg:
+                container = await build_tech_dashboard(self.bot, interaction.guild, cfg)
+                view = TechStatusView(
+                    bot=self.bot,
+                    author_id=self.author_id,
+                    guild_id=self.guild_id,
+                    is_active=True,
+                )
+                await edit_container_response(interaction, container, view=view)
+
+
 class TechStatusView(discord.ui.View):
-    """Status panel view with Edit and Disable buttons."""
+    """Status panel view with Edit, Schedule, Health, and Disable buttons."""
 
     def __init__(
         self,
@@ -382,13 +697,13 @@ class TechStatusView(discord.ui.View):
             self.edit_button.callback = self._on_edit
             self.add_item(self.edit_button)
 
-            self.disable_button = discord.ui.Button(
-                label="Disable Feed",
-                style=discord.ButtonStyle.danger,
+            self.schedule_button = discord.ui.Button(
+                label="Schedule",
+                style=discord.ButtonStyle.secondary,
                 row=0,
             )
-            self.disable_button.callback = self._on_disable
-            self.add_item(self.disable_button)
+            self.schedule_button.callback = self._on_schedule
+            self.add_item(self.schedule_button)
 
             self.health_button = discord.ui.Button(
                 label="Cloud Health",
@@ -397,6 +712,14 @@ class TechStatusView(discord.ui.View):
             )
             self.health_button.callback = self._on_health_check
             self.add_item(self.health_button)
+
+            self.disable_button = discord.ui.Button(
+                label="Disable Feed",
+                style=discord.ButtonStyle.danger,
+                row=0,
+            )
+            self.disable_button.callback = self._on_disable
+            self.add_item(self.disable_button)
         else:
             self.setup_button = discord.ui.Button(
                 label="Configure Feed",
@@ -433,6 +756,11 @@ class TechStatusView(discord.ui.View):
             f"Select the text channel where real-time tech intelligence will be broadcast."
         )
         await edit_container_response(interaction, container, view=channel_view)
+
+    async def _on_schedule(self, interaction: discord.Interaction) -> None:
+        cadence_view = TechCadenceView(self.bot, self.author_id, self.guild_id)
+        container = cadence_view.build_container()
+        await edit_container_response(interaction, container, view=cadence_view)
 
     async def _on_disable(self, interaction: discord.Interaction) -> None:
         await self.bot.tech_mgr.remove_channel(self.guild_id)
@@ -523,11 +851,11 @@ class TechFeedCog(commands.Cog):
                 pass
 
     # -------------------------------------------------------------------------
-    # Autonomous Background Dispatcher Loop (Hourly Batch: 10 Items, 1m Delay)
+    # Autonomous Background Dispatcher Loop (15-Minute Cadence Check)
     # -------------------------------------------------------------------------
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=15)
     async def _poller_task(self) -> None:
-        """Background poller harvesting a balanced 10-item tech intelligence batch and dispatching with 1-minute pacing."""
+        """Background poller checking guild schedules and dispatching curated intelligence batches."""
         try:
             await self.bot.wait_until_ready()
         except (RuntimeError, Exception):
@@ -540,6 +868,14 @@ class TechFeedCog(commands.Cog):
         if self._is_dispatching:
             return
 
+        now_utc = discord.utils.utcnow()
+        eligible_guilds = {
+            g_id: cfg for g_id, cfg in guild_configs.items()
+            if is_cadence_eligible(cfg, now_utc)
+        }
+        if not eligible_guilds:
+            return
+
         self._is_dispatching = True
         try:
             # 1. Harvest balanced batch of up to 10 top-signal items across all categories
@@ -548,12 +884,11 @@ class TechFeedCog(commands.Cog):
                 return
 
             dot = self.bot.custom_emojis.get("heart_dot", "•")
-            now_utc = discord.utils.utcnow()
             today_str = now_utc.strftime("%Y-%m-%d")
 
             # 2. Handle Morning Digest for guilds configured in 'digest' mode (Trigger at or after 9 AM UTC)
             if now_utc.hour >= 9:
-                for guild_id, cfg in list(guild_configs.items()):
+                for guild_id, cfg in list(eligible_guilds.items()):
                     if cfg.get("mode") == "digest" and cfg.get("last_digest_date") != today_str:
                         guild = self.bot.get_guild(guild_id)
                         if not guild:
@@ -564,6 +899,7 @@ class TechFeedCog(commands.Cog):
                             try:
                                 await send_container_response(channel, digest_card)
                                 await self.bot.tech_mgr.update_last_digest(guild_id, today_str)
+                                await self.bot.tech_mgr.update_last_dispatch(guild_id, now_utc)
                             except Exception as d_err:
                                 logger.debug(f"Notice sending digest to guild {guild_id}: {d_err}")
 
@@ -582,14 +918,16 @@ class TechFeedCog(commands.Cog):
                         logger.warning(f"Pre-flight check dropped unreachable URL: {candidate.url}")
                         await self.bot.tech_mgr.mark_dispatched([candidate])
 
-            logger.info(f"Dispatching batch of {len(batch_to_send)} balanced tech story/stories with 60s pacing delay.")
+            logger.info(f"Dispatching batch of {len(batch_to_send)} balanced tech story/stories to {len(eligible_guilds)} scheduled guild(s).")
 
-            # 4. Dispatch 10 items one by one with strict 1-minute (60s) delay between each post
+            dispatched_guild_ids: set[int] = set()
+
+            # 4. Dispatch items one by one with strict 1-minute (60s) delay between each post
             for index, story in enumerate(batch_to_send):
                 card = self.bot.tech_mgr.build_story_container(story, dot=dot)
                 dispatched_any = False
 
-                for guild_id, cfg in list(guild_configs.items()):
+                for guild_id, cfg in list(eligible_guilds.items()):
                     guild = self.bot.get_guild(guild_id)
                     channel = guild.get_channel(cfg.get("channel_id")) if guild else None
                     if not channel:
@@ -613,6 +951,7 @@ class TechFeedCog(commands.Cog):
                     try:
                         msg = await send_container_response(channel, card)
                         dispatched_any = True
+                        dispatched_guild_ids.add(guild_id)
 
                         # Auto-create discussion thread if enabled for this guild
                         if cfg.get("thread_enabled") and msg and isinstance(msg, discord.Message):
@@ -633,9 +972,13 @@ class TechFeedCog(commands.Cog):
                     if story.entity_hash:
                         self.bot.tech_mgr._seen_entity_hashes.add(story.entity_hash)
 
-                # Exactly 1 minute (60 seconds) delay between each of the 10 posts
+                # Exactly 1 minute (60 seconds) delay between each of the posts
                 if index < len(batch_to_send) - 1:
                     await asyncio.sleep(60)
+
+            for g_id in dispatched_guild_ids:
+                await self.bot.tech_mgr.update_last_dispatch(g_id, now_utc)
+
         except Exception as exc:
             logger.error(f"Unexpected exception in tech news background poller: {exc}", exc_info=exc)
         finally:
@@ -664,45 +1007,7 @@ class TechFeedCog(commands.Cog):
         """Unified Tech Dashboard: displays live controls if configured, or launches setup if not set."""
         cfg = self.bot.tech_mgr.get_config(ctx.guild.id)
         if cfg:
-            channel = ctx.guild.get_channel(cfg["channel_id"])
-            ch_mention = channel.mention if channel else f"Unknown ({cfg['channel_id']})"
-            raw_cats = {c.strip() for c in cfg.get("categories", "all").split(",")}
-
-            sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
-            sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
-            dot = self.bot.custom_emojis.get("heart_dot", "•")
-
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"### Tech Dashboard\n"
-                    f"> Status: Active & Broadcasting"
-                )
-            )
-            container.add_separator(divider=True)
-
-            health = await self.bot.tech_realtime_mgr.get_global_health_summary()
-            health_summary_parts = [f"{prov} `{stat}`" for prov, stat in health.items()]
-            health_line = f"**Cloud Health:** " + f"  {dot}  ".join(health_summary_parts)
-
-            top_lines = [
-                f"**Channel:** {ch_mention}  {dot}  **Cadence:** `Hourly Batch (10 Items • 1m Delay)`  {dot}  **Status:** `Active`",
-                health_line,
-            ]
-            container.add_text("\n".join(top_lines))
-            container.add_separator(divider=True)
-
-            module_lines = ["**Active Modules:**"]
-            for opt in MODULE_OPTIONS:
-                val = opt["value"]
-                lbl = opt["label"]
-                is_active = ("all" in raw_cats) or (val in raw_cats)
-                emoji = sw_on if is_active else sw_off
-                module_lines.append(f"{emoji} **{lbl}**")
-
-            container.add_text("\n".join(module_lines))
-            container.add_separator(divider=True)
-
+            container = await build_tech_dashboard(self.bot, ctx.guild, cfg)
             view = TechStatusView(
                 bot=self.bot,
                 author_id=ctx.author.id,

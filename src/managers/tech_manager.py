@@ -290,7 +290,7 @@ class TechNewsManager:
         try:
             # 1. Load active guild channel configurations
             rows = await self.db.fetch_all(
-                "SELECT guild_id, channel_id, categories, thread_enabled, mode, alert_role_id, last_digest_date FROM guild_tech_news;"
+                "SELECT guild_id, channel_id, categories, thread_enabled, mode, alert_role_id, last_digest_date, cadence, last_dispatch_ts FROM guild_tech_news;"
             )
             async with self._lock:
                 self._guild_configs = {
@@ -301,6 +301,8 @@ class TechNewsManager:
                         "mode": str(r.get("mode") or "live"),
                         "alert_role_id": int(r["alert_role_id"]) if r.get("alert_role_id") else None,
                         "last_digest_date": str(r.get("last_digest_date") or ""),
+                        "cadence": str(r.get("cadence") or "hourly"),
+                        "last_dispatch_ts": r.get("last_dispatch_ts"),
                     }
                     for r in rows
                 }
@@ -364,11 +366,40 @@ class TechNewsManager:
                     "mode": existing.get("mode", "live"),
                     "alert_role_id": existing.get("alert_role_id"),
                     "last_digest_date": existing.get("last_digest_date", ""),
+                    "cadence": existing.get("cadence", "hourly"),
+                    "last_dispatch_ts": existing.get("last_dispatch_ts"),
                 }
             return True
         except Exception as e:
             logger.error(f"Failed to set tech news channel for guild {guild_id}: {e}", exc_info=e)
             return False
+
+    async def set_cadence(self, guild_id: int, cadence: str) -> bool:
+        """Update delivery cadence: '15m', 'hourly', '09:00', '00:00', or 'custom:HH:MM'."""
+        c = cadence.strip().lower()
+        query = "UPDATE guild_tech_news SET cadence = $1 WHERE guild_id = $2;"
+        try:
+            await self.db.execute(query, c, guild_id)
+            async with self._lock:
+                if guild_id in self._guild_configs:
+                    self._guild_configs[guild_id]["cadence"] = c
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set tech news cadence for guild {guild_id}: {e}", exc_info=e)
+            return False
+
+    async def update_last_dispatch(self, guild_id: int, dt: Optional[datetime.datetime] = None) -> None:
+        """Record timestamp of latest successful batch dispatch."""
+        if dt is None:
+            dt = datetime.datetime.now(datetime.timezone.utc)
+        query = "UPDATE guild_tech_news SET last_dispatch_ts = $1 WHERE guild_id = $2;"
+        try:
+            await self.db.execute(query, dt, guild_id)
+            async with self._lock:
+                if guild_id in self._guild_configs:
+                    self._guild_configs[guild_id]["last_dispatch_ts"] = dt
+        except Exception as e:
+            logger.error(f"Failed to update last dispatch ts for guild {guild_id}: {e}", exc_info=e)
 
     async def set_mode(self, guild_id: int, mode: str) -> bool:
         """Set delivery mode: 'live' or 'digest'."""

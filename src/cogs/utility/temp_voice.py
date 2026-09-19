@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Optional
 import discord
 from discord import app_commands
@@ -411,6 +412,9 @@ class TempVoice(commands.Cog):
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
+        # Anti-spam cooldown and in-flight creation tracking
+        self._creation_cooldowns: dict[int, float] = {}
+        self._creating_users: set[int] = set()
         # Register persistent view so buttons work across restarts
         self.bot.add_view(PersistentVoiceMasterView(self.bot))
 
@@ -471,11 +475,39 @@ class TempVoice(commands.Cog):
                 await self._handle_temp_channel_leave(before.channel, member)
 
     async def _handle_join_to_create(self, member: discord.Member, master_channel: discord.VoiceChannel) -> None:
-        """Create private room, move user, and post in-room panel."""
+        """Create private room, move user, and post in-room panel with anti-spam protection."""
         guild = member.guild
         settings = self.bot.temp_voice_mgr.get_settings(guild.id)
         if not settings:
             return
+
+        # 1. Anti-Spam: In-flight creation lock (prevents duplicate triggers)
+        if member.id in self._creating_users:
+            return
+
+        # 2. Existing Room Check: If user already owns an active room in this guild, move them there
+        existing_cid = self.bot.temp_voice_mgr.get_active_room_for_user(guild.id, member.id)
+        if existing_cid:
+            existing_channel = guild.get_channel(existing_cid)
+            if isinstance(existing_channel, discord.VoiceChannel):
+                try:
+                    await member.move_to(existing_channel, reason="User already owns an active J2C room")
+                except discord.HTTPException:
+                    pass
+                return
+
+        # 3. Anti-Spam Rate Limit: 5-second cooldown between creation attempts
+        now = time.time()
+        last_created = self._creation_cooldowns.get(member.id, 0.0)
+        if now - last_created < 5.0:
+            try:
+                await member.move_to(None, reason="J2C rapid creation cooldown active")
+            except discord.HTTPException:
+                pass
+            return
+
+        self._creating_users.add(member.id)
+        self._creation_cooldowns[member.id] = now
 
         category = guild.get_channel(settings["category_id"])
         if not isinstance(category, discord.CategoryChannel):
@@ -544,6 +576,8 @@ class TempVoice(commands.Cog):
 
         except discord.HTTPException as e:
             logger.error(f"Failed creating J2C room in guild {guild.id}: {e}", exc_info=e)
+        finally:
+            self._creating_users.discard(member.id)
 
     async def _handle_temp_channel_leave(self, channel: discord.VoiceChannel, member: discord.Member) -> None:
         """Clean up empty room or alert if host leaves."""
@@ -641,18 +675,6 @@ class TempVoice(commands.Cog):
                     f"> Join {master_channel.mention} to create your private voice room.\n"
                     f"> Manage room access and settings using the controls below."
                 )
-            )
-            dashboard_container.add_separator(divider=True)
-            dashboard_container.add_text(
-                "**Controls**\n"
-                "• Lock / Unlock : Manage room access\n"
-                "• Hide / Unhide : Toggle channel visibility\n"
-                "• Limit : Set room capacity\n"
-                "• Rename : Update room name\n"
-                "• Permit / Reject : Manage member permissions\n"
-                "• Bitrate : Adjust streaming quality\n"
-                "• Transfer / Claim : Room ownership controls\n"
-                "• Delete : Close voice room"
             )
 
             view = PersistentVoiceMasterView(self.bot)

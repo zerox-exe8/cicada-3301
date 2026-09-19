@@ -40,22 +40,26 @@ class TempVoiceRenameModal(discord.ui.Modal, title="Rename Voice Room"):
         name = self.new_name.value.strip()
         cog = self.bot.get_cog("TempVoice")
         if cog and hasattr(cog, "is_rename_rate_limited") and cog.is_rename_rate_limited(self.channel.id):
-            await interaction.response.send_message(
-                "Discord allows renaming a voice room only twice every 10 minutes. Please wait a few minutes before renaming again.",
-                ephemeral=True,
+            c = KyroContainer(accent_color=None)
+            c.add_section(
+                "### Rate Limit Protected\n"
+                "> Discord allows renaming a voice room only twice every 10 minutes.\n"
+                "> Please wait a few minutes before renaming again."
             )
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         try:
             await self.channel.edit(name=name, reason=f"Temp voice renamed by {interaction.user}")
             if cog and hasattr(cog, "mark_custom_renamed"):
                 cog.mark_custom_renamed(self.channel.id)
-            await interaction.response.send_message(
-                f"**Room Renamed**: Voice channel updated to **{name}**.",
-                ephemeral=True,
-            )
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Room Renamed**\n> Voice channel updated to **{name}**.")
+            await send_container_response(interaction, c, ephemeral=True)
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to rename channel: {e}", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Error**: Failed to rename channel: {e}")
+            await send_container_response(interaction, c, ephemeral=True)
 
 
 class TempVoiceLimitModal(discord.ui.Modal, title="Set Member Limit"):
@@ -74,16 +78,22 @@ class TempVoiceLimitModal(discord.ui.Modal, title="Set Member Limit"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         raw_val = self.limit_input.value.strip()
         if not raw_val.isdigit() or not (0 <= int(raw_val) <= 99):
-            await interaction.response.send_message("Please enter a valid number between 0 and 99.", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section("**Invalid Input**: Please enter a valid number between 0 and 99.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         lim = int(raw_val)
         try:
             await self.channel.edit(user_limit=lim, reason=f"Temp voice limit changed by {interaction.user}")
             desc = "Unlimited" if lim == 0 else f"{lim} members"
-            await interaction.response.send_message(f"**Limit Updated**: Room capacity set to **{desc}**.", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Limit Updated**\n> Room capacity set to **{desc}**.")
+            await send_container_response(interaction, c, ephemeral=True)
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to update limit: {e}", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Error**: Failed to update limit: {e}")
+            await send_container_response(interaction, c, ephemeral=True)
 
 
 # ─── SELECT MENUS FOR MEMBER MANAGEMENT ───────────────────────────────────────
@@ -100,12 +110,13 @@ class TrustMemberView(discord.ui.View):
         target = select.values[0]
         try:
             await self.channel.set_permissions(target, connect=True, view_channel=True)
-            await interaction.response.send_message(
-                f"**Member Trusted**: {target.mention} can now join your room even when locked.",
-                ephemeral=True,
-            )
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Member Permitted**\n> {target.mention} can now join your room even when locked.")
+            await send_container_response(interaction, c, ephemeral=True)
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to permit member: {e}", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Error**: Failed to permit member: {e}")
+            await send_container_response(interaction, c, ephemeral=True)
 
 
 class BlockMemberView(discord.ui.View):
@@ -120,15 +131,15 @@ class BlockMemberView(discord.ui.View):
         target = select.values[0]
         try:
             await self.channel.set_permissions(target, connect=False, view_channel=False)
-            # If target is currently inside the channel, disconnect them
             if isinstance(target, discord.Member) and target.voice and target.voice.channel == self.channel:
                 await target.move_to(None, reason="Blocked from room by host")
-            await interaction.response.send_message(
-                f"**Member Blocked**: {target.mention} has been disconnected and blocked from your room.",
-                ephemeral=True,
-            )
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Member Blocked**\n> {target.mention} has been disconnected and blocked from your room.")
+            await send_container_response(interaction, c, ephemeral=True)
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to block member: {e}", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Error**: Failed to block member: {e}")
+            await send_container_response(interaction, c, ephemeral=True)
 
 
 class TransferHostView(discord.ui.View):
@@ -143,7 +154,9 @@ class TransferHostView(discord.ui.View):
             return
         new_host = select.values[0]
         if new_host.bot:
-            await interaction.response.send_message("You cannot transfer ownership to a bot.", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section("**Error**: You cannot transfer room ownership to a bot.")
+            await send_container_response(interaction, c, ephemeral=True)
             return
 
         await self.bot.temp_voice_mgr.transfer_ownership(self.channel.id, new_host.id)
@@ -161,10 +174,9 @@ class TransferHostView(discord.ui.View):
         except Exception:
             pass
 
-        await interaction.response.send_message(
-            f"**Host Transferred**: {new_host.mention} is now the host of **{self.channel.name}**!",
-            ephemeral=False,
-        )
+        c = KyroContainer(accent_color=None)
+        c.add_section(f"**Host Transferred**\n> {new_host.mention} is now the host of **{self.channel.name}**!")
+        await send_container_response(interaction, c, ephemeral=False)
 
 
 class BitrateQualityView(discord.ui.View):
@@ -190,9 +202,13 @@ class BitrateQualityView(discord.ui.View):
         try:
             await self.channel.edit(bitrate=target_bitrate, reason=f"Bitrate adjusted by {interaction.user}")
             kbps = target_bitrate // 1000
-            await interaction.response.send_message(f"**Audio Bitrate Set**: Audio streaming quality is now **{kbps} kbps**.", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Audio Bitrate Set**\n> Streaming quality is now **{kbps} kbps**.")
+            await send_container_response(interaction, c, ephemeral=True)
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to set bitrate: {e}", ephemeral=True)
+            c = KyroContainer(accent_color=None)
+            c.add_section(f"**Error**: Failed to set bitrate: {e}")
+            await send_container_response(interaction, c, ephemeral=True)
 
 
 # ─── MASTER INTERFACE & ROOM VIEW ─────────────────────────────────────────────
@@ -207,11 +223,24 @@ class PersistentVoiceMasterView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
+    async def _send_card(
+        self,
+        interaction: discord.Interaction,
+        title: str,
+        description: str,
+        view: Optional[discord.ui.View] = None,
+        ephemeral: bool = True,
+    ) -> None:
+        """Send a clean KyroContainer card for all button interactions."""
+        container = KyroContainer(accent_color=None)
+        container.add_section(f"**{title}**\n> {description}")
+        await send_container_response(interaction, container, view=view, ephemeral=ephemeral)
+
     async def _resolve_room_for_interaction(self, interaction: discord.Interaction) -> tuple[Optional[discord.VoiceChannel], Optional[dict]]:
         """Resolve which voice room the interacting user owns or is in."""
         guild = interaction.guild
         if not guild:
-            await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+            await self._send_card(interaction, "Server Only", "This command can only be used in a server.", ephemeral=True)
             return None, None
 
         # 1. Check if user owns an active room in this guild
@@ -229,16 +258,17 @@ class PersistentVoiceMasterView(discord.ui.View):
             if settings:
                 master_id = settings.get("master_channel_id")
             master_mention = f"<#{master_id}>" if master_id else "Join to Create"
-            await interaction.response.send_message(
-                f"You do not have an active temporary voice channel!\n"
-                f"> Join {master_mention} to spawn your private room first.",
+            await self._send_card(
+                interaction,
+                "No Active Room",
+                f"You do not have an active temporary voice channel.\n> Join {master_mention} to spawn your private room first.",
                 ephemeral=True,
             )
             return None, None
 
         channel = guild.get_channel(target_cid)
         if not isinstance(channel, discord.VoiceChannel):
-            await interaction.response.send_message("Your voice channel could not be found.", ephemeral=True)
+            await self._send_card(interaction, "Room Not Found", "Your voice channel could not be found.", ephemeral=True)
             return None, None
 
         data = self.bot.temp_voice_mgr.get_channel_data(target_cid)
@@ -251,7 +281,9 @@ class PersistentVoiceMasterView(discord.ui.View):
             is_admin = interaction.user.guild_permissions.administrator or interaction.user.guild_permissions.manage_channels
 
         if not is_owner and not is_admin:
-            await interaction.response.send_message(
+            await self._send_card(
+                interaction,
+                "Access Denied",
                 f"Only the room host (<@{data['owner_id']}>) can perform this action.",
                 ephemeral=True,
             )
@@ -271,9 +303,9 @@ class PersistentVoiceMasterView(discord.ui.View):
             for m in channel.members:
                 await channel.set_permissions(m, connect=True)
             await self.bot.temp_voice_mgr.update_channel_state(channel.id, is_locked=True)
-            await interaction.response.send_message(f"**Room Locked**: **{channel.name}** is now private.", ephemeral=True)
+            await self._send_card(interaction, "Room Locked", f"**{channel.name}** is now private. Only permitted members can join.")
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to lock room: {e}", ephemeral=True)
+            await self._send_card(interaction, "Error", f"Failed to lock room: {e}")
 
     @discord.ui.button(label="Unlock", style=discord.ButtonStyle.secondary, custom_id="pvm_unlock", row=0)
     async def btn_unlock(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -284,9 +316,9 @@ class PersistentVoiceMasterView(discord.ui.View):
         try:
             await channel.set_permissions(interaction.guild.default_role, connect=None)
             await self.bot.temp_voice_mgr.update_channel_state(channel.id, is_locked=False)
-            await interaction.response.send_message(f"**Room Unlocked**: **{channel.name}** is now open to everyone.", ephemeral=True)
+            await self._send_card(interaction, "Room Unlocked", f"**{channel.name}** is now open to everyone.")
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to unlock room: {e}", ephemeral=True)
+            await self._send_card(interaction, "Error", f"Failed to unlock room: {e}")
 
     @discord.ui.button(label="Hide", style=discord.ButtonStyle.secondary, custom_id="pvm_hide", row=0)
     async def btn_hide(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -299,9 +331,9 @@ class PersistentVoiceMasterView(discord.ui.View):
             for m in channel.members:
                 await channel.set_permissions(m, view_channel=True)
             await self.bot.temp_voice_mgr.update_channel_state(channel.id, is_hidden=True)
-            await interaction.response.send_message(f"**Room Hidden**: **{channel.name}** is now invisible on the channel list.", ephemeral=True)
+            await self._send_card(interaction, "Room Hidden", f"**{channel.name}** is now invisible on the channel list.")
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to hide room: {e}", ephemeral=True)
+            await self._send_card(interaction, "Error", f"Failed to hide room: {e}")
 
     @discord.ui.button(label="Unhide", style=discord.ButtonStyle.secondary, custom_id="pvm_unhide", row=0)
     async def btn_unhide(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -312,9 +344,9 @@ class PersistentVoiceMasterView(discord.ui.View):
         try:
             await channel.set_permissions(interaction.guild.default_role, view_channel=None)
             await self.bot.temp_voice_mgr.update_channel_state(channel.id, is_hidden=False)
-            await interaction.response.send_message(f"**Room Visible**: **{channel.name}** is now visible in the channel list.", ephemeral=True)
+            await self._send_card(interaction, "Room Visible", f"**{channel.name}** is now visible in the channel list.")
         except discord.HTTPException as e:
-            await interaction.response.send_message(f"Failed to unhide room: {e}", ephemeral=True)
+            await self._send_card(interaction, "Error", f"Failed to unhide room: {e}")
 
     @discord.ui.button(label="Limit", style=discord.ButtonStyle.secondary, custom_id="pvm_limit", row=0)
     async def btn_limit(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -338,7 +370,12 @@ class PersistentVoiceMasterView(discord.ui.View):
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
         view = TrustMemberView(channel)
-        await interaction.response.send_message("**Permit a Member:**", view=view, ephemeral=True)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            "### Permit Member\n"
+            "> Select a friend from the menu below to grant room access even when locked."
+        )
+        await send_container_response(interaction, container, view=view, ephemeral=True)
 
     @discord.ui.button(label="Reject", style=discord.ButtonStyle.secondary, custom_id="pvm_block", row=1)
     async def btn_block(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -346,7 +383,12 @@ class PersistentVoiceMasterView(discord.ui.View):
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
         view = BlockMemberView(channel)
-        await interaction.response.send_message("**Reject and Block a Member:**", view=view, ephemeral=True)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            "### Reject Member\n"
+            "> Select an unwanted user from the menu below to disconnect and block them."
+        )
+        await send_container_response(interaction, container, view=view, ephemeral=True)
 
     @discord.ui.button(label="Bitrate", style=discord.ButtonStyle.secondary, custom_id="pvm_bitrate", row=1)
     async def btn_bitrate(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -354,7 +396,12 @@ class PersistentVoiceMasterView(discord.ui.View):
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
         view = BitrateQualityView(channel)
-        await interaction.response.send_message("**Adjust Audio Bitrate:**", view=view, ephemeral=True)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            "### Audio Bitrate\n"
+            "> Choose audio streaming quality for your room from the menu below."
+        )
+        await send_container_response(interaction, container, view=view, ephemeral=True)
 
     @discord.ui.button(label="Transfer", style=discord.ButtonStyle.secondary, custom_id="pvm_transfer", row=1)
     async def btn_transfer(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -362,7 +409,12 @@ class PersistentVoiceMasterView(discord.ui.View):
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
         view = TransferHostView(self.bot, channel)
-        await interaction.response.send_message("**Transfer Room Ownership:**", view=view, ephemeral=True)
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            "### Transfer Host\n"
+            "> Select a member from the menu below to transfer room ownership."
+        )
+        await send_container_response(interaction, container, view=view, ephemeral=True)
 
     # ── ROW 2: OWNERSHIP & SESSION ──
 
@@ -375,7 +427,9 @@ class PersistentVoiceMasterView(discord.ui.View):
         current_owner_id = data["owner_id"]
         owner_connected = any(m.id == current_owner_id for m in channel.members)
         if owner_connected and interaction.user.id != current_owner_id:
-            await interaction.response.send_message(
+            await self._send_card(
+                interaction,
+                "Host Still Present",
                 f"The current host (<@{current_owner_id}>) is still connected in **{channel.name}**.",
                 ephemeral=True,
             )
@@ -396,8 +450,10 @@ class PersistentVoiceMasterView(discord.ui.View):
         except Exception:
             pass
 
-        await interaction.response.send_message(
-            f"**Room Claimed**: {interaction.user.mention} is now the host of **{channel.name}**!",
+        await self._send_card(
+            interaction,
+            "Room Claimed",
+            f"{interaction.user.mention} is now the host of **{channel.name}**!",
             ephemeral=False,
         )
 
@@ -407,7 +463,7 @@ class PersistentVoiceMasterView(discord.ui.View):
         if not channel or not data or not await self._verify_owner(interaction, channel, data):
             return
 
-        await interaction.response.send_message(f"**Closing Room**: Deleting **{channel.name}**...", ephemeral=True)
+        await self._send_card(interaction, "Closing Room", f"Deleting **{channel.name}**...")
         try:
             await channel.delete(reason=f"Temp voice deleted manually by host {interaction.user}")
         except Exception:
@@ -538,7 +594,7 @@ class TempVoice(commands.Cog):
             category = master_channel.category
 
         name_fmt = settings.get("default_name_format") or "{user}'s Room"
-        channel_name = name_fmt.replace("{user}", member.display_name)
+        channel_name = name_fmt.replace("{user}", member.display_name.strip()).strip()
 
         overwrites: dict[Any, discord.PermissionOverwrite] = {
             guild.default_role: discord.PermissionOverwrite(
@@ -577,26 +633,6 @@ class TempVoice(commands.Cog):
 
             await member.move_to(new_channel, reason="Moved to newly created J2C room")
             await self.bot.temp_voice_mgr.register_temp_channel(new_channel.id, guild.id, member.id)
-
-            # In-Room Control Card
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"### {channel_name}\n"
-                    f"> Welcome {member.mention}! You are the host of this room.\n"
-                    f"> Use the controls below or the Interface channel to manage your room."
-                )
-            )
-            container.add_separator(divider=True)
-            container.add_field("Host", member.mention, inline=True)
-            container.add_field("Status", "Unlocked", inline=True)
-            container.add_field("Auto-Delete", "When Empty", inline=True)
-
-            view = PersistentVoiceMasterView(self.bot)
-            panel_msg = await send_container_response(new_channel, container, view=view)
-            p_msg_id = panel_msg.id if isinstance(panel_msg, discord.Message) else (int(panel_msg["id"]) if isinstance(panel_msg, dict) and "id" in panel_msg else None)
-            if p_msg_id:
-                await self.bot.temp_voice_mgr.update_control_message(new_channel.id, p_msg_id)
 
         except discord.HTTPException as e:
             logger.error(f"Failed creating J2C room in guild {guild.id}: {e}", exc_info=e)
@@ -656,7 +692,7 @@ class TempVoice(commands.Cog):
             if channel.id not in self._custom_renamed_rooms:
                 settings = self.bot.temp_voice_mgr.get_settings(guild.id)
                 name_fmt = settings.get("default_name_format") or "{user}'s Room" if settings else "{user}'s Room"
-                new_name = name_fmt.replace("{user}", new_host.display_name)
+                new_name = name_fmt.replace("{user}", new_host.display_name.strip()).strip()
 
                 last_rename = self._last_channel_renames.get(channel.id, 0.0)
                 if (time.time() - last_rename) >= 300.0:

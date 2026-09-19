@@ -646,9 +646,14 @@ class TempVoice(commands.Cog):
                 )
             )
             dashboard_container.add_separator(divider=True)
-            dashboard_container.add_field("Access Controls", "🔒 Lock • 🔓 Unlock • 👁️ Ghost • 👀 Unhide • 👥 Limit", inline=False)
-            dashboard_container.add_field("Customization", "✏️ Rename • ⭐ Permit • 🚫 Block • 👑 Transfer • 🏆 Claim", inline=False)
-            dashboard_container.add_field("Audio & Session", "🎧 Quality Bitrate • 🗑️ Delete Room", inline=False)
+            dashboard_container.add_text(
+                "**Access Controls**\n"
+                "> 🔒 Lock • 🔓 Unlock • 👁️ Ghost • 👀 Unhide • 👥 Limit\n\n"
+                "**Customization**\n"
+                "> ✏️ Rename • ⭐ Permit • 🚫 Block • 👑 Transfer • 🏆 Claim\n\n"
+                "**Audio & Session**\n"
+                "> 🎧 Quality Bitrate • 🗑️ Delete Room"
+            )
 
             view = PersistentVoiceMasterView(self.bot)
             master_msg = await interface_channel.send(embed=dashboard_container.to_embed(), view=view)
@@ -671,9 +676,11 @@ class TempVoice(commands.Cog):
                 )
             )
             resp_container.add_separator(divider=True)
-            resp_container.add_field("Category", category.name, inline=True)
-            resp_container.add_field("Master Voice", master_channel.mention, inline=True)
-            resp_container.add_field("Interface Channel", interface_channel.mention, inline=True)
+            resp_container.add_text(
+                f"• **Category:** `{category.name}`\n"
+                f"• **Master Voice:** {master_channel.mention}\n"
+                f"• **Interface Channel:** {interface_channel.mention}"
+            )
 
             await send_container_response(ctx, resp_container, ephemeral=True)
 

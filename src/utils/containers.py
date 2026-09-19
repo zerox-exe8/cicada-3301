@@ -66,6 +66,10 @@ class KyroContainer:
         self.add_text(f"{text}")
         return self
 
+    def add_field(self, name: str, value: str, inline: bool = False) -> KyroContainer:
+        """Add a formatted field to the container."""
+        return self.add_text(f"**{name}**\n{value}")
+
     def add_media(self, url: str) -> KyroContainer:
         """Add a full-width Media Gallery component (type: 12) inside the container."""
         if not url or not str(url).strip():

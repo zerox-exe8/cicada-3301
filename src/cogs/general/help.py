@@ -81,7 +81,17 @@ class Help(commands.Cog):
                         if cmd not in categories[category_name]:
                             categories[category_name].append(cmd)
 
-        return {k: v for k, v in categories.items() if v}
+        # Ensure ordered display in dropdown: Moderation, Welcomer, Join to Create, Ticket, Security, Audit Logs, Music, Games, etc.
+        priority_order = ["Moderation", "Welcomer", "Join to Create", "Ticket", "Security", "Audit Logs", "Music", "Games", "Premium"]
+        ordered_categories: dict[str, list[commands.Command]] = {}
+        for cat in priority_order:
+            if cat in categories and categories[cat]:
+                ordered_categories[cat] = categories[cat]
+        for cat, cmds in categories.items():
+            if cat not in ordered_categories and cmds:
+                ordered_categories[cat] = cmds
+
+        return ordered_categories
 
     def _get_category_emoji(self, cat_name: str) -> str:
         """Resolve custom application emoji for category header from assets/emoji and assets/emoji2."""
@@ -95,6 +105,7 @@ class Help(commands.Cog):
             "Security": e_reg.get("icons_guardian", e_reg.get("icons_ban", "")),
             "Audit Logs": e_reg.get("icons_podcast", e_reg.get("icon_logging", "")),
             "Games": e_reg.get("icons_magicwand", e_reg.get("icons_tada", e_reg.get("icon_gift", ""))),
+            "Join to Create": e_reg.get("icons_connect", e_reg.get("icons_channel", e_reg.get("icons_podcast", ""))),
         }
         return mapping.get(cat_name, e_reg.get("icon_moderation", ""))
 
@@ -110,9 +121,13 @@ class Help(commands.Cog):
             "Security": "icons_guardian",
             "Audit Logs": "icons_podcast",
             "Games": "icons_magicwand",
+            "Join to Create": "icons_connect",
         }
         emoji_name = mapping.get(cat_name, "icon_moderation")
-        return e_reg.get_select_emoji(emoji_name, fallback_unicode=None)
+        emoji_data = e_reg.get_select_emoji(emoji_name, fallback_unicode=None)
+        if not emoji_data and cat_name == "Join to Create":
+            emoji_data = e_reg.get_select_emoji("icons_channel", fallback_unicode=None) or e_reg.get_select_emoji("icon_moderation", fallback_unicode=None)
+        return emoji_data
 
     def _build_home_container(
         self,
@@ -298,9 +313,35 @@ class Help(commands.Cog):
         """Interactive help menu filtered by user permissions."""
         visible_categories = await self._get_visible_categories(ctx)
 
-        # 1. Direct command lookup
+        # 1. Direct command or module lookup
         if command_or_module:
             query = command_or_module.lower().strip()
+
+            # Direct module / category lookup (e.g. ?help j2c, ?help "join to create")
+            category_aliases = {
+                "j2c": "Join to Create",
+                "jointocreate": "Join to Create",
+                "join to create": "Join to Create",
+                "join-to-create": "Join to Create",
+                "voice": "Join to Create",
+                "tempvoice": "Join to Create",
+                "mod": "Moderation",
+                "welcome": "Welcomer",
+            }
+            target_cat_name = category_aliases.get(query)
+            if not target_cat_name:
+                target_cat_name = next((c for c in visible_categories.keys() if c.lower() == query), None)
+
+            if target_cat_name:
+                matched_cat = next((c for c in visible_categories.keys() if c.lower() == target_cat_name.lower()), None)
+                if matched_cat:
+                    custom_id_prefix = f"help_console:{ctx.author.id}:{ctx.guild.id if ctx.guild else 0}:{ctx.message.id if ctx.message else 0}"
+                    container = self._build_category_container(
+                        ctx, matched_cat, visible_categories[matched_cat], visible_categories, custom_id_prefix
+                    )
+                    await send_container_response(ctx, container)
+                    return
+
             target_cmd = self.bot.get_command(query)
             if target_cmd and await self._can_run_command(target_cmd, ctx):
                 current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)

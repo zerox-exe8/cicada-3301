@@ -13,7 +13,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.core.bot import KyroBot
-from src.utils.containers import KyroContainer
+from src.core.context import CustomContext
+from src.utils.containers import KyroContainer, send_container_response
 
 logger = logging.getLogger("Kyro.Cogs.TempVoice")
 
@@ -407,6 +408,7 @@ class PersistentVoiceMasterView(discord.ui.View):
 
 class TempVoice(commands.Cog):
     """Dynamic Join-to-Create voice system (/vc setup j2c)."""
+    category: str = "Join to Create"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
@@ -563,9 +565,28 @@ class TempVoice(commands.Cog):
                 except Exception:
                     pass
 
-    # ─── SLASH COMMAND: /vc setup [type: j2c] ─────────────────────────────────
-
-    vc_group = app_commands.Group(name="vc", description="Voice channel management and configuration")
+    # ─── HYBRID COMMAND: /vc setup [type: j2c] ────────────────────────────────
+    @commands.hybrid_group(
+        name="vc",
+        description="Voice channel management and Join-to-Create configuration.",
+    )
+    @commands.guild_only()
+    async def vc_group(self, ctx: CustomContext) -> None:
+        """Voice channel management commands."""
+        if ctx.invoked_subcommand is None:
+            prefix = ctx.clean_prefix
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Join to Create Voice Management**\n"
+                    "> Deploy automated temporary voice infrastructure with master control dashboard.\n\n"
+                    f"> **Prefix Command:** `{prefix}vc setup [type]`\n"
+                    f"> **Slash Command:** `/vc setup type:Join to Create (J2C)`"
+                )
+            )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container, ephemeral=True)
 
     @vc_group.command(name="setup", description="Setup voice infrastructure (J2C Join-to-Create)")
     @app_commands.describe(
@@ -579,24 +600,29 @@ class TempVoice(commands.Cog):
             app_commands.Choice(name="Join to Create (J2C)", value="j2c"),
         ]
     )
-    @app_commands.checks.has_permissions(manage_channels=True)
+    @commands.has_permissions(manage_channels=True)
     async def vc_setup(
         self,
-        interaction: discord.Interaction,
-        type: Optional[app_commands.Choice[str]] = None,
+        ctx: CustomContext,
+        type: Optional[str] = "j2c",
         category_name: Optional[str] = "🔊 Custom Voice",
         voice_name: Optional[str] = "➕ Join to Create",
         interface_name: Optional[str] = "🎛️・voice-control",
     ) -> None:
         """Automated J2C infrastructure generator."""
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
         if not guild:
             return
 
-        chosen_type = type.value if type else "j2c"
+        raw_val = getattr(type, "value", type)
+        chosen_type = str(raw_val or "j2c").lower().strip()
         if chosen_type != "j2c":
-            await interaction.followup.send("Unsupported voice system type.", ephemeral=True)
+            err_c = KyroContainer(accent_color=None)
+            err_c.add_section("**Error**: Unsupported voice system type. Please use `j2c`.")
+            await send_container_response(ctx, err_c, ephemeral=True)
             return
 
         cat_title = category_name.strip() if category_name else "🔊 Custom Voice"
@@ -605,13 +631,13 @@ class TempVoice(commands.Cog):
 
         try:
             # 1. Create Category
-            category = await guild.create_category(name=cat_title, reason=f"J2C setup by {interaction.user}")
+            category = await guild.create_category(name=cat_title, reason=f"J2C setup by {ctx.author}")
 
             # 2. Create Master Voice Channel
             master_channel = await guild.create_voice_channel(
                 name=v_title,
                 category=category,
-                reason=f"J2C master channel by {interaction.user}",
+                reason=f"J2C master channel by {ctx.author}",
             )
 
             # 3. Create Interface Text Channel (Read-only for @everyone, but button clicks allowed)
@@ -635,7 +661,7 @@ class TempVoice(commands.Cog):
                 name=i_title,
                 category=category,
                 overwrites=interface_overwrites,
-                reason=f"J2C interface channel by {interaction.user}",
+                reason=f"J2C interface channel by {ctx.author}",
             )
 
             # 4. Post the Master Interface Dashboard
@@ -681,10 +707,12 @@ class TempVoice(commands.Cog):
             resp_container.add_field("Master Voice", master_channel.mention, inline=True)
             resp_container.add_field("Interface Channel", interface_channel.mention, inline=True)
 
-            await interaction.followup.send(embed=resp_container.to_embed(), ephemeral=True)
+            await send_container_response(ctx, resp_container, ephemeral=True)
 
         except discord.HTTPException as e:
-            await interaction.followup.send(f"Failed to setup voice infrastructure: {e}", ephemeral=True)
+            err_c = KyroContainer(accent_color=None)
+            err_c.add_section(f"**Error**: Failed to setup voice infrastructure: {e}")
+            await send_container_response(ctx, err_c, ephemeral=True)
 
 
 async def setup(bot: KyroBot) -> None:

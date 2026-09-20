@@ -1079,12 +1079,12 @@ class DevPulseManager:
 
         # 1. Brief
         if story.summary:
-            body_elements.append(f"**Executive Brief:**\n{story.summary}")
+            body_elements.append(story.summary)
 
         # 2. Key Highlights
         if story.highlights:
             hl_text = "\n".join(f"> {dot} {h}" for h in story.highlights[:3])
-            body_elements.append(f"**Key Details:**\n{hl_text}")
+            body_elements.append(hl_text)
 
         # 3. Why It Matters
         if story.why_it_matters:

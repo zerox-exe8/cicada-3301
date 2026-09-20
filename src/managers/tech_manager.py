@@ -1257,30 +1257,22 @@ class TechNewsManager:
 
         body_elements: list[str] = []
 
-        # 1. AI Executive Brief
+        # 1. Executive Summary
         if story.summary:
-            body_elements.append(f"**AI Executive Brief:**\n{story.summary}")
+            body_elements.append(story.summary)
 
-        # 2. Key Highlights / Specs / Architecture
+        # 2. Key Highlights / Specs
         if story.highlights:
             hl_text = "\n".join(f"> {dot} {h}" for h in story.highlights[:3])
-            body_elements.append(f"**Key Highlights & Architecture:**\n{hl_text}")
+            body_elements.append(hl_text)
         elif story.what_is_inside:
-            body_elements.append(f"**Key Capabilities & Stack:**\n> {dot} {story.what_is_inside}")
+            body_elements.append(f"> {dot} {story.what_is_inside}")
 
         # 3. Why It Matters
         if story.why_it_matters:
             body_elements.append(f"**Why It Matters:**\n> {story.why_it_matters}")
 
-        # 4. Audience / Topics
-        if story.target_audience:
-            body_elements.append(f"> *Engineered for {story.target_audience}*")
-
-        topics = story.metadata.get("topics", [])
-        if topics:
-            body_elements.append(" ".join(f"`{t}`" for t in topics[:5]))
-
-        # 5. Metadata Pill Row
+        # 4. Metadata Pill Row
         meta_items: list[str] = []
         if story.category == "github":
             lang = story.metadata.get("language", "General")
@@ -1297,7 +1289,7 @@ class TechNewsManager:
                 meta_items.append(f"**Source:** `{domain}`")
         elif story.category == "ai":
             upvotes = story.metadata.get("upvotes", 0)
-            meta_items = ["**Citation:** ArXiv", f"**Community Traction:** `{upvotes}` upvotes"]
+            meta_items = ["**Citation:** ArXiv", f"**Community:** `{upvotes}` upvotes"]
         elif story.category == "security":
             sev = story.metadata.get("severity", "Security Advisory")
             meta_items = [f"**Threat:** `{sev}`", f"**Source:** {story.source}"]

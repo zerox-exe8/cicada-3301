@@ -10,7 +10,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Optional, Any
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import aiohttp
 import discord
 from discord import app_commands
@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("Kyro.Utility.TechFeed")
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
 VALID_CATEGORIES: set[str] = {"all", "github", "ai", "security", "systems", "hardware", "tech"}
 
 CADENCE_OPTIONS: list[dict[str, str]] = [
@@ -43,19 +45,19 @@ CADENCE_OPTIONS: list[dict[str, str]] = [
         "description": "10 curated top stories delivered hourly with 1m pacing",
     },
     {
-        "label": "Morning 9:00 AM UTC",
+        "label": "Morning 9:00 AM IST",
         "value": "09:00",
-        "description": "Daily morning intelligence briefing drop at 9:00 AM UTC",
+        "description": "Daily morning intelligence briefing drop at 9:00 AM IST",
     },
     {
-        "label": "Midnight 12:00 AM UTC",
+        "label": "Midnight 12:00 AM IST",
         "value": "00:00",
-        "description": "Daily midnight intelligence recap drop at 12:00 AM UTC",
+        "description": "Daily midnight intelligence recap drop at 12:00 AM IST",
     },
     {
-        "label": "Custom Time (UTC)",
+        "label": "Custom Time (IST)",
         "value": "custom",
-        "description": "Specify custom 24-hour daily delivery time (HH:MM UTC)",
+        "description": "Specify custom 24-hour daily delivery time (HH:MM IST)",
     },
 ]
 
@@ -67,59 +69,66 @@ def format_cadence_label(cadence: str) -> str:
     if c == "hourly":
         return "Hourly Batch (1h)"
     if c == "09:00":
-        return "Morning 9:00 AM UTC"
+        return "Morning 9:00 AM IST"
     if c == "00:00":
-        return "Midnight 12:00 AM UTC"
+        return "Midnight 12:00 AM IST"
     if c.startswith("custom:") or ":" in c:
         raw_time = c.replace("custom:", "").strip()
-        return f"Daily at {raw_time} UTC"
+        return f"Daily at {raw_time} IST"
     return "Hourly Batch (1h)"
 
 
-def is_cadence_eligible(cfg: dict[str, Any], now_utc: datetime) -> bool:
-    cadence = str(cfg.get("cadence") or "hourly").lower().strip()
-    last_dispatch = cfg.get("last_dispatch_ts")
-    today_str = now_utc.strftime("%Y-%m-%d")
-
-    if isinstance(last_dispatch, str):
+def parse_ist_timestamp(ts: Any) -> Optional[datetime]:
+    """Parse and normalize any database timestamp to Indian Standard Time (IST)."""
+    if not ts:
+        return None
+    if isinstance(ts, str):
         try:
-            last_dispatch = datetime.fromisoformat(last_dispatch)
+            ts = datetime.fromisoformat(ts)
         except Exception:
-            last_dispatch = None
+            return None
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc).astimezone(IST)
+        return ts.astimezone(IST)
+    return None
 
-    if last_dispatch and last_dispatch.tzinfo is None:
-        last_dispatch = last_dispatch.replace(tzinfo=timezone.utc)
+
+def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
+    cadence = str(cfg.get("cadence") or "hourly").lower().strip()
+    last_dispatch = parse_ist_timestamp(cfg.get("last_dispatch_ts"))
+    today_str = now_ist.strftime("%Y-%m-%d")
 
     # 1. Real-time every 15 minutes
     if cadence == "15m":
         if last_dispatch is None:
             return True
-        return (now_utc - last_dispatch).total_seconds() >= 800
+        return (now_ist - last_dispatch).total_seconds() >= 800
 
-    # 2. Morning 9:00 AM UTC
+    # 2. Morning 9:00 AM IST
     if cadence == "09:00":
-        if now_utc.hour == 9:
+        if now_ist.hour == 9 and 0 <= now_ist.minute < 30:
             if last_dispatch is None:
                 return True
             return last_dispatch.strftime("%Y-%m-%d") != today_str
         return False
 
-    # 3. Midnight 12:00 AM UTC
+    # 3. Midnight 12:00 AM IST
     if cadence == "00:00":
-        if now_utc.hour == 0:
+        if now_ist.hour == 0 and 0 <= now_ist.minute < 30:
             if last_dispatch is None:
                 return True
             return last_dispatch.strftime("%Y-%m-%d") != today_str
         return False
 
-    # 4. Custom 24h Time: "custom:HH:MM" or "HH:MM"
+    # 4. Custom 24h Time: "custom:HH:MM" or "HH:MM" (evaluated strictly in IST)
     if cadence.startswith("custom:") or ":" in cadence:
         raw_time = cadence.replace("custom:", "").strip()
         try:
             parts = raw_time.split(":")
             h, m = int(parts[0]), int(parts[1])
             target_mins = h * 60 + m
-            curr_mins = now_utc.hour * 60 + now_utc.minute
+            curr_mins = now_ist.hour * 60 + now_ist.minute
             diff = curr_mins - target_mins
             if 0 <= diff < 30:
                 if last_dispatch is None:
@@ -132,7 +141,7 @@ def is_cadence_eligible(cfg: dict[str, Any], now_utc: datetime) -> bool:
     # 5. Default fallback: Hourly batch
     if last_dispatch is None:
         return True
-    return (now_utc - last_dispatch).total_seconds() >= 3500
+    return (now_ist - last_dispatch).total_seconds() >= 3500
 
 
 async def build_tech_dashboard(bot: KyroBot, guild: discord.Guild, cfg: dict[str, Any]) -> KyroContainer:
@@ -511,8 +520,8 @@ class TechSetupModulesView(discord.ui.View):
 
 class CustomTechCadenceModal(discord.ui.Modal, title="Custom Delivery Schedule"):
     time_input = discord.ui.TextInput(
-        label="Delivery Time (24-Hour UTC)",
-        placeholder="e.g. 14:30 or 21:00",
+        label="Delivery Time (24-Hour IST)",
+        placeholder="e.g. 00:00, 14:30 or 21:00",
         min_length=3,
         max_length=5,
         required=True,
@@ -529,7 +538,7 @@ class CustomTechCadenceModal(discord.ui.Modal, title="Custom Delivery Schedule")
         m = re.match(r"^([0-9]|0[0-9]|1[0-9]|2[0-3]):([0-5][0-9])$", val)
         if not m:
             await interaction.response.send_message(
-                "Invalid time format. Please enter a valid 24-hour time between 00:00 and 23:59 (e.g., 09:00, 14:30, 21:15).",
+                "Invalid time format. Please enter a valid 24-hour Indian time between 00:00 and 23:59 (e.g., 00:00, 09:00, 14:30, 21:15).",
                 ephemeral=True,
             )
             return
@@ -540,7 +549,7 @@ class CustomTechCadenceModal(discord.ui.Modal, title="Custom Delivery Schedule")
         await self.bot.tech_mgr.set_cadence(self.guild_id, cadence_val)
 
         cadence_view = TechCadenceView(self.bot, self.author_id, self.guild_id)
-        container = cadence_view.build_container(note=f"Schedule updated to **Daily at {h:02d}:{mins:02d} UTC**.")
+        container = cadence_view.build_container(note=f"Schedule updated to **Daily at {h:02d}:{mins:02d} IST**.")
         await edit_container_response(interaction, container, view=cadence_view)
 
 
@@ -616,9 +625,9 @@ class TechCadenceView(discord.ui.View):
             "Choose how frequently intelligence reports are broadcast to your channel:",
             f"{dot} **Every 15 Minutes:** Continuous real-time updates as stories break.",
             f"{dot} **Hourly Batch:** Top 10 stories delivered hourly with 1-minute pacing.",
-            f"{dot} **Morning 9:00 AM:** Daily morning briefing drop at 9:00 AM UTC.",
-            f"{dot} **Midnight 12:00 AM:** Daily midnight intelligence recap at 12:00 AM UTC.",
-            f"{dot} **Custom Time:** Specify any exact daily delivery time in 24-hour UTC.",
+            f"{dot} **Morning 9:00 AM:** Daily morning briefing drop at 9:00 AM IST.",
+            f"{dot} **Midnight 12:00 AM:** Daily midnight intelligence recap at 12:00 AM IST.",
+            f"{dot} **Custom Time:** Specify any exact daily delivery time in 24-hour IST.",
         ]
         if note:
             lines.append(f"\n> {note}")
@@ -850,8 +859,12 @@ class TechFeedCog(commands.Cog):
             except Exception:
                 pass
 
+    def cog_unload(self) -> None:
+        """Cancel background poller loop when extension unloads or reloads to prevent ghost tasks."""
+        self._poller_task.cancel()
+
     # -------------------------------------------------------------------------
-    # Autonomous Background Dispatcher Loop (15-Minute Cadence Check)
+    # Autonomous Background Dispatcher Loop (15-Minute Cadence Check in IST)
     # -------------------------------------------------------------------------
     @tasks.loop(minutes=15)
     async def _poller_task(self) -> None:
@@ -868,15 +881,19 @@ class TechFeedCog(commands.Cog):
         if self._is_dispatching:
             return
 
-        now_utc = discord.utils.utcnow()
+        now_ist = datetime.now(IST)
         eligible_guilds = {
             g_id: cfg for g_id, cfg in guild_configs.items()
-            if is_cadence_eligible(cfg, now_utc)
+            if is_cadence_eligible(cfg, now_ist)
         }
         if not eligible_guilds:
             return
 
         self._is_dispatching = True
+        # Immediately record dispatch timestamp for all eligible guilds so no other loop or task can re-qualify
+        for g_id in eligible_guilds.keys():
+            await self.bot.tech_mgr.update_last_dispatch(g_id, now_ist)
+
         try:
             # 1. Harvest balanced batch of up to 10 top-signal items across all categories
             stories = await self.bot.tech_mgr.harvest_balanced_batch(target_total=10)
@@ -884,10 +901,10 @@ class TechFeedCog(commands.Cog):
                 return
 
             dot = self.bot.custom_emojis.get("heart_dot", "•")
-            today_str = now_utc.strftime("%Y-%m-%d")
+            today_str = now_ist.strftime("%Y-%m-%d")
 
-            # 2. Handle Morning Digest for guilds configured in 'digest' mode (Trigger at or after 9 AM UTC)
-            if now_utc.hour >= 9:
+            # 2. Handle Morning Digest for guilds configured in 'digest' mode (Trigger at or after 9 AM IST)
+            if now_ist.hour >= 9:
                 for guild_id, cfg in list(eligible_guilds.items()):
                     if cfg.get("mode") == "digest" and cfg.get("last_digest_date") != today_str:
                         guild = self.bot.get_guild(guild_id)
@@ -899,7 +916,6 @@ class TechFeedCog(commands.Cog):
                             try:
                                 await send_container_response(channel, digest_card)
                                 await self.bot.tech_mgr.update_last_digest(guild_id, today_str)
-                                await self.bot.tech_mgr.update_last_dispatch(guild_id, now_utc)
                             except Exception as d_err:
                                 logger.debug(f"Notice sending digest to guild {guild_id}: {d_err}")
 
@@ -918,9 +934,9 @@ class TechFeedCog(commands.Cog):
                         logger.warning(f"Pre-flight check dropped unreachable URL: {candidate.url}")
                         await self.bot.tech_mgr.mark_dispatched([candidate])
 
+            # Strictly enforce maximum 10 items per batch
+            batch_to_send = batch_to_send[:10]
             logger.info(f"Dispatching batch of {len(batch_to_send)} balanced tech story/stories to {len(eligible_guilds)} scheduled guild(s).")
-
-            dispatched_guild_ids: set[int] = set()
 
             # 4. Dispatch items one by one with strict 1-minute (60s) delay between each post
             for index, story in enumerate(batch_to_send):
@@ -951,7 +967,6 @@ class TechFeedCog(commands.Cog):
                     try:
                         msg = await send_container_response(channel, card)
                         dispatched_any = True
-                        dispatched_guild_ids.add(guild_id)
 
                         # Auto-create discussion thread if enabled for this guild
                         if cfg.get("thread_enabled") and msg and isinstance(msg, discord.Message):
@@ -975,9 +990,6 @@ class TechFeedCog(commands.Cog):
                 # Exactly 1 minute (60 seconds) delay between each of the posts
                 if index < len(batch_to_send) - 1:
                     await asyncio.sleep(60)
-
-            for g_id in dispatched_guild_ids:
-                await self.bot.tech_mgr.update_last_dispatch(g_id, now_utc)
 
         except Exception as exc:
             logger.error(f"Unexpected exception in tech news background poller: {exc}", exc_info=exc)

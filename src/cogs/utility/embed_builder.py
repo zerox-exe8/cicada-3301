@@ -230,11 +230,11 @@ class ContainerDraft:
     """Modular data model for custom Components V2 container cards."""
 
     def __init__(self) -> None:
-        self.author_name: str | None = None
+        self.author_name: str | None = "Welcome to the Vasudev AI community!"
         self.author_icon_url: str | None = None
         self.author_url: str | None = None
 
-        self.title: str | None = "Kyro Custom Card"
+        self.title: str | None = None
         self.title_url: str | None = None
 
         self.description: str | None = "This is your live Components V2 preview. Edit options below to customize."
@@ -1344,7 +1344,7 @@ class EmbedBuilderView(discord.ui.View):
 
         bottom_container.add_separator(divider=True)
         bottom_container.add_text(
-            f"-# Step {self.current_slide_idx + 1}/5 • Session for {self.author.display_name}"
+            f"-# Step {self.current_slide_idx + 1}/5 • Session for {self.author.display_name}!"
         )
         return [top_container, bottom_container]
 

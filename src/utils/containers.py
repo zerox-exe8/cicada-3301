@@ -182,7 +182,15 @@ def build_container_payload(
             c_dict["accent_color"] = c.accent_color
 
         if not c_dict["components"]:
-            c_dict["components"] = [{"type": 10, "content": " "}]
+            c_dict["components"] = [{"type": 10, "content": "\u200b"}]
+        else:
+            for comp in c_dict["components"]:
+                if comp.get("type") == 10 and (not comp.get("content") or not str(comp.get("content")).strip()):
+                    comp["content"] = "\u200b"
+                elif comp.get("type") == 9:
+                    for sub in comp.get("components", []):
+                        if sub.get("type") == 10 and (not sub.get("content") or not str(sub.get("content")).strip()):
+                            sub["content"] = "\u200b"
 
         root_comps.append(c_dict)
 
@@ -430,11 +438,8 @@ async def edit_container_response(
                         state.store_view(view, msg.id)
                 return
             except Exception as e:
-                logger.warning(f"Direct channel PATCH edit failed ({e}). Attempting embed fallback.")
-        
-        container_list = [container] if isinstance(container, KyroContainer) else container
-        primary = container_list[0] if container_list else KyroContainer()
-        await msg.edit(embed=primary.to_embed(), view=view)
+                logger.error(f"Direct channel PATCH edit failed: {e}")
+                raise
         return
 
     interaction = interaction_or_msg

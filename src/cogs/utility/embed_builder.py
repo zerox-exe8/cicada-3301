@@ -230,11 +230,11 @@ class ContainerDraft:
     """Modular data model for custom Components V2 container cards."""
 
     def __init__(self) -> None:
-        self.author_name: str | None = "Welcome to the Vasudev AI community!"
+        self.author_name: str | None = None
         self.author_icon_url: str | None = None
         self.author_url: str | None = None
 
-        self.title: str | None = None
+        self.title: str | None = "Kyro Custom Card"
         self.title_url: str | None = None
 
         self.description: str | None = "This is your live Components V2 preview. Edit options below to customize."
@@ -311,14 +311,12 @@ class ContainerDraft:
 
             if self.divider_line:
                 container.add_section(content=formatted_title, accessory=accessory_dict)
-                container.add_separator(divider=True)
                 if page_content_parsed:
-                    container.add_text(page_content_parsed)
                     container.add_separator(divider=True)
+                    container.add_text(page_content_parsed)
             else:
                 combined = f"{formatted_title}\n{page_content_parsed}" if page_content_parsed else formatted_title
                 container.add_section(content=combined, accessory=accessory_dict)
-                container.add_separator(divider=True)
 
         else:
             # ─── BASE OVERVIEW VIEW ──────────────────────────────────────────
@@ -329,7 +327,8 @@ class ContainerDraft:
                     "type": 12,
                     "items": [{"media": {"url": top_banner_url}}],
                 })
-                container.add_separator(divider=True)
+                if self.divider_line:
+                    container.add_separator(divider=True)
 
             author_raw = parse(self.author_name)
             author_text, author_url_extracted = parse_markdown_link(author_raw)
@@ -350,43 +349,36 @@ class ContainerDraft:
                 }
 
             top_lines = []
-            if author_text:
+            if author_text and title_text:
+                if final_author_url and final_author_url.startswith("http"):
+                    top_lines.append(f"-# **[{author_text}]({final_author_url})**")
+                else:
+                    top_lines.append(f"-# **{author_text}**")
+                if final_title_url and final_title_url.startswith("http"):
+                    top_lines.append(f"**[{title_text}]({final_title_url})**")
+                else:
+                    top_lines.append(f"**{title_text}**" if not title_text.startswith("#") else title_text)
+            elif author_text:
                 if final_author_url and final_author_url.startswith("http"):
                     top_lines.append(f"**[{author_text}]({final_author_url})**")
                 else:
                     top_lines.append(f"**{author_text}**")
-
-            if title_text:
-                if title_text.startswith("#"):
-                    formatted_title = title_text
-                else:
-                    formatted_title = f"**{title_text}**"
+            elif title_text:
                 if final_title_url and final_title_url.startswith("http"):
-                    top_lines.append(f"[{formatted_title}]({final_title_url})")
+                    top_lines.append(f"**[{title_text}]({final_title_url})**")
                 else:
-                    top_lines.append(formatted_title)
+                    top_lines.append(f"**{title_text}**" if not title_text.startswith("#") else title_text)
 
-            if top_lines and desc_text:
-                if self.divider_line:
-                    top_header_content = "\n".join(top_lines)
-                    container.add_section(content=top_header_content, accessory=accessory_dict)
-                    container.add_separator(divider=True)
-                    container.add_text(desc_text)
-                    container.add_separator(divider=True)
-                else:
-                    combined_content = "\n".join(top_lines) + "\n" + desc_text
-                    container.add_section(content=combined_content, accessory=accessory_dict)
-                    container.add_separator(divider=True)
-            elif top_lines:
+            if top_lines:
                 top_header_content = "\n".join(top_lines)
                 container.add_section(content=top_header_content, accessory=accessory_dict)
-                container.add_separator(divider=True)
-            elif desc_text:
-                container.add_section(content=desc_text, accessory=accessory_dict)
-                container.add_separator(divider=True)
             elif accessory_dict:
-                container.add_section(content=" ", accessory=accessory_dict)
-                container.add_separator(divider=True)
+                container.add_section(content="\u200b", accessory=accessory_dict)
+
+            if desc_text:
+                if container.components and self.divider_line:
+                    container.add_separator(divider=True)
+                container.add_text(desc_text)
 
             # Custom Fields (Only on Main Overview)
             if self.fields:
@@ -402,17 +394,19 @@ class ContainerDraft:
                         field_lines.append(f_val)
 
                 if field_lines:
+                    if container.components and self.divider_line:
+                        container.add_separator(divider=True)
                     container.add_text("\n\n".join(field_lines))
-                    container.add_separator(divider=True)
 
             # Large Banner Image (Only on Main Overview)
             banner_url = parse(self.image_url)
             if banner_url and banner_url.startswith("http"):
+                if container.components and self.divider_line:
+                    container.add_separator(divider=True)
                 container.components.append({
                     "type": 12,
                     "items": [{"media": {"url": banner_url}}],
                 })
-                container.add_separator(divider=True)
 
         # Footer Subtext (Only on Main Overview, NOT on Module Sub-Pages)
         if not active_mod:
@@ -426,8 +420,9 @@ class ContainerDraft:
                 footer_parts.append(now_str)
 
             if footer_parts:
-                container.add_text(" • ".join(footer_parts))
-                container.add_separator(divider=True)
+                if container.components and self.divider_line:
+                    container.add_separator(divider=True)
+                container.add_text(f"-# {' • '.join(footer_parts)}")
 
         # ─── SHARED CONTROLS (Modules Dropdown & Buttons at the bottom) ─────
 
@@ -472,7 +467,7 @@ class ContainerDraft:
             container.add_action_row(btn_comps)
 
         if not container.components:
-            container.add_text("Empty card container.")
+            container.add_text("*Empty card preview. Use the controls below to add content.*")
 
         container._fallback_embed = self.to_embed(
             active_module_id=active_module_id,
@@ -1450,30 +1445,30 @@ class EmbedBuilderView(discord.ui.View):
         channel = self.bot.get_channel(self.channel_id) if self.channel_id else interaction.channel
         containers = self.get_dual_containers(guild, channel)
 
+        updated_via_interaction = False
         if not is_ephemeral and not interaction.response.is_done():
             try:
                 await edit_container_response(interaction, containers, view=self)
+                updated_via_interaction = True
             except Exception as err:
                 logger.warning(f"edit_container_response in update_view: {err}")
-        else:
+
+        if not updated_via_interaction:
             if not interaction.response.is_done():
-                upd_card = KyroContainer()
-                upd_card.add_section(content="**Card Builder**\n> Card updated.")
                 try:
-                    await send_container_response(interaction, upd_card, ephemeral=True)
+                    await interaction.response.defer()
                 except Exception:
                     pass
 
-        # ALWAYS PATCH the main builder message in the channel
-        if self.channel_id and self.message_id:
-            try:
-                payload = build_container_payload(containers, view=self)
-                await self.bot.http.request(
-                    discord.http.Route("PATCH", f"/channels/{self.channel_id}/messages/{self.message_id}"),
-                    json=payload,
-                )
-            except Exception as patch_err:
-                logger.error(f"Direct channel PATCH failed for message {self.message_id}: {patch_err}")
+            if self.channel_id and self.message_id:
+                try:
+                    payload = build_container_payload(containers, view=self)
+                    await self.bot.http.request(
+                        discord.http.Route("PATCH", f"/channels/{self.channel_id}/messages/{self.message_id}"),
+                        json=payload,
+                    )
+                except Exception as patch_err:
+                    logger.error(f"Direct channel PATCH failed for message {self.message_id}: {patch_err}")
 
     async def update_view_channel_patch(self) -> None:
         """Directly sync state to DB and PATCH the main builder message."""
@@ -1867,7 +1862,7 @@ class EmbedBuilder(commands.Cog):
         description="Create a new named embed. Usage: ?embed create <name>",
     )
     @commands.has_permissions(manage_messages=True)
-    async def embed_create(self, ctx: CustomContext, name: str) -> None:
+    async def embed_create(self, ctx: CustomContext, *, name: str) -> None:
         """Create a new named embed."""
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
         if not clean_name:
@@ -1903,7 +1898,7 @@ class EmbedBuilder(commands.Cog):
         description="Edit an existing named embed. Usage: ?embed edit <name>",
     )
     @commands.has_permissions(manage_messages=True)
-    async def embed_edit_template(self, ctx: CustomContext, name: str) -> None:
+    async def embed_edit_template(self, ctx: CustomContext, *, name: str) -> None:
         """Open the builder to edit a saved template."""
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
         template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
@@ -1931,7 +1926,7 @@ class EmbedBuilder(commands.Cog):
         description="Preview a saved embed card. Usage: ?embed show <name>",
     )
     @commands.has_permissions(manage_messages=True)
-    async def embed_show(self, ctx: CustomContext, name: str) -> None:
+    async def embed_show(self, ctx: CustomContext, *, name: str) -> None:
         """View a live preview of a saved embed template."""
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
         template_data = await self.bot.embed_mgr.get_template(ctx.guild.id, clean_name)
@@ -2046,7 +2041,7 @@ class EmbedBuilder(commands.Cog):
         description="Delete a saved template. Usage: ?embed delete <name>",
     )
     @commands.has_permissions(manage_messages=True)
-    async def embed_delete(self, ctx: CustomContext, name: str) -> None:
+    async def embed_delete(self, ctx: CustomContext, *, name: str) -> None:
         """Delete a saved template."""
         clean_name = re.sub(r"[^a-zA-Z0-9_-]", "", name.lower())
         success = await self.bot.embed_mgr.delete_template(ctx.guild.id, clean_name)

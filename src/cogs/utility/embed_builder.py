@@ -224,6 +224,18 @@ def parse_markdown_link(text: str | None) -> tuple[str | None, str | None]:
     return text.strip(), None
 
 
+def format_title_line(text: str, url: str | None = None) -> str:
+    """Format title text preserving blockquotes, headers, and custom markdown without unwanted bolding."""
+    if not text:
+        return ""
+    if url and url.startswith("http"):
+        return f"**[{text}]({url})**"
+    stripped = text.strip()
+    if stripped.startswith(("#", ">", "-#", "*", "_", "`")):
+        return text
+    return f"**{text}**"
+
+
 # ─── Data Model ───────────────────────────────────────────────────────────────
 
 class ContainerDraft:
@@ -293,10 +305,7 @@ class ContainerDraft:
             # ─── ACTIVE MODULE SUB-PAGE VIEW (Clean Standalone) ───────────────
             page_title = active_mod.get("page_title") or active_mod.get("label") or "Page"
             page_title_parsed = parse(page_title)
-            if page_title_parsed.startswith("#") or page_title_parsed.startswith("**"):
-                formatted_title = page_title_parsed
-            else:
-                formatted_title = f"**{page_title_parsed}**"
+            formatted_title = format_title_line(page_title_parsed)
             page_content_parsed = clean_description_markdown(parse(active_mod.get("content", "")))
 
             # Thumbnail for module if set, else fallback to global thumbnail
@@ -353,21 +362,15 @@ class ContainerDraft:
                 if final_author_url and final_author_url.startswith("http"):
                     top_lines.append(f"-# **[{author_text}]({final_author_url})**")
                 else:
-                    top_lines.append(f"-# **{author_text}**")
-                if final_title_url and final_title_url.startswith("http"):
-                    top_lines.append(f"**[{title_text}]({final_title_url})**")
-                else:
-                    top_lines.append(f"**{title_text}**" if not title_text.startswith("#") else title_text)
+                    top_lines.append(f"-# **{author_text}**" if not author_text.startswith(("#", ">", "-#", "*", "_", "`")) else author_text)
+                top_lines.append(format_title_line(title_text, final_title_url))
             elif author_text:
                 if final_author_url and final_author_url.startswith("http"):
                     top_lines.append(f"**[{author_text}]({final_author_url})**")
                 else:
-                    top_lines.append(f"**{author_text}**")
+                    top_lines.append(f"**{author_text}**" if not author_text.startswith(("#", ">", "-#", "*", "_", "`")) else author_text)
             elif title_text:
-                if final_title_url and final_title_url.startswith("http"):
-                    top_lines.append(f"**[{title_text}]({final_title_url})**")
-                else:
-                    top_lines.append(f"**{title_text}**" if not title_text.startswith("#") else title_text)
+                top_lines.append(format_title_line(title_text, final_title_url))
 
             if top_lines:
                 top_header_content = "\n".join(top_lines)

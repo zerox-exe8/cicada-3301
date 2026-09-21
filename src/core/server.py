@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 from typing import TYPE_CHECKING, Any, Callable
 from aiohttp import web
@@ -66,7 +67,7 @@ class HealthServer:
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Detailed health check endpoint."""
         bot = self.bot
-        ws_ping = round(bot.latency * 1000) if (bot and bot.latency) else 0
+        ws_ping = round(bot.latency * 1000) if (bot and bot.latency and not math.isnan(bot.latency)) else 0
         data = {
             "status": "healthy",
             "bot": "Kyro",
@@ -81,7 +82,7 @@ class HealthServer:
         if not bot:
             return web.json_response({"error": "Bot gateway not initialized"}, status=503)
 
-        ws_ping = round(bot.latency * 1000) if bot.latency else 0
+        ws_ping = round(bot.latency * 1000) if (bot.latency and not math.isnan(bot.latency)) else 0
         total_members = sum(getattr(g, "member_count", 0) for g in bot.guilds)
 
         active_players = 0

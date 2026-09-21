@@ -155,7 +155,8 @@ class KyroBot(commands.Bot):
         if self.user and clean_content in [f"<@{self.user.id}>", f"<@!{self.user.id}>"]:
             from src.utils.containers import KyroContainer, send_container_response
             current_prefix = self.guild_mgr.get_prefix(message.guild.id if message.guild else None)
-            ws_ping = round(self.latency * 1000) if self.latency else 0
+            import math
+            ws_ping = round(self.latency * 1000) if (self.latency and not math.isnan(self.latency)) else 0
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(

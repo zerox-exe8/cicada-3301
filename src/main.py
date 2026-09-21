@@ -111,13 +111,29 @@ async def run_bot_loop() -> None:
                             retry_after = float(retry_header)
                         except ValueError:
                             pass
-                wait_time = max(retry_after if retry_after else delay, 45.0)
-                logger.warning(
-                    f"Discord Gateway Rate Limit (429) active: {response_text}. "
-                    f"Cooling down for {wait_time:.0f}s before reconnecting to allow Discord rate-limit window to reset..."
+
+                # Detect Cloudflare IP ban (HTML page returned instead of JSON)
+                is_cloudflare_block = (
+                    "<!doctype" in response_text.lower()
+                    or "cloudflare" in response_text.lower()
+                    or "access denied" in response_text.lower()
                 )
+
+                if is_cloudflare_block:
+                    wait_time = 900.0  # 15 minutes — let Cloudflare IP ban expire
+                    logger.warning(
+                        f"Cloudflare IP block detected on Render shared IP. "
+                        f"Cooling down for {wait_time/60:.0f} minutes before reconnecting..."
+                    )
+                else:
+                    wait_time = max(retry_after if retry_after else delay, 45.0)
+                    logger.warning(
+                        f"Discord Gateway Rate Limit (429) active: {response_text}. "
+                        f"Cooling down for {wait_time:.0f}s before reconnecting to allow Discord rate-limit window to reset..."
+                    )
+
                 await asyncio.sleep(wait_time)
-                delay = min(max(delay * 2.0, wait_time), 300.0)
+                delay = min(max(delay * 2.0, wait_time), 900.0)
             else:
                 logger.error(f"Discord HTTP Exception ({e.status}): {e}. Retrying in 15s...")
                 await asyncio.sleep(15)

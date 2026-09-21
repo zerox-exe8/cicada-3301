@@ -301,10 +301,10 @@ class DevPulseManager:
             logger.error(f"Failed to set dev pulse cadence for guild {guild_id}: {e}", exc_info=e)
             return False
 
-    async def update_last_dispatch(self, guild_id: int, dt: Optional[datetime.datetime] = None) -> None:
+    async def update_last_dispatch(self, guild_id: int, dt: Optional[datetime] = None) -> None:
         """Record timestamp of latest successful batch dispatch."""
         if dt is None:
-            dt = datetime.datetime.now(datetime.timezone.utc)
+            dt = datetime.now(timezone.utc)
         query = "UPDATE guild_dev_pulse SET last_dispatch_ts = $1 WHERE guild_id = $2;"
         try:
             await self.db.execute(query, dt, guild_id)

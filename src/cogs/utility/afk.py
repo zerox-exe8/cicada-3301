@@ -269,26 +269,16 @@ class AFKCog(commands.Cog, name="AFK"):
 
         # Dispatch confirmation container
         e_reg = getattr(self.bot, "custom_emojis", {})
-        dot = e_reg.get("heart_dot", "-")
         clock = e_reg.get("icons_clock", "")
         clock_str = f"{clock} " if clock else ""
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"{clock_str}**AFK Status Set**\n"
-                f"> You are now AFK: **{final_reason}**\n"
-                f"> I will notify anyone who mentions you and automatically remove your AFK status when you next chat."
+                f"{clock_str}**{ctx.author.display_name} is now AFK**\n"
+                f"> {final_reason}"
             )
         )
-        container.add_separator(divider=True)
-        container.add_text(
-            f"{dot} **User:** **{ctx.author.display_name}**\n"
-            f"{dot} **Reason:** `{final_reason}`\n"
-            f"{dot} **Set At:** <t:{int(now.timestamp())}:t> (<t:{int(now.timestamp())}:R>)"
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Type a message in any channel to remove your AFK status.")
 
         await send_container_response(ctx, container)
 
@@ -351,9 +341,8 @@ class AFKCog(commands.Cog, name="AFK"):
                 except Exception as e:
                     logger.debug(f"Failed to fetch AFK notes: {e}")
 
-                # Send welcome back card
+                # Send welcome back card (ultra-compact)
                 e_reg = getattr(self.bot, "custom_emojis", {})
-                dot = e_reg.get("heart_dot", "-")
                 wave = e_reg.get("icons_correct", "")
                 wave_str = f"{wave} " if wave else ""
                 duration_str = format_duration(elapsed_seconds)
@@ -362,13 +351,8 @@ class AFKCog(commands.Cog, name="AFK"):
                 container.add_section(
                     content=(
                         f"{wave_str}**Welcome Back, {message.author.display_name}!**\n"
-                        f"> Your AFK status has been automatically removed."
+                        f"> AFK removed (`{duration_str}`) • Reason: `{afk_data.reason}`"
                     )
-                )
-                container.add_separator(divider=True)
-                container.add_text(
-                    f"{dot} **Time AFK:** `{duration_str}`\n"
-                    f"{dot} **Reason was:** `{afk_data.reason}`"
                 )
 
                 if pending_notes:
@@ -380,14 +364,12 @@ class AFKCog(commands.Cog, name="AFK"):
                         notes_lines.append(f"> **{s_name}:** {note_msg}")
                     container.add_section(
                         content=(
-                            f"**AFK Voice Mail ({len(pending_notes)} Note{'s' if len(pending_notes) > 1 else ''} Received)**\n"
+                            f"**Voice Mail ({len(pending_notes)} Note{'s' if len(pending_notes) > 1 else ''})**\n"
                             + "\n".join(notes_lines)
                         )
                     )
 
-                container.add_separator(divider=True)
-                delete_delay = 18.0 if pending_notes else 7.0
-                container.add_text(f"-# This notice will automatically delete in {int(delete_delay)} seconds.")
+                delete_delay = 10.0 if pending_notes else 4.0
 
                 try:
                     notice_msg = await send_container_response(message.channel, container)
@@ -423,24 +405,16 @@ class AFKCog(commands.Cog, name="AFK"):
 
                     target_afk = self._afk_cache[mentioned_key]
                     e_reg = getattr(self.bot, "custom_emojis", {})
-                    dot = e_reg.get("heart_dot", "-")
                     clock = e_reg.get("icons_clock", "")
                     clock_str = f"{clock} " if clock else ""
 
                     container = KyroContainer(accent_color=None)
                     container.add_section(
                         content=(
-                            f"{clock_str}**{mentioned_user.display_name} is currently AFK**\n"
+                            f"{clock_str}**{mentioned_user.display_name} is AFK** (<t:{int(target_afk.created_at.timestamp())}:R>)\n"
                             f"> {target_afk.reason}"
                         )
                     )
-                    container.add_separator(divider=True)
-                    container.add_text(
-                        f"{dot} **Reason:** `{target_afk.reason}`\n"
-                        f"{dot} **Went AFK:** <t:{int(target_afk.created_at.timestamp())}:R>"
-                    )
-                    container.add_separator(divider=True)
-                    container.add_text(f"-# Mentioned by {message.author.display_name} | Click below to leave a note")
 
                     view = AFKLeaveNoteView(self.bot, mentioned_user.id, mentioned_user.display_name, guild_id)
                     try:

@@ -156,6 +156,7 @@ def build_container_payload(
     view: discord.ui.View | None = None,
     content: str | None = None,
     allowed_mentions: discord.AllowedMentions | dict[str, Any] | None = None,
+    is_edit: bool = False,
 ) -> dict[str, Any]:
     """Generate the full Discord REST payload supporting single or multiple stacked containers with root-level controls."""
     if isinstance(container, list):
@@ -215,11 +216,14 @@ def build_container_payload(
             "replied_user": True,
         }
 
-    return {
-        "flags": 32768,  # IS_COMPONENTS_V2 (1 << 15)
+    payload: dict[str, Any] = {
         "components": root_comps[:5],  # Discord allows maximum 5 top-level items
         "allowed_mentions": mentions_payload,
     }
+    if not is_edit:
+        payload["flags"] = 32768  # IS_COMPONENTS_V2 (1 << 15) only valid on new message creation
+
+    return payload
 
 
 async def send_container_response(
@@ -420,7 +424,8 @@ async def edit_container_response(
     view: discord.ui.View | None = None,
 ) -> None:
     """Edit an existing Components V2 Container message safely with fallbacks."""
-    payload = build_container_payload(container, view=view)
+    payload = build_container_payload(container, view=view, is_edit=True)
+    payload.pop("flags", None)
 
     if isinstance(interaction_or_msg, discord.Message):
         msg = interaction_or_msg
@@ -447,7 +452,11 @@ async def edit_container_response(
 
     interaction = interaction_or_msg
     bot = interaction.client
-    app_id = getattr(bot, "application_id", None) or (bot.user.id if bot and bot.user else None)
+    app_id = (
+        getattr(interaction, "application_id", None)
+        or getattr(bot, "application_id", None)
+        or (bot.user.id if bot and bot.user else None)
+    )
 
     # 1. Try interaction response callback (type 7 UPDATE_MESSAGE) if not done
     try:

@@ -170,7 +170,6 @@ class StealDashboardView(discord.ui.View):
         btn_emoji = discord.ui.Button(
             label="Emoji",
             style=discord.ButtonStyle.secondary,
-            custom_id="btn_steal_emoji",
             row=0,
         )
         btn_emoji.callback = self._on_steal_emoji
@@ -179,11 +178,20 @@ class StealDashboardView(discord.ui.View):
         btn_sticker = discord.ui.Button(
             label="Sticker",
             style=discord.ButtonStyle.secondary,
-            custom_id="btn_steal_sticker",
             row=0,
         )
         btn_sticker.callback = self._on_steal_sticker
         self.add_item(btn_sticker)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
+        logger.error(f"Error in StealDashboardView on {item}: {error}", exc_info=error)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"Action failed: `{error}`", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Action failed: `{error}`", ephemeral=True)
+        except Exception:
+            pass
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Enforce author-lock: only the command author can click."""
@@ -246,7 +254,11 @@ class StealDashboardView(discord.ui.View):
 
     async def _on_steal_emoji(self, interaction: discord.Interaction) -> None:
         """Add target as a server custom emoji with collision & capacity resolution."""
-        await interaction.response.defer()
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
 
         static_count = len([e for e in self.guild.emojis if not e.animated])
         anim_count = len([e for e in self.guild.emojis if e.animated])
@@ -328,7 +340,11 @@ class StealDashboardView(discord.ui.View):
 
     async def _on_steal_sticker(self, interaction: discord.Interaction) -> None:
         """Add target as a server custom sticker with collision & capacity resolution."""
-        await interaction.response.defer()
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
 
         sticker_count = len(self.guild.stickers)
         s_limit = getattr(self.guild, "sticker_limit", 5)

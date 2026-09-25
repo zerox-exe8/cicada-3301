@@ -237,6 +237,16 @@ class ExpressionManagerView(discord.ui.View):
 
         return container
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
+        logger.error(f"Error in ExpressionManagerView on {item}: {error}", exc_info=error)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"Action failed: `{error}`", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Action failed: `{error}`", ephemeral=True)
+        except Exception:
+            pass
+
     async def _on_switch_emojis(self, interaction: discord.Interaction) -> None:
         self.mode = "emojis"
         self.page = 0
@@ -244,7 +254,7 @@ class ExpressionManagerView(discord.ui.View):
         self.status_msg = None
         self._rebuild_components()
         container = self.build_container()
-        await edit_container_response(interaction.message, container, view=self)
+        await edit_container_response(interaction, container, view=self)
 
     async def _on_switch_stickers(self, interaction: discord.Interaction) -> None:
         self.mode = "stickers"
@@ -253,7 +263,7 @@ class ExpressionManagerView(discord.ui.View):
         self.status_msg = None
         self._rebuild_components()
         container = self.build_container()
-        await edit_container_response(interaction.message, container, view=self)
+        await edit_container_response(interaction, container, view=self)
 
     async def _on_prev_page(self, interaction: discord.Interaction) -> None:
         if self.page > 0:
@@ -262,7 +272,7 @@ class ExpressionManagerView(discord.ui.View):
             self.status_msg = None
             self._rebuild_components()
             container = self.build_container()
-            await edit_container_response(interaction.message, container, view=self)
+            await edit_container_response(interaction, container, view=self)
 
     async def _on_next_page(self, interaction: discord.Interaction) -> None:
         total = self._get_total_pages()
@@ -272,7 +282,7 @@ class ExpressionManagerView(discord.ui.View):
             self.status_msg = None
             self._rebuild_components()
             container = self.build_container()
-            await edit_container_response(interaction.message, container, view=self)
+            await edit_container_response(interaction, container, view=self)
 
     async def _on_select_item(self, interaction: discord.Interaction) -> None:
         if interaction.data and "values" in interaction.data and interaction.data["values"]:
@@ -280,7 +290,7 @@ class ExpressionManagerView(discord.ui.View):
             self.status_msg = None
             self._rebuild_components()
             container = self.build_container()
-            await edit_container_response(interaction.message, container, view=self)
+            await edit_container_response(interaction, container, view=self)
 
     async def _on_delete_item(self, interaction: discord.Interaction) -> None:
         if not self.selected_id:
@@ -293,6 +303,10 @@ class ExpressionManagerView(discord.ui.View):
                 ephemeral=True,
             )
             return
+
+        # Defer immediately to prevent mobile 3-second timeout during deletion
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
         e_reg = getattr(self.bot, "custom_emojis", None)
         dot = e_reg.get("heart_dot", "-") if e_reg else "-"
@@ -318,15 +332,15 @@ class ExpressionManagerView(discord.ui.View):
             self.selected_id = None
             self._rebuild_components()
             container = self.build_container()
-            await edit_container_response(interaction.message, container, view=self)
+            await edit_container_response(interaction, container, view=self)
 
         except discord.Forbidden:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Failed to delete: Missing permissions to manage server expressions.",
                 ephemeral=True,
             )
         except discord.HTTPException as err:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"Failed to delete: {err}",
                 ephemeral=True,
             )

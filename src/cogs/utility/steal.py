@@ -242,7 +242,13 @@ class StealDashboardView(discord.ui.View):
             )
             return False
 
-        if not interaction.user.guild_permissions.manage_guild_expressions:
+        perms = getattr(interaction.user, "guild_permissions", None)
+        has_perm = perms and (
+            getattr(perms, "manage_expressions", False)
+            or getattr(perms, "manage_emojis_and_stickers", False)
+            or perms.administrator
+        )
+        if not has_perm:
             await interaction.response.send_message(
                 "You need `Manage Expressions` permission to add emojis or stickers to this server.",
                 ephemeral=True,
@@ -601,8 +607,8 @@ class Steal(commands.Cog):
         description="Open interactive Steal Studio to add emojis or stickers from messages, replies, or chat.",
     )
     @commands.guild_only()
-    @commands.has_permissions(manage_guild_expressions=True)
-    @commands.bot_has_permissions(manage_guild_expressions=True)
+    @commands.has_permissions(manage_expressions=True)
+    @commands.bot_has_permissions(manage_expressions=True)
     async def steal_command(
         self,
         ctx: CustomContext,

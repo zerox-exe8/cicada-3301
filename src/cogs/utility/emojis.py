@@ -79,6 +79,10 @@ class ExpressionManagerView(discord.ui.View):
             return sorted(list(self.guild.emojis), key=lambda e: e.name.lower())
         return sorted(list(self.guild.stickers), key=lambda s: s.name.lower())
 
+    def _find_sticker(self, sid: int) -> discord.GuildSticker | None:
+        """Find a sticker by ID from the guild or bot cache."""
+        return discord.utils.get(self.guild.stickers, id=sid) or self.bot.get_sticker(sid)
+
     def _get_total_pages(self) -> int:
         total = len(self._get_items())
         return max(1, math.ceil(total / 25))
@@ -228,7 +232,7 @@ class ExpressionManagerView(discord.ui.View):
                         f"> {', '.join(emoji_previews)}{more}"
                     )
             else:
-                selected_stickers = [self.guild.get_sticker(sid) for sid in self.selected_ids]
+                selected_stickers = [self._find_sticker(sid) for sid in self.selected_ids]
                 selected_stickers = [s for s in selected_stickers if s is not None]
                 if count == 1 and selected_stickers:
                     sticker = selected_stickers[0]
@@ -400,7 +404,7 @@ class ExpressionManagerView(discord.ui.View):
                         await emoji.delete(reason=f"Bulk deleted by {interaction.user} via Kyro Manager")
             else:
                 for sid in list(self.selected_ids):
-                    sticker = self.guild.get_sticker(sid)
+                    sticker = self._find_sticker(sid)
                     if sticker:
                         deleted_names.append(f"`{sticker.name}`")
                         await sticker.delete(reason=f"Bulk deleted by {interaction.user} via Kyro Manager")

@@ -1,8 +1,8 @@
 """
 Kyro Discord Bot - Expression Manager (Emojis & Stickers)
 Minimal, ultra-clean Components V2 dashboard for managing and deleting server expressions.
-Supports both non-Nitro users (visual dropdowns for animated/static emojis) and stickers (with instant live preview).
-Guaranteed zero-timeout with immediate deferred interaction acknowledgements.
+Supports multi-select deletion (bulk select 1 to 25 items at once with checkboxes)
+for both non-Nitro custom emojis and stickers (with instant live preview).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ logger = logging.getLogger("Kyro.Utility.Emojis")
 
 
 class ExpressionManagerView(discord.ui.View):
-    """Interactive view for navigating, previewing, and deleting server emojis and stickers."""
+    """Interactive view for navigating, previewing, and bulk deleting server emojis and stickers."""
 
     def __init__(self, ctx: CustomContext, bot: KyroBot, initial_mode: str = "emojis") -> None:
         super().__init__(timeout=120)
@@ -35,7 +35,7 @@ class ExpressionManagerView(discord.ui.View):
 
         self.mode: str = initial_mode  # "emojis" or "stickers"
         self.page: int = 0
-        self.selected_id: Optional[int] = None
+        self.selected_ids: set[int] = set()
         self.status_msg: Optional[str] = None
 
         self._rebuild_components()
@@ -84,7 +84,7 @@ class ExpressionManagerView(discord.ui.View):
         return max(1, math.ceil(total / 25))
 
     def _rebuild_components(self) -> None:
-        """Reconstruct the buttons and dropdown based on current state."""
+        """Reconstruct the buttons and multi-select dropdown based on current state."""
         self.clear_items()
         items = self._get_items()
         total_pages = self._get_total_pages()
@@ -108,7 +108,7 @@ class ExpressionManagerView(discord.ui.View):
         btn_sticker.callback = self._on_switch_stickers
         self.add_item(btn_sticker)
 
-        # Row 1: Select Dropdown (up to 25 items per page)
+        # Row 1: Multi-Select Dropdown (up to 25 items per page)
         start_idx = self.page * 25
         page_items = items[start_idx : start_idx + 25]
 
@@ -123,7 +123,7 @@ class ExpressionManagerView(discord.ui.View):
                         value=str(item.id),
                         description=desc,
                         emoji=item if isinstance(item, discord.Emoji) else None,
-                        default=(item.id == self.selected_id),
+                        default=(item.id in self.selected_ids),
                     )
                 )
             else:
@@ -134,20 +134,18 @@ class ExpressionManagerView(discord.ui.View):
                         label=item.name[:100],
                         value=str(item.id),
                         description=f"Format: {fmt_name}",
-                        default=(item.id == self.selected_id),
+                        default=(item.id in self.selected_ids),
                     )
                 )
 
         if options:
             placeholder = (
-                "Select an emoji to delete..."
-                if self.mode == "emojis"
-                else "Select a sticker to preview & delete..."
+                f"Select {self.mode} to delete (1-{len(options)})..."
             )
             select = discord.ui.Select(
                 placeholder=placeholder,
                 min_values=1,
-                max_values=1,
+                max_values=len(options),
                 options=options,
                 row=1,
             )
@@ -181,10 +179,16 @@ class ExpressionManagerView(discord.ui.View):
         btn_next.callback = self._on_next_page
         self.add_item(btn_next)
 
+        sel_count = len(self.selected_ids)
+        del_label = (
+            f"Delete ({sel_count}) {self.mode.capitalize()}"
+            if sel_count > 0
+            else f"Delete {self.mode.capitalize()}"
+        )
         btn_delete = discord.ui.Button(
-            label=f"Delete {'Emoji' if self.mode == 'emojis' else 'Sticker'}",
+            label=del_label,
             style=discord.ButtonStyle.danger,
-            disabled=(self.selected_id is None),
+            disabled=(sel_count == 0),
             row=2,
         )
         btn_delete.callback = self._on_delete_item
@@ -199,20 +203,35 @@ class ExpressionManagerView(discord.ui.View):
 
         preview_url: Optional[str] = None
         selected_text: Optional[str] = None
+        count = len(self.selected_ids)
 
-        if self.selected_id is not None:
+        if count > 0:
             if self.mode == "emojis":
-                emoji = self.guild.get_emoji(self.selected_id)
-                if emoji:
+                selected_emojis = [self.guild.get_emoji(eid) for eid in self.selected_ids]
+                selected_emojis = [e for e in selected_emojis if e is not None]
+                if count == 1 and selected_emojis:
+                    emoji = selected_emojis[0]
                     preview_url = emoji.url
                     prefix = "a" if getattr(emoji, "animated", False) else ""
                     selected_text = (
                         f"{dot} **Selected Emoji:** <{prefix}:{emoji.name}:{emoji.id}> `{emoji.name}`\n"
                         f"{dot} **Type:** `{'Animated' if getattr(emoji, 'animated', False) else 'Static'}` {dot} **ID:** `{emoji.id}`"
                     )
+                else:
+                    emoji_previews = []
+                    for e in selected_emojis[:8]:
+                        prefix = "a" if getattr(e, "animated", False) else ""
+                        emoji_previews.append(f"<{prefix}:{e.name}:{e.id}> `{e.name}`")
+                    more = f" *(+{count - 8} more)*" if count > 8 else ""
+                    selected_text = (
+                        f"{dot} **Selected ({count} Emojis):**\n"
+                        f"> {', '.join(emoji_previews)}{more}"
+                    )
             else:
-                sticker = self.guild.get_sticker(self.selected_id)
-                if sticker:
+                selected_stickers = [self.guild.get_sticker(sid) for sid in self.selected_ids]
+                selected_stickers = [s for s in selected_stickers if s is not None]
+                if count == 1 and selected_stickers:
+                    sticker = selected_stickers[0]
                     preview_url = sticker.url
                     fmt_obj = getattr(sticker, "format", None)
                     fmt_name = getattr(fmt_obj, "name", str(fmt_obj or "PNG")).upper()
@@ -220,13 +239,20 @@ class ExpressionManagerView(discord.ui.View):
                         f"{dot} **Selected Sticker:** `{sticker.name}`\n"
                         f"{dot} **Format:** `{fmt_name}` {dot} **ID:** `{sticker.id}`"
                     )
+                else:
+                    sticker_names = [f"`{s.name}`" for s in selected_stickers[:8]]
+                    more = f" *(+{count - 8} more)*" if count > 8 else ""
+                    selected_text = (
+                        f"{dot} **Selected ({count} Stickers):**\n"
+                        f"> {', '.join(sticker_names)}{more}"
+                    )
 
         # Header Section
         accessory = {"type": 11, "media": {"url": preview_url}} if preview_url else None
         container.add_section(
             content=(
                 f"**Expression Manager**\n"
-                f"> Manage and remove server expressions."
+                f"> Manage and bulk-remove server expressions."
             ),
             accessory=accessory,
         )
@@ -250,7 +276,7 @@ class ExpressionManagerView(discord.ui.View):
             else:
                 container.add_text(
                     f"{dot} **Server Total:** `{emoji_count} Emojis` {dot} `{sticker_count} Stickers`\n"
-                    f"{dot} Choose an item from the dropdown below to preview or delete."
+                    f"{dot} Check one or multiple items from the dropdown below to delete."
                 )
 
         if self.status_msg:
@@ -268,7 +294,7 @@ class ExpressionManagerView(discord.ui.View):
 
         self.mode = "emojis"
         self.page = 0
-        self.selected_id = None
+        self.selected_ids.clear()
         self.status_msg = None
         self._rebuild_components()
         container = self.build_container()
@@ -281,7 +307,6 @@ class ExpressionManagerView(discord.ui.View):
             except Exception:
                 pass
 
-        # If cache is empty, fetch fresh stickers from API
         if not self.guild.stickers:
             try:
                 await self.guild.fetch_stickers()
@@ -290,7 +315,7 @@ class ExpressionManagerView(discord.ui.View):
 
         self.mode = "stickers"
         self.page = 0
-        self.selected_id = None
+        self.selected_ids.clear()
         self.status_msg = None
         self._rebuild_components()
         container = self.build_container()
@@ -305,7 +330,7 @@ class ExpressionManagerView(discord.ui.View):
 
         if self.page > 0:
             self.page -= 1
-            self.selected_id = None
+            self.selected_ids.clear()
             self.status_msg = None
             self._rebuild_components()
             container = self.build_container()
@@ -321,7 +346,7 @@ class ExpressionManagerView(discord.ui.View):
         total = self._get_total_pages()
         if self.page < total - 1:
             self.page += 1
-            self.selected_id = None
+            self.selected_ids.clear()
             self.status_msg = None
             self._rebuild_components()
             container = self.build_container()
@@ -335,15 +360,18 @@ class ExpressionManagerView(discord.ui.View):
                 pass
 
         if interaction.data and "values" in interaction.data and interaction.data["values"]:
-            self.selected_id = int(interaction.data["values"][0])
-            self.status_msg = None
-            self._rebuild_components()
-            container = self.build_container()
-            await edit_container_response(interaction, container, view=self)
+            self.selected_ids = {int(v) for v in interaction.data["values"]}
+        else:
+            self.selected_ids.clear()
+
+        self.status_msg = None
+        self._rebuild_components()
+        container = self.build_container()
+        await edit_container_response(interaction, container, view=self)
 
     async def _on_delete_item(self, interaction: discord.Interaction) -> None:
-        if not self.selected_id:
-            await interaction.response.send_message("No item selected.", ephemeral=True)
+        if not self.selected_ids:
+            await interaction.response.send_message("No items selected.", ephemeral=True)
             return
 
         if not self.guild.me.guild_permissions.manage_expressions:
@@ -353,7 +381,6 @@ class ExpressionManagerView(discord.ui.View):
             )
             return
 
-        # Defer immediately to prevent mobile timeout
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
@@ -363,25 +390,28 @@ class ExpressionManagerView(discord.ui.View):
         e_reg = getattr(self.bot, "custom_emojis", None)
         dot = e_reg.get("heart_dot", "-") if e_reg else "-"
 
+        deleted_names: list[str] = []
         try:
             if self.mode == "emojis":
-                emoji = self.guild.get_emoji(self.selected_id)
-                if not emoji:
-                    self.status_msg = f"{dot} Emoji was not found or already deleted."
-                else:
-                    name = emoji.name
-                    await emoji.delete(reason=f"Deleted by {interaction.user} via Kyro Manager")
-                    self.status_msg = f"{dot} Successfully deleted emoji `{name}`."
+                for eid in list(self.selected_ids):
+                    emoji = self.guild.get_emoji(eid)
+                    if emoji:
+                        deleted_names.append(f"`{emoji.name}`")
+                        await emoji.delete(reason=f"Bulk deleted by {interaction.user} via Kyro Manager")
             else:
-                sticker = self.guild.get_sticker(self.selected_id)
-                if not sticker:
-                    self.status_msg = f"{dot} Sticker was not found or already deleted."
-                else:
-                    name = sticker.name
-                    await sticker.delete(reason=f"Deleted by {interaction.user} via Kyro Manager")
-                    self.status_msg = f"{dot} Successfully deleted sticker `{name}`."
+                for sid in list(self.selected_ids):
+                    sticker = self.guild.get_sticker(sid)
+                    if sticker:
+                        deleted_names.append(f"`{sticker.name}`")
+                        await sticker.delete(reason=f"Bulk deleted by {interaction.user} via Kyro Manager")
 
-            self.selected_id = None
+            count = len(deleted_names)
+            if count > 0:
+                self.status_msg = f"{dot} Successfully deleted **{count}** {self.mode}: {', '.join(deleted_names[:5])}{'...' if count > 5 else ''}"
+            else:
+                self.status_msg = f"{dot} No selected items were found to delete."
+
+            self.selected_ids.clear()
             self._rebuild_components()
             container = self.build_container()
             await edit_container_response(interaction, container, view=self)
@@ -421,14 +451,12 @@ class Emojis(commands.Cog):
             await send_container_response(ctx, container)
             return
 
-        # Ensure stickers are fetched from Discord REST API if not yet in cache
         if not ctx.guild.stickers:
             try:
                 await ctx.guild.fetch_stickers()
             except Exception:
                 pass
 
-        # If user invoked with ?stickers, directly start in stickers mode
         initial_mode = "stickers" if ctx.invoked_with in ("stickers", "delsticker") else "emojis"
 
         view = ExpressionManagerView(ctx, self.bot, initial_mode=initial_mode)

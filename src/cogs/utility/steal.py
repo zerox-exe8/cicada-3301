@@ -1,8 +1,11 @@
 """
 Kyro Discord Bot - Interactive Steal Studio
-Clean, compact Components V2 card with two always-active buttons: [Emoji] and [Sticker].
-Regardless of whether target is an emoji or sticker, user can choose to add it as either.
-Uses custom heart_dot emoji and live in-place edits.
+Smart expression stealer with:
+- Duplicate detection (already exists in server check)
+- Name collision auto-renaming (pepe -> pepe_1)
+- Dynamic slot capacity calculations (Static/Animated/Stickers)
+- Clean, compact Components V2 card with two always-active buttons: [Emoji] and [Sticker]
+- Custom heart_dot emoji styling and in-place live edits
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ class StealTarget:
     url: str
     is_animated: bool
     is_sticker: bool = False
-    sticker_id: Optional[int] = None
+    source_id: Optional[int] = None
     custom_name: Optional[str] = None
 
 
@@ -50,6 +53,22 @@ def sanitize_name(name: str, max_len: int = 32) -> str:
     if len(cleaned) < 2:
         cleaned = f"item_{cleaned}" if cleaned else "stolen_item"
     return cleaned[:max_len]
+
+
+def resolve_unique_name(base_name: str, existing_names: set[str], max_len: int = 32) -> str:
+    """If a name already exists in the server, append _1, _2 to prevent autocomplete confusion."""
+    cleaned = sanitize_name(base_name, max_len=max_len)
+    if cleaned.lower() not in existing_names:
+        return cleaned
+
+    counter = 1
+    while True:
+        suffix = f"_{counter}"
+        available_len = max_len - len(suffix)
+        candidate = f"{cleaned[:available_len]}{suffix}"
+        if candidate.lower() not in existing_names:
+            return candidate
+        counter += 1
 
 
 async def fetch_and_compress_image(
@@ -72,11 +91,13 @@ async def fetch_and_compress_image(
         out = io.BytesIO()
 
         if is_sticker:
+            # Discord stickers must be exactly 320x320 pixels PNG
             img = img.convert("RGBA")
             img = img.resize((320, 320), Image.Resampling.LANCZOS)
             img.save(out, format="PNG", optimize=True)
             return out.getvalue()
 
+        # Handle animated GIFs compression
         if getattr(img, "is_animated", False) and getattr(img, "n_frames", 1) > 1:
             frames = []
             durations = []
@@ -111,6 +132,7 @@ async def fetch_and_compress_image(
                 val = out.getvalue()
             return val
 
+        # Handle static image
         if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
             img = img.convert("RGBA")
         else:
@@ -125,7 +147,7 @@ async def fetch_and_compress_image(
 
 
 class StealDashboardView(discord.ui.View):
-    """Clean view where both [Emoji] and [Sticker] buttons are ALWAYS available."""
+    """Clean view with [Emoji] and [Sticker] buttons and duplicate detection."""
 
     def __init__(
         self,
@@ -145,10 +167,9 @@ class StealDashboardView(discord.ui.View):
         self._build_buttons()
 
     def _build_buttons(self) -> None:
-        """Both buttons (Emoji and Sticker) are always active and clickable."""
+        """Both buttons (Emoji and Sticker) are always present."""
         self.clear_items()
 
-        # Button 1: Emoji (Always clickable)
         btn_emoji = discord.ui.Button(
             label="Emoji",
             style=discord.ButtonStyle.secondary,
@@ -158,7 +179,6 @@ class StealDashboardView(discord.ui.View):
         btn_emoji.callback = self._on_steal_emoji
         self.add_item(btn_emoji)
 
-        # Button 2: Sticker (Always clickable)
         btn_sticker = discord.ui.Button(
             label="Sticker",
             style=discord.ButtonStyle.secondary,
@@ -194,10 +214,19 @@ class StealDashboardView(discord.ui.View):
 
         return True
 
+    def _is_already_in_server(self) -> bool:
+        """Check if this exact emoji or sticker is already present in this server."""
+        if not self.target.source_id:
+            return False
+        if self.target.is_sticker:
+            return any(s.id == self.target.source_id for s in self.guild.stickers)
+        return any(e.id == self.target.source_id for e in self.guild.emojis)
+
     def build_initial_container(self) -> KyroContainer:
-        """Build a clean, compact Components V2 dashboard with preview thumbnail."""
+        """Build clean Components V2 card with thumbnail and duplicate warnings."""
         e_reg = getattr(self.bot, "custom_emojis", None)
         dot = e_reg.get("heart_dot", "-") if e_reg else "-"
+        warn_icon = e_reg.get("icons_warning", "⚠️ ") if e_reg else "⚠️ "
 
         preview_url = self.target.url
         target_name = self.target.name
@@ -210,12 +239,16 @@ class StealDashboardView(discord.ui.View):
         s_limit = getattr(self.guild, "sticker_limit", 5)
 
         container = KyroContainer(accent_color=None)
-        section_kwargs = {
-            "content": (
-                f"**Steal Expression**\n"
-                f"> Choose whether to add as **Emoji** or **Sticker**."
-            )
-        }
+        
+        # Header text
+        header_text = (
+            f"**Steal Studio**\n"
+            f"> Choose whether to add as **Emoji** or **Sticker**."
+        )
+        if self._is_already_in_server():
+            header_text += f"\n> {warn_icon}*Notice: This item already exists in this server.*"
+
+        section_kwargs = {"content": header_text}
         if preview_url:
             section_kwargs["accessory"] = {
                 "type": 11,
@@ -234,25 +267,30 @@ class StealDashboardView(discord.ui.View):
         return container
 
     async def _on_steal_emoji(self, interaction: discord.Interaction) -> None:
-        """Add the target as a server custom emoji."""
+        """Add target as a server custom emoji with collision & capacity resolution."""
         await interaction.response.defer()
-        final_name = sanitize_name(self.target.custom_name or self.target.name, max_len=32)
 
+        # 1. Capacity check
         static_count = len([e for e in self.guild.emojis if not e.animated])
         anim_count = len([e for e in self.guild.emojis if e.animated])
         limit = self.guild.emoji_limit
 
         if self.target.is_animated and anim_count >= limit:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Slots Full**\n> All `{limit}` animated emoji slots are full.")
+            container.add_section(content=f"**Slots Full**\n> All `{limit}` animated emoji slots in **{self.guild.name}** are full.")
             await edit_container_response(interaction, container, view=None)
             return
 
         if not self.target.is_animated and static_count >= limit:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Slots Full**\n> All `{limit}` static emoji slots are full.")
+            container.add_section(content=f"**Slots Full**\n> All `{limit}` static emoji slots in **{self.guild.name}** are occupied.")
             await edit_container_response(interaction, container, view=None)
             return
+
+        # 2. Name collision check & auto-rename
+        existing_emoji_names = {e.name.lower() for e in self.guild.emojis}
+        base_name = self.target.custom_name or self.target.name
+        final_name = resolve_unique_name(base_name, existing_emoji_names, max_len=32)
 
         try:
             session = self.bot.session or aiohttp.ClientSession()
@@ -260,11 +298,11 @@ class StealDashboardView(discord.ui.View):
             new_emoji = await self.guild.create_custom_emoji(
                 name=final_name,
                 image=img_bytes,
-                reason=f"Steal by {interaction.user}",
+                reason=f"Steal executed by {interaction.user} (ID: {interaction.user.id})",
             )
         except discord.Forbidden:
             container = KyroContainer(accent_color=None)
-            container.add_section(content="**Permission Error**\n> I do not have permission to add emojis or my role is too low.")
+            container.add_section(content="**Permission Denied**\n> I do not have permission to add emojis or my role is positioned too low.")
             await edit_container_response(interaction, container, view=None)
             return
         except Exception as e:
@@ -278,11 +316,13 @@ class StealDashboardView(discord.ui.View):
         s_count = len([e for e in self.guild.emojis if not e.animated])
         a_count = len([e for e in self.guild.emojis if e.animated])
 
+        rename_note = f" *(Auto-renamed from `{base_name}` to prevent name conflict)*" if final_name.lower() != base_name.lower() else ""
+
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Emoji Added Successfully**\n"
-                f"> {new_emoji} is now ready to use in **{self.guild.name}**!"
+                f"> {new_emoji} is now ready to use in **{self.guild.name}**!{rename_note}"
             ),
             accessory={
                 "type": 11,
@@ -308,18 +348,23 @@ class StealDashboardView(discord.ui.View):
         await edit_container_response(interaction, container, view=self)
 
     async def _on_steal_sticker(self, interaction: discord.Interaction) -> None:
-        """Add the target as a server custom sticker."""
+        """Add target as a server custom sticker with collision & capacity resolution."""
         await interaction.response.defer()
-        final_name = sanitize_name(self.target.custom_name or self.target.name, max_len=30)
 
+        # 1. Capacity check
         sticker_count = len(self.guild.stickers)
         s_limit = getattr(self.guild, "sticker_limit", 5)
 
         if sticker_count >= s_limit:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Slots Full**\n> All `{s_limit}` sticker slots are full.")
+            container.add_section(content=f"**Sticker Slots Full**\n> All `{s_limit}` sticker slots in **{self.guild.name}** are occupied.")
             await edit_container_response(interaction, container, view=None)
             return
+
+        # 2. Name collision check & auto-rename (max 30 chars for stickers)
+        existing_sticker_names = {s.name.lower() for s in self.guild.stickers}
+        base_name = self.target.custom_name or self.target.name
+        final_name = resolve_unique_name(base_name, existing_sticker_names, max_len=30)
 
         try:
             session = self.bot.session or aiohttp.ClientSession()
@@ -328,14 +373,14 @@ class StealDashboardView(discord.ui.View):
 
             new_sticker = await self.guild.create_sticker(
                 name=final_name,
-                description=f"Stolen by {interaction.user.name}",
+                description=f"Stolen with Kyro by {interaction.user.name}",
                 emoji="⭐",
                 file=sticker_file,
-                reason=f"Steal by {interaction.user}",
+                reason=f"Steal executed by {interaction.user} (ID: {interaction.user.id})",
             )
         except discord.Forbidden:
             container = KyroContainer(accent_color=None)
-            container.add_section(content="**Permission Error**\n> I do not have permission to add stickers or my role is too low.")
+            container.add_section(content="**Permission Denied**\n> I do not have permission to add stickers or my role is positioned too low.")
             await edit_container_response(interaction, container, view=None)
             return
         except Exception as e:
@@ -348,11 +393,13 @@ class StealDashboardView(discord.ui.View):
         dot = e_reg.get("heart_dot", "-") if e_reg else "-"
         s_count = len(self.guild.stickers)
 
+        rename_note = f" *(Auto-renamed from `{base_name}` to prevent name conflict)*" if final_name.lower() != base_name.lower() else ""
+
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Sticker Added Successfully**\n"
-                f"> Sticker **{new_sticker.name}** is now available in **{self.guild.name}**!"
+                f"> Sticker **{new_sticker.name}** is now available in **{self.guild.name}**!{rename_note}"
             ),
             accessory={
                 "type": 11,
@@ -390,7 +437,7 @@ class StealDashboardView(discord.ui.View):
 
 
 class Steal(commands.Cog):
-    """Clean & minimalist expression stealer with exactly 2 buttons: [Emoji] and [Sticker]."""
+    """Interactive expression stealer with duplicate detection and name collision handling."""
     category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
@@ -412,10 +459,10 @@ class Steal(commands.Cog):
     ) -> None:
         """
         Interactive Steal Studio with exactly 2 buttons: [Emoji] and [Sticker].
-        Both options are always active, allowing you to add as either.
         
         Usage:
           ?steal <:pepe:123456789>
+          ?steal <:pepe:123456789> my_name
           ?steal (reply to any message with emoji/sticker)
         """
         assert ctx.guild is not None
@@ -434,7 +481,13 @@ class Steal(commands.Cog):
                 e_id = int(match.group(3))
                 ext = "gif" if is_anim else "png"
                 e_url = f"https://cdn.discordapp.com/emojis/{e_id}.{ext}?size=256&quality=lossless"
-                target = StealTarget(name=e_name, url=e_url, is_animated=is_anim, custom_name=target_input if not custom_name else custom_name)
+                target = StealTarget(
+                    name=e_name,
+                    url=e_url,
+                    is_animated=is_anim,
+                    source_id=e_id,
+                    custom_name=target_input if not custom_name else custom_name,
+                )
                 break
 
             # Check stickers in replied message if no emoji
@@ -448,7 +501,7 @@ class Steal(commands.Cog):
                         url=st_url,
                         is_animated=(st.format == discord.StickerFormatType.apng),
                         is_sticker=True,
-                        sticker_id=st.id,
+                        source_id=st.id,
                         custom_name=target_input if not custom_name else custom_name,
                     )
                     break
@@ -463,6 +516,7 @@ class Steal(commands.Cog):
                             name=att_name,
                             url=att.url,
                             is_animated=is_gif,
+                            source_id=att.id,
                             custom_name=target_input if not custom_name else custom_name,
                         )
                         break
@@ -475,7 +529,13 @@ class Steal(commands.Cog):
                 e_id = int(match.group(3))
                 ext = "gif" if is_anim else "png"
                 e_url = f"https://cdn.discordapp.com/emojis/{e_id}.{ext}?size=256&quality=lossless"
-                target = StealTarget(name=e_name, url=e_url, is_animated=is_anim, custom_name=custom_name)
+                target = StealTarget(
+                    name=e_name,
+                    url=e_url,
+                    is_animated=is_anim,
+                    source_id=e_id,
+                    custom_name=custom_name,
+                )
                 break
 
             if not target:
@@ -497,7 +557,7 @@ class Steal(commands.Cog):
                     e_id = int(match.group(3))
                     ext = "gif" if is_anim else "png"
                     e_url = f"https://cdn.discordapp.com/emojis/{e_id}.{ext}?size=256&quality=lossless"
-                    target = StealTarget(name=e_name, url=e_url, is_animated=is_anim)
+                    target = StealTarget(name=e_name, url=e_url, is_animated=is_anim, source_id=e_id)
                     break
 
                 if not target and old_msg.stickers:
@@ -509,7 +569,7 @@ class Steal(commands.Cog):
                             url=st_url,
                             is_animated=(st.format == discord.StickerFormatType.apng),
                             is_sticker=True,
-                            sticker_id=st.id,
+                            source_id=st.id,
                         )
                         break
 
@@ -532,7 +592,7 @@ class Steal(commands.Cog):
             await send_container_response(ctx, container)
             return
 
-        # Launch clean dashboard with BOTH options always available
+        # Launch clean dashboard with duplicate & collision checks
         view = StealDashboardView(
             bot=self.bot,
             author=ctx.author,

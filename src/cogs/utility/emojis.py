@@ -2,6 +2,7 @@
 Kyro Discord Bot - Expression Manager (Emojis & Stickers)
 Minimal, ultra-clean Components V2 dashboard for managing and deleting server expressions.
 Supports both non-Nitro users (visual dropdowns for animated/static emojis) and stickers (with instant live preview).
+Guaranteed zero-timeout with immediate deferred interaction acknowledgements.
 """
 
 from __future__ import annotations
@@ -25,14 +26,14 @@ logger = logging.getLogger("Kyro.Utility.Emojis")
 class ExpressionManagerView(discord.ui.View):
     """Interactive view for navigating, previewing, and deleting server emojis and stickers."""
 
-    def __init__(self, ctx: CustomContext, bot: KyroBot) -> None:
+    def __init__(self, ctx: CustomContext, bot: KyroBot, initial_mode: str = "emojis") -> None:
         super().__init__(timeout=120)
         self.ctx = ctx
         self.bot = bot
         self.guild = ctx.guild
         self.author_id = ctx.author.id
 
-        self.mode: str = "emojis"  # "emojis" or "stickers"
+        self.mode: str = initial_mode  # "emojis" or "stickers"
         self.page: int = 0
         self.selected_id: Optional[int] = None
         self.status_msg: Optional[str] = None
@@ -61,6 +62,16 @@ class ExpressionManagerView(discord.ui.View):
             return False
 
         return True
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
+        logger.error(f"Error in ExpressionManagerView on {item}: {error}", exc_info=error)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"Action failed: `{error}`", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Action failed: `{error}`", ephemeral=True)
+        except Exception:
+            pass
 
     def _get_items(self) -> list[discord.Emoji | discord.GuildSticker]:
         """Fetch sorted list of emojis or stickers for current mode."""
@@ -101,32 +112,38 @@ class ExpressionManagerView(discord.ui.View):
         start_idx = self.page * 25
         page_items = items[start_idx : start_idx + 25]
 
-        if page_items:
-            options: list[discord.SelectOption] = []
-            for item in page_items:
-                if self.mode == "emojis" and isinstance(item, discord.Emoji):
-                    desc = "Animated" if item.animated else "Static"
-                    options.append(
-                        discord.SelectOption(
-                            label=item.name[:100],
-                            value=str(item.id),
-                            description=desc,
-                            emoji=item,
-                            default=(item.id == self.selected_id),
-                        )
+        options: list[discord.SelectOption] = []
+        for item in page_items:
+            if self.mode == "emojis":
+                is_anim = getattr(item, "animated", False)
+                desc = "Animated" if is_anim else "Static"
+                options.append(
+                    discord.SelectOption(
+                        label=item.name[:100],
+                        value=str(item.id),
+                        description=desc,
+                        emoji=item if isinstance(item, discord.Emoji) else None,
+                        default=(item.id == self.selected_id),
                     )
-                elif self.mode == "stickers" and isinstance(item, discord.GuildSticker):
-                    desc = f"Format: {item.format.name.upper()}"
-                    options.append(
-                        discord.SelectOption(
-                            label=item.name[:100],
-                            value=str(item.id),
-                            description=desc,
-                            default=(item.id == self.selected_id),
-                        )
+                )
+            else:
+                fmt_obj = getattr(item, "format", None)
+                fmt_name = getattr(fmt_obj, "name", str(fmt_obj or "PNG")).upper()
+                options.append(
+                    discord.SelectOption(
+                        label=item.name[:100],
+                        value=str(item.id),
+                        description=f"Format: {fmt_name}",
+                        default=(item.id == self.selected_id),
                     )
+                )
 
-            placeholder = "Select an emoji to delete..." if self.mode == "emojis" else "Select a sticker to preview & delete..."
+        if options:
+            placeholder = (
+                "Select an emoji to delete..."
+                if self.mode == "emojis"
+                else "Select a sticker to preview & delete..."
+            )
             select = discord.ui.Select(
                 placeholder=placeholder,
                 min_values=1,
@@ -136,14 +153,6 @@ class ExpressionManagerView(discord.ui.View):
             )
             select.callback = self._on_select_item
             self.add_item(select)
-        else:
-            empty_select = discord.ui.Select(
-                placeholder=f"No {self.mode} found in this server",
-                disabled=True,
-                options=[discord.SelectOption(label="Empty", value="none")],
-                row=1,
-            )
-            self.add_item(empty_select)
 
         # Row 2: Navigation & Action Buttons
         btn_prev = discord.ui.Button(
@@ -196,18 +205,20 @@ class ExpressionManagerView(discord.ui.View):
                 emoji = self.guild.get_emoji(self.selected_id)
                 if emoji:
                     preview_url = emoji.url
-                    prefix = "a" if emoji.animated else ""
+                    prefix = "a" if getattr(emoji, "animated", False) else ""
                     selected_text = (
                         f"{dot} **Selected Emoji:** <{prefix}:{emoji.name}:{emoji.id}> `{emoji.name}`\n"
-                        f"{dot} **Type:** `{'Animated' if emoji.animated else 'Static'}` {dot} **ID:** `{emoji.id}`"
+                        f"{dot} **Type:** `{'Animated' if getattr(emoji, 'animated', False) else 'Static'}` {dot} **ID:** `{emoji.id}`"
                     )
             else:
                 sticker = self.guild.get_sticker(self.selected_id)
                 if sticker:
                     preview_url = sticker.url
+                    fmt_obj = getattr(sticker, "format", None)
+                    fmt_name = getattr(fmt_obj, "name", str(fmt_obj or "PNG")).upper()
                     selected_text = (
                         f"{dot} **Selected Sticker:** `{sticker.name}`\n"
-                        f"{dot} **Format:** `{sticker.format.name.upper()}` {dot} **ID:** `{sticker.id}`"
+                        f"{dot} **Format:** `{fmt_name}` {dot} **ID:** `{sticker.id}`"
                     )
 
         # Header Section
@@ -226,10 +237,21 @@ class ExpressionManagerView(discord.ui.View):
         else:
             emoji_count = len(self.guild.emojis)
             sticker_count = len(self.guild.stickers)
-            container.add_text(
-                f"{dot} **Server Total:** `{emoji_count} Emojis` {dot} `{sticker_count} Stickers`\n"
-                f"{dot} Choose an item from the dropdown below to preview or delete."
-            )
+            if self.mode == "stickers" and sticker_count == 0:
+                container.add_text(
+                    f"{dot} **Server Total:** `{sticker_count} Stickers`\n"
+                    f"{dot} No custom stickers found in this server."
+                )
+            elif self.mode == "emojis" and emoji_count == 0:
+                container.add_text(
+                    f"{dot} **Server Total:** `{emoji_count} Emojis`\n"
+                    f"{dot} No custom emojis found in this server."
+                )
+            else:
+                container.add_text(
+                    f"{dot} **Server Total:** `{emoji_count} Emojis` {dot} `{sticker_count} Stickers`\n"
+                    f"{dot} Choose an item from the dropdown below to preview or delete."
+                )
 
         if self.status_msg:
             container.add_separator(divider=True)
@@ -237,17 +259,13 @@ class ExpressionManagerView(discord.ui.View):
 
         return container
 
-    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
-        logger.error(f"Error in ExpressionManagerView on {item}: {error}", exc_info=error)
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"Action failed: `{error}`", ephemeral=True)
-            else:
-                await interaction.followup.send(f"Action failed: `{error}`", ephemeral=True)
-        except Exception:
-            pass
-
     async def _on_switch_emojis(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
+
         self.mode = "emojis"
         self.page = 0
         self.selected_id = None
@@ -257,6 +275,19 @@ class ExpressionManagerView(discord.ui.View):
         await edit_container_response(interaction, container, view=self)
 
     async def _on_switch_stickers(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
+
+        # If cache is empty, fetch fresh stickers from API
+        if not self.guild.stickers:
+            try:
+                await self.guild.fetch_stickers()
+            except Exception:
+                pass
+
         self.mode = "stickers"
         self.page = 0
         self.selected_id = None
@@ -266,6 +297,12 @@ class ExpressionManagerView(discord.ui.View):
         await edit_container_response(interaction, container, view=self)
 
     async def _on_prev_page(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
+
         if self.page > 0:
             self.page -= 1
             self.selected_id = None
@@ -275,6 +312,12 @@ class ExpressionManagerView(discord.ui.View):
             await edit_container_response(interaction, container, view=self)
 
     async def _on_next_page(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
+
         total = self._get_total_pages()
         if self.page < total - 1:
             self.page += 1
@@ -285,6 +328,12 @@ class ExpressionManagerView(discord.ui.View):
             await edit_container_response(interaction, container, view=self)
 
     async def _on_select_item(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
+
         if interaction.data and "values" in interaction.data and interaction.data["values"]:
             self.selected_id = int(interaction.data["values"][0])
             self.status_msg = None
@@ -304,9 +353,12 @@ class ExpressionManagerView(discord.ui.View):
             )
             return
 
-        # Defer immediately to prevent mobile 3-second timeout during deletion
+        # Defer immediately to prevent mobile timeout
         if not interaction.response.is_done():
-            await interaction.response.defer()
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
 
         e_reg = getattr(self.bot, "custom_emojis", None)
         dot = e_reg.get("heart_dot", "-") if e_reg else "-"
@@ -369,7 +421,17 @@ class Emojis(commands.Cog):
             await send_container_response(ctx, container)
             return
 
-        view = ExpressionManagerView(ctx, self.bot)
+        # Ensure stickers are fetched from Discord REST API if not yet in cache
+        if not ctx.guild.stickers:
+            try:
+                await ctx.guild.fetch_stickers()
+            except Exception:
+                pass
+
+        # If user invoked with ?stickers, directly start in stickers mode
+        initial_mode = "stickers" if ctx.invoked_with in ("stickers", "delsticker") else "emojis"
+
+        view = ExpressionManagerView(ctx, self.bot, initial_mode=initial_mode)
         container = view.build_container()
         await send_container_response(ctx, container, view=view)
 

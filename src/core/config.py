@@ -66,6 +66,9 @@ class Config:
     DEV_GUILD_ID: int | None = (
         int(os.getenv("DEV_GUILD_ID")) if os.getenv("DEV_GUILD_ID") else None
     )
+    SYNC_COMMANDS_ON_STARTUP: bool = (
+        os.getenv("SYNC_COMMANDS_ON_STARTUP", "false").lower() in ("true", "1", "yes")
+    )
     
     # PostgreSQL / Supabase Database Settings
     DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()

@@ -84,6 +84,13 @@ class ErrorHandler(commands.Cog):
                 )
             )
 
+        elif isinstance(error, discord.HTTPException) and error.status == 429:
+            logger.error(
+                f"Discord REST API 429 Rate Limit active during '{ctx.command}': {error}. "
+                "Suppressing error message response to avoid extending rate limit window."
+            )
+            return
+
         else:
             logger.error(f"Unhandled error in '{ctx.command}': {error}", exc_info=error)
             container.add_section(

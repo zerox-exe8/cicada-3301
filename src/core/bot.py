@@ -325,15 +325,15 @@ class KyroBot(commands.Bot):
         if not self._rotate_presence.is_running():
             self._rotate_presence.start()
 
-        # Auto sync global application commands tree with Discord
-        try:
-            synced = await self.tree.sync()
-            logger.info(f"Successfully synced {len(synced)} application/slash commands globally.")
-        except Exception as e:
-            logger.warning(f"Automatic command tree sync failed: {e}")
-
-        # Automatically sync custom application emojis from assets in background
-        asyncio.create_task(self.custom_emojis.sync_from_assets())
+        # Auto sync global application commands tree with Discord only if explicitly enabled
+        if getattr(Config, "SYNC_COMMANDS_ON_STARTUP", False):
+            try:
+                synced = await self.tree.sync()
+                logger.info(f"Successfully synced {len(synced)} application/slash commands globally.")
+            except Exception as e:
+                logger.warning(f"Automatic command tree sync failed: {e}")
+        else:
+            logger.info("Skipping automatic slash command sync on startup (use '?sync' command if needed).")
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         """Fired when Kyro is invited to a new server."""

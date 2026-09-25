@@ -6,6 +6,7 @@ easy resolution for in-text mentions and Discord UI dropdown options.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 import discord
@@ -68,6 +69,11 @@ class EmojiRegistry:
                 continue
             for pattern in ("*.png", "*.gif"):
                 for img_file in sorted(adir.glob(pattern)):
+                    # Discord application emoji hard limit is 50 for non-partner bots
+                    if len(self._emojis) >= 50:
+                        logger.info(f"Application emoji capacity reached ({len(self._emojis)} emojis cached). Stopping sync.")
+                        return uploaded, len(self._emojis)
+
                     raw_name = img_file.stem.lower()
                     clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", raw_name)
                     clean_name = clean_name.strip("_")[:32]
@@ -84,6 +90,7 @@ class EmojiRegistry:
                             self._emojis.pop(clean_name, None)
                             self._emojis.pop(raw_name, None)
                             existing = None
+                            await asyncio.sleep(1.0)
                         except Exception as e:
                             logger.debug(f"Could not delete static emoji {clean_name}: {e}")
 
@@ -99,6 +106,16 @@ class EmojiRegistry:
                             self._emojis[raw_name] = new_emoji
                             uploaded += 1
                             logger.info(f"Uploaded application emoji: {clean_name} (animated={getattr(new_emoji, 'animated', False)})")
+                            await asyncio.sleep(1.5)  # Throttle to prevent Discord 429 rate limits
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                logger.warning(f"Rate limited by Discord while uploading emoji {clean_name}. Aborting sync.")
+                                return uploaded, len(self._emojis)
+                            elif getattr(e, "code", 0) in (30007, 50035) or "maximum" in str(e).lower():
+                                logger.warning(f"Maximum application emojis reached. Aborting sync.")
+                                return uploaded, len(self._emojis)
+                            else:
+                                logger.debug(f"Could not upload emoji {clean_name}: {e}")
                         except Exception as e:
                             logger.debug(f"Could not upload emoji {clean_name}: {e}")
 

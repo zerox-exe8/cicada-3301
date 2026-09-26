@@ -406,11 +406,11 @@ class AnimeClash(commands.Cog):
         return current_rank
 
     # ==========================================
-    # 🪪 COMMAND: !profile / !hunter
+    # 🪪 COMMAND: !hunter / !hp
     # ==========================================
-    @commands.command(name="profile", aliases=["hunter", "id", "stats"])
+    @commands.command(name="hunter", aliases=["hp", "hunterprofile", "shadowprofile"])
     @commands.cooldown(1, 3, commands.BucketType.user)
-    async def profile_cmd(self, ctx: CustomContext, target: discord.Member | None = None) -> None:
+    async def hunter_cmd(self, ctx: CustomContext, target: discord.Member | None = None) -> None:
         """Display high-resolution Hunter License Profile Card and Vault."""
         user = target or ctx.author
         profile = await self.get_or_create_profile(user.id)
@@ -799,7 +799,7 @@ class CustomizeView(discord.ui.View):
             interaction.user.id,
         )
         await interaction.response.send_message(
-            f"✅ **Theme Updated to `{THEMES[raw_val]['name']}`!** Type `!profile` to see the new look.",
+            f"✅ **Theme Updated to `{THEMES[raw_val]['name']}`!** Type `!hunter` to see the new look.",
             ephemeral=True,
         )
 
@@ -968,7 +968,7 @@ class SoloSelectFighterView(discord.ui.View):
         container.add_section(content=title_text)
         if chest_dropped:
             container.add_separator(divider=True)
-            container.add_text(f"-# 🎁 Bonus Reward: {chest_dropped} added to your vault! Use `!profile` to open it.")
+            container.add_text(f"-# 🎁 Bonus Reward: {chest_dropped} added to your vault! Use `!hunter` to open it.")
 
         await send_container_response(interaction, container, file=file)
 

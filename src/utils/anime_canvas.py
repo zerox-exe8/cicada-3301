@@ -479,9 +479,13 @@ def render_battle_clash(
     turn_action_text: str | None = None,
     chest_reward: str | None = None,
     gold_reward: int = 50,
+    p1_energy: int = 0,
+    p2_energy: int = 0,
+    domain_active: str | None = None,
 ) -> io.BytesIO:
     """
-    Renders a dramatic 940x440 Anime Clash Arena Card with both fighters' high-res portraits and live HP bars.
+    Renders a dramatic 940x440 Anime Clash Arena Card with both fighters' portraits,
+    live HP bars, Cursed Energy / Ultimate meter, and Domain Expansion effects.
     """
     w, h = 940, 440
     im = Image.new("RGBA", (w, h), (12, 10, 22, 255))
@@ -489,22 +493,31 @@ def render_battle_clash(
     # Glows
     glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     gdraw = ImageDraw.Draw(glow)
-    gdraw.ellipse([(-50, -50), (320, 320)], fill=(59, 130, 246, 45))  # Left Blue
-    gdraw.ellipse([(w - 320, -50), (w + 50, 320)], fill=(239, 68, 68, 45))  # Right Red
+    if domain_active:
+        gdraw.ellipse([(w // 4, -80), (3 * w // 4, 320)], fill=(244, 63, 94, 60))
+    else:
+        gdraw.ellipse([(-50, -50), (320, 320)], fill=(59, 130, 246, 45))  # Left Blue
+        gdraw.ellipse([(w - 320, -50), (w + 50, 320)], fill=(239, 68, 68, 45))  # Right Red
     im = Image.alpha_composite(im, glow)
     draw = ImageDraw.Draw(im)
 
     # Frame
-    draw.rounded_rectangle([(8, 8), (w - 8, h - 8)], radius=20, outline=(55, 45, 75, 255), width=2)
+    outline_col = (244, 63, 94) if domain_active else (55, 45, 75, 255)
+    draw.rounded_rectangle([(8, 8), (w - 8, h - 8)], radius=20, outline=outline_col, width=2)
 
     # Top arena header
-    draw.rounded_rectangle([(24, 16), (w - 24, 20)], radius=2, fill=(168, 85, 247))
-    draw.text((w // 2 - 90, 26), "SHADOW DUEL ARENA", fill=(216, 180, 254, 255), font=_get_font(13, bold=True))
+    if domain_active:
+        draw.rounded_rectangle([(24, 16), (w - 24, 20)], radius=2, fill=(244, 63, 94))
+        domain_title = f"DOMAIN EXPANSION: {domain_active.upper()}"
+        draw.text((w // 2 - 160, 26), domain_title, fill=(255, 255, 255, 255), font=_get_font(14, bold=True))
+    else:
+        draw.rounded_rectangle([(24, 16), (w - 24, 20)], radius=2, fill=(168, 85, 247))
+        draw.text((w // 2 - 90, 26), "SHADOW DUEL ARENA", fill=(216, 180, 254, 255), font=_get_font(13, bold=True))
 
-    card_w, card_h = 390, 290
+    card_w, card_h = 390, 295
 
     # ------------------ LEFT FIGHTER (Player 1) ------------------
-    p1_x, p1_y = 35, 60
+    p1_x, p1_y = 35, 58
     p1_rarity = player1_hero.get("rarity", "Common")
     p1_color = RARITY_COLORS.get(p1_rarity, (156, 163, 175))
     p1_outline = (234, 179, 8) if winner_num == 1 else (p1_color if winner_num == 0 else (60, 50, 80))
@@ -518,34 +531,44 @@ def render_battle_clash(
     draw.text((p1_x + card_w - 95, p1_y + 15), f"[{p1_elem.upper()}]", fill=ELEMENT_DATA.get(p1_elem, {}).get("color", (200, 200, 200)), font=_get_font(11, bold=True))
 
     # Art Left
-    art_w, art_h = 115, 140
+    art_w, art_h = 115, 130
     art1 = _load_hero_image(player1_hero.get("id", "tanjiro"), (art_w, art_h), corner_radius=10)
-    im.paste(art1, (p1_x + 16, p1_y + 46), art1)
-    draw.rounded_rectangle([(p1_x + 15, p1_y + 45), (p1_x + 16 + art_w, p1_y + 46 + art_h)], radius=10, outline=p1_color, width=1)
+    im.paste(art1, (p1_x + 16, p1_y + 44), art1)
+    draw.rounded_rectangle([(p1_x + 15, p1_y + 43), (p1_x + 16 + art_w, p1_y + 44 + art_h)], radius=10, outline=p1_color, width=1)
 
     # Info Left
-    p1_info_x = p1_x + art_w + 28
-    draw.text((p1_info_x, p1_y + 48), player1_hero.get("name", "Fighter")[:14], fill=(255, 255, 255, 255), font=_get_font(19, bold=True))
-    draw.text((p1_info_x, p1_y + 74), f"Master: {player1_name[:12]}", fill=(160, 150, 185, 255), font=_get_font(12))
+    p1_info_x = p1_x + art_w + 26
+    draw.text((p1_info_x, p1_y + 45), player1_hero.get("name", "Fighter")[:14], fill=(255, 255, 255, 255), font=_get_font(18, bold=True))
+    draw.text((p1_info_x, p1_y + 70), f"Master: {player1_name[:12]}", fill=(160, 150, 185, 255), font=_get_font(11))
 
-    # Power
+    # Power & Tech
     p1_power = player1_hero.get("power", 500) + player1_hero.get("power_bonus", 0)
-    draw.rounded_rectangle([(p1_info_x, p1_y + 98), (p1_info_x + 120, p1_y + 126)], radius=6, fill=(32, 24, 52, 255), outline=(75, 60, 105, 255), width=1)
-    draw.text((p1_info_x + 10, p1_y + 104), f"POWER: {p1_power}", fill=(255, 255, 255, 255), font=_get_font(12, bold=True))
+    draw.rounded_rectangle([(p1_info_x, p1_y + 92), (p1_info_x + 120, p1_y + 118)], radius=6, fill=(32, 24, 52, 255), outline=(75, 60, 105, 255), width=1)
+    draw.text((p1_info_x + 10, p1_y + 97), f"POWER: {p1_power}", fill=(255, 255, 255, 255), font=_get_font(11, bold=True))
+    draw.text((p1_info_x, p1_y + 126), f"MOVE: {player1_hero.get('move', 'Strike')[:18]}", fill=(216, 180, 254), font=_get_font(10, bold=True))
 
     # HP Bar Left
     hp1_pct = max(0.0, min(1.0, p1_hp / p1_max_hp if p1_max_hp > 0 else 0.0))
     bar1_w = card_w - 32
-    bar1_y = p1_y + card_h - 60
-    draw.text((p1_x + 16, bar1_y - 18), f"HEALTH: {max(0, p1_hp)} / {p1_max_hp} HP", fill=(210, 200, 230, 255), font=_get_font(11, bold=True))
-    draw.rounded_rectangle([(p1_x + 16, bar1_y), (p1_x + 16 + bar1_w, bar1_y + 12)], radius=6, fill=(35, 28, 52, 255))
+    bar1_y = p1_y + card_h - 75
+    draw.text((p1_x + 16, bar1_y - 17), f"HEALTH: {max(0, p1_hp)} / {p1_max_hp} HP", fill=(210, 200, 230, 255), font=_get_font(11, bold=True))
+    draw.rounded_rectangle([(p1_x + 16, bar1_y), (p1_x + 16 + bar1_w, bar1_y + 9)], radius=5, fill=(35, 28, 52, 255))
     hp_fill1_w = int(bar1_w * hp1_pct)
     hp_color1 = (34, 197, 94) if hp1_pct > 0.4 else ((234, 179, 8) if hp1_pct > 0.2 else (239, 68, 68))
     if hp_fill1_w > 0:
-        draw.rounded_rectangle([(p1_x + 16, bar1_y), (p1_x + 16 + hp_fill1_w, bar1_y + 12)], radius=6, fill=hp_color1)
+        draw.rounded_rectangle([(p1_x + 16, bar1_y), (p1_x + 16 + hp_fill1_w, bar1_y + 9)], radius=5, fill=hp_color1)
 
-    # Signature Move
-    draw.text((p1_x + 16, bar1_y + 20), f"MOVE: {player1_hero.get('move', 'Strike')[:32]}", fill=(150, 140, 175, 255), font=_get_font(11))
+    # Cursed Energy / Ultimate Bar Left
+    ce1_pct = max(0.0, min(1.0, p1_energy / 100.0))
+    ce1_y = bar1_y + 28
+    ce1_label = "DOMAIN READY (100%)" if p1_energy >= 100 else f"CURSED ENERGY: {p1_energy}%"
+    ce1_col = (250, 204, 21) if p1_energy >= 100 else (165, 243, 252)
+    draw.text((p1_x + 16, ce1_y - 14), ce1_label, fill=ce1_col, font=_get_font(10, bold=True))
+    draw.rounded_rectangle([(p1_x + 16, ce1_y), (p1_x + 16 + bar1_w, ce1_y + 8)], radius=4, fill=(28, 22, 42, 255))
+    ce_fill1_w = int(bar1_w * ce1_pct)
+    ce_color1 = (234, 179, 8) if p1_energy >= 100 else (6, 182, 212)
+    if ce_fill1_w > 0:
+        draw.rounded_rectangle([(p1_x + 16, ce1_y), (p1_x + 16 + ce_fill1_w, ce1_y + 8)], radius=4, fill=ce_color1)
 
     # ------------------ RIGHT FIGHTER (Player 2 / Rival) ------------------
     p2_x = w - card_w - 35
@@ -564,31 +587,41 @@ def render_battle_clash(
 
     # Art Right
     art2 = _load_hero_image(player2_hero.get("id", "sukuna"), (art_w, art_h), corner_radius=10)
-    im.paste(art2, (p2_x + 16, p2_y + 46), art2)
-    draw.rounded_rectangle([(p2_x + 15, p2_y + 45), (p2_x + 16 + art_w, p2_y + 46 + art_h)], radius=10, outline=p2_color, width=1)
+    im.paste(art2, (p2_x + 16, p2_y + 44), art2)
+    draw.rounded_rectangle([(p2_x + 15, p2_y + 43), (p2_x + 16 + art_w, p2_y + 44 + art_h)], radius=10, outline=p2_color, width=1)
 
     # Info Right
-    p2_info_x = p2_x + art_w + 28
-    draw.text((p2_info_x, p2_y + 48), player2_hero.get("name", "Fighter")[:14], fill=(255, 255, 255, 255), font=_get_font(19, bold=True))
-    draw.text((p2_info_x, p2_y + 74), f"Master: {player2_name[:12]}", fill=(160, 150, 185, 255), font=_get_font(12))
+    p2_info_x = p2_x + art_w + 26
+    draw.text((p2_info_x, p2_y + 45), player2_hero.get("name", "Fighter")[:14], fill=(255, 255, 255, 255), font=_get_font(18, bold=True))
+    draw.text((p2_info_x, p2_y + 70), f"Master: {player2_name[:12]}", fill=(160, 150, 185, 255), font=_get_font(11))
 
-    # Power
+    # Power & Tech
     p2_power = player2_hero.get("power", 500) + player2_hero.get("power_bonus", 0)
-    draw.rounded_rectangle([(p2_info_x, p2_y + 98), (p2_info_x + 120, p2_y + 126)], radius=6, fill=(32, 24, 52, 255), outline=(75, 60, 105, 255), width=1)
-    draw.text((p2_info_x + 10, p2_y + 104), f"POWER: {p2_power}", fill=(255, 255, 255, 255), font=_get_font(12, bold=True))
+    draw.rounded_rectangle([(p2_info_x, p2_y + 92), (p2_info_x + 120, p2_y + 118)], radius=6, fill=(32, 24, 52, 255), outline=(75, 60, 105, 255), width=1)
+    draw.text((p2_info_x + 10, p2_y + 97), f"POWER: {p2_power}", fill=(255, 255, 255, 255), font=_get_font(11, bold=True))
+    draw.text((p2_info_x, p2_y + 126), f"MOVE: {player2_hero.get('move', 'Strike')[:18]}", fill=(216, 180, 254), font=_get_font(10, bold=True))
 
     # HP Bar Right
     hp2_pct = max(0.0, min(1.0, p2_hp / p2_max_hp if p2_max_hp > 0 else 0.0))
-    bar2_y = p2_y + card_h - 60
-    draw.text((p2_x + 16, bar2_y - 18), f"HEALTH: {max(0, p2_hp)} / {p2_max_hp} HP", fill=(210, 200, 230, 255), font=_get_font(11, bold=True))
-    draw.rounded_rectangle([(p2_x + 16, bar2_y), (p2_x + 16 + bar1_w, bar2_y + 12)], radius=6, fill=(35, 28, 52, 255))
+    bar2_y = p2_y + card_h - 75
+    draw.text((p2_x + 16, bar2_y - 17), f"HEALTH: {max(0, p2_hp)} / {p2_max_hp} HP", fill=(210, 200, 230, 255), font=_get_font(11, bold=True))
+    draw.rounded_rectangle([(p2_x + 16, bar2_y), (p2_x + 16 + bar1_w, bar2_y + 9)], radius=5, fill=(35, 28, 52, 255))
     hp_fill2_w = int(bar1_w * hp2_pct)
     hp_color2 = (34, 197, 94) if hp2_pct > 0.4 else ((234, 179, 8) if hp2_pct > 0.2 else (239, 68, 68))
     if hp_fill2_w > 0:
-        draw.rounded_rectangle([(p2_x + 16, bar2_y), (p2_x + 16 + hp_fill2_w, bar2_y + 12)], radius=6, fill=hp_color2)
+        draw.rounded_rectangle([(p2_x + 16, bar2_y), (p2_x + 16 + hp_fill2_w, bar2_y + 9)], radius=5, fill=hp_color2)
 
-    # Signature Move
-    draw.text((p2_x + 16, bar2_y + 20), f"MOVE: {player2_hero.get('move', 'Strike')[:32]}", fill=(150, 140, 175, 255), font=_get_font(11))
+    # Cursed Energy / Ultimate Bar Right
+    ce2_pct = max(0.0, min(1.0, p2_energy / 100.0))
+    ce2_y = bar2_y + 28
+    ce2_label = "DOMAIN READY (100%)" if p2_energy >= 100 else f"CURSED ENERGY: {p2_energy}%"
+    ce2_col = (250, 204, 21) if p2_energy >= 100 else (165, 243, 252)
+    draw.text((p2_x + 16, ce2_y - 14), ce2_label, fill=ce2_col, font=_get_font(10, bold=True))
+    draw.rounded_rectangle([(p2_x + 16, ce2_y), (p2_x + 16 + bar1_w, ce2_y + 8)], radius=4, fill=(28, 22, 42, 255))
+    ce_fill2_w = int(bar1_w * ce2_pct)
+    ce_color2 = (234, 179, 8) if p2_energy >= 100 else (6, 182, 212)
+    if ce_fill2_w > 0:
+        draw.rounded_rectangle([(p2_x + 16, ce2_y), (p2_x + 16 + ce_fill2_w, ce2_y + 8)], radius=4, fill=ce_color2)
 
     # ------------------ CENTER VS EMBLEM ------------------
     vs_cx, vs_cy = w // 2, 200

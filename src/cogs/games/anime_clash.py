@@ -397,6 +397,118 @@ RANK_THRESHOLDS: list[tuple[int, str]] = [
     (120, "National Monarch"),
 ]
 
+# Champion Ultimate Moves & Domain Expansions (Triggered at 100% Cursed Energy)
+CHAMPION_ULTIMATES: dict[str, dict[str, Any]] = {
+    "tanjiro": {
+        "name": "Hinokami Kagura: Sun Halo Dragon",
+        "domain": "Blazing Sun Dance",
+        "quote": "Set your heart ablaze! Hinokami Kagura: Sun Halo Dragon Head Dance!",
+        "dmg_mult": 2.2,
+    },
+    "zenitsu": {
+        "name": "Seventh Form: Honoikazuchi no Kami",
+        "domain": "Flaming Thunder God",
+        "quote": "Thunder Breathing, Seventh Form... Flaming Thunder God!",
+        "dmg_mult": 2.3,
+    },
+    "deku": {
+        "name": "One For All 100%: United States of Smash",
+        "domain": "Vestiges Resonance",
+        "quote": "I have to be the symbol of peace! UNITED STATES OF SMASH!",
+        "dmg_mult": 2.2,
+    },
+    "killua": {
+        "name": "Godspeed: Thunderbolt Whirlwind",
+        "domain": "Electric Aura Field",
+        "quote": "If you move even a millimeter, I will tear your throat out. GODSPEED!",
+        "dmg_mult": 2.25,
+    },
+    "megumi": {
+        "name": "Domain Expansion: Chimera Shadow Garden",
+        "domain": "Chimera Shadow Garden",
+        "quote": "Domain Expansion... Chimera Shadow Garden! With this treasure I summon!",
+        "dmg_mult": 2.4,
+    },
+    "choso": {
+        "name": "Blood Manipulation: Supernova",
+        "domain": "Crimson Blood Realm",
+        "quote": "As an older brother, I will protect you to the bitter end! SUPERNOVA!",
+        "dmg_mult": 2.2,
+    },
+    "zoro": {
+        "name": "King of Hell, Three-Sword Serpent: 103 Mercies",
+        "domain": "King of Hell Domain",
+        "quote": "I promised Luffy... I will never lose again! King of Hell, Three-Sword Serpent!",
+        "dmg_mult": 2.35,
+    },
+    "levi": {
+        "name": "Spur Slash: Beyond the Walls",
+        "domain": "Survey Corps Blade Dance",
+        "quote": "Give up on your dreams and die. Spiral slash!",
+        "dmg_mult": 2.3,
+    },
+    "toji": {
+        "name": "Heavenly Restriction: Soul Splitter",
+        "domain": "Zero Cursed Energy Purge",
+        "quote": "You should have died in the gutter like the rest of us. Inverted Spear pierce!",
+        "dmg_mult": 2.4,
+    },
+    "itachi": {
+        "name": "Tsukuyomi & Susanoo Totsuka Blade",
+        "domain": "Infinite Tsukuyomi Realm",
+        "quote": "You are weak because you lack hatred... Susanoo Totsuka Blade Seal!",
+        "dmg_mult": 2.45,
+    },
+    "rengoku": {
+        "name": "Flame Breathing Ninth Form: Rengoku",
+        "domain": "Purgatory Heart",
+        "quote": "SET YOUR HEART ABLAZE! Ninth Form: PURGATORY!",
+        "dmg_mult": 2.4,
+    },
+    "gojo": {
+        "name": "Domain Expansion: Infinite Void",
+        "domain": "Infinite Void",
+        "quote": "Throughout heaven and earth, I alone am the honored one. Domain Expansion: Infinite Void... Hollow Purple!",
+        "dmg_mult": 2.6,
+    },
+    "sukuna": {
+        "name": "Domain Expansion: Malevolent Shrine",
+        "domain": "Malevolent Shrine",
+        "quote": "Domain Expansion: Malevolent Shrine! Dismantle and Cleave until nothing remains!",
+        "dmg_mult": 2.6,
+    },
+    "sukuna_true": {
+        "name": "World Cutting Slash: Spatial Severance",
+        "domain": "True Form Malevolent Shrine",
+        "quote": "Scale of the Dragon. Recoil. Twin Meteors. World Cutting Slash!",
+        "dmg_mult": 2.7,
+    },
+    "jinwoo": {
+        "name": "Ruler's Authority & Shadow Extraction: Arise",
+        "domain": "Shadow Sovereign Territory",
+        "quote": "The hunt begins now. ARISE, my soldiers!",
+        "dmg_mult": 2.5,
+    },
+    "jinwoo_monarch": {
+        "name": "Monarch of Shadows: Cataclysmic Annihilation",
+        "domain": "Domain of the Monarch",
+        "quote": "I am the Monarch of Shadows. Bow before the ruler of Death!",
+        "dmg_mult": 2.7,
+    },
+    "luffy": {
+        "name": "Gear 5: Bajrang Gun",
+        "domain": "Sun God Nika Domain",
+        "quote": "AHAHAHA! I can do whatever I want now! GOMU GOMU NO BAJRANG GUN!",
+        "dmg_mult": 2.5,
+    },
+    "madara": {
+        "name": "Perfect Susanoo & Tengai Shinsei Dual Meteors",
+        "domain": "Sovereign Susanoo Domain",
+        "quote": "Would you like these clones to use Susanoo or not? Tengai Shinsei!",
+        "dmg_mult": 2.6,
+    },
+}
+
 THEME_ORDER = ["shadow", "crimson", "cyber", "gold"]
 
 
@@ -724,6 +836,9 @@ class AnimeClash(commands.Cog):
             p2_max_hp=100,
             winner_num=0,
             turn_action_text=f"ROUND 1: Duel Initiated! Choose your combat action below.",
+            p1_energy=0,
+            p2_energy=0,
+            domain_active=None,
         )
         discord_file = discord.File(card_buf, filename="battle_clash.png")
 
@@ -740,6 +855,103 @@ class AnimeClash(commands.Cog):
 
         view = SoloBattleSessionView(self, ctx, p1, p1_main, rival_hero, p1_profile)
         await send_container_response(ctx, container, file=discord_file, view=view)
+
+    # ==========================================
+    # COMMAND: !powers / !lore / !animeinfo (AniList API Live Lore)
+    # ==========================================
+    @commands.command(name="powers", aliases=["power", "animeinfo", "charinfo", "lore"])
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def powers_cmd(self, ctx: CustomContext, *, character_name: str) -> None:
+        """
+        Look up full canonical powers, abilities, and anime lore via AniList API.
+        Example: `!powers Gojo`, `!powers Sukuna`, `!powers Madara`, `!powers Naruto`
+        """
+        search_query = character_name.strip()
+        if not search_query:
+            await ctx.send_error("Please specify an anime character name! Example: `!powers Satoru Gojo`")
+            return
+
+        graphql_query = """
+        query ($search: String) {
+          Character (search: $search) {
+            id
+            name {
+              full
+              native
+              alternative
+            }
+            image {
+              large
+            }
+            description
+            media (perPage: 1, sort: POPULARITY_DESC) {
+              nodes {
+                title {
+                  romaji
+                  english
+                }
+              }
+            }
+          }
+        }
+        """
+
+        session = self.bot.session
+        if not session:
+            await ctx.send_error("Bot HTTP session is not ready. Please try again.")
+            return
+
+        try:
+            async with session.post(
+                "https://graphql.anilist.co",
+                json={"query": graphql_query, "variables": {"search": search_query}},
+                headers={"Content-Type": "application/json", "User-Agent": "KyroBot/1.0"},
+                timeout=10,
+            ) as resp:
+                if resp.status != 200:
+                    await ctx.send_error(f"Character `{search_query}` not found on AniList database.")
+                    return
+                data = await resp.json()
+                char = data.get("data", {}).get("Character")
+                if not char:
+                    await ctx.send_error(f"Character `{search_query}` not found.")
+                    return
+        except Exception as e:
+            await ctx.send_error(f"Failed to fetch character powers: {e}")
+            return
+
+        full_name = char["name"]["full"]
+        native_name = char["name"].get("native") or ""
+        alt_names = char["name"].get("alternative") or []
+        alias_str = f" • AKA: {', '.join(alt_names[:2])}" if alt_names else ""
+
+        media_nodes = char.get("media", {}).get("nodes", [])
+        anime_title = "Unknown Anime"
+        if media_nodes:
+            anime_title = media_nodes[0].get("title", {}).get("english") or media_nodes[0].get("title", {}).get("romaji", "Anime Series")
+
+        raw_desc = char.get("description") or "No canonical ability summary available on AniList."
+        # Clean spoiler tags, markdown formatting
+        clean_desc = raw_desc.replace("~!~", "").replace("~!", "").replace("!~", "")
+        clean_desc = clean_desc.replace("__", "").replace("**", "")
+        if len(clean_desc) > 650:
+            clean_desc = clean_desc[:650] + "..."
+
+        container = KyroContainer(accent_color=None)
+        img_url = char.get("image", {}).get("large")
+        if img_url:
+            container.add_media(img_url)
+
+        container.add_section(
+            content=(
+                f"### {full_name.upper()} {f'({native_name})' if native_name else ''}\n"
+                f"> **Origin Anime:** « {anime_title} »{alias_str}\n"
+                f"> **Canonical Powers & Lore:**\n"
+                f"{clean_desc}\n\n"
+                f"> ⚔️ *Tip: You can fight or summon this champion in `!battle` and `!hunter` chests!*"
+            )
+        )
+        await send_container_response(ctx, container)
 
 
 # ==========================================
@@ -1378,6 +1590,9 @@ class SoloBattleSessionView(discord.ui.View):
         self.p1_hp = 100
         self.p2_max_hp = 100
         self.p2_hp = 100
+        self.p1_energy = 0
+        self.p2_energy = 0
+        self.domain_active: str | None = None
         self.round_num = 1
         self.battle_concluded = False
 
@@ -1405,23 +1620,79 @@ class SoloBattleSessionView(discord.ui.View):
         p1_crit = random.random() < 0.18
         rival_crit = random.random() < 0.12
 
-        # 1. Calculate Player and Rival Damage
-        if action_type == "attack":
+        # 1. Action Resolution
+        if action_type == "ultimate":
+            if self.p1_energy < 100:
+                await interaction.response.send_message(
+                    f"⚠️ Cursed Energy at {self.p1_energy}%! Charge it to 100% using Attack, Technique, or Parries to unleash Domain Expansion.",
+                    ephemeral=True,
+                )
+                return
+
+            self.p1_energy = 0
+            ult_info = CHAMPION_ULTIMATES.get(
+                p1_id,
+                {
+                    "name": "Domain Expansion",
+                    "domain": "Cursed Domain",
+                    "quote": "Domain Expansion!",
+                    "dmg_mult": 2.5,
+                },
+            )
+            self.domain_active = ult_info["domain"]
+            base_p1 = random.randint(55, 72) + (14 if self.p1_adv else 0)
+            p1_dmg = int(base_p1 * ult_info.get("dmg_mult", 2.5))
+            rival_dmg = random.randint(6, 12)
+            turn_narrative = f"Round {self.round_num}: 🌌 DOMAIN EXPANSION! {ult_info['name'][:22]} strikes for {p1_dmg} DMG!"
+            turn_narrative_full = (
+                f"🌌 **DOMAIN EXPANSION: {ult_info['domain'].upper()}!**\n"
+                f'*"{ult_info["quote"]}"*\n'
+                f"> **💥 {self.my_hero['name']}** unleashed **{ult_info['name']}** dealing **{p1_dmg} CRITICAL DMG**!\n"
+                f"> **{self.rival_hero['name']}** was paralyzed within the domain and countered for only `{rival_dmg} DMG`."
+            )
+
+        elif action_type == "attack":
+            self.p1_energy = min(100, self.p1_energy + 25)
+            self.p2_energy = min(100, self.p2_energy + random.choice([20, 25]))
             base_p1 = random.randint(22, 28) + (7 if self.p1_adv else 0)
             p1_dmg = int(base_p1 * 1.45) if p1_crit else base_p1
 
             base_rival = random.randint(16, 24) + (5 if self.p2_adv else 0)
             rival_dmg = int(base_rival * 1.35) if rival_crit else base_rival
 
-            cry = p1_lines.get("crit" if p1_crit else "cry", "Take this!")
-            crit_flag = "💥 CRITICAL! " if p1_crit else ""
-            turn_narrative = f"Round {self.round_num}: {crit_flag}{self.my_hero['name']} deals {p1_dmg} DMG! Rival hits for {rival_dmg}."
-            turn_narrative_full = (
-                f'*"{cry}"*\n'
-                f"> **{crit_flag}{self.my_hero['name']}** landed a strike dealing **{p1_dmg} DMG**!\n"
-                f"> **{self.rival_hero['name']}** struck back with **{rival_dmg} DMG**."
-            )
+            # Dynamic Anime Combat Events
+            roll = random.random()
+            if roll < 0.16:
+                p1_dmg = int(p1_dmg * 1.6)
+                turn_narrative = f"Round {self.round_num}: 💥 BLACK FLASH! {self.my_hero['name']} lands spatial hit for {p1_dmg} DMG!"
+                turn_narrative_full = (
+                    f"> 💥 **BLACK FLASH!** Space distorts with black cursed lightning as **{self.my_hero['name']}** strikes for **{p1_dmg} DMG**!\n"
+                    f"> **{self.rival_hero['name']}** countered for **{rival_dmg} DMG**."
+                )
+            elif roll < 0.28:
+                rival_dmg = 0
+                turn_narrative = f"Round {self.round_num}: ⚡ FLASH STEP! {self.my_hero['name']} dealt {p1_dmg} DMG & dodged counter!"
+                turn_narrative_full = (
+                    f"> ⚡ **FLASH STEP!** **{self.my_hero['name']}** landed **{p1_dmg} DMG** and vanished in an afterimage, taking `0 DMG` from counter!"
+                )
+            elif roll < 0.40:
+                turn_narrative = f"Round {self.round_num}: ⚔️ WEAPON CLASH! Both fighters locked blades! {p1_dmg} vs {rival_dmg}."
+                turn_narrative_full = (
+                    f"> ⚔️ **WEAPON CLASH!** Sparks flew as both attacks collided! **{self.my_hero['name']}** broke through for **{p1_dmg} DMG**! (Took `{rival_dmg} DMG`)."
+                )
+            else:
+                cry = p1_lines.get("crit" if p1_crit else "cry", "Take this!")
+                crit_flag = "💥 CRITICAL! " if p1_crit else ""
+                turn_narrative = f"Round {self.round_num}: {crit_flag}{self.my_hero['name']} deals {p1_dmg} DMG! Rival hits for {rival_dmg}."
+                turn_narrative_full = (
+                    f'*"{cry}"*\n'
+                    f"> **{crit_flag}{self.my_hero['name']}** landed a strike dealing **{p1_dmg} DMG**!\n"
+                    f"> **{self.rival_hero['name']}** struck back with **{rival_dmg} DMG**."
+                )
+
         elif action_type == "technique":
+            self.p1_energy = min(100, self.p1_energy + 35)
+            self.p2_energy = min(100, self.p2_energy + random.choice([20, 25]))
             base_p1 = random.randint(34, 46) + (9 if self.p1_adv else 0)
             p1_dmg = int(base_p1 * 1.4) if p1_crit else base_p1
 
@@ -1437,6 +1708,7 @@ class SoloBattleSessionView(discord.ui.View):
                 f"> **{crit_flag}{self.my_hero['name']}** unleashed **{move_name}** for **{p1_dmg} DMG**!\n"
                 f"> **{self.rival_hero['name']}** absorbed the shock and countered for **{rival_dmg} DMG**."
             )
+
         elif action_type == "potion":
             if self.profile.get("healing_potions", 0) <= 0:
                 await interaction.response.send_message("You have no Healing Potions left in your pouch!", ephemeral=True)
@@ -1456,6 +1728,8 @@ class SoloBattleSessionView(discord.ui.View):
                 f"> 🧪 **COMBAT ELIXIR!** **{self.my_hero['name']}** consumed a Healing Potion and recovered **+{heal_amt} HP**! (Took `{rival_dmg} DMG` while drinking)."
             )
         else:  # guard
+            self.p1_energy = min(100, self.p1_energy + 20)
+            self.p2_energy = min(100, self.p2_energy + 15)
             p1_dmg = random.randint(15, 22)
             raw_rival = random.randint(18, 26) + (4 if self.p2_adv else 0)
             rival_dmg = max(3, int(raw_rival * 0.25))
@@ -1464,6 +1738,14 @@ class SoloBattleSessionView(discord.ui.View):
             turn_narrative_full = (
                 f"> 🛡️ **PERFECT PARRY!** **{self.my_hero['name']}** blocked 75% damage and counter-attacked for **{p1_dmg} DMG**! (Took only `{rival_dmg} DMG`)."
             )
+
+        # Check Rival Ultimate Awakening
+        if self.p2_energy >= 100 and (self.p2_hp - p1_dmg) > 0 and action_type != "ultimate":
+            self.p2_energy = 0
+            rival_ult = CHAMPION_ULTIMATES.get(rival_id, {})
+            if rival_ult:
+                rival_dmg = int(rival_dmg * 1.5)
+                turn_narrative_full += f"\n> ⚠️ **RIVAL AWAKENED!** **{self.rival_hero['name']}** countered with **{rival_ult['name']}**!"
 
         # 2. Update HP
         self.p2_hp = max(0, self.p2_hp - p1_dmg)
@@ -1558,6 +1840,9 @@ class SoloBattleSessionView(discord.ui.View):
             turn_action_text=turn_narrative,
             chest_reward=chest_dropped,
             gold_reward=gold_win,
+            p1_energy=self.p1_energy,
+            p2_energy=self.p2_energy,
+            domain_active=self.domain_active,
         )
 
         discord_file = discord.File(card_buf, filename="battle_clash.png")
@@ -1598,21 +1883,33 @@ class SoloBattleSessionView(discord.ui.View):
                 )
             )
 
+            # Update Domain Button label and style based on Cursed Energy
+            if self.p1_energy >= 100:
+                self.ultimate_btn.label = "🔥 UNLEASH DOMAIN (100% Ready!)"
+                self.ultimate_btn.style = discord.ButtonStyle.danger
+            else:
+                self.ultimate_btn.label = f"🔥 Domain [CE: {self.p1_energy}%]"
+                self.ultimate_btn.style = discord.ButtonStyle.secondary
+
         await edit_container_response(interaction, container, file=discord_file, view=self)
 
-    @discord.ui.button(label="Attack", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Attack", style=discord.ButtonStyle.primary, row=0)
     async def attack_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._execute_turn(interaction, "attack")
 
-    @discord.ui.button(label="Technique", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Technique", style=discord.ButtonStyle.success, row=0)
     async def technique_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._execute_turn(interaction, "technique")
 
-    @discord.ui.button(label="Guard & Counter", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Guard & Counter", style=discord.ButtonStyle.secondary, row=0)
     async def guard_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._execute_turn(interaction, "guard")
 
-    @discord.ui.button(label="Use Potion (+35 HP)", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="🔥 Domain [CE: 0%]", style=discord.ButtonStyle.secondary, row=1)
+    async def ultimate_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._execute_turn(interaction, "ultimate")
+
+    @discord.ui.button(label="Use Potion (+35 HP)", style=discord.ButtonStyle.secondary, row=1)
     async def potion_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._execute_turn(interaction, "potion")
 

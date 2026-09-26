@@ -226,6 +226,43 @@ def build_container_payload(
     return payload
 
 
+def _prepare_multipart_form(
+    payload: dict[str, Any],
+    file_list: list[discord.File],
+    wrapper: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Constructs compliant multipart form fields for Discord REST API file uploads.
+    Injects attachments metadata array into payload and attaches binary streams as files[i].
+    """
+    for f in file_list:
+        try:
+            f.reset()
+        except Exception:
+            pass
+
+    payload["attachments"] = [
+        {"id": i, "filename": f.filename}
+        for i, f in enumerate(file_list)
+    ]
+
+    top_json = wrapper if wrapper is not None else payload
+    if wrapper is not None and "data" in wrapper:
+        wrapper["data"] = payload
+
+    form: list[dict[str, Any]] = [
+        {"name": "payload_json", "value": discord.utils._to_json(top_json)}
+    ]
+    for i, f in enumerate(file_list):
+        form.append({
+            "name": f"files[{i}]",
+            "value": f.fp,
+            "filename": f.filename,
+            "content_type": "application/octet-stream",
+        })
+    return form
+
+
 async def send_container_response(
     interaction_or_ctx: discord.Interaction | commands.Context | discord.abc.Messageable | discord.User | discord.Member,
     container: KyroContainer | list[KyroContainer],
@@ -261,7 +298,7 @@ async def send_container_response(
 
         if interaction.response.is_done():
             if file_list:
-                form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                form = _prepare_multipart_form(payload, file_list)
                 msg_data = await bot.http.request(
                     discord.http.Route(
                         "POST",
@@ -287,7 +324,7 @@ async def send_container_response(
         else:
             # Send initial response via raw interaction callback
             if file_list:
-                form = [{"name": "payload_json", "value": discord.utils._to_json({"type": 4, "data": payload})}]
+                form = _prepare_multipart_form(payload, file_list, wrapper={"type": 4, "data": payload})
                 res = await bot.http.request(
                     discord.http.Route(
                         "POST",
@@ -334,7 +371,7 @@ async def send_container_response(
         # Direct bot channel message dispatch via raw Components V2 payload
         try:
             if file_list:
-                form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                form = _prepare_multipart_form(payload, file_list)
                 msg_data = await http_client.request(
                     discord.http.Route("POST", f"/channels/{channel_id}/messages"),
                     form=form,
@@ -437,7 +474,7 @@ async def edit_container_response(
         if http_client:
             try:
                 if file_list:
-                    form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                    form = _prepare_multipart_form(payload, file_list)
                     await http_client.request(
                         discord.http.Route(
                             "PATCH",
@@ -476,7 +513,7 @@ async def edit_container_response(
     try:
         if not interaction.response.is_done():
             if file_list:
-                form = [{"name": "payload_json", "value": discord.utils._to_json({"type": 7, "data": payload})}]
+                form = _prepare_multipart_form(payload, file_list, wrapper={"type": 7, "data": payload})
                 await bot.http.request(
                     discord.http.Route(
                         "POST",
@@ -500,7 +537,7 @@ async def edit_container_response(
         else:
             # 2. If interaction is already done/deferred, edit original webhook message
             if file_list:
-                form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                form = _prepare_multipart_form(payload, file_list)
                 msg_data = await bot.http.request(
                     discord.http.Route(
                         "PATCH",
@@ -532,7 +569,7 @@ async def edit_container_response(
     try:
         if interaction.message and interaction.channel_id:
             if file_list:
-                form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                form = _prepare_multipart_form(payload, file_list)
                 await bot.http.request(
                     discord.http.Route(
                         "PATCH",

@@ -358,23 +358,25 @@ class AnimeClash(commands.Cog):
 
     async def get_equipped_hero(self, profile: dict[str, Any]) -> dict[str, Any]:
         """Fetch the equipped hero details."""
-        user_id = profile["user_id"]
+        user_id = profile.get("user_id", 0)
         equipped_id = profile.get("equipped_hero_id") or "tanjiro"
 
-        row = await self.bot.db.fetch_one(
-            "SELECT * FROM game_anime_inventory WHERE user_id = $1 AND hero_id = $2;",
-            user_id,
-            equipped_id,
-        )
+        row = None
+        if user_id:
+            row = await self.bot.db.fetch_one(
+                "SELECT * FROM game_anime_inventory WHERE user_id = $1 AND hero_id = $2;",
+                user_id,
+                equipped_id,
+            )
         if not row or equipped_id not in HERO_REGISTRY:
-            base = HERO_REGISTRY["tanjiro"].copy()
+            base = HERO_REGISTRY.get(equipped_id, HERO_REGISTRY["tanjiro"]).copy()
             base["stars"] = 1
             base["power_bonus"] = 0
             return base
 
         base = HERO_REGISTRY[equipped_id].copy()
-        base["stars"] = row["stars"]
-        base["power_bonus"] = row["power_bonus"]
+        base["stars"] = row.get("stars", 1) if isinstance(row, dict) else (row["stars"] if hasattr(row, "__getitem__") else 1)
+        base["power_bonus"] = row.get("power_bonus", 0) if isinstance(row, dict) else (row["power_bonus"] if hasattr(row, "__getitem__") else 0)
         return base
 
     def compute_rank(self, wins: int) -> str:
@@ -449,7 +451,7 @@ class AnimeClash(commands.Cog):
         discord_file = discord.File(img_buffer, filename="hunter_profile.png")
 
         # Container / Embed Interface with Media Gallery attachment
-        container = KyroContainer(accent_color=THEMES.get(theme, THEMES["shadow"])["accent"][0])
+        container = KyroContainer(accent_color=None)
         container.add_media("attachment://hunter_profile.png")
         container.add_section(
             content=(
@@ -501,13 +503,13 @@ class AnimeClash(commands.Cog):
         # 1. 1v1 PVP DUEL CHALLENGE
         if opponent and opponent.id != p1.id:
             if opponent.bot:
-                await ctx.error("You cannot challenge bots to a duel! Use `!battle` to fight AI rivals.")
+                await ctx.send_error("You cannot challenge bots to a duel! Use `!battle` to fight AI rivals.")
                 return
 
             p2_profile = await self.get_or_create_profile(opponent.id)
             p2_heroes = await self.get_user_heroes(opponent.id)
 
-            container = KyroContainer(accent_color=0xA855F7)
+            container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
                     f"### Anime Duel Challenge!\n"
@@ -559,7 +561,7 @@ class AnimeClash(commands.Cog):
         )
         discord_file = discord.File(card_buf, filename="battle_clash.png")
 
-        container = KyroContainer(accent_color=0x38BDF8)
+        container = KyroContainer(accent_color=None)
         container.add_media("attachment://battle_clash.png")
         container.add_section(
             content=(
@@ -702,7 +704,7 @@ class ProfileHubView(discord.ui.View):
         )
 
         file = discord.File(card_buf, filename="chest_reveal.png")
-        container = KyroContainer(accent_color=0xEAB308 if is_dup else 0x22C55E)
+        container = KyroContainer(accent_color=None)
         container.add_media("attachment://chest_reveal.png")
         container.add_section(
             content=(
@@ -742,7 +744,7 @@ class ProfileHubView(discord.ui.View):
             return
 
         equip_view = EquipRosterView(self.cog, self.user, self.profile, self.heroes)
-        container = KyroContainer(accent_color=0x9333EA)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"### Hunter Champion Roster ({len(self.heroes)} Unlocked)\n"
@@ -860,7 +862,7 @@ class SoloBattleSessionView(discord.ui.View):
         self.p2_max_hp = 100
         self.p2_hp = 100
         self.round_num = 1
-        self.is_finished = False
+        self.battle_concluded = False
 
         e1 = my_hero.get("element", "Physical")
         e2 = rival_hero.get("element", "Physical")
@@ -874,7 +876,7 @@ class SoloBattleSessionView(discord.ui.View):
         return True
 
     async def _execute_turn(self, interaction: discord.Interaction, action_type: str) -> None:
-        if self.is_finished:
+        if self.battle_concluded:
             return
 
         # 1. Calculate Player and Rival Damage
@@ -914,7 +916,8 @@ class SoloBattleSessionView(discord.ui.View):
         xp_gain = 0
 
         if self.p2_hp <= 0 or self.p1_hp <= 0:
-            self.is_finished = True
+            self.battle_concluded = True
+            self.stop()
             winner_num = 1 if self.p2_hp <= 0 else 2
 
             if winner_num == 1:
@@ -997,9 +1000,7 @@ class SoloBattleSessionView(discord.ui.View):
         )
 
         discord_file = discord.File(card_buf, filename="battle_clash.png")
-        container = KyroContainer(
-            accent_color=0x22C55E if winner_num == 1 else (0xEF4444 if winner_num == 2 else 0x38BDF8)
-        )
+        container = KyroContainer(accent_color=None)
         container.add_media("attachment://battle_clash.png")
 
         if winner_num == 1:
@@ -1008,8 +1009,8 @@ class SoloBattleSessionView(discord.ui.View):
                 f"> **{self.my_hero['name']}** (« {self.my_hero.get('anime', 'Anime')} ») defeated **{self.rival_hero['name']}**!\n"
                 f"> **Spoils of War:** `+{gold_win} Gold` | `+{xp_gain} XP`\n"
             )
-            if chest_reward:
-                title_text += f"> **Vault Drop:** `{chest_reward}` stored in your vault."
+            if chest_dropped:
+                title_text += f"> **Vault Drop:** `{chest_dropped}` stored in your vault."
             container.add_section(content=title_text)
             self.clear_items()
             self.add_item(BattleAgainButton(self.cog, self.ctx))
@@ -1060,7 +1061,7 @@ class BattleAgainButton(discord.ui.Button):
             await interaction.response.send_message("Only the player can battle again.", ephemeral=True)
             return
         await interaction.response.defer()
-        await self.cog.battle_cmd(self.ctx)
+        await self.ctx.invoke(self.cog.battle_cmd)
 
 
 class PvPInviteView(discord.ui.View):
@@ -1090,7 +1091,7 @@ class PvPInviteView(discord.ui.View):
             return
 
         self.stop()
-        container = KyroContainer(accent_color=0x22C55E)
+        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"### Duel Accepted!\n"
@@ -1108,7 +1109,7 @@ class PvPInviteView(discord.ui.View):
             return
 
         self.stop()
-        container = KyroContainer(accent_color=0xEF4444)
+        container = KyroContainer(accent_color=None)
         container.add_section(content=f"> **{self.opponent.display_name} declined the duel challenge.**")
         await edit_container_response(interaction, container)
 
@@ -1229,7 +1230,7 @@ class PvPLockFightersView(discord.ui.View):
         )
 
         file = discord.File(card_buf, filename="pvp_clash.png")
-        container = KyroContainer(accent_color=0x22C55E)
+        container = KyroContainer(accent_color=None)
         container.add_media("attachment://pvp_clash.png")
         container.add_section(
             content=(

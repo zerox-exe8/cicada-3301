@@ -92,7 +92,9 @@ class ErrorHandler(commands.Cog):
             return
 
         else:
-            logger.error(f"Unhandled error in '{ctx.command}': {error}", exc_info=error)
+            import traceback
+            tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+            logger.error(f"Unhandled error in '{ctx.command}': {error}\n{tb}")
             container.add_section(
                 content=(
                     f"**{err_icon}Internal Error**\n"

@@ -23,6 +23,7 @@ from src.core.bot import KyroBot
 from src.core.context import CustomContext
 from src.utils.anime_canvas import (
     ELEMENT_DATA,
+    HUNTER_BANNERS,
     RARITY_COLORS,
     THEMES,
     render_battle_clash,
@@ -232,6 +233,74 @@ HERO_REGISTRY: dict[str, dict[str, Any]] = {
     },
 }
 
+# Cursed Anime Weapons & Relics Registry (Equippable onto Hunter for Power Bonus)
+RELIC_REGISTRY: dict[str, dict[str, Any]] = {
+    "kamish_wrath": {
+        "id": "kamish_wrath",
+        "name": "Kamish's Wrath Daggers",
+        "anime": "Solo Leveling",
+        "rarity": "Mythic",
+        "power": 150,
+        "effect": "+150 Combat Power in all battles",
+    },
+    "inverted_spear": {
+        "id": "inverted_spear",
+        "name": "Inverted Spear of Heaven",
+        "anime": "Jujutsu Kaisen",
+        "rarity": "Legendary",
+        "power": 130,
+        "effect": "+130 Combat Power & Technique Nullify",
+    },
+    "sukuna_finger": {
+        "id": "sukuna_finger",
+        "name": "Sukuna's Cursed Finger",
+        "anime": "Jujutsu Kaisen",
+        "rarity": "Legendary",
+        "power": 125,
+        "effect": "+125 Combat Power & Cursed Aura",
+    },
+    "enma_blade": {
+        "id": "enma_blade",
+        "name": "Enma Cursed Katana",
+        "anime": "One Piece",
+        "rarity": "Legendary",
+        "power": 120,
+        "effect": "+120 Combat Power & Haki Infusion",
+    },
+    "nichirin_blade": {
+        "id": "nichirin_blade",
+        "name": "Demon Slayer Black Blade",
+        "anime": "Demon Slayer",
+        "rarity": "Epic",
+        "power": 90,
+        "effect": "+90 Combat Power & Sun Breathing Flow",
+    },
+    "playful_cloud": {
+        "id": "playful_cloud",
+        "name": "Playful Cloud Staff",
+        "anime": "Jujutsu Kaisen",
+        "rarity": "Epic",
+        "power": 85,
+        "effect": "+85 Combat Power & Pure Force",
+    },
+    "odm_blades": {
+        "id": "odm_blades",
+        "name": "Dual Ultra-Hard Steel Blades",
+        "anime": "Attack on Titan",
+        "rarity": "Rare",
+        "power": 60,
+        "effect": "+60 Combat Power & Agile Slashes",
+    },
+    "kunai_set": {
+        "id": "kunai_set",
+        "name": "Chakra Infused Kunai",
+        "anime": "Naruto",
+        "rarity": "Common",
+        "power": 40,
+        "effect": "+40 Combat Power",
+    },
+}
+
 # Champion Battle Quotes & Critical Strike Cries
 CHAMPION_BATTLE_LINES: dict[str, dict[str, str]] = {
     "tanjiro": {
@@ -385,6 +454,21 @@ class AnimeClash(commands.Cog):
                 await self.bot.db.execute(q)
             except Exception as e:
                 self.bot.logger.debug(f"Anime DB schema query notice: {e}")
+
+        alter_queries = [
+            "ALTER TABLE game_anime_profiles ADD COLUMN IF NOT EXISTS banner VARCHAR(64) DEFAULT 'shadow_realm';",
+            "ALTER TABLE game_anime_profiles ADD COLUMN IF NOT EXISTS banners_unlocked TEXT DEFAULT 'shadow_realm';",
+            "ALTER TABLE game_anime_profiles ADD COLUMN IF NOT EXISTS relic_id VARCHAR(64) DEFAULT NULL;",
+            "ALTER TABLE game_anime_profiles ADD COLUMN IF NOT EXISTS relic_power INT DEFAULT 0;",
+            "ALTER TABLE game_anime_profiles ADD COLUMN IF NOT EXISTS relics_unlocked TEXT DEFAULT '';",
+            "ALTER TABLE game_anime_profiles ADD COLUMN IF NOT EXISTS healing_potions INT DEFAULT 0;",
+        ]
+        for q in alter_queries:
+            try:
+                await self.bot.db.execute(q)
+            except Exception as e:
+                self.bot.logger.debug(f"Anime DB alter notice: {e}")
+
         self._schema_initialized = True
 
     async def get_or_create_profile(self, user_id: int) -> dict[str, Any]:
@@ -454,6 +538,8 @@ class AnimeClash(commands.Cog):
         base = HERO_REGISTRY[equipped_id].copy()
         base["stars"] = row.get("stars", 1) if isinstance(row, dict) else (row["stars"] if hasattr(row, "__getitem__") else 1)
         base["power_bonus"] = row.get("power_bonus", 0) if isinstance(row, dict) else (row["power_bonus"] if hasattr(row, "__getitem__") else 0)
+        # Add player's equipped relic / weapon power bonus
+        base["power_bonus"] += profile.get("relic_power", 0)
         return base
 
     def compute_rank(self, wins: int) -> str:
@@ -493,7 +579,6 @@ class AnimeClash(commands.Cog):
                 except Exception:
                     pass
 
-
         lvl = profile.get("level", 1)
         xp = profile.get("xp", 0)
         xp_needed = lvl * 250
@@ -506,7 +591,7 @@ class AnimeClash(commands.Cog):
             + profile.get("chests_monarch", 0)
         )
 
-        theme = profile.get("theme", "shadow")
+        active_banner = profile.get("banner") or profile.get("theme", "shadow_realm")
         img_buffer = await asyncio.to_thread(
             render_hunter_profile,
             avatar_bytes=av_bytes,
@@ -522,7 +607,7 @@ class AnimeClash(commands.Cog):
             gold=profile.get("gold", 150),
             chests_count=chests_total,
             hero_data=equipped_hero,
-            theme_key=theme,
+            theme_key=active_banner,
         )
 
         discord_file = discord.File(img_buffer, filename="hunter_profile.png")
@@ -685,7 +770,7 @@ class ProfileHubView(discord.ui.View):
 
     @discord.ui.button(label="Open Chest", style=discord.ButtonStyle.primary)
     async def open_chests_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        """Instantly unbox the highest available chest and update message in-place with unboxing card."""
+        """Instantly unbox the highest available chest with multi-tier loot variety."""
         b = self.profile.get("chests_bronze", 0)
         s = self.profile.get("chests_silver", 0)
         e = self.profile.get("chests_epic", 0)
@@ -717,105 +802,300 @@ class ProfileHubView(discord.ui.View):
         )
         self.profile[col_name] -= 1
 
-        # Determine loot pool and rewards
+        # Determine loot category & rewards based on chest tier
         if target_tier == "bronze":
             chest_display_name = "Bronze Battle Chest"
             gold_reward = random.randint(50, 120)
-            loot_pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Common", "Rare"]]
+            loot_type = random.choices(["jackpot", "consumable", "relic", "hero"], weights=[35, 25, 20, 20])[0]
         elif target_tier == "silver":
             chest_display_name = "Silver Cursed Chest"
             gold_reward = random.randint(150, 280)
-            loot_pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Rare", "Epic"]]
+            loot_type = random.choices(["banner", "relic", "hero", "consumable", "jackpot"], weights=[25, 25, 25, 15, 10])[0]
         elif target_tier == "epic":
             chest_display_name = "Shadow Epic Chest"
             gold_reward = random.randint(300, 600)
-            loot_pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Epic", "Legendary"]]
+            loot_type = random.choices(["relic", "banner", "hero", "jackpot"], weights=[30, 30, 25, 15])[0]
         else:  # monarch
             chest_display_name = "Monarch Divine Chest"
             gold_reward = random.randint(800, 1500)
-            loot_pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Legendary", "Mythic"]]
+            loot_type = random.choices(["hero", "relic", "banner"], weights=[35, 35, 30])[0]
 
-        if not loot_pool:
-            loot_pool = list(HERO_REGISTRY.keys())
+        if loot_type == "relic":
+            # Pool based on tier
+            if target_tier == "bronze":
+                pool = [k for k, v in RELIC_REGISTRY.items() if v["rarity"] in ["Common", "Rare"]]
+            elif target_tier == "silver":
+                pool = [k for k, v in RELIC_REGISTRY.items() if v["rarity"] in ["Rare", "Epic"]]
+            elif target_tier == "epic":
+                pool = [k for k, v in RELIC_REGISTRY.items() if v["rarity"] in ["Epic", "Legendary"]]
+            else:
+                pool = [k for k, v in RELIC_REGISTRY.items() if v["rarity"] in ["Legendary", "Mythic"]]
+            if not pool:
+                pool = list(RELIC_REGISTRY.keys())
 
-        chosen_id = random.choice(loot_pool)
-        hero = HERO_REGISTRY[chosen_id].copy()
+            chosen_id = random.choice(pool)
+            relic = RELIC_REGISTRY[chosen_id].copy()
 
-        # Check duplicate
-        row = await self.cog.bot.db.fetch_one(
-            "SELECT * FROM game_anime_inventory WHERE user_id = $1 AND hero_id = $2;",
-            interaction.user.id,
-            chosen_id,
-        )
+            unlocked_raw = self.profile.get("relics_unlocked") or ""
+            unlocked_list = [r.strip() for r in unlocked_raw.split(",") if r.strip()]
+            is_dup = chosen_id in unlocked_list
 
-        is_dup = False
-        if row:
-            is_dup = True
+            if not is_dup:
+                unlocked_list.append(chosen_id)
+                self.profile["relics_unlocked"] = ",".join(unlocked_list)
+                if not self.profile.get("relic_id") or relic["power"] > self.profile.get("relic_power", 0):
+                    self.profile["relic_id"] = chosen_id
+                    self.profile["relic_power"] = relic["power"]
+
+                await self.cog.bot.db.execute(
+                    """
+                    UPDATE game_anime_profiles 
+                    SET relics_unlocked = $1, relic_id = $2, relic_power = $3, gold = gold + $4 
+                    WHERE user_id = $5;
+                    """,
+                    ",".join(unlocked_list),
+                    self.profile.get("relic_id"),
+                    self.profile.get("relic_power", 0),
+                    gold_reward,
+                    interaction.user.id,
+                )
+            else:
+                gold_reward += 200
+                if self.profile.get("relic_id") == chosen_id:
+                    self.profile["relic_power"] = self.profile.get("relic_power", 0) + 15
+                    await self.cog.bot.db.execute(
+                        "UPDATE game_anime_profiles SET relic_power = relic_power + 15, gold = gold + $1 WHERE user_id = $2;",
+                        gold_reward,
+                        interaction.user.id,
+                    )
+                else:
+                    await self.cog.bot.db.execute(
+                        "UPDATE game_anime_profiles SET gold = gold + $1 WHERE user_id = $2;",
+                        gold_reward,
+                        interaction.user.id,
+                    )
+
+            self.profile["gold"] = self.profile.get("gold", 150) + gold_reward
+            card_buf = await asyncio.to_thread(
+                render_chest_open_card,
+                user_name=interaction.user.display_name,
+                chest_type=chest_display_name,
+                gold_reward=gold_reward,
+                reward_type="relic",
+                reward_data=relic,
+                is_duplicate=is_dup,
+            )
+            section_msg = (
+                f"### {chest_display_name.upper()} UNBOXED!\n"
+                f"> **Cursed Relic:** **{relic['name']}** (« {relic.get('anime', 'Anime')} ») • `{relic['rarity'].upper()}`\n"
+                f"> **Combat Perk:** `+{relic['power']} Power` boost ({relic.get('effect', '')})\n"
+                f"> **Status:** {'Equipped to your Hunter!' if self.profile.get('relic_id') == chosen_id else 'Added to Relic Vault'}\n"
+                f"> **Treasury Spoils:** `+{gold_reward} Gold` added to vault."
+            )
+
+        elif loot_type == "banner":
+            if target_tier in ["bronze", "silver"]:
+                pool = [k for k, v in HUNTER_BANNERS.items() if v["rarity"] in ["Common", "Rare", "Epic"]]
+            elif target_tier == "epic":
+                pool = [k for k, v in HUNTER_BANNERS.items() if v["rarity"] in ["Epic", "Legendary"]]
+            else:
+                pool = [k for k, v in HUNTER_BANNERS.items() if v["rarity"] in ["Legendary", "Mythic"]]
+            if not pool:
+                pool = list(HUNTER_BANNERS.keys())
+
+            chosen_id = random.choice(pool)
+            banner = HUNTER_BANNERS[chosen_id].copy()
+
+            unlocked_raw = self.profile.get("banners_unlocked") or "shadow_realm"
+            unlocked_list = [b.strip() for b in unlocked_raw.split(",") if b.strip()]
+            is_dup = chosen_id in unlocked_list
+
+            if not is_dup:
+                unlocked_list.append(chosen_id)
+                self.profile["banners_unlocked"] = ",".join(unlocked_list)
+                self.profile["banner"] = chosen_id
+                self.profile["theme"] = chosen_id
+                await self.cog.bot.db.execute(
+                    """
+                    UPDATE game_anime_profiles 
+                    SET banners_unlocked = $1, banner = $2, theme = $2, gold = gold + $3 
+                    WHERE user_id = $4;
+                    """,
+                    ",".join(unlocked_list),
+                    chosen_id,
+                    gold_reward,
+                    interaction.user.id,
+                )
+            else:
+                gold_reward += 300
+                await self.cog.bot.db.execute(
+                    "UPDATE game_anime_profiles SET gold = gold + $1 WHERE user_id = $2;",
+                    gold_reward,
+                    interaction.user.id,
+                )
+
+            self.profile["gold"] = self.profile.get("gold", 150) + gold_reward
+            card_buf = await asyncio.to_thread(
+                render_chest_open_card,
+                user_name=interaction.user.display_name,
+                chest_type=chest_display_name,
+                gold_reward=gold_reward,
+                reward_type="banner",
+                reward_data=banner,
+                is_duplicate=is_dup,
+            )
+            section_msg = (
+                f"### {chest_display_name.upper()} UNBOXED!\n"
+                f"> **Hunter Banner:** **{banner['name']}** (« {banner.get('anime', 'Anime')} ») • `{banner['rarity'].upper()}`\n"
+                f"> **Aesthetic:** {banner.get('desc', 'Custom Hunter Backdrop')}\n"
+                f"> **Status:** Active on your Hunter License! `+{gold_reward} Gold` added."
+            )
+
+        elif loot_type == "consumable":
             await self.cog.bot.db.execute(
-                "UPDATE game_anime_inventory SET power_bonus = power_bonus + 50 WHERE user_id = $1 AND hero_id = $2;",
+                "UPDATE game_anime_profiles SET healing_potions = healing_potions + 2, gold = gold + $1 WHERE user_id = $2;",
+                gold_reward,
+                interaction.user.id,
+            )
+            self.profile["healing_potions"] = self.profile.get("healing_potions", 0) + 2
+            self.profile["gold"] = self.profile.get("gold", 150) + gold_reward
+            card_buf = await asyncio.to_thread(
+                render_chest_open_card,
+                user_name=interaction.user.display_name,
+                chest_type=chest_display_name,
+                gold_reward=gold_reward,
+                reward_type="consumable",
+                reward_data={"name": "Healing Potion", "rarity": "Rare"},
+            )
+            section_msg = (
+                f"### {chest_display_name.upper()} UNBOXED!\n"
+                f"> **Battle Supplies:** `2x Healing Potions` added to your pouch!\n"
+                f"> **Effect:** Recovers +35 HP during duels.\n"
+                f"> **Treasury Spoils:** `+{gold_reward} Gold` added to vault."
+            )
+
+        elif loot_type == "jackpot":
+            if target_tier == "bronze":
+                jackpot_gold = random.randint(250, 450)
+                bonus_xp = 100
+            elif target_tier == "silver":
+                jackpot_gold = random.randint(450, 800)
+                bonus_xp = 150
+            elif target_tier == "epic":
+                jackpot_gold = random.randint(900, 1600)
+                bonus_xp = 250
+            else:
+                jackpot_gold = random.randint(2000, 3500)
+                bonus_xp = 400
+
+            await self.cog.bot.db.execute(
+                "UPDATE game_anime_profiles SET gold = gold + $1, xp = xp + $2 WHERE user_id = $3;",
+                jackpot_gold,
+                bonus_xp,
+                interaction.user.id,
+            )
+            self.profile["gold"] = self.profile.get("gold", 150) + jackpot_gold
+            self.profile["xp"] = self.profile.get("xp", 0) + bonus_xp
+            card_buf = await asyncio.to_thread(
+                render_chest_open_card,
+                user_name=interaction.user.display_name,
+                chest_type=chest_display_name,
+                gold_reward=jackpot_gold,
+                reward_type="jackpot",
+                reward_data={"name": "Treasury Jackpot", "rarity": "Legendary"},
+            )
+            section_msg = (
+                f"### {chest_display_name.upper()} UNBOXED!\n"
+                f"> **ROYAL BOUNTY JACKPOT:** `+{jackpot_gold:,} Gold` deposited!\n"
+                f"> **Hunter Surge:** `+{bonus_xp} XP` bonus added to level progression!"
+            )
+
+        else:  # hero
+            if target_tier == "bronze":
+                loot_pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Common", "Rare"]]
+            elif target_tier == "silver":
+                loot_pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Rare", "Epic"]]
+            elif target_tier == "epic":
+                loot_pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Epic", "Legendary"]]
+            else:
+                loot_pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Legendary", "Mythic"]]
+
+            if not loot_pool:
+                loot_pool = list(HERO_REGISTRY.keys())
+
+            chosen_id = random.choice(loot_pool)
+            hero = HERO_REGISTRY[chosen_id].copy()
+
+            row = await self.cog.bot.db.fetch_one(
+                "SELECT * FROM game_anime_inventory WHERE user_id = $1 AND hero_id = $2;",
                 interaction.user.id,
                 chosen_id,
             )
-            hero["power_bonus"] = row["power_bonus"] + 50
-            hero["stars"] = row["stars"]
-        else:
+
+            is_dup = False
+            if row:
+                is_dup = True
+                await self.cog.bot.db.execute(
+                    "UPDATE game_anime_inventory SET power_bonus = power_bonus + 50 WHERE user_id = $1 AND hero_id = $2;",
+                    interaction.user.id,
+                    chosen_id,
+                )
+                hero["power_bonus"] = row["power_bonus"] + 50
+                hero["stars"] = row["stars"]
+            else:
+                await self.cog.bot.db.execute(
+                    "INSERT INTO game_anime_inventory (user_id, hero_id, stars, power_bonus) VALUES ($1, $2, $3, 0);",
+                    interaction.user.id,
+                    chosen_id,
+                    hero["stars"],
+                )
+                self.heroes.append(hero)
+
             await self.cog.bot.db.execute(
-                "INSERT INTO game_anime_inventory (user_id, hero_id, stars, power_bonus) VALUES ($1, $2, $3, 0);",
+                "UPDATE game_anime_profiles SET gold = gold + $1 WHERE user_id = $2;",
+                gold_reward,
                 interaction.user.id,
-                chosen_id,
-                hero["stars"],
             )
-            self.heroes.append(hero)
+            self.profile["gold"] = self.profile.get("gold", 150) + gold_reward
 
-        await self.cog.bot.db.execute(
-            "UPDATE game_anime_profiles SET gold = gold + $1 WHERE user_id = $2;",
-            gold_reward,
-            interaction.user.id,
-        )
-        self.profile["gold"] = self.profile.get("gold", 150) + gold_reward
-
-        # Render unboxing card with full Media Gallery attachment
-        card_buf = await asyncio.to_thread(
-            render_chest_open_card,
-            user_name=interaction.user.display_name,
-            chest_type=chest_display_name,
-            unlocked_hero=hero,
-            is_duplicate=is_dup,
-            gold_reward=gold_reward,
-        )
-
-        file = discord.File(card_buf, filename="chest_reveal.png")
-        container = KyroContainer(accent_color=None)
-        container.add_media("attachment://chest_reveal.png")
-        container.add_section(
-            content=(
+            card_buf = await asyncio.to_thread(
+                render_chest_open_card,
+                user_name=interaction.user.display_name,
+                chest_type=chest_display_name,
+                unlocked_hero=hero,
+                is_duplicate=is_dup,
+                gold_reward=gold_reward,
+                reward_type="hero",
+                reward_data=hero,
+            )
+            section_msg = (
                 f"### {chest_display_name.upper()} UNBOXED!\n"
                 f"> **Champion:** **{hero['name']}** (« {hero.get('anime', 'Anime')} ») • `{hero['rarity'].upper()}`\n"
                 f"> **Status:** {'Duplicate Power Up (+50 Power)!' if is_dup else 'Brand New Champion Added!'}\n"
                 f"> **Spoils:** `+{gold_reward} Gold` added to treasury."
             )
-        )
+
+        file = discord.File(card_buf, filename="chest_reveal.png")
+        container = KyroContainer(accent_color=None)
+        container.add_media("attachment://chest_reveal.png")
+        container.add_section(content=section_msg)
 
         reveal_view = ChestRevealedView(self.cog, self.user, self.profile, self.heroes)
         await edit_container_response(interaction, container, file=file, view=reveal_view)
 
-    @discord.ui.button(label="Switch Theme", style=discord.ButtonStyle.secondary)
-    async def switch_theme_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        """Cycle card theme instantly in-place without any popup."""
-        curr_theme = self.profile.get("theme", "shadow")
-        curr_idx = THEME_ORDER.index(curr_theme) if curr_theme in THEME_ORDER else 0
-        next_theme = THEME_ORDER[(curr_idx + 1) % len(THEME_ORDER)]
-
-        await self.cog.bot.db.execute(
-            "UPDATE game_anime_profiles SET theme = $1 WHERE user_id = $2;",
-            next_theme,
-            interaction.user.id,
+    @discord.ui.button(label="Equip Banner", style=discord.ButtonStyle.secondary)
+    async def equip_banner_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        """Display select menu to equip unlocked background banner in-place."""
+        equip_view = EquipBannerView(self.cog, self.user, self.profile, self.heroes)
+        container = KyroContainer(accent_color=None)
+        unlocked_count = len([b for b in (self.profile.get("banners_unlocked") or "shadow_realm").split(",") if b.strip()])
+        container.add_section(
+            content=(
+                f"### Hunter Profile Banners ({unlocked_count} Unlocked)\n"
+                f"> Select a custom anime theme banner below to decorate your Hunter License:"
+            )
         )
-        self.profile["theme"] = next_theme
-
-        # Re-render updated container and edit in-place
-        container, discord_file, new_view = await self.cog.render_profile_container(self.user, self.profile)
-        await edit_container_response(interaction, container, file=discord_file, view=new_view)
+        await edit_container_response(interaction, container, view=equip_view)
 
     @discord.ui.button(label="Roster & Equip", style=discord.ButtonStyle.secondary)
     async def my_heroes_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -830,6 +1110,31 @@ class ProfileHubView(discord.ui.View):
             content=(
                 f"### Hunter Champion Roster ({len(self.heroes)} Unlocked)\n"
                 f"> Select a champion from the dropdown below to equip as your main fighter:"
+            )
+        )
+        await edit_container_response(interaction, container, view=equip_view)
+
+    @discord.ui.button(label="Relic Vault", style=discord.ButtonStyle.secondary)
+    async def relic_vault_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        """Display select menu to equip unlocked cursed weapon or relic."""
+        raw_relics = self.profile.get("relics_unlocked") or ""
+        unlocked_relic_ids = [r.strip() for r in raw_relics.split(",") if r.strip()]
+        if not unlocked_relic_ids:
+            await interaction.response.send_message(
+                "You have no Cursed Relics or Anime Weapons yet! Open Battle Chests with `Open Chest` to loot rare relics.",
+                ephemeral=True,
+            )
+            return
+
+        equip_view = EquipRelicView(self.cog, self.user, self.profile, self.heroes)
+        curr_relic = RELIC_REGISTRY.get(self.profile.get("relic_id", ""), {})
+        active_str = f"**Equipped:** {curr_relic.get('name', 'None')} (+{self.profile.get('relic_power', 0)} Power)" if curr_relic else "None equipped"
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"### Cursed Relics & Weapons Vault ({len(unlocked_relic_ids)} Unlocked)\n"
+                f"> {active_str}\n"
+                f"> Select a relic below to equip and boost all your fighters:"
             )
         )
         await edit_container_response(interaction, container, view=equip_view)
@@ -856,6 +1161,137 @@ class ChestRevealedView(discord.ui.View):
 
     @discord.ui.button(label="Return to Profile", style=discord.ButtonStyle.primary)
     async def return_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        container, discord_file, new_view = await self.cog.render_profile_container(self.user, self.profile)
+        await edit_container_response(interaction, container, file=discord_file, view=new_view)
+
+
+class EquipBannerView(discord.ui.View):
+    """Dropdown menu allowing players to equip any unlocked background banner."""
+
+    def __init__(
+        self,
+        cog: AnimeClash,
+        user: discord.Member | discord.User,
+        profile: dict[str, Any],
+        heroes: list[dict[str, Any]],
+    ) -> None:
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.user = user
+        self.profile = profile
+        self.heroes = heroes
+
+        raw_unlocked = profile.get("banners_unlocked") or "shadow_realm"
+        unlocked_keys = [b.strip() for b in raw_unlocked.split(",") if b.strip()]
+        if "shadow_realm" not in unlocked_keys:
+            unlocked_keys.insert(0, "shadow_realm")
+
+        current_active = profile.get("banner") or profile.get("theme", "shadow_realm")
+
+        options = []
+        for key in unlocked_keys:
+            if key in HUNTER_BANNERS:
+                b_info = HUNTER_BANNERS[key]
+                options.append(
+                    discord.SelectOption(
+                        label=b_info["name"],
+                        value=key,
+                        description=f"{b_info['anime']} • {b_info['rarity']} ({b_info['desc'][:30]})",
+                        default=(key == current_active),
+                    )
+                )
+
+        if not options:
+            options.append(
+                discord.SelectOption(label="Monarch's Abyss", value="shadow_realm", default=True)
+            )
+
+        select = discord.ui.Select(placeholder="Choose Hunter Profile Banner...", options=options[:25])
+        select.callback = self.select_callback
+        self.add_item(select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user.id
+
+    async def select_callback(self, interaction: discord.Interaction) -> None:
+        chosen_banner = interaction.data["values"][0]
+        await self.cog.bot.db.execute(
+            "UPDATE game_anime_profiles SET banner = $1, theme = $1 WHERE user_id = $2;",
+            chosen_banner,
+            interaction.user.id,
+        )
+        self.profile["banner"] = chosen_banner
+        self.profile["theme"] = chosen_banner
+
+        container, discord_file, new_view = await self.cog.render_profile_container(self.user, self.profile)
+        await edit_container_response(interaction, container, file=discord_file, view=new_view)
+
+    @discord.ui.button(label="Back to Profile", style=discord.ButtonStyle.secondary)
+    async def back_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        container, discord_file, new_view = await self.cog.render_profile_container(self.user, self.profile)
+        await edit_container_response(interaction, container, file=discord_file, view=new_view)
+
+
+class EquipRelicView(discord.ui.View):
+    """Dropdown menu allowing players to equip any unlocked cursed weapon or relic."""
+
+    def __init__(
+        self,
+        cog: AnimeClash,
+        user: discord.Member | discord.User,
+        profile: dict[str, Any],
+        heroes: list[dict[str, Any]],
+    ) -> None:
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.user = user
+        self.profile = profile
+        self.heroes = heroes
+
+        raw_unlocked = profile.get("relics_unlocked") or ""
+        unlocked_keys = [r.strip() for r in raw_relics.split(",") if r.strip()]
+        current_relic = profile.get("relic_id")
+
+        options = []
+        for key in unlocked_keys:
+            if key in RELIC_REGISTRY:
+                r_info = RELIC_REGISTRY[key]
+                options.append(
+                    discord.SelectOption(
+                        label=f"{r_info['name']} (+{r_info['power']} Power)",
+                        value=key,
+                        description=f"{r_info['anime']} • {r_info['rarity']} [{r_info.get('effect', '')[:25]}]",
+                        default=(key == current_relic),
+                    )
+                )
+
+        if options:
+            select = discord.ui.Select(placeholder="Choose Relic to equip...", options=options[:25])
+            select.callback = self.select_callback
+            self.add_item(select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user.id
+
+    async def select_callback(self, interaction: discord.Interaction) -> None:
+        chosen_relic_id = interaction.data["values"][0]
+        relic_data = RELIC_REGISTRY.get(chosen_relic_id, {})
+        power = relic_data.get("power", 0)
+
+        await self.cog.bot.db.execute(
+            "UPDATE game_anime_profiles SET relic_id = $1, relic_power = $2 WHERE user_id = $3;",
+            chosen_relic_id,
+            power,
+            interaction.user.id,
+        )
+        self.profile["relic_id"] = chosen_relic_id
+        self.profile["relic_power"] = power
+
+        container, discord_file, new_view = await self.cog.render_profile_container(self.user, self.profile)
+        await edit_container_response(interaction, container, file=discord_file, view=new_view)
+
+    @discord.ui.button(label="Back to Profile", style=discord.ButtonStyle.secondary)
+    async def back_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         container, discord_file, new_view = await self.cog.render_profile_container(self.user, self.profile)
         await edit_container_response(interaction, container, file=discord_file, view=new_view)
 
@@ -1000,6 +1436,24 @@ class SoloBattleSessionView(discord.ui.View):
                 f'*"{cry}"*\n'
                 f"> **{crit_flag}{self.my_hero['name']}** unleashed **{move_name}** for **{p1_dmg} DMG**!\n"
                 f"> **{self.rival_hero['name']}** absorbed the shock and countered for **{rival_dmg} DMG**."
+            )
+        elif action_type == "potion":
+            if self.profile.get("healing_potions", 0) <= 0:
+                await interaction.response.send_message("You have no Healing Potions left in your pouch!", ephemeral=True)
+                return
+            await self.cog.bot.db.execute(
+                "UPDATE game_anime_profiles SET healing_potions = healing_potions - 1 WHERE user_id = $1;",
+                self.player.id,
+            )
+            self.profile["healing_potions"] -= 1
+            heal_amt = 35
+            self.p1_hp = min(self.p1_max_hp, self.p1_hp + heal_amt)
+            p1_dmg = 0
+            raw_rival = random.randint(10, 18)
+            rival_dmg = raw_rival
+            turn_narrative = f"Round {self.round_num}: 🧪 HEALED! Restored +{heal_amt} HP. Rival dealt {rival_dmg}."
+            turn_narrative_full = (
+                f"> 🧪 **COMBAT ELIXIR!** **{self.my_hero['name']}** consumed a Healing Potion and recovered **+{heal_amt} HP**! (Took `{rival_dmg} DMG` while drinking)."
             )
         else:  # guard
             p1_dmg = random.randint(15, 22)
@@ -1157,6 +1611,10 @@ class SoloBattleSessionView(discord.ui.View):
     @discord.ui.button(label="Guard & Counter", style=discord.ButtonStyle.secondary)
     async def guard_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._execute_turn(interaction, "guard")
+
+    @discord.ui.button(label="Use Potion (+35 HP)", style=discord.ButtonStyle.secondary)
+    async def potion_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._execute_turn(interaction, "potion")
 
 
 class BattleAgainButton(discord.ui.Button):

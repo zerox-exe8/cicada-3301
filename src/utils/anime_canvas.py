@@ -18,48 +18,115 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 ASSETS_DIR = os.path.join(os.getcwd(), "assets", "anime")
 
-# Theme Color Palettes (Background base, Card surface, Accent RGB, Accent Hex)
-THEMES: dict[str, dict[str, Any]] = {
-    "shadow": {
+# Hunter Profile Banners Registry (Equippable Custom Backdrops & Aesthetics)
+HUNTER_BANNERS: dict[str, dict[str, Any]] = {
+    "shadow_realm": {
+        "id": "shadow_realm",
+        "name": "Monarch's Abyss",
+        "anime": "Solo Leveling",
+        "rarity": "Common",
+        "accent": (168, 85, 247),
+        "accent_glow": (147, 51, 234, 70),
+        "highlight": (216, 180, 254),
         "bg": (12, 10, 20, 255),
         "surface": (22, 18, 36, 255),
         "surface_card": (26, 21, 42, 255),
         "border": (58, 48, 85, 255),
-        "accent": (168, 85, 247),  # Neon Purple
-        "accent_glow": (147, 51, 234, 70),
-        "highlight": (216, 180, 254),
-        "name": "Shadow Realm",
+        "desc": "Sovereign dark mist of the Shadow Monarch.",
     },
-    "crimson": {
+    "infinite_void": {
+        "id": "infinite_void",
+        "name": "Infinite Void",
+        "anime": "Jujutsu Kaisen",
+        "rarity": "Mythic",
+        "accent": (6, 182, 212),
+        "accent_glow": (14, 165, 233, 70),
+        "highlight": (165, 243, 252),
+        "bg": (6, 14, 26, 255),
+        "surface": (14, 25, 45, 255),
+        "surface_card": (18, 34, 60, 255),
+        "border": (40, 68, 100, 255),
+        "desc": "Cosmic domain where all perception converges.",
+    },
+    "malevolent_shrine": {
+        "id": "malevolent_shrine",
+        "name": "Malevolent Shrine",
+        "anime": "Jujutsu Kaisen",
+        "rarity": "Legendary",
+        "accent": (239, 68, 68),
+        "accent_glow": (220, 38, 38, 70),
+        "highlight": (252, 165, 165),
+        "bg": (20, 8, 12, 255),
+        "surface": (34, 14, 22, 255),
+        "surface_card": (44, 18, 28, 255),
+        "border": (85, 40, 55, 255),
+        "desc": "Cursed sanctuary surrounded by cleaving blades.",
+    },
+    "wano_sunset": {
+        "id": "wano_sunset",
+        "name": "Wano Blossoms",
+        "anime": "One Piece",
+        "rarity": "Epic",
+        "accent": (244, 114, 182),
+        "accent_glow": (236, 72, 153, 70),
+        "highlight": (251, 207, 232),
+        "bg": (22, 10, 18, 255),
+        "surface": (36, 18, 30, 255),
+        "surface_card": (48, 24, 40, 255),
+        "border": (80, 45, 70, 255),
+        "desc": "Cherry blossoms under golden sunset twilight.",
+    },
+    "flame_purgatory": {
+        "id": "flame_purgatory",
+        "name": "Flame Purgatory",
+        "anime": "Demon Slayer",
+        "rarity": "Epic",
+        "accent": (249, 115, 22),
+        "accent_glow": (234, 88, 12, 70),
+        "highlight": (254, 215, 170),
+        "bg": (24, 12, 6, 255),
+        "surface": (38, 20, 10, 255),
+        "surface_card": (52, 28, 14, 255),
+        "border": (85, 60, 30, 255),
+        "desc": "Blazing inferno of fiery determination.",
+    },
+    "godspeed_storm": {
+        "id": "godspeed_storm",
+        "name": "Godspeed Thunder",
+        "anime": "Hunter x Hunter",
+        "rarity": "Rare",
+        "accent": (234, 179, 8),
+        "accent_glow": (202, 138, 4, 70),
+        "highlight": (253, 224, 71),
+        "bg": (18, 16, 6, 255),
+        "surface": (30, 26, 12, 255),
+        "surface_card": (42, 36, 18, 255),
+        "border": (85, 75, 40, 255),
+        "desc": "Electric storm crackling with lightning aura.",
+    },
+    "akatsuki_eclipse": {
+        "id": "akatsuki_eclipse",
+        "name": "Crimson Eclipse",
+        "anime": "Naruto",
+        "rarity": "Rare",
+        "accent": (220, 38, 38),
+        "accent_glow": (185, 28, 28, 70),
+        "highlight": (254, 202, 202),
         "bg": (20, 9, 14, 255),
         "surface": (34, 15, 24, 255),
         "surface_card": (42, 19, 30, 255),
         "border": (85, 40, 55, 255),
-        "accent": (239, 68, 68),  # Blood Red
-        "accent_glow": (220, 38, 38, 70),
-        "highlight": (252, 165, 165),
-        "name": "Blood Moon",
+        "desc": "Blood moon eclipse with crimson cloud sigils.",
     },
-    "cyber": {
-        "bg": (8, 16, 28, 255),
-        "surface": (15, 26, 45, 255),
-        "surface_card": (22, 38, 65, 255),
-        "border": (40, 68, 100, 255),
-        "accent": (6, 182, 212),  # Cyber Cyan
-        "accent_glow": (14, 165, 233, 70),
-        "highlight": (165, 243, 252),
-        "name": "Neon Cyber",
-    },
-    "gold": {
-        "bg": (20, 17, 8, 255),
-        "surface": (34, 28, 14, 255),
-        "surface_card": (48, 40, 20, 255),
-        "border": (85, 70, 40, 255),
-        "accent": (234, 179, 8),  # Solar Gold
-        "accent_glow": (202, 138, 4, 70),
-        "highlight": (253, 224, 71),
-        "name": "Monarch Sun",
-    },
+}
+
+# Theme Color Palettes (Aliased for backwards compatibility)
+THEMES: dict[str, dict[str, Any]] = {
+    "shadow": HUNTER_BANNERS["shadow_realm"],
+    "crimson": HUNTER_BANNERS["malevolent_shrine"],
+    "cyber": HUNTER_BANNERS["infinite_void"],
+    "gold": HUNTER_BANNERS["godspeed_storm"],
+    **HUNTER_BANNERS,
 }
 
 # Rarity Color Specs
@@ -551,15 +618,19 @@ def render_battle_clash(
 def render_chest_open_card(
     user_name: str,
     chest_type: str,
-    unlocked_hero: dict[str, Any],
+    unlocked_hero: dict[str, Any] | None = None,
     is_duplicate: bool = False,
     gold_reward: int = 100,
+    reward_type: str = "hero",
+    reward_data: dict[str, Any] | None = None,
 ) -> io.BytesIO:
     """
-    Renders an exhilarating 880x400 Chest Opening & Hero Unlock Card.
+    Renders an exhilarating 880x400 Chest Opening Card supporting all loot types:
+    Champions, Cursed Relics/Weapons, Profile Banners, Battle Potions, and Gold Jackpots.
     """
+    data = reward_data or unlocked_hero or {}
     w, h = 880, 400
-    rarity = unlocked_hero.get("rarity", "Common")
+    rarity = data.get("rarity", "Common")
     r_color = RARITY_COLORS.get(rarity, (156, 163, 175))
 
     im = Image.new("RGBA", (w, h), (14, 11, 24, 255))
@@ -582,55 +653,152 @@ def render_chest_open_card(
 
     # Frame
     draw.rounded_rectangle([(8, 8), (w - 8, h - 8)], radius=20, outline=r_color, width=2)
-
-    # Top Header
     draw.rounded_rectangle([(24, 16), (w - 24, 20)], radius=2, fill=r_color)
-    draw.text((w // 2 - 110, 26), f"{chest_type.upper()} UNBOXED!", fill=r_color, font=_get_font(13, bold=True))
+    draw.text((w // 2 - 120, 26), f"{chest_type.upper()} UNBOXED!", fill=r_color, font=_get_font(13, bold=True))
 
-    # Left: Character Artwork Showcase Card
     art_x, art_y = 60, 65
     art_w, art_h = 210, 260
-    hero_art = _load_hero_image(unlocked_hero.get("id", "tanjiro"), (art_w, art_h), corner_radius=14)
-    im.paste(hero_art, (art_x, art_y), hero_art)
-    draw.rounded_rectangle([(art_x - 3, art_y - 3), (art_x + art_w + 3, art_y + art_h + 3)], radius=16, outline=r_color, width=2)
-
-    # Right: Hero Unlocked Details
     rx = art_x + art_w + 40
-    anime_title = unlocked_hero.get("anime", "Anime Series").upper()
-    draw.rounded_rectangle([(rx, 65), (rx + 240, 92)], radius=6, fill=(28, 20, 44, 255), outline=r_color, width=1)
-    draw.text((rx + 14, 71), f"« {anime_title} »", fill=r_color, font=_get_font(12, bold=True))
 
-    hero_name = unlocked_hero.get("name", "Unknown Hero")
-    draw.text((rx, 105), hero_name, fill=(255, 255, 255, 255), font=_get_font(28, bold=True))
+    if reward_type == "relic":
+        # Left Relic Icon Card
+        draw.rounded_rectangle([(art_x, art_y), (art_x + art_w, art_y + art_h)], radius=16, fill=(26, 20, 40, 255), outline=r_color, width=2)
+        draw.ellipse([(art_x + 35, art_y + 35), (art_x + art_w - 35, art_y + art_h - 75)], fill=(38, 28, 58, 255), outline=r_color, width=2)
+        draw.text((art_x + 55, art_y + 80), "[RELIC]", fill=r_color, font=_get_font(24, bold=True))
+        draw.text((art_x + 38, art_y + art_h - 55), "ANIME WEAPON", fill=(170, 160, 200, 255), font=_get_font(13, bold=True))
 
-    # Rarity & Element Tags
-    elem = unlocked_hero.get("element", "Water")
-    elem_info = ELEMENT_DATA.get(elem, {"symbol": elem, "color": (168, 85, 247)})
-    draw.rounded_rectangle([(rx, 150), (rx + 130, 176)], radius=6, fill=(35, 26, 52, 255), outline=r_color, width=1)
-    draw.text((rx + 14, 155), f"{rarity.upper()}", fill=r_color, font=_get_font(12, bold=True))
+        anime_title = data.get("anime", "Anime").upper()
+        draw.rounded_rectangle([(rx, 65), (rx + 240, 92)], radius=6, fill=(28, 20, 44, 255), outline=r_color, width=1)
+        draw.text((rx + 14, 71), f"<< {anime_title} >>", fill=r_color, font=_get_font(12, bold=True))
+        draw.text((rx, 105), data.get("name", "Relic")[:22], fill=(255, 255, 255, 255), font=_get_font(26, bold=True))
 
-    draw.rounded_rectangle([(rx + 145, 150), (rx + 295, 176)], radius=6, fill=(35, 26, 52, 255), outline=(70, 60, 95, 255), width=1)
-    draw.text((rx + 158, 155), f"ELEMENT: {elem.upper()}", fill=elem_info["color"], font=_get_font(11, bold=True))
+        draw.rounded_rectangle([(rx, 150), (rx + 130, 176)], radius=6, fill=(35, 26, 52, 255), outline=r_color, width=1)
+        draw.text((rx + 14, 155), rarity.upper(), fill=r_color, font=_get_font(12, bold=True))
 
-    # Power & Technique
-    p_box_y = 190
-    draw.rounded_rectangle([(rx, p_box_y), (w - 60, p_box_y + 60)], radius=10, fill=(22, 17, 36, 255), outline=(55, 45, 75, 255), width=1)
-    power_val = unlocked_hero.get("power", 500)
-    draw.text((rx + 16, p_box_y + 10), "BASE POWER", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
-    draw.text((rx + 16, p_box_y + 26), f"{power_val} COMBAT RATING", fill=(255, 255, 255, 255), font=_get_font(15, bold=True))
+        draw.rounded_rectangle([(rx + 145, 150), (rx + 335, 176)], radius=6, fill=(35, 26, 52, 255), outline=(70, 60, 95, 255), width=1)
+        draw.text((rx + 158, 155), "TYPE: CURSED ARTIFACT", fill=(216, 180, 254, 255), font=_get_font(11, bold=True))
 
-    move_val = unlocked_hero.get("move", "Special Hit")
-    draw.text((rx + 240, p_box_y + 10), "SIGNATURE MOVE", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
-    draw.text((rx + 240, p_box_y + 26), f"» {move_val[:24]}", fill=(216, 180, 254, 255), font=_get_font(13, bold=True))
+        p_box_y = 190
+        draw.rounded_rectangle([(rx, p_box_y), (w - 60, p_box_y + 60)], radius=10, fill=(22, 17, 36, 255), outline=(55, 45, 75, 255), width=1)
+        draw.text((rx + 16, p_box_y + 10), "POWER BONUS", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
+        draw.text((rx + 16, p_box_y + 26), f"+{data.get('power', 100)} COMBAT POWER", fill=(250, 204, 21), font=_get_font(15, bold=True))
+        draw.text((rx + 240, p_box_y + 10), "SPECIAL PERK", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
+        draw.text((rx + 240, p_box_y + 26), f"> {data.get('effect', 'Bonus')[:24]}", fill=(216, 180, 254, 255), font=_get_font(13, bold=True))
 
-    # Status / Duplicate banner
-    status_y = 265
-    if is_duplicate:
+        status_y = 265
         draw.rounded_rectangle([(rx, status_y), (w - 60, status_y + 44)], radius=8, fill=(38, 28, 18, 255), outline=(234, 179, 8), width=1)
-        draw.text((rx + 16, status_y + 14), f"DUPLICATE FIGHTER: Upgraded combat power by +25! (+{gold_reward} Gold)", fill=(253, 224, 71), font=_get_font(12, bold=True))
-    else:
+        draw.text((rx + 16, status_y + 14), f"EQUIPPED! Boosted all your champions' combat power (+{gold_reward} Gold).", fill=(253, 224, 71), font=_get_font(12, bold=True))
+
+    elif reward_type == "banner":
+        # Left Banner Preview Card
+        draw.rounded_rectangle([(art_x, art_y), (art_x + art_w, art_y + art_h)], radius=16, fill=(18, 25, 45, 255), outline=r_color, width=2)
+        draw.rounded_rectangle([(art_x + 15, art_y + 40), (art_x + art_w - 15, art_y + 140)], radius=10, fill=(30, 45, 80, 255), outline=r_color, width=1)
+        draw.text((art_x + 24, art_y + 80), "[BANNER PREVIEW]", fill=r_color, font=_get_font(14, bold=True))
+        draw.text((art_x + 35, art_y + art_h - 55), "PROFILE THEME", fill=(170, 200, 240, 255), font=_get_font(13, bold=True))
+
+        anime_title = data.get("anime", "Anime").upper()
+        draw.rounded_rectangle([(rx, 65), (rx + 240, 92)], radius=6, fill=(28, 20, 44, 255), outline=r_color, width=1)
+        draw.text((rx + 14, 71), f"<< {anime_title} >>", fill=r_color, font=_get_font(12, bold=True))
+        draw.text((rx, 105), data.get("name", "Banner")[:22], fill=(255, 255, 255, 255), font=_get_font(28, bold=True))
+
+        draw.rounded_rectangle([(rx, 150), (rx + 130, 176)], radius=6, fill=(35, 26, 52, 255), outline=r_color, width=1)
+        draw.text((rx + 14, 155), rarity.upper(), fill=r_color, font=_get_font(12, bold=True))
+
+        draw.rounded_rectangle([(rx + 145, 150), (rx + 335, 176)], radius=6, fill=(35, 26, 52, 255), outline=(70, 60, 95, 255), width=1)
+        draw.text((rx + 158, 155), "TYPE: PROFILE BANNER", fill=(165, 243, 252, 255), font=_get_font(11, bold=True))
+
+        p_box_y = 190
+        draw.rounded_rectangle([(rx, p_box_y), (w - 60, p_box_y + 60)], radius=10, fill=(22, 17, 36, 255), outline=(55, 45, 75, 255), width=1)
+        draw.text((rx + 16, p_box_y + 10), "BANNER THEME", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
+        draw.text((rx + 16, p_box_y + 26), f"{data.get('name', 'Banner').upper()}", fill=(255, 255, 255, 255), font=_get_font(15, bold=True))
+        draw.text((rx + 240, p_box_y + 10), "PALETTE AESTHETIC", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
+        draw.text((rx + 240, p_box_y + 26), f"> {data.get('desc', 'Aesthetic')[:26]}", fill=(165, 243, 252, 255), font=_get_font(12, bold=True))
+
+        status_y = 265
+        draw.rounded_rectangle([(rx, status_y), (w - 60, status_y + 44)], radius=8, fill=(18, 32, 45, 255), outline=(6, 182, 212), width=1)
+        draw.text((rx + 16, status_y + 14), f"BANNER UNLOCKED! Set as your active Hunter Profile Banner (+{gold_reward} Gold).", fill=(165, 243, 252), font=_get_font(12, bold=True))
+
+    elif reward_type == "consumable":
+        # Left Consumable Card
+        draw.rounded_rectangle([(art_x, art_y), (art_x + art_w, art_y + art_h)], radius=16, fill=(20, 35, 30, 255), outline=(34, 197, 94), width=2)
+        draw.ellipse([(art_x + 35, art_y + 35), (art_x + art_w - 35, art_y + art_h - 75)], fill=(28, 52, 42, 255), outline=(34, 197, 94), width=2)
+        draw.text((art_x + 50, art_y + 80), "[POTION]", fill=(34, 197, 94), font=_get_font(22, bold=True))
+        draw.text((art_x + 30, art_y + art_h - 55), "BATTLE SUPPLIES", fill=(134, 239, 172), font=_get_font(13, bold=True))
+
+        draw.rounded_rectangle([(rx, 65), (rx + 240, 92)], radius=6, fill=(20, 35, 30, 255), outline=(34, 197, 94), width=1)
+        draw.text((rx + 14, 71), "<< COMBAT ELIXIR >>", fill=(134, 239, 172), font=_get_font(12, bold=True))
+        draw.text((rx, 105), "2x Healing Potions", fill=(255, 255, 255, 255), font=_get_font(28, bold=True))
+
+        p_box_y = 175
+        draw.rounded_rectangle([(rx, p_box_y), (w - 60, p_box_y + 65)], radius=10, fill=(22, 17, 36, 255), outline=(55, 45, 75, 255), width=1)
+        draw.text((rx + 16, p_box_y + 10), "CONSUMABLE EFFECT", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
+        draw.text((rx + 16, p_box_y + 26), "RECOVERS +35 HP IN DUELS", fill=(34, 197, 94), font=_get_font(15, bold=True))
+
+        status_y = 265
         draw.rounded_rectangle([(rx, status_y), (w - 60, status_y + 44)], radius=8, fill=(18, 38, 24, 255), outline=(34, 197, 94), width=1)
-        draw.text((rx + 16, status_y + 14), f"NEW CHAMPION UNLOCKED! Added to {user_name}'s Battle Roster.", fill=(134, 239, 172), font=_get_font(12, bold=True))
+        draw.text((rx + 16, status_y + 14), f"STOCKED! 2x Potions added to your Hunter Pouch (+{gold_reward} Gold).", fill=(134, 239, 172), font=_get_font(12, bold=True))
+
+    elif reward_type == "jackpot":
+        # Left Jackpot Card
+        draw.rounded_rectangle([(art_x, art_y), (art_x + art_w, art_y + art_h)], radius=16, fill=(35, 30, 15, 255), outline=(234, 179, 8), width=2)
+        draw.ellipse([(art_x + 35, art_y + 35), (art_x + art_w - 35, art_y + art_h - 75)], fill=(50, 42, 20, 255), outline=(234, 179, 8), width=2)
+        draw.text((art_x + 40, art_y + 80), "[JACKPOT]", fill=(234, 179, 8), font=_get_font(22, bold=True))
+        draw.text((art_x + 38, art_y + art_h - 55), "ROYAL BOUNTY", fill=(253, 224, 71), font=_get_font(13, bold=True))
+
+        draw.rounded_rectangle([(rx, 65), (rx + 240, 92)], radius=6, fill=(35, 30, 15, 255), outline=(234, 179, 8), width=1)
+        draw.text((rx + 14, 71), "<< MONARCH TREASURY >>", fill=(250, 204, 21), font=_get_font(12, bold=True))
+        draw.text((rx, 105), f"+{gold_reward:,} Gold Jackpot!", fill=(255, 255, 255, 255), font=_get_font(28, bold=True))
+
+        p_box_y = 175
+        draw.rounded_rectangle([(rx, p_box_y), (w - 60, p_box_y + 65)], radius=10, fill=(22, 17, 36, 255), outline=(55, 45, 75, 255), width=1)
+        draw.text((rx + 16, p_box_y + 10), "EXPEDITION SURGE", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
+        draw.text((rx + 16, p_box_y + 26), "+150 HUNTER XP BONUS", fill=(216, 180, 254), font=_get_font(15, bold=True))
+
+        status_y = 265
+        draw.rounded_rectangle([(rx, status_y), (w - 60, status_y + 44)], radius=8, fill=(38, 28, 18, 255), outline=(234, 179, 8), width=1)
+        draw.text((rx + 16, status_y + 14), f"GOLD SURGE! Massive bounty deposited directly into your Treasury.", fill=(253, 224, 71), font=_get_font(12, bold=True))
+
+    else:
+        # Default: Champion Hero Unlock
+        hero_art = _load_hero_image(data.get("id", "tanjiro"), (art_w, art_h), corner_radius=14)
+        im.paste(hero_art, (art_x, art_y), hero_art)
+        draw.rounded_rectangle([(art_x - 3, art_y - 3), (art_x + art_w + 3, art_y + art_h + 3)], radius=16, outline=r_color, width=2)
+
+        anime_title = data.get("anime", "Anime Series").upper()
+        draw.rounded_rectangle([(rx, 65), (rx + 240, 92)], radius=6, fill=(28, 20, 44, 255), outline=r_color, width=1)
+        draw.text((rx + 14, 71), f"<< {anime_title} >>", fill=r_color, font=_get_font(12, bold=True))
+
+        hero_name = data.get("name", "Unknown Hero")
+        draw.text((rx, 105), hero_name, fill=(255, 255, 255, 255), font=_get_font(28, bold=True))
+
+        # Rarity & Element Tags
+        elem = data.get("element", "Water")
+        elem_info = ELEMENT_DATA.get(elem, {"symbol": elem, "color": (168, 85, 247)})
+        draw.rounded_rectangle([(rx, 150), (rx + 130, 176)], radius=6, fill=(35, 26, 52, 255), outline=r_color, width=1)
+        draw.text((rx + 14, 155), f"{rarity.upper()}", fill=r_color, font=_get_font(12, bold=True))
+
+        draw.rounded_rectangle([(rx + 145, 150), (rx + 295, 176)], radius=6, fill=(35, 26, 52, 255), outline=(70, 60, 95, 255), width=1)
+        draw.text((rx + 158, 155), f"ELEMENT: {elem.upper()}", fill=elem_info["color"], font=_get_font(11, bold=True))
+
+        # Power & Technique
+        p_box_y = 190
+        draw.rounded_rectangle([(rx, p_box_y), (w - 60, p_box_y + 60)], radius=10, fill=(22, 17, 36, 255), outline=(55, 45, 75, 255), width=1)
+        power_val = data.get("power", 500)
+        draw.text((rx + 16, p_box_y + 10), "BASE POWER", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
+        draw.text((rx + 16, p_box_y + 26), f"{power_val} COMBAT RATING", fill=(255, 255, 255, 255), font=_get_font(15, bold=True))
+
+        move_val = data.get("move", "Special Hit")
+        draw.text((rx + 240, p_box_y + 10), "SIGNATURE MOVE", fill=(160, 150, 185, 255), font=_get_font(10, bold=True))
+        draw.text((rx + 240, p_box_y + 26), f"> {move_val[:24]}", fill=(216, 180, 254, 255), font=_get_font(13, bold=True))
+
+        # Status / Duplicate banner
+        status_y = 265
+        if is_duplicate:
+            draw.rounded_rectangle([(rx, status_y), (w - 60, status_y + 44)], radius=8, fill=(38, 28, 18, 255), outline=(234, 179, 8), width=1)
+            draw.text((rx + 16, status_y + 14), f"DUPLICATE FIGHTER: Upgraded combat power by +50! (+{gold_reward} Gold)", fill=(253, 224, 71), font=_get_font(12, bold=True))
+        else:
+            draw.rounded_rectangle([(rx, status_y), (w - 60, status_y + 44)], radius=8, fill=(18, 38, 24, 255), outline=(34, 197, 94), width=1)
+            draw.text((rx + 16, status_y + 14), f"NEW CHAMPION UNLOCKED! Added to {user_name}'s Battle Roster.", fill=(134, 239, 172), font=_get_font(12, bold=True))
 
     # Bottom Footer
     draw.text((60, h - 35), "KYRO SHADOW VAULT • CHEST REVEAL RECORD", fill=(110, 100, 135, 255), font=_get_font(11, bold=True))

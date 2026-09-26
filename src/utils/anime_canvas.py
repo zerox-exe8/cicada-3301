@@ -153,7 +153,7 @@ def render_hunter_profile(
     """
     Renders an authentic 900x390 Hunter License Card with the equipped character's high-res artwork.
     """
-    w, h = 900, 390
+    w, h = 980, 480
     theme = THEMES.get(theme_key, THEMES["shadow"])
     accent = theme["accent"]
 
@@ -162,21 +162,21 @@ def render_hunter_profile(
     # Ambient glows
     glow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     gdraw = ImageDraw.Draw(glow)
-    gdraw.ellipse([(-60, -60), (320, 320)], fill=(accent[0], accent[1], accent[2], 40))
-    gdraw.ellipse([(w - 380, 20), (w + 60, h + 80)], fill=(accent[0], accent[1], accent[2], 45))
+    gdraw.ellipse([(-60, -60), (380, 380)], fill=(accent[0], accent[1], accent[2], 45))
+    gdraw.ellipse([(w - 420, 30), (w + 80, h + 80)], fill=(accent[0], accent[1], accent[2], 50))
     im = Image.alpha_composite(im, glow)
     draw = ImageDraw.Draw(im)
 
-    # Frame
-    draw.rounded_rectangle([(8, 8), (w - 8, h - 8)], radius=20, outline=(55, 45, 75, 255), width=2)
+    # Frame outer & inner border
+    draw.rounded_rectangle([(8, 8), (w - 8, h - 8)], radius=20, outline=(58, 48, 85, 255), width=2)
     draw.rounded_rectangle([(10, 10), (w - 10, h - 10)], radius=18, outline=accent, width=1)
 
-    # Top Header strip
-    draw.rounded_rectangle([(24, 18), (w - 24, 22)], radius=2, fill=accent)
+    # Top accent line
+    draw.rounded_rectangle([(24, 16), (w - 24, 20)], radius=2, fill=accent)
 
-    # Player Avatar
-    av_size = 96
-    av_x, av_y = 35, 45
+    # Player Avatar (110px High-DPI)
+    av_size = 110
+    av_x, av_y = 35, 35
     draw.ellipse([(av_x, av_y), (av_x + av_size, av_y + av_size)], fill=(28, 22, 40, 255))
     draw.ellipse([(av_x - 3, av_y - 3), (av_x + av_size + 3, av_y + av_size + 3)], outline=accent, width=3)
 
@@ -193,62 +193,91 @@ def render_hunter_profile(
             pass
 
     if not pasted_avatar:
-        draw.text((av_x + 32, av_y + 30), username[:1].upper(), fill=(255, 255, 255, 255), font=_get_font(36, bold=True))
-
+        draw.text(
+            (av_x + 36, av_y + 30),
+            username[:1].upper(),
+            fill=(255, 255, 255, 255),
+            font=_get_font(44, bold=True),
+        )
 
     user_x = av_x + av_size + 20
-    draw.text((user_x, av_y + 4), username[:18], fill=(255, 255, 255, 255), font=_get_font(26, bold=True))
-    draw.text((user_x, av_y + 38), f"[ {title[:28]} ]", fill=theme["highlight"], font=_get_font(15))
+    draw.text((user_x, av_y + 4), username[:18], fill=(255, 255, 255, 255), font=_get_font(32, bold=True))
+    draw.text((user_x, av_y + 42), f"[ {title[:28]} ]", fill=theme["highlight"], font=_get_font(17, bold=True))
 
-    # Rank Badge
-    badge_y = av_y + 64
+    # Badges Row (Rank & Level)
+    badge_y = av_y + 74
     rank_color = (234, 179, 8) if "S" in rank else ((168, 85, 247) if "A" in rank else (59, 130, 246))
-    draw.rounded_rectangle([(user_x, badge_y), (user_x + 155, badge_y + 26)], radius=6, fill=(28, 22, 42, 255), outline=rank_color, width=1)
-    draw.text((user_x + 14, badge_y + 5), f"{rank.upper()} HUNTER", fill=rank_color, font=_get_font(12, bold=True))
+    draw.rounded_rectangle(
+        [(user_x, badge_y), (user_x + 160, badge_y + 32)],
+        radius=8,
+        fill=(28, 22, 42, 255),
+        outline=rank_color,
+        width=2,
+    )
+    draw.text((user_x + 18, badge_y + 6), f"{rank.upper()} HUNTER", fill=rank_color, font=_get_font(14, bold=True))
 
-    # Level Badge
-    lvl_x = user_x + 168
-    draw.rounded_rectangle([(lvl_x, badge_y), (lvl_x + 85, badge_y + 26)], radius=6, fill=(35, 30, 52, 255), outline=(90, 80, 120, 255), width=1)
-    draw.text((lvl_x + 14, badge_y + 5), f"LVL {level}", fill=(240, 240, 255, 255), font=_get_font(12, bold=True))
+    lvl_x = user_x + 175
+    draw.rounded_rectangle(
+        [(lvl_x, badge_y), (lvl_x + 115, badge_y + 32)],
+        radius=8,
+        fill=(35, 30, 52, 255),
+        outline=(100, 90, 135, 255),
+        width=2,
+    )
+    draw.text((lvl_x + 18, badge_y + 6), f"LEVEL {level}", fill=(245, 245, 255, 255), font=_get_font(14, bold=True))
 
-    # Middle Stats Grid
-    stats_y = 170
+    # 2x2 Large Stats Grid (High readability on mobile screens)
+    stats_y = 165
     total_battles = wins + losses
     win_rate = round((wins / total_battles * 100), 1) if total_battles > 0 else 0.0
 
     stat_cards = [
-        ("WIN RATE", f"{win_rate}%", f"{wins}W / {losses}L"),
-        ("STREAK", f"{streak}", "Unbroken Record"),
-        ("GOLD", f"{gold:,}", "Treasury"),
-        ("VAULT", f"{chests_count}", "Chests Ready"),
+        (35, stats_y, "WIN RATE", f"{win_rate}%", f"{wins} Wins / {losses} Losses", (255, 255, 255)),
+        (325, stats_y, "WIN STREAK", f"{streak} STREAK", "Active Unbroken Run", (250, 204, 21)),
+        (35, stats_y + 92, "TREASURY", f"{gold:,} GOLD", "Hunter Coin Balance", (250, 204, 21)),
+        (325, stats_y + 92, "VAULT STORAGE", f"{chests_count} CHESTS", "Ready To Unbox", (216, 180, 254)),
     ]
 
-    pill_w = 120
-    start_x = 35
-    for i, (lbl, val, sub) in enumerate(stat_cards):
-        cx = start_x + (i * (pill_w + 14))
-        draw.rounded_rectangle([(cx, stats_y), (cx + pill_w, stats_y + 72)], radius=10, fill=theme["surface"], outline=(55, 45, 75, 255), width=1)
-        draw.text((cx + 12, stats_y + 10), lbl, fill=(160, 150, 185, 255), font=_get_font(11, bold=True))
-        draw.text((cx + 12, stats_y + 28), val, fill=(255, 255, 255, 255), font=_get_font(19, bold=True))
-        draw.text((cx + 12, stats_y + 52), sub, fill=(130, 120, 150, 255), font=_get_font(10))
+    card_w, card_h = 275, 80
+    for cx, cy, lbl, val, sub, vc in stat_cards:
+        draw.rounded_rectangle(
+            [(cx, cy), (cx + card_w, cy + card_h)],
+            radius=12,
+            fill=theme["surface"],
+            outline=(65, 52, 90, 255),
+            width=1,
+        )
+        draw.text((cx + 16, cy + 10), lbl, fill=(170, 160, 195, 255), font=_get_font(13, bold=True))
+        draw.text((cx + 16, cy + 28), val, fill=vc, font=_get_font(24, bold=True))
+        draw.text((cx + 16, cy + 54), sub, fill=(135, 125, 155, 255), font=_get_font(12))
 
-    # XP Progress Bar
-    xp_bar_y = 275
-    bar_w = 522
-    draw.text((35, xp_bar_y - 18), f"HUNTER PROGRESSION • {xp} / {xp_needed} XP", fill=(175, 165, 200, 255), font=_get_font(11, bold=True))
-    draw.rounded_rectangle([(35, xp_bar_y), (35 + bar_w, xp_bar_y + 12)], radius=6, fill=(35, 30, 52, 255))
+    # Hunter XP Progress Bar
+    bar_w = 565
+    pct = int((xp / xp_needed) * 100) if xp_needed > 0 else 100
+    draw.text(
+        (35, 360),
+        f"HUNTER XP PROGRESSION • {xp} / {xp_needed} XP ({pct}%)",
+        fill=(195, 185, 220, 255),
+        font=_get_font(13, bold=True),
+    )
+    draw.rounded_rectangle([(35, 384), (35 + bar_w, 384 + 16)], radius=8, fill=(35, 30, 52, 255))
     progress = min(1.0, max(0.05, (xp / xp_needed) if xp_needed > 0 else 1.0))
     fill_w = int(bar_w * progress)
-    draw.rounded_rectangle([(35, xp_bar_y), (35 + fill_w, xp_bar_y + 12)], radius=6, fill=accent)
+    draw.rounded_rectangle([(35, 384), (35 + fill_w, 384 + 16)], radius=8, fill=accent)
 
     # Footer Branding
-    draw.text((35, h - 35), "KYRO ANIME BATTLE ARENA • OFFICIAL HUNTER LICENSE", fill=(95, 85, 120, 255), font=_get_font(11, bold=True))
+    draw.text(
+        (35, 430),
+        "KYRO BATTLE ARENA • OFFICIAL HUNTER LICENSE",
+        fill=(115, 105, 140, 255),
+        font=_get_font(13, bold=True),
+    )
 
-    # --- RIGHT SHOWCASE: EQUIPPED HERO CARD ---
-    hero_card_x = 585
-    hero_card_y = 35
-    hero_card_w = 280
-    hero_card_h = 320
+    # --- RIGHT SHOWCASE: HERO CARD ---
+    hero_card_x = 630
+    hero_card_y = 25
+    hero_card_w = 325
+    hero_card_h = 430
 
     h_rarity = hero_data.get("rarity", "Common")
     h_color = RARITY_COLORS.get(h_rarity, (156, 163, 175))
@@ -263,7 +292,7 @@ def render_hunter_profile(
     # Card background & glowing rarity border
     draw.rounded_rectangle(
         [(hero_card_x, hero_card_y), (hero_card_x + hero_card_w, hero_card_y + hero_card_h)],
-        radius=16,
+        radius=18,
         fill=theme["surface_card"],
         outline=h_color,
         width=2,
@@ -271,55 +300,98 @@ def render_hunter_profile(
 
     # Anime Series Title Header Box
     draw.rounded_rectangle(
-        [(hero_card_x + 10, hero_card_y + 10), (hero_card_x + hero_card_w - 10, hero_card_y + 36)],
-        radius=6,
+        [(hero_card_x + 12, hero_card_y + 12), (hero_card_x + hero_card_w - 12, hero_card_y + 44)],
+        radius=8,
         fill=(18, 14, 28, 255),
     )
-    draw.text((hero_card_x + 18, hero_card_y + 14), f"« {h_anime.upper()} »", fill=h_color, font=_get_font(11, bold=True))
-    draw.text((hero_card_x + hero_card_w - 85, hero_card_y + 14), f"[{elem_info['symbol']}]", fill=elem_info["color"], font=_get_font(11, bold=True))
+    draw.text(
+        (hero_card_x + 20, hero_card_y + 18),
+        f"<< {h_anime.upper()} >>",
+        fill=h_color,
+        font=_get_font(13, bold=True),
+    )
+    draw.text(
+        (hero_card_x + hero_card_w - 90, hero_card_y + 18),
+        f"[{elem_info['symbol']}]",
+        fill=elem_info["color"],
+        font=_get_font(13, bold=True),
+    )
 
     # Character Artwork
-    art_w, art_h = 130, 160
-    art_x, art_y = hero_card_x + 14, hero_card_y + 44
+    art_w, art_h = 145, 185
+    art_x, art_y = hero_card_x + 14, hero_card_y + 54
     draw.rounded_rectangle(
         [(art_x - 2, art_y - 2), (art_x + art_w + 2, art_y + art_h + 2)],
-        radius=10,
+        radius=12,
         outline=h_color,
-        width=1,
+        width=2,
     )
-    hero_art = _load_hero_image(h_id, (art_w, art_h), corner_radius=8)
+    hero_art = _load_hero_image(h_id, (art_w, art_h), corner_radius=10)
     im.paste(hero_art, (art_x, art_y), hero_art)
 
     # Info to right of artwork
     info_x = art_x + art_w + 14
     info_y = art_y + 4
-    draw.text((info_x, info_y), h_name.split()[0], fill=(255, 255, 255, 255), font=_get_font(18, bold=True))
-    if len(h_name.split()) > 1:
-        draw.text((info_x, info_y + 22), " ".join(h_name.split()[1:])[:12], fill=(210, 200, 230, 255), font=_get_font(14, bold=True))
+    name_parts = h_name.split()
+    draw.text((info_x, info_y), name_parts[0], fill=(255, 255, 255, 255), font=_get_font(22, bold=True))
+    if len(name_parts) > 1:
+        draw.text(
+            (info_x, info_y + 26),
+            " ".join(name_parts[1:])[:14],
+            fill=(215, 205, 235, 255),
+            font=_get_font(16, bold=True),
+        )
 
     # Rarity Pill
-    draw.rounded_rectangle([(info_x, info_y + 48), (info_x + 95, info_y + 68)], radius=5, fill=(18, 14, 28, 255), outline=h_color, width=1)
-    draw.text((info_x + 8, info_y + 52), h_rarity.upper(), fill=h_color, font=_get_font(10, bold=True))
-
-    # Power Pill
-    draw.rounded_rectangle([(info_x, info_y + 74), (info_x + 105, info_y + 104)], radius=6, fill=(35, 26, 52, 255), outline=(80, 65, 110, 255), width=1)
-    draw.text((info_x + 8, info_y + 78), "COMBAT POWER", fill=(160, 150, 185, 255), font=_get_font(9, bold=True))
-    draw.text((info_x + 8, info_y + 89), f"{h_power}", fill=(255, 255, 255, 255), font=_get_font(13, bold=True))
-
-    # Signature Move Box below artwork
-    move_y = art_y + art_h + 12
     draw.rounded_rectangle(
-        [(hero_card_x + 12, move_y), (hero_card_x + hero_card_w - 12, move_y + 42)],
-        radius=8,
+        [(info_x, info_y + 58), (info_x + 125, info_y + 86)],
+        radius=6,
         fill=(18, 14, 28, 255),
-        outline=(50, 40, 70, 255),
+        outline=h_color,
         width=1,
     )
-    draw.text((hero_card_x + 20, move_y + 6), "SIGNATURE TECHNIQUE", fill=(140, 130, 165, 255), font=_get_font(9, bold=True))
-    draw.text((hero_card_x + 20, move_y + 20), f"» {h_move[:30]}", fill=theme["highlight"], font=_get_font(11, bold=True))
+    draw.text((info_x + 12, info_y + 63), h_rarity.upper(), fill=h_color, font=_get_font(13, bold=True))
+
+    # Power Pill
+    draw.rounded_rectangle(
+        [(info_x, info_y + 96), (info_x + 135, info_y + 150)],
+        radius=8,
+        fill=(35, 26, 52, 255),
+        outline=(90, 75, 125, 255),
+        width=1,
+    )
+    draw.text((info_x + 10, info_y + 102), "COMBAT POWER", fill=(170, 160, 195, 255), font=_get_font(11, bold=True))
+    draw.text((info_x + 10, info_y + 118), f"{h_power}", fill=(255, 255, 255, 255), font=_get_font(22, bold=True))
+
+    # Signature Move Box below artwork
+    move_y = art_y + art_h + 14
+    draw.rounded_rectangle(
+        [(hero_card_x + 14, move_y), (hero_card_x + hero_card_w - 14, move_y + 64)],
+        radius=10,
+        fill=(18, 14, 28, 255),
+        outline=(60, 50, 85, 255),
+        width=1,
+    )
+    draw.text(
+        (hero_card_x + 24, move_y + 10),
+        "SIGNATURE TECHNIQUE",
+        fill=(160, 150, 185, 255),
+        font=_get_font(12, bold=True),
+    )
+    draw.text(
+        (hero_card_x + 24, move_y + 30),
+        f"> {h_move[:30]}",
+        fill=theme["highlight"],
+        font=_get_font(15, bold=True),
+    )
 
     # Card Footer Status
-    draw.text((hero_card_x + 55, move_y + 50), "EQUIPPED MAIN FIGHTER", fill=(120, 110, 145, 255), font=_get_font(10, bold=True))
+    draw.text(
+        (hero_card_x + 60, move_y + 76),
+        "EQUIPPED MAIN FIGHTER",
+        fill=(160, 150, 185, 255),
+        font=_get_font(13, bold=True),
+    )
 
     out = io.BytesIO()
     im.save(out, format="PNG", optimize=True)

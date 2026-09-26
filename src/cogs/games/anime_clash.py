@@ -232,6 +232,82 @@ HERO_REGISTRY: dict[str, dict[str, Any]] = {
     },
 }
 
+# Champion Battle Quotes & Critical Strike Cries
+CHAMPION_BATTLE_LINES: dict[str, dict[str, str]] = {
+    "tanjiro": {
+        "cry": "Never give up! Set your heart ablaze!",
+        "crit": "Water Breathing, Tenth Form: Constant Flux!",
+    },
+    "zenitsu": {
+        "cry": "Thunderclap and Flash... Godspeed!",
+        "crit": "I will protect them with everything I have!",
+    },
+    "deku": {
+        "cry": "One For All... 100% Full Cowling!",
+        "crit": "DETROIT SMASH!",
+    },
+    "killua": {
+        "cry": "Too slow... Lightning flows through my veins.",
+        "crit": "Godspeed Whirlwind!",
+    },
+    "megumi": {
+        "cry": "Chimera Shadow Garden, unfold!",
+        "crit": "With this treasure I summon... Eight-Handled Sword!",
+    },
+    "choso": {
+        "cry": "As an older brother, I will never yield!",
+        "crit": "Blood Manipulation: Piercing Blood!",
+    },
+    "zoro": {
+        "cry": "Nine Mountains, Eight Seas... I will become the King of Hell!",
+        "crit": "Three Thousand Worlds!",
+    },
+    "levi": {
+        "cry": "Give up on your dreams and die. Spiral slash!",
+        "crit": "You have no idea how fast I am.",
+    },
+    "toji": {
+        "cry": "Sorry kid, nothing personal. Just business.",
+        "crit": "Inverted Spear of Heaven pierce!",
+    },
+    "itachi": {
+        "cry": "You are already trapped in my Tsukuyomi.",
+        "crit": "Amaterasu... burn to ashes!",
+    },
+    "rengoku": {
+        "cry": "Set your heart ablaze! Go beyond your limits!",
+        "crit": "Flame Breathing, Ninth Form: Purgatory!",
+    },
+    "gojo": {
+        "cry": "Throughout heaven and earth, I alone am the honored one.",
+        "crit": "Domain Expansion: Infinite Void... Hollow Purple!",
+    },
+    "sukuna": {
+        "cry": "Know your place, fool. Stand proud.",
+        "crit": "Domain Expansion: Malevolent Shrine! Dismantle!",
+    },
+    "sukuna_true": {
+        "cry": "Fools, behold true Jujutsu magnificence!",
+        "crit": "World Cutting Slash!",
+    },
+    "jinwoo": {
+        "cry": "ARISE. The hunt begins now.",
+        "crit": "Shadow Army, slaughter them all!",
+    },
+    "jinwoo_monarch": {
+        "cry": "I am the Monarch of Shadows. Bow before Death.",
+        "crit": "Cataclysmic Shadow Realm Extraction!",
+    },
+    "luffy": {
+        "cry": "I'm gonna be the King of the Pirates! Gear 5!",
+        "crit": "BAJRANG GUN!",
+    },
+    "madara": {
+        "cry": "Do not misunderstand... this is not power of your creation!",
+        "crit": "Dual Heavenly Tengai Shinsei Meteor!",
+    },
+}
+
 # Elemental Advantage Matrix (+15% damage bonus)
 ELEMENT_ADVANTAGE: dict[str, str] = {
     "Fire": "Wind",
@@ -261,6 +337,7 @@ class AnimeClash(commands.Cog):
     def __init__(self, bot: KyroBot) -> None:
         self.bot: KyroBot = bot
         self._schema_initialized = False
+        self.recent_rivals: dict[int, list[str]] = {}
 
     async def cog_load(self) -> None:
         """Initialize database schema on cog startup."""
@@ -450,22 +527,9 @@ class AnimeClash(commands.Cog):
 
         discord_file = discord.File(img_buffer, filename="hunter_profile.png")
 
-        # Container / Embed Interface with Media Gallery attachment
+        # Container Interface with clean Media Gallery attachment (no redundant text)
         container = KyroContainer(accent_color=None)
         container.add_media("attachment://hunter_profile.png")
-        container.add_section(
-            content=(
-                f"### Hunter License — {user.mention}\n"
-                f"> **Rank:** `{rank}` | **Level:** `{lvl}` | **Streak:** `{profile.get('win_streak', 0)}`\n"
-                f"> **Champion:** **{equipped_hero['name']}** (« {equipped_hero.get('anime', 'Anime')} ») • `{equipped_hero['power'] + equipped_hero.get('power_bonus', 0)} Power`"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(
-            f"• **Treasury:** `{profile.get('gold', 150):,} Gold`\n"
-            f"• **Vault:** `{profile.get('chests_bronze', 0)}` Bronze | `{profile.get('chests_silver', 0)}` Silver | `{profile.get('chests_epic', 0)}` Epic | `{profile.get('chests_monarch', 0)}` Monarch\n"
-            f"• **Roster:** `{len(user_heroes)} / {len(HERO_REGISTRY)} Fighters Unlocked`"
-        )
 
         view = ProfileHubView(self, user, profile, user_heroes)
         return container, discord_file, view
@@ -525,7 +589,7 @@ class AnimeClash(commands.Cog):
         p1_main = await self.get_equipped_hero(p1_profile)
         p1_power = p1_main["power"] + p1_main.get("power_bonus", 0)
 
-        # Matchmaking from rank pool
+        # Matchmaking from rank pool with anti-repetition memory
         rank = p1_profile.get("hunter_rank", "E-Rank")
         if rank in ["E-Rank", "D-Rank"]:
             pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Common", "Rare"]]
@@ -537,7 +601,24 @@ class AnimeClash(commands.Cog):
         if not pool:
             pool = list(HERO_REGISTRY.keys())
 
-        rival_id = random.choice(pool)
+        # Filter out player's equipped hero (no mirror) and recently encountered rivals
+        user_recent = self.recent_rivals.get(p1.id, [])
+        eligible_pool = [k for k in pool if k != p1_main["id"] and k not in user_recent]
+        if not eligible_pool:
+            # If recent memory exhausted pool, only exclude the immediate last rival and self
+            last_rival = user_recent[-1] if user_recent else None
+            eligible_pool = [k for k in pool if k != p1_main["id"] and k != last_rival]
+        if not eligible_pool:
+            eligible_pool = [k for k in HERO_REGISTRY.keys() if k != p1_main["id"]]
+        if not eligible_pool:
+            eligible_pool = list(HERO_REGISTRY.keys())
+
+        rival_id = random.choice(eligible_pool)
+        user_recent.append(rival_id)
+        if len(user_recent) > 4:
+            user_recent.pop(0)
+        self.recent_rivals[p1.id] = user_recent
+
         rival_hero = HERO_REGISTRY[rival_id].copy()
 
         # Balance rival power close to player's power (+/- 6%)
@@ -879,29 +960,55 @@ class SoloBattleSessionView(discord.ui.View):
         if self.battle_concluded:
             return
 
+        p1_id = self.my_hero.get("id", "tanjiro")
+        rival_id = self.rival_hero.get("id", "sukuna")
+        p1_lines = CHAMPION_BATTLE_LINES.get(p1_id, {})
+        rival_lines = CHAMPION_BATTLE_LINES.get(rival_id, {})
+
+        # Critical Strike Roll (18% for player, 12% for rival)
+        p1_crit = random.random() < 0.18
+        rival_crit = random.random() < 0.12
+
         # 1. Calculate Player and Rival Damage
         if action_type == "attack":
-            p1_dmg = random.randint(22, 28) + (6 if self.p1_adv else 0)
-            rival_dmg = random.randint(16, 24) + (5 if self.p2_adv else 0)
-            turn_narrative = (
-                f"Round {self.round_num}: {self.my_hero['name']} used Attack for {p1_dmg} DMG! "
-                f"{self.rival_hero['name']} hit back for {rival_dmg} DMG."
+            base_p1 = random.randint(22, 28) + (7 if self.p1_adv else 0)
+            p1_dmg = int(base_p1 * 1.45) if p1_crit else base_p1
+
+            base_rival = random.randint(16, 24) + (5 if self.p2_adv else 0)
+            rival_dmg = int(base_rival * 1.35) if rival_crit else base_rival
+
+            cry = p1_lines.get("crit" if p1_crit else "cry", "Take this!")
+            crit_flag = "💥 CRITICAL! " if p1_crit else ""
+            turn_narrative = f"Round {self.round_num}: {crit_flag}{self.my_hero['name']} deals {p1_dmg} DMG! Rival hits for {rival_dmg}."
+            turn_narrative_full = (
+                f'*"{cry}"*\n'
+                f"> **{crit_flag}{self.my_hero['name']}** landed a strike dealing **{p1_dmg} DMG**!\n"
+                f"> **{self.rival_hero['name']}** struck back with **{rival_dmg} DMG**."
             )
         elif action_type == "technique":
-            p1_dmg = random.randint(34, 46) + (8 if self.p1_adv else 0)
-            rival_dmg = random.randint(20, 32) + (5 if self.p2_adv else 0)
+            base_p1 = random.randint(34, 46) + (9 if self.p1_adv else 0)
+            p1_dmg = int(base_p1 * 1.4) if p1_crit else base_p1
+
+            base_rival = random.randint(20, 32) + (5 if self.p2_adv else 0)
+            rival_dmg = int(base_rival * 1.3) if rival_crit else base_rival
+
             move_name = self.my_hero.get("move", "Signature Hit")
-            turn_narrative = (
-                f"Round {self.round_num}: {self.my_hero['name']} unleashed {move_name[:26]} for {p1_dmg} DMG! "
-                f"{self.rival_hero['name']} countered for {rival_dmg} DMG."
+            cry = p1_lines.get("crit" if p1_crit else "cry", f"{move_name}!")
+            crit_flag = "💥 CRITICAL! " if p1_crit else ""
+            turn_narrative = f"Round {self.round_num}: {crit_flag}{self.my_hero['name']} used {move_name[:20]} for {p1_dmg} DMG!"
+            turn_narrative_full = (
+                f'*"{cry}"*\n'
+                f"> **{crit_flag}{self.my_hero['name']}** unleashed **{move_name}** for **{p1_dmg} DMG**!\n"
+                f"> **{self.rival_hero['name']}** absorbed the shock and countered for **{rival_dmg} DMG**."
             )
         else:  # guard
-            p1_dmg = random.randint(14, 20)
-            # Guard blocks 75% of incoming damage
+            p1_dmg = random.randint(15, 22)
             raw_rival = random.randint(18, 26) + (4 if self.p2_adv else 0)
-            rival_dmg = max(4, int(raw_rival * 0.25))
-            turn_narrative = (
-                f"Round {self.round_num}: {self.my_hero['name']} guarded, blocking 75% damage and counter-attacked for {p1_dmg} DMG!"
+            rival_dmg = max(3, int(raw_rival * 0.25))
+
+            turn_narrative = f"Round {self.round_num}: 🛡️ PARRY! {self.my_hero['name']} blocked 75% DMG & dealt {p1_dmg}."
+            turn_narrative_full = (
+                f"> 🛡️ **PERFECT PARRY!** **{self.my_hero['name']}** blocked 75% damage and counter-attacked for **{p1_dmg} DMG**! (Took only `{rival_dmg} DMG`)."
             )
 
         # 2. Update HP
@@ -1004,8 +1111,10 @@ class SoloBattleSessionView(discord.ui.View):
         container.add_media("attachment://battle_clash.png")
 
         if winner_num == 1:
+            win_quote = p1_lines.get("cry", "Victory is ours!")
             title_text = (
-                f"### VICTORY OVER RIVAL!\n"
+                f"### 🏆 VICTORY OVER RIVAL!\n"
+                f'*"{win_quote}"*\n'
                 f"> **{self.my_hero['name']}** (« {self.my_hero.get('anime', 'Anime')} ») defeated **{self.rival_hero['name']}**!\n"
                 f"> **Spoils of War:** `+{gold_win} Gold` | `+{xp_gain} XP`\n"
             )
@@ -1015,8 +1124,10 @@ class SoloBattleSessionView(discord.ui.View):
             self.clear_items()
             self.add_item(BattleAgainButton(self.cog, self.ctx))
         elif winner_num == 2:
+            rival_quote = rival_lines.get("cry", "You are not ready for this arena.")
             title_text = (
-                f"### DEFEATED BY RIVAL!\n"
+                f"### 💀 DEFEATED BY RIVAL!\n"
+                f'*"{rival_quote}"*\n'
                 f"> **{self.rival_hero['name']}** (« {self.rival_hero.get('anime', 'Anime')} ») overpowered your fighter!\n"
                 f"> **Consolation:** `+{xp_gain} XP` gained from experience."
             )
@@ -1024,12 +1135,12 @@ class SoloBattleSessionView(discord.ui.View):
             self.clear_items()
             self.add_item(BattleAgainButton(self.cog, self.ctx))
         else:
+            adv_str = " | ⚡ **Element Advantage!**" if self.p1_adv else ""
             container.add_section(
                 content=(
-                    f"### Combat In Progress — Round {self.round_num - 1}\n"
-                    f"> **{self.my_hero['name']}:** `{self.p1_hp}/{self.p1_max_hp} HP` | "
-                    f"**{self.rival_hero['name']}:** `{self.p2_hp}/{self.p2_max_hp} HP`\n"
-                    f"> {turn_narrative}"
+                    f"### Combat In Progress — Round {self.round_num - 1}{adv_str}\n"
+                    f"{turn_narrative_full}\n"
+                    f"> **{self.my_hero['name']}:** `{self.p1_hp}/{self.p1_max_hp} HP` vs **{self.rival_hero['name']}:** `{self.p2_hp}/{self.p2_max_hp} HP`"
                 )
             )
 

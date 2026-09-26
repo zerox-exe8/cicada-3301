@@ -509,6 +509,150 @@ CHAMPION_ULTIMATES: dict[str, dict[str, Any]] = {
     },
 }
 
+# Authentic Canon Techniques for All Champions (Basic, Heavy, Guard, Focus, Climax)
+CHAMPION_TECHNIQUES: dict[str, dict[str, str]] = {
+    "tanjiro": {
+        "basic": "Water Surface Slash",
+        "heavy": "Water Breathing: Tenth Form",
+        "guard": "Water Wheel Guard",
+        "focus": "Total Concentration Breathing",
+        "climax": "Hinokami Kagura: Sun Halo Dragon",
+    },
+    "zenitsu": {
+        "basic": "Godspeed Lightning Dash",
+        "heavy": "Thunderclap and Flash: Sixfold",
+        "guard": "Lightning Reflex Evasion",
+        "focus": "Unconscious Thunder Focus",
+        "climax": "Seventh Form: Honoikazuchi no Kami",
+    },
+    "deku": {
+        "basic": "Delaware Smash",
+        "heavy": "Detroit Smash: 100% Impact",
+        "guard": "Full Cowling Defense Stance",
+        "focus": "One For All Synchronize",
+        "climax": "100% United States Smash",
+    },
+    "killua": {
+        "basic": "Thunder Palm Blitz",
+        "heavy": "Godspeed: Whirlwind",
+        "guard": "Lightning Reflex Counter",
+        "focus": "Nen Ren Aura Concentration",
+        "climax": "Godspeed Thunderbolt Execution",
+    },
+    "megumi": {
+        "basic": "Divine Dog Savage Strike",
+        "heavy": "Nue Lightning Claw",
+        "guard": "Shadow Clone Shield",
+        "focus": "Cursed Energy Condensation",
+        "climax": "Chimera Shadow Garden",
+    },
+    "choso": {
+        "basic": "Blood Edge Slash",
+        "heavy": "Piercing Blood Stream",
+        "guard": "Hardened Blood Shield",
+        "focus": "Flowing Red Scale",
+        "climax": "Supernova Blood Burst",
+    },
+    "zoro": {
+        "basic": "Oni Giri Slash",
+        "heavy": "Three Thousand Worlds",
+        "guard": "Blade Cross Deflection",
+        "focus": "Coating Conqueror's Haki",
+        "climax": "King of Hell: Dragon Damnation",
+    },
+    "levi": {
+        "basic": "ODM Spiral Blitz",
+        "heavy": "Ackerman Precision Sever",
+        "guard": "High-Speed Wire Evasion",
+        "focus": "Steel Tactical Calm",
+        "climax": "Spiral Tempest Decapitation",
+    },
+    "yuji": {
+        "basic": "Divergent Fist",
+        "heavy": "Black Flash Spatial Strike",
+        "guard": "Superhuman Body Guard",
+        "focus": "Focus on the Spark of Black Cursed Energy",
+        "climax": "Continuous Quadruple Black Flash",
+    },
+    "sasuke": {
+        "basic": "Chidori Stream",
+        "heavy": "Amaterasu Black Flames",
+        "guard": "Susanoo Ribcage Barrier",
+        "focus": "Sharingan Chakra Surge",
+        "climax": "Indra's Arrow: Lightning God",
+    },
+    "rengoku": {
+        "basic": "First Form: Unknowing Fire",
+        "heavy": "Fifth Form: Flame Tiger",
+        "guard": "Rising Scorching Sun Guard",
+        "focus": "Set Your Heart Ablaze",
+        "climax": "Ninth Form: Rengoku Purgatory",
+    },
+    "toji": {
+        "basic": "Playful Cloud Multi-Strike",
+        "heavy": "Inverted Spear of Heaven Thrust",
+        "guard": "Zero Cursed Instinct Evasion",
+        "focus": "Heavenly Restriction Sharpening",
+        "climax": "Soul Splitter Severance",
+    },
+    "itachi": {
+        "basic": "Crow Clone Shuriken Jutsu",
+        "heavy": "Amaterasu Inferno",
+        "guard": "Yata Mirror Divine Guard",
+        "focus": "Mangekyo Chakra Gathering",
+        "climax": "Susanoo Totsuka Blade Seal",
+    },
+    "jinwoo": {
+        "basic": "Kasaka Dagger Flurry",
+        "heavy": "Shadow Dagger: Vital Strike",
+        "guard": "Ruler's Authority Deflection",
+        "focus": "Awaken Monarch Mana",
+        "climax": "Shadow Sovereign: ARISE",
+    },
+    "luffy": {
+        "basic": "Gomu Gomu no Jet Pistol",
+        "heavy": "Gomu Gomu no Red Roc",
+        "guard": "Advanced Armament Haki Guard",
+        "focus": "Conqueror's Ryuo Amplification",
+        "climax": "Gear 5: Bajrang Sun God Gun",
+    },
+    "madara": {
+        "basic": "Gunbai Wind Tempest",
+        "heavy": "Fire Style: Majestic Destroyer Flame",
+        "guard": "Susanoo Ribcage Reflection",
+        "focus": "Six Paths Chakra Kneading",
+        "climax": "Tengai Shinsei: Dual Heavenly Meteors",
+    },
+    "gojo": {
+        "basic": "Cursed Spatial Blitz",
+        "heavy": "Technique Amplification: Blue & Red",
+        "guard": "Infinity Spatial Barrier",
+        "focus": "Six Eyes Cursed Energy Optimization",
+        "climax": "Domain Expansion: Infinite Void",
+    },
+    "sukuna": {
+        "basic": "Dismantle Invisible Slash",
+        "heavy": "Cleave: Soul Severance",
+        "guard": "Domain Amplification",
+        "focus": "Disaster Cursed Surge",
+        "climax": "Domain Expansion: Malevolent Shrine",
+    },
+    "jinwoo_monarch": {
+        "basic": "Kamish Wrath Vortex",
+        "heavy": "Death Monarch Cleave",
+        "guard": "Absolute Darkness Shroud",
+        "focus": "Domain of Death Mana Surge",
+        "climax": "Monarch of Shadows: Absolute Annihilation",
+    },
+    "sukuna_true": {
+        "basic": "Four-Armed Spatial Dismantle",
+        "heavy": "Kamutoke Divine Lightning",
+        "guard": "Heian Form Armor",
+        "focus": "King of Curses True Aura",
+        "climax": "World Cutting Slash: Spatial Severance",
+    },
+}
+
 # Authentic Universe Power Systems & Climax Rules
 UNIVERSE_SYSTEMS: dict[str, dict[str, str]] = {
     "Jujutsu Kaisen": {
@@ -966,7 +1110,7 @@ class AnimeClash(commands.Cog):
             p2_hp=100,
             p2_max_hp=100,
             winner_num=0,
-            turn_action_text=f"ROUND 1: Clash Initiated! Predict rival moves & strike below.",
+            turn_action_text=f"ROUND 1: Clash Initiated! Choose your action below.",
             p1_energy=0,
             p2_energy=0,
             domain_active=None,
@@ -979,21 +1123,23 @@ class AnimeClash(commands.Cog):
         p1_tot = p1_power + (p1_profile.get("relic_power", 0) if p1_profile.get("relic_id") else 0)
         power_diff = p1_tot - rival_hero["power"]
         if power_diff < -200:
-            diff_badge = "⚠️ **EXTREME THREAT! Underdog Battle** (Use Parries & Focus!)"
+            diff_badge = "⚠️ **EXTREME THREAT! Underdog Battle** (Use Guard & Focus wisely!)"
         elif power_diff > 200:
             diff_badge = "🔥 **YOU HOLD MASSIVE POWER ADVANTAGE!**"
         else:
-            diff_badge = "⚖️ **EVEN MATCHUP!** Pure tactical skill will decide victory."
+            diff_badge = "⚖️ **EVEN MATCHUP!** Pure combat skill will decide victory."
 
         container = KyroContainer(accent_color=None)
         container.add_media("attachment://battle_clash.png")
         container.add_section(
             content=(
-                f"### Rival Encountered: {rival_hero['name'].upper()}!\n"
-                f"> **Your Champion:** **{p1_main['name']}** (« {p1_main.get('anime', 'Anime')} ») • `{p1_tot} Power` • [{p1_main['element']}]\n"
-                f"> **Rival Fighter:** **{rival_hero['name']}** (« {rival_hero.get('anime', 'Anime')} ») • `{rival_hero['power']} Power` • [{rival_hero['element']}]\n"
+                f"### ⚔️ Anime Arena Clash: {rival_hero['name'].upper()}!\n"
+                f"────────────────────────────────────────────\n"
+                f"🔵 **{p1_main['name']}** (« {p1_main.get('anime', 'Anime')} ») • `{p1_tot} Power` • [{p1_main['element']}]\n"
+                f"🔴 **{rival_hero['name']}** (« {rival_hero.get('anime', 'Anime')} ») • `{rival_hero['power']} Power` • [{rival_hero['element']}]\n"
+                f"────────────────────────────────────────────\n"
                 f"> {diff_badge}\n"
-                f"> **Mind Game:** ⚔️ `Rush` beats Focus • 🛡️ `Parry` counters Rush • 🧘 `Focus` charges Energy!"
+                f"> **Select your combat action below to initiate Round 1!**"
             )
         )
 
@@ -2060,6 +2206,20 @@ class SoloBattleSessionView(discord.ui.View):
 
         p1_id = self.my_hero.get("id", "tanjiro")
         rival_id = self.rival_hero.get("id", "sukuna")
+        p1_tech = CHAMPION_TECHNIQUES.get(p1_id, {
+            "basic": "Basic Strike",
+            "heavy": "Iconic Technique",
+            "guard": "Guard & Deflect",
+            "focus": "Channel Energy",
+            "climax": "Ultimate Climax",
+        })
+        rival_tech = CHAMPION_TECHNIQUES.get(rival_id, {
+            "basic": "Basic Strike",
+            "heavy": "Iconic Technique",
+            "guard": "Guard & Deflect",
+            "focus": "Channel Energy",
+            "climax": "Ultimate Climax",
+        })
         p1_lines = CHAMPION_BATTLE_LINES.get(p1_id, {})
         rival_lines = CHAMPION_BATTLE_LINES.get(rival_id, {})
 
@@ -2071,42 +2231,39 @@ class SoloBattleSessionView(discord.ui.View):
         p1_elem = 1.18 if self.p1_adv else 1.0
         p2_elem = 1.18 if self.p2_adv else 1.0
 
-        # 2. Tactical Rival AI Intent Selection
+        # 2. Authentic Rival Decision & Move Selection
         if self.p2_energy >= 100:
             rival_action = "climax"
-        elif self.p1_energy >= 100:
-            # Player is poised to Climax -> Rival is alert to Parry or Rush
-            rival_roll = random.random()
-            if rival_roll < 0.55:
-                rival_action = "parry"
-            elif rival_roll < 0.85:
-                rival_action = "rush"
-            else:
-                rival_action = "focus"
+            rival_move = rival_tech["climax"]
+        elif self.p1_energy >= 100 and random.random() < 0.60:
+            # Alert to player's ready ultimate -> rival guards
+            rival_action = "guard"
+            rival_move = rival_tech["guard"]
         elif self.p2_hp <= 35:
-            # Desperation all-out onslaught
-            rival_roll = random.random()
-            if rival_roll < 0.65:
-                rival_action = "rush"
-            elif rival_roll < 0.85:
-                rival_action = "focus"
-            else:
-                rival_action = "parry"
+            # Aggressive desperation strike
+            rival_action = "strike"
+            rival_move = rival_tech["heavy"]
         else:
-            rival_roll = random.random()
-            if rival_roll < 0.45:
-                rival_action = "rush"
-            elif rival_roll < 0.78:
+            r_roll = random.random()
+            if r_roll < 0.45:
+                rival_action = "strike"
+                rival_move = rival_tech["heavy"]
+            elif r_roll < 0.75:
+                rival_action = "strike"
+                rival_move = rival_tech["basic"]
+            elif r_roll < 0.90:
                 rival_action = "focus"
+                rival_move = rival_tech["focus"]
             else:
-                rival_action = "parry"
+                rival_action = "guard"
+                rival_move = rival_tech["guard"]
 
-        # 3. Handle Special Player Actions: Potion & Climax
         p1_dmg = 0
         rival_dmg = 0
-        turn_narrative = ""
         turn_narrative_full = ""
+        turn_action_text = ""
 
+        # 3. Resolve Special Actions: Potion & Climax
         if player_action == "potion":
             if self.profile.get("healing_potions", 0) <= 0:
                 await interaction.response.send_message("⚠️ You have no Healing Potions left in your pouch!", ephemeral=True)
@@ -2119,36 +2276,26 @@ class SoloBattleSessionView(discord.ui.View):
             heal_amt = 35
             self.p1_hp = min(self.p1_max_hp, self.p1_hp + heal_amt)
 
-            # Rival strikes or focuses while player drinks
-            if rival_action == "rush":
-                rival_dmg = int(random.randint(18, 26) * scaled_p2 * p2_elem)
-                turn_narrative = f"Round {self.round_num}: 🧪 HEALED +{heal_amt} HP! Rival rushed for {rival_dmg} DMG."
+            if rival_action in ("strike", "climax"):
+                base_r = 55 if rival_action == "climax" else 22
+                rival_dmg = int(random.randint(base_r, base_r + 10) * scaled_p2 * p2_elem)
+                turn_action_text = f"Round {self.round_num}: 🧪 HEALED +{heal_amt} HP! Rival hit for {rival_dmg}."
                 turn_narrative_full = (
-                    f"> 🧪 **COMBAT ELIXIR!** You consumed a Healing Potion and recovered **+{heal_amt} HP**!\n"
-                    f"> **{self.rival_hero['name']}** rushed forward while you drank, dealing `{rival_dmg} DMG`."
-                )
-            elif rival_action == "climax":
-                self.p2_energy = 0
-                rival_ult = CHAMPION_ULTIMATES.get(rival_id, {})
-                rival_dmg = int(random.randint(48, 65) * scaled_p2 * p2_elem * rival_ult.get("dmg_mult", 2.5))
-                turn_narrative = f"Round {self.round_num}: 🧪 HEALED +{heal_amt} HP, but Rival unleashed CLIMAX for {rival_dmg} DMG!"
-                turn_narrative_full = (
-                    f"> 🧪 **COMBAT ELIXIR!** Recovered **+{heal_amt} HP**!\n"
-                    f"> ⚠️ **RIVAL CLIMAX!** **{self.rival_hero['name']}** unleashed **{rival_ult.get('name', 'Ultimate')}** dealing **{rival_dmg} DMG**!"
+                    f"🧪 **COMBAT HEAL:** **{self.my_hero['name']}** consumed an elixir and restored **+{heal_amt} HP**!\n"
+                    f"🔴 **{self.rival_hero['name']}** capitalized with **{rival_move}** ➔ **{rival_dmg} DMG**!"
                 )
             else:
-                self.p2_energy = min(100, self.p2_energy + 35)
-                turn_narrative = f"Round {self.round_num}: 🧪 HEALED +{heal_amt} HP! Rival focused energy."
+                self.p2_energy = min(100, self.p2_energy + 30)
+                turn_action_text = f"Round {self.round_num}: 🧪 HEALED +{heal_amt} HP! Safe recovery."
                 turn_narrative_full = (
-                    f"> 🧪 **COMBAT ELIXIR!** You safely drank an elixir and recovered **+{heal_amt} HP**!\n"
-                    f"> **{self.rival_hero['name']}** spent the moment gathering `{self.p2_energy_name}` (+35%)."
+                    f"🧪 **SAFE RECOVERY:** **{self.my_hero['name']}** drank an elixir and restored **+{heal_amt} HP**!\n"
+                    f"🔴 **{self.rival_hero['name']}** held ground with **{rival_move}** (+30% {self.p2_short_energy})."
                 )
 
         elif player_action == "climax":
             if self.p1_energy < 100:
                 await interaction.response.send_message(
-                    f"⚠️ **{self.p1_energy_name} at {self.p1_energy}%!**\n"
-                    f"Charge it to **100%** using 🧘 **Energy Focus** or 🛡️ **Tactical Parries** to unleash your {self.p1_climax_type}!",
+                    f"⚠️ **{self.p1_energy_name} at {self.p1_energy}%!** Charge to 100% using ⚔️ **Strike**, 🛡️ **Guard**, or 🧘 **Focus**!",
                     ephemeral=True,
                 )
                 return
@@ -2157,176 +2304,172 @@ class SoloBattleSessionView(discord.ui.View):
             ult_info = CHAMPION_ULTIMATES.get(
                 p1_id,
                 {
-                    "name": f"{self.p1_climax_type}: Sovereign Strike",
-                    "domain": f"{self.my_hero['name']} Territory",
-                    "quote": "Prepare yourself!",
+                    "name": p1_tech["climax"],
+                    "domain": f"{self.my_hero['name']} Awakening",
+                    "quote": "This battle ends now!",
                     "dmg_mult": 2.5,
                 },
             )
             self.domain_active = ult_info["domain"]
             raw_p1 = random.randint(58, 76) * scaled_p1 * p1_elem * ult_info.get("dmg_mult", 2.5)
             p1_dmg = int(raw_p1)
+            rival_dmg = random.randint(6, 14)
 
-            # Rival counter during player climax
-            if rival_action == "climax":
-                self.p2_energy = 0
-                rival_ult = CHAMPION_ULTIMATES.get(rival_id, {})
-                rival_dmg = int(random.randint(45, 60) * scaled_p2 * p2_elem * rival_ult.get("dmg_mult", 2.5))
-                turn_narrative = f"Round {self.round_num}: 🌌 DUAL CLIMAX COLLISION! {p1_dmg} vs {rival_dmg} DMG!"
-                turn_narrative_full = (
-                    f"🌌 **{ult_info['domain'].upper()}!**\n"
-                    f'*"{ult_info["quote"]}"*\n'
-                    f"> 💥 **COLLIDING CLIMAXES!** Both champions unleashed their ultimate forms simultaneously!\n"
-                    f"> **{self.my_hero['name']}** dealt **{p1_dmg} CRITICAL DMG**!\n"
-                    f"> **{self.rival_hero['name']}** countered with **{rival_dmg} DMG** before domain suppression!"
-                )
-            else:
-                rival_dmg = random.randint(5, 12)
-                turn_narrative = f"Round {self.round_num}: 🌌 {ult_info['domain'][:24]}! Dealt {p1_dmg} CRITICAL DMG!"
-                turn_narrative_full = (
-                    f"🌌 **{ult_info['domain'].upper()}!**\n"
-                    f'*"{ult_info["quote"]}"*\n'
-                    f"> 💥 **{self.my_hero['name']}** unleashed **{ult_info['name']}** dealing **{p1_dmg} CRITICAL DMG**!\n"
-                    f"> **{self.rival_hero['name']}** was overwhelmed within the {self.p1_climax_type} and dealt only `{rival_dmg} DMG`."
-                )
+            turn_action_text = f"Round {self.round_num}: 🌌 {ult_info['name'][:22]}! Dealt {p1_dmg} CRIT DMG!"
+            turn_narrative_full = (
+                f"🌌 **{ult_info['domain'].upper()}!**\n"
+                f'*"{ult_info["quote"]}"*\n\n'
+                f"💥 **{self.my_hero['name']}** unleashed **{ult_info['name']}** ➔ **{p1_dmg} CRITICAL DMG**!\n"
+                f"🔴 **{self.rival_hero['name']}** struck back with **{rival_move}** ➔ `{rival_dmg} DMG` before being suppressed!"
+            )
 
-        # 4. Tactical 3-Way Prediction Matrix: Rush vs Parry vs Focus
-        elif player_action == "rush":
-            if rival_action == "focus":
-                # PUNISH INTERRUPT: Player beats rival's charge
+        # 4. Resolve Interactive Clashes (Both sides active!)
+        elif player_action == "strike":
+            p1_move = p1_tech["heavy"] if random.random() < 0.60 else p1_tech["basic"]
+
+            if rival_action == "guard":
+                # Opponent guarded player's strike
+                self.p1_energy = min(100, self.p1_energy + 10)
+                self.p2_energy = min(100, self.p2_energy + 25)
+                p1_dmg = int(random.randint(10, 16) * scaled_p1 * p1_elem)
+                rival_dmg = int(random.randint(26, 36) * scaled_p2 * p2_elem)
+                turn_action_text = f"Round {self.round_num}: 🛡️ Deflected! Rival parried {p1_move}."
+                turn_narrative_full = (
+                    f"🛡️ **RIVAL DEFLECTED!**\n"
+                    f"🔵 **{self.my_hero['name']}** attacked with **{p1_move}** but met **{rival_move}**! (Dealt `{p1_dmg} DMG`)\n"
+                    f"🔴 **{self.rival_hero['name']}** executed a sharp counter-riposte ➔ **{rival_dmg} DMG**!"
+                )
+            elif rival_action == "focus":
+                # Interrupted opponent's focus
                 self.p1_energy = min(100, self.p1_energy + 25)
                 self.p2_energy = min(100, self.p2_energy + 10)
                 p1_dmg = int(random.randint(34, 46) * scaled_p1 * p1_elem)
                 rival_dmg = 0
-                turn_narrative = f"Round {self.round_num}: 💥 PUNISH INTERRUPT! {self.my_hero['name']} broke charge for {p1_dmg} DMG!"
+                turn_action_text = f"Round {self.round_num}: 💥 INTERRUPT! {p1_move} broke rival's charge!"
                 turn_narrative_full = (
-                    f"> 💥 **PUNISH INTERRUPT!** **{self.rival_hero['name']}** attempted to charge {self.p2_energy_name}, but **{self.my_hero['name']}** intercepted with a savage Rush Strike!\n"
-                    f"> Dealt **{p1_dmg} DMG** and completely nullified rival's turn (`0 DMG taken`)."
-                )
-            elif rival_action == "parry":
-                # COUNTERED: Rival predicted player's rush
-                self.p1_energy = min(100, self.p1_energy + 5)
-                self.p2_energy = min(100, self.p2_energy + 25)
-                p1_dmg = 0
-                rival_dmg = int(random.randint(28, 42) * scaled_p2 * p2_elem)
-                turn_narrative = f"Round {self.round_num}: 🛡️ RIVAL PARRY! Rival deflected strike and countered for {rival_dmg} DMG!"
-                turn_narrative_full = (
-                    f"> 🛡️ **RIVAL PARRY!** **{self.rival_hero['name']}** anticipated your Rush, deflected your strike with weapon guard, and executed a sharp riposte!\n"
-                    f"> Your attack was blocked (`0 DMG dealt`), and you suffered **{rival_dmg} DMG**!"
+                    f"💥 **PUNISH INTERRUPT!**\n"
+                    f"🔵 **{self.my_hero['name']}** caught the rival charging with **{p1_move}** ➔ **{p1_dmg} DMG**!\n"
+                    f"🔴 **{self.rival_hero['name']}'s** **{rival_move}** was broken (`0 DMG taken`)."
                 )
             elif rival_action == "climax":
-                # Rival Climax crushes normal rush
+                # Rival Climax hits hard
                 self.p2_energy = 0
                 rival_ult = CHAMPION_ULTIMATES.get(rival_id, {})
-                p1_dmg = int(random.randint(18, 26) * scaled_p1 * p1_elem)
+                p1_dmg = int(random.randint(20, 28) * scaled_p1 * p1_elem)
                 rival_dmg = int(random.randint(48, 65) * scaled_p2 * p2_elem * rival_ult.get("dmg_mult", 2.5))
-                turn_narrative = f"Round {self.round_num}: ⚠️ RIVAL CLIMAX OVERWHELM! Rival hit for {rival_dmg} DMG."
+                turn_action_text = f"Round {self.round_num}: ⚠️ RIVAL CLIMAX! Took {rival_dmg} DMG."
                 turn_narrative_full = (
-                    f"> ⚠️ **RIVAL AWAKENED!** While you rushed, **{self.rival_hero['name']}** ignited **{rival_ult.get('name', 'Awakening')}**!\n"
-                    f"> You dealt **{p1_dmg} DMG**, but took a catastrophic **{rival_dmg} DMG**!"
+                    f"⚠️ **RIVAL ULTIMATE RELEASE!**\n"
+                    f"🔵 **{self.my_hero['name']}** landed **{p1_move}** ➔ `{p1_dmg} DMG`.\n"
+                    f"🔴 **{self.rival_hero['name']}** overwhelmed you with **{rival_ult.get('name', 'Awakening')}** ➔ **{rival_dmg} DMG**!"
                 )
-            else:  # rival also rushed
+            else:
+                # Direct 2-Sided Clash!
                 self.p1_energy = min(100, self.p1_energy + 20)
                 self.p2_energy = min(100, self.p2_energy + 20)
-                p1_dmg = int(random.randint(24, 34) * scaled_p1 * p1_elem)
+                p1_dmg = int(random.randint(25, 35) * scaled_p1 * p1_elem)
                 rival_dmg = int(random.randint(22, 32) * scaled_p2 * p2_elem)
-                turn_narrative = f"Round {self.round_num}: ⚔️ DIRECT CLASH! {self.my_hero['name']} {p1_dmg} DMG vs Rival {rival_dmg} DMG."
+                turn_action_text = f"Round {self.round_num}: ⚔️ Clash! {self.my_hero['name']} {p1_dmg} vs Rival {rival_dmg}."
                 turn_narrative_full = (
-                    f"> ⚔️ **DIRECT CLASH!** Both warriors charged forward in raw collision! Shockwaves erupted as strikes traded blow-for-blow!\n"
-                    f"> **{self.my_hero['name']}** dealt **{p1_dmg} DMG**! (Suffered `{rival_dmg} DMG`)."
+                    f"🔵 **{self.my_hero['name']}** used **{p1_move}** ➔ **{p1_dmg} DMG**!\n"
+                    f"🔴 **{self.rival_hero['name']}** countered with **{rival_move}** ➔ **{rival_dmg} DMG**!"
                 )
 
-        elif player_action == "parry":
-            if rival_action == "rush":
-                # PERFECT PARRY: Player read rival's attack!
+        elif player_action == "guard":
+            p1_guard = p1_tech["guard"]
+
+            if rival_action == "strike":
+                # Perfect Parry!
                 self.p1_energy = min(100, self.p1_energy + 35)
                 self.p2_energy = min(100, self.p2_energy + 5)
                 p1_dmg = int(random.randint(38, 52) * scaled_p1 * p1_elem)
                 rival_dmg = 0
-                turn_narrative = f"Round {self.round_num}: 🛡️⚡ PERFECT PARRY! Deflected attack & riposted for {p1_dmg} DMG!"
+                turn_action_text = f"Round {self.round_num}: 🛡️ PARRY! Countered {rival_move} for {p1_dmg} DMG."
                 turn_narrative_full = (
-                    f"> 🛡️⚡ **PERFECT PARRY & RIPOSTE!** You read **{self.rival_hero['name']}'s** aggressive rush perfectly! Sparks flew as you parried their blade and severed their posture!\n"
-                    f"> Riposte dealt **{p1_dmg} CRITICAL DMG** with **0 DMG taken**! (+35% {self.p1_short_energy} Energy)."
+                    f"🛡️⚡ **PERFECT PARRY & RIPOSTE!**\n"
+                    f"🔵 **{self.my_hero['name']}** raised **{p1_guard}** and deflected **{rival_move}** (`0 DMG taken`)!\n"
+                    f"⚡ **Riposte Strike** struck **{self.rival_hero['name']}** for **{p1_dmg} CRITICAL DMG**! (+35% {self.p1_short_energy})"
                 )
             elif rival_action == "focus":
-                # WHIFF: Player guarded empty air while rival charged
                 self.p1_energy = min(100, self.p1_energy + 5)
-                self.p2_energy = min(100, self.p2_energy + 45)
+                self.p2_energy = min(100, self.p2_energy + 40)
                 p1_dmg = 0
                 rival_dmg = 0
-                turn_narrative = f"Round {self.round_num}: 💨 WHIFFED PARRY! Rival focused {self.p2_energy_name} to {self.p2_energy}%!"
+                turn_action_text = f"Round {self.round_num}: 💨 Whiffed guard. Rival charged energy."
                 turn_narrative_full = (
-                    f"> 💨 **WHIFFED PARRY!** You raised your guard anticipating an attack, but **{self.rival_hero['name']}** recognized the defensive stance and charged {self.p2_energy_name}!\n"
-                    f"> Rival's energy surged to **{self.p2_energy}%**!"
+                    f"💨 **WHIFFED GUARD:**\n"
+                    f"🔵 **{self.my_hero['name']}** guarded with **{p1_guard}**, expecting an attack.\n"
+                    f"🔴 **{self.rival_hero['name']}** used the pause for **{rival_move}** (+40% {self.p2_short_energy})!"
                 )
             elif rival_action == "climax":
-                # Guard against Rival Climax mitigates 50% DMG
                 self.p2_energy = 0
                 rival_ult = CHAMPION_ULTIMATES.get(rival_id, {})
                 raw_rival = int(random.randint(48, 65) * scaled_p2 * p2_elem * rival_ult.get("dmg_mult", 2.5))
                 rival_dmg = max(15, raw_rival // 2)
                 p1_dmg = int(random.randint(14, 20) * scaled_p1 * p1_elem)
-                turn_narrative = f"Round {self.round_num}: 🛡️ DESPERATE GUARD! Reduced rival Climax by 50% (took {rival_dmg} DMG)."
+                turn_action_text = f"Round {self.round_num}: 🛡️ Guard cut Climax damage in half! (Took {rival_dmg})."
                 turn_narrative_full = (
-                    f"> 🛡️ **DESPERATE GUARD!** **{self.rival_hero['name']}** unleashed **{rival_ult.get('name', 'Awakening')}**!\n"
-                    f"> Your defensive parry softened the devastation, cutting damage in half to `{rival_dmg} DMG`! (Countered for `{p1_dmg} DMG`)."
+                    f"🛡️ **DESPERATE DEFENSE:**\n"
+                    f"🔵 **{self.my_hero['name']}** held **{p1_guard}**, cutting **{rival_ult.get('name', 'Awakening')}** in half! (Took `{rival_dmg} DMG`)\n"
+                    f"⚡ Counter-attack landed for `{p1_dmg} DMG`."
                 )
-            else:  # both parried
+            else:
                 self.p1_energy = min(100, self.p1_energy + 10)
                 self.p2_energy = min(100, self.p2_energy + 10)
                 p1_dmg = 0
                 rival_dmg = 0
-                turn_narrative = f"Round {self.round_num}: 👀 STALEMATE! Both fighters held defensive stances."
+                turn_action_text = f"Round {self.round_num}: 👀 Stalemate! Both guarded."
                 turn_narrative_full = (
-                    f"> 👀 **STALEMATE!** Both warriors held their posture and circled each other cautiously, waiting for the opponent to make a mistake.\n"
-                    f"> `0 DMG dealt` • Both fighters rested stamina."
+                    f"👀 **STALEMATE:** Both warriors raised defense cautiously. `0 DMG dealt`."
                 )
 
         elif player_action == "focus":
-            if rival_action == "rush":
-                # INTERRUPTED: Player punished while channeling
+            p1_focus = p1_tech["focus"]
+
+            if rival_action == "strike":
                 self.p1_energy = min(100, self.p1_energy + 15)
                 self.p2_energy = min(100, self.p2_energy + 20)
                 p1_dmg = 0
                 rival_dmg = int(random.randint(30, 44) * scaled_p2 * p2_elem)
-                turn_narrative = f"Round {self.round_num}: ⚠️ FOCUS PUNISHED! Rival struck while charging for {rival_dmg} DMG!"
+                turn_action_text = f"Round {self.round_num}: ⚠️ Punished while focusing! Took {rival_dmg} DMG."
                 turn_narrative_full = (
-                    f"> ⚠️ **CAUGHT OFF GUARD!** You dropped your defense to gather {self.p1_energy_name}, but **{self.rival_hero['name']}** rushed in with full force!\n"
-                    f"> You took **{rival_dmg} DMG** and only managed to gather +15% energy."
+                    f"⚠️ **FOCUS INTERRUPTED:**\n"
+                    f"🔵 **{self.my_hero['name']}** tried to use **{p1_focus}** (+15% {self.p1_short_energy}).\n"
+                    f"🔴 **{self.rival_hero['name']}** charged in with **{rival_move}** ➔ **{rival_dmg} DMG**!"
                 )
-            elif rival_action == "parry":
-                # FREE CHARGE: Player gets uninterrupted surge
+            elif rival_action == "guard":
                 self.p1_energy = min(100, self.p1_energy + 45)
                 self.p2_energy = min(100, self.p2_energy + 5)
                 p1_dmg = 0
                 rival_dmg = 0
-                turn_narrative = f"Round {self.round_num}: 🧘 UNHINDERED FOCUS! {self.p1_energy_name} charged to {self.p1_energy}%!"
+                turn_action_text = f"Round {self.round_num}: 🧘 Free Energy Surge! +45% {self.p1_short_energy}."
                 turn_narrative_full = (
-                    f"> 🧘✨ **UNHINDERED FOCUS!** **{self.rival_hero['name']}** was waiting defensively for an attack that never came!\n"
-                    f"> **{self.my_hero['name']}** channeled {self.p1_energy_name} to **{self.p1_energy}%**!"
+                    f"🧘✨ **UNHINDERED FOCUS:**\n"
+                    f"🔵 **{self.my_hero['name']}** channeled **{p1_focus}** safely! (**+{45}% {self.p1_energy_name}**)\n"
+                    f"🔴 **{self.rival_hero['name']}** was waiting defensively with **{rival_move}**."
                 )
             elif rival_action == "climax":
                 self.p2_energy = 0
                 rival_ult = CHAMPION_ULTIMATES.get(rival_id, {})
                 rival_dmg = int(random.randint(50, 68) * scaled_p2 * p2_elem * rival_ult.get("dmg_mult", 2.5))
                 p1_dmg = 0
-                self.p1_energy = min(100, self.p1_energy + 20)
-                turn_narrative = f"Round {self.round_num}: 💀 CAUGHT IN CLIMAX! Rival unleashed ultimate for {rival_dmg} DMG!"
+                turn_action_text = f"Round {self.round_num}: 💀 Trapped in Climax! Took {rival_dmg} DMG."
                 turn_narrative_full = (
-                    f"> 💀 **TRAPPED IN CLIMAX!** While you were focusing, **{self.rival_hero['name']}** activated **{rival_ult.get('name', 'Ultimate')}**!\n"
-                    f"> Smashed for **{rival_dmg} DMG**!"
+                    f"💀 **TRAPPED DURING FOCUS:**\n"
+                    f"🔴 **{self.rival_hero['name']}** detonated **{rival_ult.get('name', 'Awakening')}** while you gathered energy!\n"
+                    f"Suffered catastrophic **{rival_dmg} DMG**!"
                 )
-            else:  # both focused
+            else:
                 self.p1_energy = min(100, self.p1_energy + 45)
                 self.p2_energy = min(100, self.p2_energy + 45)
                 p1_dmg = 0
                 rival_dmg = 0
-                turn_narrative = f"Round {self.round_num}: ⚡ DUAL ENERGY SURGE! Both auras flared to near maximum!"
+                turn_action_text = f"Round {self.round_num}: ⚡ Dual Energy Surge! Both charged +45%."
                 turn_narrative_full = (
-                    f"> ⚡🌀 **DUAL ENERGY SURGE!** Both warriors simultaneously ignited their spirits! The battlefield ground cracked as `{self.p1_energy_name}: {self.p1_energy}%` and `{self.p2_energy_name}: {self.p2_energy}%` flared!"
+                    f"⚡🌀 **DUAL ENERGY SURGE:** Both champions simultaneously unleashed their auras! (+45% energy each)."
                 )
 
-        # 5. Update HP Pools
+        # 5. Update Vitality
         self.p2_hp = max(0, self.p2_hp - p1_dmg)
         self.p1_hp = max(0, self.p1_hp - rival_dmg)
         self.round_num += 1
@@ -2395,7 +2538,6 @@ class SoloBattleSessionView(discord.ui.View):
                     self.player.id,
                 )
 
-            # Check Level Up
             curr_lvl = self.profile.get("level", 1)
             curr_xp = self.profile.get("xp", 0) + xp_gain
             if curr_xp >= curr_lvl * 250:
@@ -2404,7 +2546,7 @@ class SoloBattleSessionView(discord.ui.View):
                     self.player.id,
                 )
 
-        # 7. Render Updated Battle Arena Canvas
+        # 7. Render Updated Canvas Card
         card_buf = await asyncio.to_thread(
             render_battle_clash,
             player1_name=self.player.display_name,
@@ -2416,7 +2558,7 @@ class SoloBattleSessionView(discord.ui.View):
             p2_hp=self.p2_hp,
             p2_max_hp=self.p2_max_hp,
             winner_num=winner_num,
-            turn_action_text=turn_narrative,
+            turn_action_text=turn_action_text,
             chest_reward=chest_dropped,
             gold_reward=gold_win,
             p1_energy=self.p1_energy,
@@ -2434,8 +2576,8 @@ class SoloBattleSessionView(discord.ui.View):
             win_quote = p1_lines.get("cry", "Victory is ours!")
             title_text = (
                 f"### 🏆 TRIUMPH OVER RIVAL!\n"
-                f'*"{win_quote}"*\n'
-                f"> **{self.my_hero['name']}** (« {self.my_hero.get('anime', 'Anime')} ») defeated **{self.rival_hero['name']}**!\n"
+                f'*"{win_quote}"*\n\n'
+                f"> **{self.my_hero['name']}** (« {self.my_hero.get('anime', 'Anime')} ») finished off **{self.rival_hero['name']}**!\n"
                 f"> **Spoils of War:** `+{gold_win} Gold` | `+{xp_gain} XP`\n"
             )
             if chest_dropped:
@@ -2447,7 +2589,7 @@ class SoloBattleSessionView(discord.ui.View):
             rival_quote = rival_lines.get("cry", "You lack the power to challenge me.")
             title_text = (
                 f"### 💀 DEFEATED IN COMBAT!\n"
-                f'*"{rival_quote}"*\n'
+                f'*"{rival_quote}"*\n\n'
                 f"> **{self.rival_hero['name']}** (« {self.rival_hero.get('anime', 'Anime')} ») overwhelmed your champion!\n"
                 f"> **Consolation:** `+{xp_gain} XP` earned from combat experience."
             )
@@ -2455,20 +2597,20 @@ class SoloBattleSessionView(discord.ui.View):
             self.clear_items()
             self.add_item(BattleAgainButton(self.cog, self.ctx))
         else:
-            adv_str = " | ⚡ **Element Advantage!**" if self.p1_adv else ""
-            container.add_section(
-                content=(
-                    f"### Combat In Progress — Round {self.round_num - 1}{adv_str}\n"
-                    f"{turn_narrative_full}\n"
-                    f"> **{self.my_hero['name']}:** `{self.p1_hp}/{self.p1_max_hp} HP` • `{self.p1_energy_name}: {self.p1_energy}%`\n"
-                    f"> **{self.rival_hero['name']}:** `{self.p2_hp}/{self.p2_max_hp} HP` • `{self.p2_energy_name}: {self.p2_energy}%`\n"
-                    f"> **Mind Game:** ⚔️ `Rush` beats Focus • 🛡️ `Parry` beats Rush • 🧘 `Focus` charges Energy!"
-                )
+            adv_badge = " • ⚡ **Element Advantage**" if self.p1_adv else ""
+            status_box = (
+                f"### ⚔️ Round {self.round_num - 1} Clash{adv_badge}\n"
+                f"{turn_narrative_full}\n\n"
+                f"────────────────────────────────────────────\n"
+                f"🔵 **{self.my_hero['name']}:** `{self.p1_hp}/{self.p1_max_hp} HP` • ⚡ `{self.p1_short_energy}: {self.p1_energy}%`\n"
+                f"🔴 **{self.rival_hero['name']}:** `{self.p2_hp}/{self.p2_max_hp} HP` • ⚡ `{self.p2_short_energy}: {self.p2_energy}%`\n"
+                f"────────────────────────────────────────────"
             )
+            container.add_section(content=status_box)
 
-            # Update Climax Button Label & Glow Style
+            # Update Climax Button Label
             if self.p1_energy >= 100:
-                self.ultimate_btn.label = f"🔥 {self.p1_climax_type.upper()} (READY!)"
+                self.ultimate_btn.label = f"🔥 UNLEASH {self.p1_climax_type.upper()}!"
                 self.ultimate_btn.style = discord.ButtonStyle.danger
             else:
                 self.ultimate_btn.label = f"🔥 Climax [{self.p1_short_energy}: {self.p1_energy}%]"
@@ -2476,19 +2618,19 @@ class SoloBattleSessionView(discord.ui.View):
 
         await edit_container_response(interaction, container, file=discord_file, view=self)
 
-    @discord.ui.button(label="⚔️ Rush Strike", style=discord.ButtonStyle.primary, row=0)
-    async def rush_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._execute_turn(interaction, "rush")
+    @discord.ui.button(label="⚔️ Strike", style=discord.ButtonStyle.primary, row=0)
+    async def strike_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._execute_turn(interaction, "strike")
 
-    @discord.ui.button(label="🛡️ Tactical Parry", style=discord.ButtonStyle.secondary, row=0)
-    async def parry_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self._execute_turn(interaction, "parry")
+    @discord.ui.button(label="🛡️ Guard / Counter", style=discord.ButtonStyle.secondary, row=0)
+    async def guard_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._execute_turn(interaction, "guard")
 
-    @discord.ui.button(label="🧘 Energy Focus", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="🧘 Focus Energy", style=discord.ButtonStyle.success, row=0)
     async def focus_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._execute_turn(interaction, "focus")
 
-    @discord.ui.button(label="🔥 Climax [Ready 0%]", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="🔥 Climax [0%]", style=discord.ButtonStyle.secondary, row=1)
     async def ultimate_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._execute_turn(interaction, "climax")
 

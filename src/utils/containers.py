@@ -422,10 +422,13 @@ async def edit_container_response(
     interaction_or_msg: discord.Interaction | discord.Message,
     container: KyroContainer | list[KyroContainer],
     view: discord.ui.View | None = None,
+    file: discord.File | None = None,
+    files: list[discord.File] | None = None,
 ) -> None:
-    """Edit an existing Components V2 Container message safely with fallbacks."""
+    """Edit an existing Components V2 Container message safely with fallbacks, including files."""
     payload = build_container_payload(container, view=view, is_edit=True)
     payload.pop("flags", None)
+    file_list = [file] if file is not None else (files or [])
 
     if isinstance(interaction_or_msg, discord.Message):
         msg = interaction_or_msg
@@ -433,13 +436,24 @@ async def edit_container_response(
         http_client = getattr(bot, "http", None)
         if http_client:
             try:
-                await http_client.request(
-                    discord.http.Route(
-                        "PATCH",
-                        f"/channels/{msg.channel.id}/messages/{msg.id}",
-                    ),
-                    json=payload,
-                )
+                if file_list:
+                    form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                    await http_client.request(
+                        discord.http.Route(
+                            "PATCH",
+                            f"/channels/{msg.channel.id}/messages/{msg.id}",
+                        ),
+                        form=form,
+                        files=file_list,
+                    )
+                else:
+                    await http_client.request(
+                        discord.http.Route(
+                            "PATCH",
+                            f"/channels/{msg.channel.id}/messages/{msg.id}",
+                        ),
+                        json=payload,
+                    )
                 if view:
                     state = getattr(bot, "_connection", None) or getattr(msg, "_state", None) or bot
                     if hasattr(state, "store_view"):
@@ -461,26 +475,48 @@ async def edit_container_response(
     # 1. Try interaction response callback (type 7 UPDATE_MESSAGE) if not done
     try:
         if not interaction.response.is_done():
-            await bot.http.request(
-                discord.http.Route(
-                    "POST",
-                    f"/interactions/{interaction.id}/{interaction.token}/callback",
-                ),
-                json={"type": 7, "data": payload},  # 7 = UPDATE_MESSAGE
-            )
+            if file_list:
+                form = [{"name": "payload_json", "value": discord.utils._to_json({"type": 7, "data": payload})}]
+                await bot.http.request(
+                    discord.http.Route(
+                        "POST",
+                        f"/interactions/{interaction.id}/{interaction.token}/callback",
+                    ),
+                    form=form,
+                    files=file_list,
+                )
+            else:
+                await bot.http.request(
+                    discord.http.Route(
+                        "POST",
+                        f"/interactions/{interaction.id}/{interaction.token}/callback",
+                    ),
+                    json={"type": 7, "data": payload},  # 7 = UPDATE_MESSAGE
+                )
             if view and hasattr(bot, "_connection"):
                 msg_id = interaction.message.id if interaction.message else None
                 bot._connection.store_view(view, msg_id)
             return
         else:
             # 2. If interaction is already done/deferred, edit original webhook message
-            msg_data = await bot.http.request(
-                discord.http.Route(
-                    "PATCH",
-                    f"/webhooks/{app_id}/{interaction.token}/messages/@original",
-                ),
-                json=payload,
-            )
+            if file_list:
+                form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                msg_data = await bot.http.request(
+                    discord.http.Route(
+                        "PATCH",
+                        f"/webhooks/{app_id}/{interaction.token}/messages/@original",
+                    ),
+                    form=form,
+                    files=file_list,
+                )
+            else:
+                msg_data = await bot.http.request(
+                    discord.http.Route(
+                        "PATCH",
+                        f"/webhooks/{app_id}/{interaction.token}/messages/@original",
+                    ),
+                    json=payload,
+                )
             if view and hasattr(bot, "_connection"):
                 msg_id = None
                 if isinstance(msg_data, dict) and "id" in msg_data:
@@ -495,13 +531,24 @@ async def edit_container_response(
     # 3. Fallback to direct channel message edit if interaction expired
     try:
         if interaction.message and interaction.channel_id:
-            await bot.http.request(
-                discord.http.Route(
-                    "PATCH",
-                    f"/channels/{interaction.channel_id}/messages/{interaction.message.id}",
-                ),
-                json=payload,
-            )
+            if file_list:
+                form = [{"name": "payload_json", "value": discord.utils._to_json(payload)}]
+                await bot.http.request(
+                    discord.http.Route(
+                        "PATCH",
+                        f"/channels/{interaction.channel_id}/messages/{interaction.message.id}",
+                    ),
+                    form=form,
+                    files=file_list,
+                )
+            else:
+                await bot.http.request(
+                    discord.http.Route(
+                        "PATCH",
+                        f"/channels/{interaction.channel_id}/messages/{interaction.message.id}",
+                    ),
+                    json=payload,
+                )
             if view and hasattr(bot, "_connection"):
                 bot._connection.store_view(view, interaction.message.id)
     except Exception as e2:

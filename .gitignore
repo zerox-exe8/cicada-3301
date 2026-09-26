@@ -33,3 +33,7 @@ Thumbs.db
 # Lavalink local server
 lavalink/
 *.jar
+
+# Temporary scratch
+scratch/
+

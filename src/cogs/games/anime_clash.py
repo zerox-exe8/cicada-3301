@@ -526,26 +526,39 @@ class AnimeClash(commands.Cog):
 
         # 2. SOLO INSTANT AI ENCOUNTER
         p1_main = await self.get_equipped_hero(p1_profile)
-        candidate_ids = list(HERO_REGISTRY.keys())
-        rival_id = random.choice(candidate_ids)
+        p1_power = p1_main["power"] + p1_main.get("power_bonus", 0)
+
+        # Fair Matchmaking: Pick rival from player's rank pool
+        rank = p1_profile.get("hunter_rank", "E-Rank")
+        if rank in ["E-Rank", "D-Rank"]:
+            pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Common", "Rare"]]
+        elif rank in ["C-Rank", "B-Rank"]:
+            pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Rare", "Epic"]]
+        else:
+            pool = [k for k, v in HERO_REGISTRY.items() if v["rarity"] in ["Epic", "Legendary", "Mythic"]]
+
+        if not pool:
+            pool = list(HERO_REGISTRY.keys())
+
+        rival_id = random.choice(pool)
         rival_hero = HERO_REGISTRY[rival_id].copy()
 
-        scale = random.uniform(0.90, 1.10)
-        rival_hero["power"] = int(rival_hero["power"] * scale)
+        # Balance rival power close to player's power (+/- 6%)
+        scale = random.uniform(0.93, 1.05)
+        rival_hero["power"] = max(420, int(p1_power * scale))
         rival_hero["power_bonus"] = 0
-
-        top_heroes = sorted(p1_heroes, key=lambda h: h["power"] + h.get("power_bonus", 0), reverse=True)[:3]
 
         container = KyroContainer(accent_color=0x38BDF8)
         container.add_section(
             content=(
                 f"### Rival Encountered: {rival_hero['name'].upper()}!\n"
-                f"> **Rival Element:** `{rival_hero['element']}` | **Estimated Power:** `{rival_hero['power']}`\n"
-                f"> Select your fighter below to strike!"
+                f"> **Rival Fighter:** **{rival_hero['name']}** • `{rival_hero['power']} Power` | [{rival_hero['element']}]\n"
+                f"> **Your Champion:** **{p1_main['name']}** • `{p1_power} Power` | [{p1_main['element']}]\n"
+                f"> Choose your combat stance below to strike!"
             )
         )
 
-        view = SoloSelectFighterView(self, ctx, p1, top_heroes, rival_hero, p1_profile)
+        view = SoloSelectFighterView(self, ctx, p1, p1_main, rival_hero, p1_profile)
         await send_container_response(ctx, container, view=view)
 
 
@@ -735,14 +748,14 @@ class ProfileHubView(discord.ui.View):
 
 
 class SoloSelectFighterView(discord.ui.View):
-    """Let player select their champion for the solo AI battle."""
+    """Let player select their combat stance to strike."""
 
     def __init__(
         self,
         cog: AnimeClash,
         ctx: CustomContext,
         player: discord.Member,
-        heroes: list[dict[str, Any]],
+        my_hero: dict[str, Any],
         rival_hero: dict[str, Any],
         profile: dict[str, Any],
     ) -> None:
@@ -750,32 +763,34 @@ class SoloSelectFighterView(discord.ui.View):
         self.cog = cog
         self.ctx = ctx
         self.player = player
-        self.heroes = heroes
+        self.my_hero = my_hero
         self.rival_hero = rival_hero
         self.profile = profile
 
-        for i, h in enumerate(heroes[:3]):
-            p = h["power"] + h.get("power_bonus", 0)
-            btn = discord.ui.Button(
-                label=f"Strike: {h['name']} ({p})",
-                style=discord.ButtonStyle.primary if i == 0 else discord.ButtonStyle.secondary,
-                custom_id=f"solo_hero_{h['id']}",
-            )
-            btn.callback = self.make_callback(h)
-            self.add_item(btn)
+        btn_strike = discord.ui.Button(label="Balanced Strike", style=discord.ButtonStyle.primary)
+        btn_slash = discord.ui.Button(label="Fierce Critical Slash", style=discord.ButtonStyle.danger)
+        btn_guard = discord.ui.Button(label="Counter Guard", style=discord.ButtonStyle.secondary)
 
-    def make_callback(self, chosen_hero: dict[str, Any]):
+        btn_strike.callback = self.make_callback("strike")
+        btn_slash.callback = self.make_callback("slash")
+        btn_guard.callback = self.make_callback("counter")
+
+        self.add_item(btn_strike)
+        self.add_item(btn_slash)
+        self.add_item(btn_guard)
+
+    def make_callback(self, stance: str):
         async def callback(interaction: discord.Interaction) -> None:
             if interaction.user.id != self.player.id:
                 await interaction.response.send_message("This is not your match.", ephemeral=True)
                 return
 
             self.stop()
-            await self.resolve_battle(interaction, chosen_hero)
+            await self.resolve_battle(interaction, self.my_hero, stance)
 
         return callback
 
-    async def resolve_battle(self, interaction: discord.Interaction, hero1: dict[str, Any]) -> None:
+    async def resolve_battle(self, interaction: discord.Interaction, hero1: dict[str, Any], stance: str) -> None:
         hero2 = self.rival_hero
 
         e1 = hero1.get("element", "Shadow")
@@ -784,40 +799,51 @@ class SoloSelectFighterView(discord.ui.View):
         p1_adv = ELEMENT_ADVANTAGE.get(e1) == e2
         p2_adv = ELEMENT_ADVANTAGE.get(e2) == e1
 
-        p1_power = hero1["power"] + hero1.get("power_bonus", 0)
-        p2_power = hero2["power"] + hero2.get("power_bonus", 0)
+        p1_base = hero1["power"] + hero1.get("power_bonus", 0)
+        p2_base = hero2["power"] + hero2.get("power_bonus", 0)
 
-        p1_eff = p1_power * (1.08 if p1_adv else 1.0) * random.uniform(0.96, 1.04)
-        p2_eff = p2_power * (1.08 if p2_adv else 1.0) * random.uniform(0.96, 1.04)
+        # Apply tactical stance calculation
+        p1_roll = random.uniform(0.96, 1.04)
+        if stance == "slash":
+            p1_roll = random.uniform(0.85, 1.25)
+        elif stance == "counter":
+            p1_base += int(p2_base * 0.12)
+            p1_roll = random.uniform(0.96, 1.02)
 
-        winner = 1 if p1_eff > p2_eff else 2
+        p1_adv_mult = 1.10 if p1_adv else 1.0
+        p2_adv_mult = 1.10 if p2_adv else 1.0
 
-        gold_win = random.randint(45, 90)
-        xp_gain = 35 if winner == 1 else 10
+        p1_eff = p1_base * p1_adv_mult * p1_roll
+        p2_eff = p2_base * p2_adv_mult * random.uniform(0.95, 1.05)
+
+        winner = 1 if p1_eff >= p2_eff else 2
+
+        gold_win = random.randint(50, 95)
+        xp_gain = 35 if winner == 1 else 12
         chest_dropped: str | None = None
 
         if winner == 1:
             streak = self.profile.get("win_streak", 0) + 1
             roll = random.random()
-            if streak >= 5 or roll < 0.05:
+            if streak >= 5 or roll < 0.06:
                 chest_dropped = "Monarch Divine Chest"
                 await self.cog.bot.db.execute(
                     "UPDATE game_anime_profiles SET chests_monarch = chests_monarch + 1 WHERE user_id = $1;",
                     self.player.id,
                 )
-            elif streak >= 3 or roll < 0.20:
+            elif streak >= 3 or roll < 0.22:
                 chest_dropped = "Shadow Epic Chest"
                 await self.cog.bot.db.execute(
                     "UPDATE game_anime_profiles SET chests_epic = chests_epic + 1 WHERE user_id = $1;",
                     self.player.id,
                 )
-            elif roll < 0.45:
+            elif roll < 0.50:
                 chest_dropped = "Silver Cursed Chest"
                 await self.cog.bot.db.execute(
                     "UPDATE game_anime_profiles SET chests_silver = chests_silver + 1 WHERE user_id = $1;",
                     self.player.id,
                 )
-            elif roll < 0.75:
+            elif roll < 0.80:
                 chest_dropped = "Bronze Battle Chest"
                 await self.cog.bot.db.execute(
                     "UPDATE game_anime_profiles SET chests_bronze = chests_bronze + 1 WHERE user_id = $1;",
@@ -870,10 +896,37 @@ class SoloSelectFighterView(discord.ui.View):
         file = discord.File(card_buf, filename="battle_clash.png")
         container = KyroContainer(accent_color=0x22C55E if winner == 1 else 0xEF4444)
         container.add_media("attachment://battle_clash.png")
+
+        elem_recap = "Neutral element matchup"
+        if p1_adv:
+            elem_recap = f"{e1} countered {e2}! (+10% Power Advantage)"
+        elif p2_adv:
+            elem_recap = f"{e2} countered {e1}! (-10% Disadvantage)"
+
+        stance_desc = {
+            "strike": "Balanced Strike",
+            "slash": "Fierce Critical Slash",
+            "counter": "Counter Guard Stance",
+        }.get(stance, "Attack")
+
         if winner == 1:
-            title_text = f"### Victory Over Rival!\n> **{self.player.mention}** defeated **{hero2['name']}**!"
+            title_text = (
+                f"### Victory Over Rival!\n"
+                f"> **Your Champion:** **{hero1['name']}** • `{int(p1_eff)} Combat Score` [{e1}]\n"
+                f"> **Rival Fighter:** **{hero2['name']}** • `{int(p2_eff)} Combat Score` [{e2}]\n"
+                f"> **Element Synergy:** {elem_recap}\n"
+                f"> **Tactical Action:** Executed *{stance_desc}* and shattered rival's defense!\n"
+                f"> **Spoils of War:** `+{gold_win} Gold` | `+{xp_gain} XP`"
+            )
         else:
-            title_text = f"### Defeated By Rival!\n> **{hero2['name']}** overpowered **{self.player.mention}**!"
+            title_text = (
+                f"### Defeated By Rival!\n"
+                f"> **Your Champion:** **{hero1['name']}** • `{int(p1_eff)} Combat Score` [{e1}]\n"
+                f"> **Rival Fighter:** **{hero2['name']}** • `{int(p2_eff)} Combat Score` [{e2}]\n"
+                f"> **Element Synergy:** {elem_recap}\n"
+                f"> **Combat Turn:** Rival countered with *{hero2.get('move', 'Special Strike')}* and landed the final hit.\n"
+                f"> **Consolation:** `+{xp_gain} XP` gained from experience."
+            )
 
         container.add_section(content=title_text)
         if chest_dropped:

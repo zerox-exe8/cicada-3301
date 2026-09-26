@@ -34,6 +34,8 @@ from src.utils.containers import (
     edit_container_response,
     send_container_response,
 )
+from src.utils.image_tools import download_image_bytes
+
 
 # ==========================================
 # MASTER ANIME HERO REGISTRY (20 Champions)
@@ -391,10 +393,27 @@ class AnimeClash(commands.Cog):
         user_heroes = await self.get_user_heroes(user.id)
 
         av_bytes: bytes | None = None
-        try:
-            av_bytes = await user.display_avatar.with_format("png").with_size(256).read()
-        except Exception:
-            pass
+        # 1. Primary: Download via bot.session HTTP client
+        if hasattr(self.bot, "session") and self.bot.session and hasattr(user, "display_avatar") and user.display_avatar:
+            try:
+                av_url = str(user.display_avatar.replace(size=256, static_format="png").url)
+                av_bytes = await download_image_bytes(av_url, self.bot.session)
+            except Exception:
+                try:
+                    av_bytes = await download_image_bytes(str(user.display_avatar.url), self.bot.session)
+                except Exception:
+                    pass
+
+        # 2. Secondary fallback: internal discord.py asset read
+        if not av_bytes and hasattr(user, "display_avatar") and user.display_avatar:
+            try:
+                av_bytes = await user.display_avatar.read()
+            except Exception:
+                try:
+                    av_bytes = await user.default_avatar.read()
+                except Exception:
+                    pass
+
 
         lvl = profile.get("level", 1)
         xp = profile.get("xp", 0)

@@ -177,8 +177,10 @@ def render_hunter_profile(
     # Player Avatar
     av_size = 96
     av_x, av_y = 35, 45
+    draw.ellipse([(av_x, av_y), (av_x + av_size, av_y + av_size)], fill=(28, 22, 40, 255))
     draw.ellipse([(av_x - 3, av_y - 3), (av_x + av_size + 3, av_y + av_size + 3)], outline=accent, width=3)
 
+    pasted_avatar = False
     if avatar_bytes:
         try:
             av_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
@@ -186,11 +188,13 @@ def render_hunter_profile(
             mask = Image.new("L", (av_size, av_size), 0)
             ImageDraw.Draw(mask).ellipse([(0, 0), (av_size, av_size)], fill=255)
             im.paste(av_img, (av_x, av_y), mask)
+            pasted_avatar = True
         except Exception:
-            draw.ellipse([(av_x, av_y), (av_x + av_size, av_y + av_size)], fill=(40, 35, 55, 255))
-    else:
-        draw.ellipse([(av_x, av_y), (av_x + av_size, av_y + av_size)], fill=(35, 30, 50, 255))
+            pass
+
+    if not pasted_avatar:
         draw.text((av_x + 32, av_y + 30), username[:1].upper(), fill=(255, 255, 255, 255), font=_get_font(36, bold=True))
+
 
     user_x = av_x + av_size + 20
     draw.text((user_x, av_y + 4), username[:18], fill=(255, 255, 255, 255), font=_get_font(26, bold=True))

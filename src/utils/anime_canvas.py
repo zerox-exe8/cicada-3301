@@ -482,10 +482,12 @@ def render_battle_clash(
     p1_energy: int = 0,
     p2_energy: int = 0,
     domain_active: str | None = None,
+    p1_energy_name: str = "CURSED ENERGY",
+    p2_energy_name: str = "CURSED ENERGY",
 ) -> io.BytesIO:
     """
     Renders a dramatic 940x440 Anime Clash Arena Card with both fighters' portraits,
-    live HP bars, Cursed Energy / Ultimate meter, and Domain Expansion effects.
+    live HP bars, Universe-specific Energy meters, and Climax Awakening effects.
     """
     w, h = 940, 440
     im = Image.new("RGBA", (w, h), (12, 10, 22, 255))
@@ -508,8 +510,8 @@ def render_battle_clash(
     # Top arena header
     if domain_active:
         draw.rounded_rectangle([(24, 16), (w - 24, 20)], radius=2, fill=(244, 63, 94))
-        domain_title = f"DOMAIN EXPANSION: {domain_active.upper()}"
-        draw.text((w // 2 - 160, 26), domain_title, fill=(255, 255, 255, 255), font=_get_font(14, bold=True))
+        domain_title = domain_active.upper()
+        draw.text((w // 2 - 160, 26), domain_title[:45], fill=(255, 255, 255, 255), font=_get_font(13, bold=True))
     else:
         draw.rounded_rectangle([(24, 16), (w - 24, 20)], radius=2, fill=(168, 85, 247))
         draw.text((w // 2 - 90, 26), "SHADOW DUEL ARENA", fill=(216, 180, 254, 255), font=_get_font(13, bold=True))
@@ -561,7 +563,7 @@ def render_battle_clash(
     # Cursed Energy / Ultimate Bar Left
     ce1_pct = max(0.0, min(1.0, p1_energy / 100.0))
     ce1_y = bar1_y + 28
-    ce1_label = "DOMAIN READY (100%)" if p1_energy >= 100 else f"CURSED ENERGY: {p1_energy}%"
+    ce1_label = "CLIMAX READY (100%)" if p1_energy >= 100 else f"{p1_energy_name.upper()}: {p1_energy}%"
     ce1_col = (250, 204, 21) if p1_energy >= 100 else (165, 243, 252)
     draw.text((p1_x + 16, ce1_y - 14), ce1_label, fill=ce1_col, font=_get_font(10, bold=True))
     draw.rounded_rectangle([(p1_x + 16, ce1_y), (p1_x + 16 + bar1_w, ce1_y + 8)], radius=4, fill=(28, 22, 42, 255))
@@ -614,7 +616,7 @@ def render_battle_clash(
     # Cursed Energy / Ultimate Bar Right
     ce2_pct = max(0.0, min(1.0, p2_energy / 100.0))
     ce2_y = bar2_y + 28
-    ce2_label = "DOMAIN READY (100%)" if p2_energy >= 100 else f"CURSED ENERGY: {p2_energy}%"
+    ce2_label = "CLIMAX READY (100%)" if p2_energy >= 100 else f"{p2_energy_name.upper()}: {p2_energy}%"
     ce2_col = (250, 204, 21) if p2_energy >= 100 else (165, 243, 252)
     draw.text((p2_x + 16, ce2_y - 14), ce2_label, fill=ce2_col, font=_get_font(10, bold=True))
     draw.rounded_rectangle([(p2_x + 16, ce2_y), (p2_x + 16 + bar1_w, ce2_y + 8)], radius=4, fill=(28, 22, 42, 255))

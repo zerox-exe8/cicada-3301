@@ -90,20 +90,26 @@ class HealthServer:
         if music_cog and hasattr(music_cog, "controller"):
             active_players = sum(1 for p in music_cog.controller.players.values() if p and p.is_connected)
 
-        import os
-        import psutil
-        process = psutil.Process(os.getpid())
-        ram_mb = round(process.memory_info().rss / (1024 * 1024), 2)
+        ram_mb = 0.0
+        try:
+            import os
+            import psutil
+            process = psutil.Process(os.getpid())
+            ram_mb = round(process.memory_info().rss / (1024 * 1024), 2)
+        except Exception:
+            pass
 
         data = {
             "status": "online",
             "bot_name": Config.BOT_NAME,
-            "version": Config.VERSION,
+            "version": getattr(Config, "VERSION", "2.4.0"),
             "latency_ms": ws_ping,
             "guilds": len(bot.guilds),
             "total_users": total_members,
             "active_audio_players": active_players,
             "ram_usage_mb": ram_mb,
+            "loaded_cogs": list(bot.cogs.keys()),
+            "total_commands": len(bot.commands),
             "uptime_seconds": int((discord.utils.utcnow() - bot.start_time).total_seconds()) if hasattr(bot, "start_time") else 0,
         }
         return web.json_response(data, headers={"Access-Control-Allow-Origin": "*"})

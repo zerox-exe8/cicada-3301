@@ -88,6 +88,7 @@ class Config:
     
     # Bot Branding & Official Links
     BOT_NAME: str = "Kyro"
+    VERSION: str = "2.4.0"
     FOOTER_TEXT: str = "Powered by Kyro Studio"
     INVITE_URL: str = os.getenv(
         "INVITE_URL",

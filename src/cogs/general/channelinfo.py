@@ -60,22 +60,17 @@ class ChannelInfo(commands.Cog, name="General-ChannelInfo"):
         bitrate = getattr(target_ch, "bitrate", None)
         bitrate_str = f"`{bitrate // 1000} kbps`" if bitrate else "N/A"
 
-        container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"### #{target_ch.name}\n"
-                f"> **Channel ID:** `{target_ch.id}` • **Type:** `{ch_type}`\n"
-                f"> **Category:** `{category_name}`\n"
-                f"> **Created:** <t:{created_ts}:F> (<t:{created_ts}:R>)"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_section(
-            content=(
-                f"**Settings & Properties**\n"
-                f"• **Slowmode:** {slowmode_str} • **NSFW:** {nsfw_str}\n"
-                f"• **Voice Bitrate:** {bitrate_str}\n"
-                f"• **Topic:** `{topic}`"
+                f"ID: `{target_ch.id}` | Type: `{ch_type}`\n"
+                f"Category: `{category_name}`\n"
+                f"Created: <t:{created_ts}:F> (<t:{created_ts}:R>)\n\n"
+                f"**Channel Settings**\n"
+                f"Slowmode: {slowmode_str}\n"
+                f"NSFW: {nsfw_str}\n"
+                f"Voice Bitrate: {bitrate_str}\n"
+                f"Topic: `{topic}`"
             )
         )
         container.add_separator(divider=True)

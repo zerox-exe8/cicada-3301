@@ -1,7 +1,6 @@
 """
 Kyro Discord Bot - Server Avatar & Banner Module
-Display high-resolution server icon, server banner, and invite splash with direct download.
-Uses custom download emoji from assets/emoji.
+Display high-resolution server icon, server banner, and invite splash with direct top download link.
 """
 
 from __future__ import annotations
@@ -53,24 +52,13 @@ class ServerAvatar(commands.Cog, name="General-ServerAvatar"):
 
         icon_url = str(ctx.guild.icon.url)
         hd_url = f"{icon_url}?size=4096" if "?" not in icon_url else f"{icon_url}&size=4096"
-        dl_emoji = self.bot.custom_emojis.get_emoji_obj("icons_download") or "📥"
         dl_str = self.bot.custom_emojis.get("icons_download", "📥")
 
         container = KyroContainer(accent_color=None)
         container.add_section(content=f"**{ctx.guild.name}** • {dl_str} [Download Icon]({hd_url})")
         container.add_separator(divider=True)
         container.add_media(f"{icon_url}?size=1024" if "?" not in icon_url else icon_url)
-
-        view = discord.ui.View()
-        view.add_item(
-            discord.ui.Button(
-                label="Download",
-                url=hd_url,
-                style=discord.ButtonStyle.link,
-                emoji=dl_emoji,
-            )
-        )
-        await send_container_response(ctx, container, view=view)
+        await send_container_response(ctx, container)
 
     @server_group.command(
         name="banner",
@@ -93,24 +81,13 @@ class ServerAvatar(commands.Cog, name="General-ServerAvatar"):
 
         hd_url = f"{active_url}?size=4096" if "?" not in active_url else f"{active_url}&size=4096"
         label = "Server Banner" if banner_url else "Invite Splash"
-        dl_emoji = self.bot.custom_emojis.get_emoji_obj("icons_download") or "📥"
         dl_str = self.bot.custom_emojis.get("icons_download", "📥")
 
         container = KyroContainer(accent_color=None)
         container.add_section(content=f"**{ctx.guild.name}** • {dl_str} [Download {label}]({hd_url})")
         container.add_separator(divider=True)
         container.add_media(f"{active_url}?size=2048" if "?" not in active_url else active_url)
-
-        view = discord.ui.View()
-        view.add_item(
-            discord.ui.Button(
-                label="Download",
-                url=hd_url,
-                style=discord.ButtonStyle.link,
-                emoji=dl_emoji,
-            )
-        )
-        await send_container_response(ctx, container, view=view)
+        await send_container_response(ctx, container)
 
     @commands.command(name="serveravatar", hidden=True)
     async def serveravatar_shorthand(self, ctx: CustomContext) -> None:

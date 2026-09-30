@@ -1,7 +1,6 @@
 """
 Kyro Discord Bot - Avatar Module
-Displays clean, high-resolution user avatar with direct download link and server/global avatar toggle.
-Uses custom download emoji from assets/emoji.
+Displays clean, high-resolution user avatar with top download link.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ logger = logging.getLogger("Kyro.General.Avatar")
 
 
 class AvatarView(discord.ui.View):
-    """Clean view with custom download button and optional server/global toggle."""
+    """View handling server/global avatar toggle if member has a separate server avatar."""
 
     def __init__(
         self,
@@ -46,23 +45,7 @@ class AvatarView(discord.ui.View):
 
     def _build_components(self) -> None:
         self.clear_items()
-
-        active_url = self.guild_url if self.current_mode == "guild" and self.guild_url else self.global_url
-        hd_url = f"{active_url}?size=4096" if "?" not in active_url else f"{active_url}&size=4096"
-
-        dl_emoji = self.ctx.bot.custom_emojis.get_emoji_obj("icons_download") or "📥"
-
-        # 1. Download Link Button
-        self.add_item(
-            discord.ui.Button(
-                label="Download",
-                url=hd_url,
-                style=discord.ButtonStyle.link,
-                emoji=dl_emoji,
-            )
-        )
-
-        # 2. Server/Global Toggle Button (ONLY if server avatar is distinct)
+        # Only display toggle button if server avatar is distinct from global avatar
         if self.guild_url and self.guild_url != self.global_url:
             label = "Global Avatar" if self.current_mode == "guild" else "Server Avatar"
             btn = discord.ui.Button(
@@ -82,7 +65,7 @@ class AvatarView(discord.ui.View):
         self._build_components()
 
         container = self.render_container()
-        await edit_container_response(interaction, container, view=self)
+        await edit_container_response(interaction, container, view=self if len(self.children) > 0 else None)
 
     def render_container(self) -> KyroContainer:
         active_url = self.guild_url if self.current_mode == "guild" and self.guild_url else self.global_url
@@ -90,14 +73,15 @@ class AvatarView(discord.ui.View):
         dl_str = self.ctx.bot.custom_emojis.get("icons_download", "📥")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content=f"**{self.target.display_name}** • {dl_str} [Download Avatar]({hd_url})")
+        # Clean title with direct download link at the top, no mentions, no dots
+        container.add_section(content=f"**{self.target.name}** • {dl_str} [Download HD]({hd_url})")
         container.add_separator(divider=True)
         container.add_media(f"{active_url}?size=1024" if "?" not in active_url else active_url)
         return container
 
     async def on_timeout(self) -> None:
         for item in self.children:
-            if isinstance(item, discord.ui.Button) and item.style != discord.ButtonStyle.link:
+            if isinstance(item, discord.ui.Button):
                 item.disabled = True
 
 
@@ -119,7 +103,7 @@ class Avatar(commands.Cog, name="General-Avatar"):
         ctx: CustomContext,
         member: Optional[discord.Member | discord.User] = None,
     ) -> None:
-        """View user avatar with instant download link."""
+        """View user avatar with top download link."""
         target = member or ctx.author
 
         full_user = target
@@ -143,7 +127,11 @@ class Avatar(commands.Cog, name="General-Avatar"):
         )
         container = view.render_container()
 
-        await send_container_response(ctx, container, view=view)
+        # Only attach view if toggle button exists
+        if len(view.children) > 0:
+            await send_container_response(ctx, container, view=view)
+        else:
+            await send_container_response(ctx, container)
 
 
 async def setup(bot: KyroBot) -> None:

@@ -78,19 +78,19 @@ class Stats(commands.Cog, name="General-Stats"):
         container.add_separator(divider=True)
         container.add_section(
             content=(
-                f"**Performance & System**\n"
-                f"• **RAM Usage:** `{ram_used_mb:.1f} MB` / `{total_sys_ram_gb:.1f} GB`\n"
-                f"• **Process CPU:** `{cpu_percent:.1f}%`\n"
-                f"• **Runtimes:** Python `{sys.version.split()[0]}` • Discord.py `{discord.__version__}`\n"
-                f"• **OS Platform:** `{platform.system()} {platform.release()}`"
+                f"**System & Resources**\n"
+                f"RAM Usage: `{ram_used_mb:.1f} MB` / `{total_sys_ram_gb:.1f} GB`\n"
+                f"Process CPU: `{cpu_percent:.1f}%`\n"
+                f"Runtimes: Python `{sys.version.split()[0]}` | Discord.py `{discord.__version__}`\n"
+                f"Platform: `{platform.system()} {platform.release()}`"
             )
         )
         container.add_separator(divider=True)
         container.add_section(
             content=(
                 f"**Network Reach**\n"
-                f"• **Guilds:** `{total_guilds:,}` servers\n"
-                f"• **Users In Scope:** `{total_members:,}` members"
+                f"Guilds: `{total_guilds:,}` servers\n"
+                f"Users In Scope: `{total_members:,}` members"
             )
         )
         container.add_separator(divider=True)

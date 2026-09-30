@@ -42,20 +42,22 @@ class MemberCount(commands.Cog, name="General-MemberCount"):
         total = guild.member_count or len(guild.members)
         bots = sum(1 for m in guild.members if m.bot)
         humans = total - bots
+        humans_pct = round((humans / total) * 100 if total else 0)
+        bots_pct = round((bots / total) * 100 if total else 0)
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### {guild.name} Population\n"
-                f"> **Total Members:** `{total:,}`\n"
-                f"• **Humans:** `{humans:,}` ({round((humans / total) * 100 if total else 0)}%)\n"
-                f"• **Bots:** `{bots:,}` ({round((bots / total) * 100 if total else 0)}%)"
+                f"### {guild.name} — Population\n\n"
+                f"Total Members: `{total:,}`\n"
+                f"Real Humans: `{humans:,}` ({humans_pct}%)\n"
+                f"Bot Accounts: `{bots:,}` ({bots_pct}%)"
             )
         )
         if guild.icon:
             container.add_thumbnail(guild.icon.url)
         container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        container.add_text(f"-# Requested by {ctx.author.name}")
 
         await send_container_response(ctx, container)
 

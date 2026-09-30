@@ -80,18 +80,18 @@ class RoleListPaginationView(discord.ui.View):
         for r in current_slice:
             member_count = len(r.members)
             hex_color = f"#{r.color.value:06X}" if r.color.value else "Default"
-            lines.append(f"• {r.mention} — `{member_count}` members (`{hex_color}`)")
+            lines.append(f"`@{r.name}` — {member_count} members ({hex_color})")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Server Roles ({len(self.roles)})\n"
-                f"> Page `{self.page + 1}` of `{self.max_page + 1}`\n\n"
+                f"### {self.ctx.guild.name} — Roles ({len(self.roles)})\n"
+                f"Page {self.page + 1} of {self.max_page + 1}\n\n"
                 + "\n".join(lines)
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {self.ctx.author.display_name}")
+        container.add_text(f"-# Requested by {self.ctx.author.name}")
         return container
 
     async def on_timeout(self) -> None:

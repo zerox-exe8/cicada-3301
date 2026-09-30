@@ -1,7 +1,6 @@
 """
 Kyro Discord Bot - User Banner Module
 Display a user's high-resolution profile banner or custom accent color.
-Uses custom download emoji from assets/emoji.
 """
 
 from __future__ import annotations
@@ -56,24 +55,13 @@ class Banner(commands.Cog, name="General-Banner"):
         if banner_asset:
             banner_url = str(banner_asset.url)
             hd_url = f"{banner_url}?size=4096" if "?" not in banner_url else f"{banner_url}&size=4096"
-            dl_emoji = self.bot.custom_emojis.get_emoji_obj("icons_download") or "📥"
             dl_str = self.bot.custom_emojis.get("icons_download", "📥")
 
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**{target.display_name}** • {dl_str} [Download Banner]({hd_url})")
+            container.add_section(content=f"**{target.name}** • {dl_str} [Download Banner]({hd_url})")
             container.add_separator(divider=True)
             container.add_media(f"{banner_url}?size=2048" if "?" not in banner_url else banner_url)
-
-            view = discord.ui.View()
-            view.add_item(
-                discord.ui.Button(
-                    label="Download",
-                    url=hd_url,
-                    style=discord.ButtonStyle.link,
-                    emoji=dl_emoji,
-                )
-            )
-            await send_container_response(ctx, container, view=view)
+            await send_container_response(ctx, container)
 
         elif accent_color:
             hex_code = f"#{accent_color.value:06X}"
@@ -82,8 +70,8 @@ class Banner(commands.Cog, name="General-Banner"):
             container = KyroContainer(accent_color=accent_color.value)
             container.add_section(
                 content=(
-                    f"**{target.display_name}**\n"
-                    f"> **Accent Color:** `{hex_code}` • `{rgb_str}`"
+                    f"**{target.name}**\n"
+                    f"Accent Color: `{hex_code}` ({rgb_str})"
                 )
             )
             await send_container_response(ctx, container)
@@ -91,7 +79,7 @@ class Banner(commands.Cog, name="General-Banner"):
         else:
             container = KyroContainer(accent_color=None)
             container.add_section(
-                content=f"**{target.display_name}** does not have a profile banner or accent color set."
+                content=f"**{target.name}** does not have a profile banner or accent color set."
             )
             await send_container_response(ctx, container)
 

@@ -1,6 +1,6 @@
 """
 Kyro Discord Bot - Role Information Module
-Deep inspection of a single role's properties, color, position, and permissions.
+Deep inspection of a single role's properties, color, position, and permissions without dots or unwanted pings.
 """
 
 from __future__ import annotations
@@ -50,7 +50,6 @@ class RoleInfo(commands.Cog, name="Moderation-RoleInfo"):
         mention_str = "Yes" if role.mentionable else "No"
         managed_str = "Yes (Integration / Bot)" if role.managed else "No (Standard)"
 
-        # Key Permissions extraction
         perms = role.permissions
         key_perms: list[str] = []
         if perms.administrator:
@@ -70,56 +69,34 @@ class RoleInfo(commands.Cog, name="Moderation-RoleInfo"):
                 key_perms.append("Timeout Members")
             if perms.manage_messages:
                 key_perms.append("Manage Messages")
-            if perms.mention_everyone:
-                key_perms.append("Mention Everyone")
 
-        perms_str = ", ".join(f"`{p}`" for p in key_perms) if key_perms else "`Standard / None`"
+        perms_str = ", ".join(f"`{p}`" for p in key_perms) if key_perms else "Standard / None"
+
+        icon_link = f" | [Icon]({role.display_icon.url})" if role.display_icon else ""
 
         container = KyroContainer(accent_color=role.color.value if role.color.value else None)
         container.add_section(
             content=(
-                f"### {role.name}\n"
-                f"> **Role ID:** `{role.id}` • **Mention:** {role.mention}\n"
-                f"> **Created:** <t:{created_ts}:F> (<t:{created_ts}:R>)"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_section(
-            content=(
-                f"**Role Properties**\n"
-                f"• **Color:** `{hex_color}`\n"
-                f"• **Position:** `{hierarchy_pos}`\n"
-                f"• **Members with Role:** `{len(role.members):,}` members\n"
-                f"• **Hoisted:** `{hoist_str}` • **Mentionable:** `{mention_str}` • **Managed:** `{managed_str}`"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_section(
-            content=(
-                f"**Key Permissions**\n"
-                f"> {perms_str}"
+                f"### @{role.name}\n"
+                f"Role ID: `{role.id}`{icon_link}\n"
+                f"Created: <t:{created_ts}:F> (<t:{created_ts}:R>)\n\n"
+                f"**Properties**\n"
+                f"Color: `{hex_color}`\n"
+                f"Hierarchy Position: `{hierarchy_pos}`\n"
+                f"Members: `{len(role.members):,}`\n"
+                f"Hoisted: `{hoist_str}` | Mentionable: `{mention_str}` | Managed: `{managed_str}`\n\n"
+                f"**Permissions**\n"
+                f"{perms_str}"
             )
         )
 
-        view = discord.ui.View()
         if role.display_icon:
-            icon_url = str(role.display_icon.url)
-            container.add_thumbnail(icon_url)
-            view.add_item(
-                discord.ui.Button(
-                    label="Role Icon",
-                    url=icon_url,
-                    style=discord.ButtonStyle.link,
-                )
-            )
+            container.add_thumbnail(str(role.display_icon.url))
 
         container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        container.add_text(f"-# Requested by {ctx.author.name}")
 
-        if len(view.children) > 0:
-            await send_container_response(ctx, container, view=view)
-        else:
-            await send_container_response(ctx, container)
+        await send_container_response(ctx, container)
 
 
 async def setup(bot: KyroBot) -> None:

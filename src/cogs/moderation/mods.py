@@ -1,6 +1,6 @@
 """
 Kyro Discord Bot - Moderators & Staff Discovery Module
-Lists all staff and moderators possessing moderation privileges.
+Lists all staff and moderators possessing moderation privileges without unwanted pings.
 """
 
 from __future__ import annotations
@@ -62,22 +62,21 @@ class Mods(commands.Cog, name="Moderation-Mods"):
 
         lines = []
         for m in mods_list[:20]:
-            top_role_str = m.top_role.mention if m.top_role != guild.default_role else "No Role"
-            lines.append(f"• {m.mention} (`{m.name}`) — {top_role_str}")
+            top_role_str = f"`@{m.top_role.name}`" if m.top_role != guild.default_role else "No Role"
+            lines.append(f"{m.name} (ID: `{m.id}`) — {top_role_str}")
 
         if len(mods_list) > 20:
-            lines.append(f"-# ...and `{len(mods_list) - 20}` more staff members")
+            lines.append(f"-# ...and {len(mods_list) - 20} more staff members")
 
         container = KyroContainer(accent_color=discord.Color.blue().value)
         container.add_section(
             content=(
-                f"### Active Staff & Moderation Team ({len(mods_list)})\n"
-                f"> Members with Kick, Ban, Timeout, or Message Management:\n\n"
+                f"### {guild.name} — Staff & Moderation Team ({len(mods_list)})\n\n"
                 + "\n".join(lines)
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        container.add_text(f"-# Requested by {ctx.author.name}")
 
         await send_container_response(ctx, container)
 

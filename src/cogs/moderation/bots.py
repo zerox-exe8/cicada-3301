@@ -78,8 +78,8 @@ class BotsPaginationView(discord.ui.View):
 
         lines = []
         for b in current_slice:
-            top_role_str = b.top_role.mention if b.top_role != self.ctx.guild.default_role else "No Role"
-            lines.append(f"• {b.mention} (`{b.name}`) — {top_role_str}")
+            role_str = f"`@{b.top_role.name}`" if b.top_role != self.ctx.guild.default_role else "No Role"
+            lines.append(f"{b.name} (ID: `{b.id}`) — {role_str}")
 
         container = KyroContainer(accent_color=None)
         container.add_section(

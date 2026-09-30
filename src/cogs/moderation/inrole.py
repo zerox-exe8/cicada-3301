@@ -78,18 +78,18 @@ class InRolePaginationView(discord.ui.View):
         end = start + self.per_page
         current_slice = self.members[start:end]
 
-        lines = [f"• {m.mention} (`{m.name}`)" for m in current_slice]
+        lines = [f"{m.name} (ID: `{m.id}`)" for m in current_slice]
 
         container = KyroContainer(accent_color=self.role.color.value if self.role.color.value else None)
         container.add_section(
             content=(
-                f"### Members with {self.role.name} ({len(self.members)})\n"
-                f"> Role: {self.role.mention} • Page `{self.page + 1}` of `{self.max_page + 1}`\n\n"
+                f"### Members with @{self.role.name} ({len(self.members)})\n"
+                f"Page {self.page + 1} of {self.max_page + 1}\n\n"
                 + "\n".join(lines)
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {self.ctx.author.display_name}")
+        container.add_text(f"-# Requested by {self.ctx.author.name}")
         return container
 
     async def on_timeout(self) -> None:

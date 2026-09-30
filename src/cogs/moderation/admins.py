@@ -1,6 +1,6 @@
 """
 Kyro Discord Bot - Administrators & Admin Roles Audit Module
-Discovers and lists all roles and members holding full Administrator permissions.
+Discovers and lists all roles and members holding full Administrator permissions without unwanted pings.
 """
 
 from __future__ import annotations
@@ -39,12 +39,11 @@ class Admins(commands.Cog, name="Moderation-Admins"):
             await ctx.send_warning("This command can only be used in a server.")
             return
 
-        # 1. Admin Roles
         admin_roles = [r for r in guild.roles if r.permissions.administrator and not r.is_default()]
         admin_roles.sort(key=lambda r: r.position, reverse=True)
-        admin_roles_str = " ".join(r.mention for r in admin_roles) if admin_roles else "None"
+        admin_roles_tags = [f"`@{r.name}`" for r in admin_roles]
+        admin_roles_str = ", ".join(admin_roles_tags) if admin_roles_tags else "None"
 
-        # 2. Admin Members
         admin_members = [m for m in guild.members if m.guild_permissions.administrator]
         admin_members.sort(key=lambda m: (m.id != guild.owner_id, m.top_role.position), reverse=True)
 
@@ -52,23 +51,23 @@ class Admins(commands.Cog, name="Moderation-Admins"):
         bot_admins = [m for m in admin_members if m.bot]
 
         owner = guild.owner or await self.bot.fetch_user(guild.owner_id) if guild.owner_id else None
-        owner_str = f"{owner.mention} (`{owner.name}`)" if owner else f"ID: `{guild.owner_id}`"
+        owner_str = f"{owner.name} (ID: `{guild.owner_id}`)" if owner else f"ID: `{guild.owner_id}`"
 
-        human_lines = [f"• {m.mention} (`{m.name}`)" for m in human_admins[:15]]
+        human_lines = [f"{m.name} (ID: `{m.id}`)" for m in human_admins[:15]]
         if len(human_admins) > 15:
-            human_lines.append(f"-# ...and `{len(human_admins) - 15}` more human admins")
+            human_lines.append(f"-# ...and {len(human_admins) - 15} more human admins")
 
-        bot_lines = [f"• {m.mention} (`{m.name}`)" for m in bot_admins[:10]]
+        bot_lines = [f"{m.name} (ID: `{m.id}`)" for m in bot_admins[:10]]
         if len(bot_admins) > 10:
-            bot_lines.append(f"-# ...and `{len(bot_admins) - 10}` more bot admins")
+            bot_lines.append(f"-# ...and {len(bot_admins) - 10} more bot admins")
 
         container = KyroContainer(accent_color=discord.Color.red().value)
         container.add_section(
             content=(
-                f"### Administrator Security Audit\n"
-                f"> **Server Owner:** {owner_str}\n"
-                f"> **Admin Roles:** {admin_roles_str}\n"
-                f"> **Total Admins:** `{len(admin_members)}` (`{len(human_admins)}` humans, `{len(bot_admins)}` bots)"
+                f"### {guild.name} — Administrators\n"
+                f"Server Owner: `{owner_str}`\n"
+                f"Admin Roles: {admin_roles_str}\n"
+                f"Total Admins: `{len(admin_members)}` ({len(human_admins)} humans, {len(bot_admins)} bots)"
             )
         )
         container.add_separator(divider=True)
@@ -85,7 +84,7 @@ class Admins(commands.Cog, name="Moderation-Admins"):
             )
             container.add_separator(divider=True)
 
-        container.add_text(f"-# Audited by {ctx.author.display_name}")
+        container.add_text(f"-# Audited by {ctx.author.name}")
         await send_container_response(ctx, container)
 
 

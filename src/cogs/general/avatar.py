@@ -1,6 +1,7 @@
 """
 Kyro Discord Bot - Avatar Module
 Displays clean, high-resolution user avatar with direct download link and server/global avatar toggle.
+Uses custom download emoji from assets/emoji.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ logger = logging.getLogger("Kyro.General.Avatar")
 
 
 class AvatarView(discord.ui.View):
-    """Clean view with direct download button and optional server/global toggle."""
+    """Clean view with custom download button and optional server/global toggle."""
 
     def __init__(
         self,
@@ -49,13 +50,15 @@ class AvatarView(discord.ui.View):
         active_url = self.guild_url if self.current_mode == "guild" and self.guild_url else self.global_url
         hd_url = f"{active_url}?size=4096" if "?" not in active_url else f"{active_url}&size=4096"
 
+        dl_emoji = self.ctx.bot.custom_emojis.get_emoji_obj("icons_download") or "📥"
+
         # 1. Download Link Button
         self.add_item(
             discord.ui.Button(
                 label="Download",
                 url=hd_url,
                 style=discord.ButtonStyle.link,
-                emoji="📥",
+                emoji=dl_emoji,
             )
         )
 
@@ -84,9 +87,10 @@ class AvatarView(discord.ui.View):
     def render_container(self) -> KyroContainer:
         active_url = self.guild_url if self.current_mode == "guild" and self.guild_url else self.global_url
         hd_url = f"{active_url}?size=4096" if "?" not in active_url else f"{active_url}&size=4096"
+        dl_str = self.ctx.bot.custom_emojis.get("icons_download", "📥")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content=f"**{self.target.display_name}** • [Download Avatar]({hd_url})")
+        container.add_section(content=f"**{self.target.display_name}** • {dl_str} [Download Avatar]({hd_url})")
         container.add_separator(divider=True)
         container.add_media(f"{active_url}?size=1024" if "?" not in active_url else active_url)
         return container

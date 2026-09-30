@@ -37,6 +37,20 @@ class EmojiRegistry:
                 emojis = await self.bot.fetch_application_emojis()
                 self._emojis = {e.name.lower(): e for e in emojis}
                 logger.info(f"Successfully cached {len(self._emojis)} custom Application Emoji(s).")
+
+                # Auto-sync icons_Download if not yet uploaded
+                if "icons_download" not in self._emojis:
+                    from pathlib import Path
+                    dl_path = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji" / "icons_Download.png"
+                    if dl_path.exists() and len(self._emojis) < 50:
+                        try:
+                            with open(dl_path, "rb") as f:
+                                data = f.read()
+                            new_e = await self.bot.create_application_emoji(name="icons_download", image=data)
+                            self._emojis["icons_download"] = new_e
+                            logger.info(f"Auto-uploaded icons_Download to application emojis.")
+                        except Exception as e:
+                            logger.debug(f"Could not auto-upload icons_Download: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 
@@ -148,6 +162,8 @@ class EmojiRegistry:
                 "icons_join": ["icon_join", "icons_welcome", "icons_connect"],
                 "icon_join": ["icons_join", "icons_welcome", "icons_connect"],
                 "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
+                "icons_download": ["icons_download", "icons_Download", "download", "icon_download"],
+                "download": ["icons_download", "icons_Download", "icon_download"],
                 # Music Emojis
                 "music": ["icon_music", "music_playing", "music_music"],
                 "icon_music": ["music", "music_playing", "music_music"],
@@ -198,6 +214,8 @@ class EmojiRegistry:
                 "icons_join": ["icon_join", "icons_welcome", "icons_connect"],
                 "icon_join": ["icons_join", "icons_welcome", "icons_connect"],
                 "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
+                "icons_download": ["icons_download", "icons_Download", "download", "icon_download"],
+                "download": ["icons_download", "icons_Download", "icon_download"],
                 # Music Emojis
                 "music": ["icon_music", "music_playing", "music_music"],
                 "icon_music": ["music", "music_playing", "music_music"],

@@ -1,7 +1,6 @@
 """
 Kyro Discord Bot - Avatar Module
-Clean, high-resolution media viewer with dynamic server/global avatar toggling,
-avatar decoration asset extraction, and direct HD download.
+Displays clean, high-resolution user avatar with direct download link and server/global avatar toggle.
 """
 
 from __future__ import annotations
@@ -26,10 +25,7 @@ logger = logging.getLogger("Kyro.General.Avatar")
 
 
 class AvatarView(discord.ui.View):
-    """
-    Interactive view allowing 1-click toggling between Server and Global Avatar,
-    plus direct HD download and Avatar Decoration Asset links.
-    """
+    """Clean view with direct download button and optional server/global toggle."""
 
     def __init__(
         self,
@@ -37,7 +33,6 @@ class AvatarView(discord.ui.View):
         target: discord.Member | discord.User,
         global_url: str,
         guild_url: str | None = None,
-        decoration_url: str | None = None,
         initial_mode: str = "guild",
     ) -> None:
         super().__init__(timeout=120)
@@ -45,25 +40,26 @@ class AvatarView(discord.ui.View):
         self.target = target
         self.global_url = global_url
         self.guild_url = guild_url
-        self.decoration_url = decoration_url
         self.current_mode = initial_mode if guild_url else "global"
         self._build_components()
 
     def _build_components(self) -> None:
         self.clear_items()
 
-        # 1. Direct HD Download Link Button
         active_url = self.guild_url if self.current_mode == "guild" and self.guild_url else self.global_url
         hd_url = f"{active_url}?size=4096" if "?" not in active_url else f"{active_url}&size=4096"
+
+        # 1. Download Link Button
         self.add_item(
             discord.ui.Button(
-                label="Open HD",
+                label="Download",
                 url=hd_url,
                 style=discord.ButtonStyle.link,
+                emoji="📥",
             )
         )
 
-        # 2. Toggle Button: ONLY displayed if user has a distinct Server Avatar
+        # 2. Server/Global Toggle Button (ONLY if server avatar is distinct)
         if self.guild_url and self.guild_url != self.global_url:
             label = "Global Avatar" if self.current_mode == "guild" else "Server Avatar"
             btn = discord.ui.Button(
@@ -74,22 +70,9 @@ class AvatarView(discord.ui.View):
             btn.callback = self._toggle_callback
             self.add_item(btn)
 
-        # 3. Decoration Frame Button: ONLY displayed if user possesses an Avatar Decoration
-        if self.decoration_url:
-            self.add_item(
-                discord.ui.Button(
-                    label="Decoration Frame",
-                    url=self.decoration_url,
-                    style=discord.ButtonStyle.link,
-                )
-            )
-
     async def _toggle_callback(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message(
-                "Only the command invoker can toggle this avatar view.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message("Only the command invoker can toggle this view.", ephemeral=True)
             return
 
         self.current_mode = "global" if self.current_mode == "guild" else "guild"
@@ -100,23 +83,12 @@ class AvatarView(discord.ui.View):
 
     def render_container(self) -> KyroContainer:
         active_url = self.guild_url if self.current_mode == "guild" and self.guild_url else self.global_url
-        is_server = self.current_mode == "guild" and self.guild_url
-
-        mode_badge = "Server Profile Avatar" if is_server else "Global User Avatar"
-        is_animated = "a_" in str(active_url) or ".gif" in str(active_url).lower()
-        format_badge = "Animated GIF" if is_animated else "Static Asset"
+        hd_url = f"{active_url}?size=4096" if "?" not in active_url else f"{active_url}&size=4096"
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**{self.target.display_name}** (`{self.target.name}`)\n"
-                f"> **Mode:** `{mode_badge}` • **Type:** `{format_badge}`"
-            )
-        )
+        container.add_section(content=f"**{self.target.display_name}** • [Download Avatar]({hd_url})")
         container.add_separator(divider=True)
         container.add_media(f"{active_url}?size=1024" if "?" not in active_url else active_url)
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {self.ctx.author.display_name}")
         return container
 
     async def on_timeout(self) -> None:
@@ -143,7 +115,7 @@ class Avatar(commands.Cog, name="General-Avatar"):
         ctx: CustomContext,
         member: Optional[discord.Member | discord.User] = None,
     ) -> None:
-        """View clean, high-resolution avatar with server/global avatar detection."""
+        """View user avatar with instant download link."""
         target = member or ctx.author
 
         full_user = target
@@ -157,17 +129,12 @@ class Avatar(commands.Cog, name="General-Avatar"):
         if isinstance(target, discord.Member) and target.guild_avatar:
             guild_url = str(target.guild_avatar.url)
 
-        decoration_url = None
-        if hasattr(full_user, "avatar_decoration") and full_user.avatar_decoration:
-            decoration_url = str(full_user.avatar_decoration.url)
-
         initial_mode = "guild" if guild_url else "global"
         view = AvatarView(
             ctx=ctx,
             target=target,
             global_url=global_url,
             guild_url=guild_url,
-            decoration_url=decoration_url,
             initial_mode=initial_mode,
         )
         container = view.render_container()

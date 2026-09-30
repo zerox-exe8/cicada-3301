@@ -90,6 +90,43 @@ class KyroContainer:
         """Alias for add_media."""
         return self.add_media(url)
 
+    def add_thumbnail(self, url: str) -> KyroContainer:
+        """Add a thumbnail accessory or media."""
+        if not url or not str(url).strip():
+            return self
+        clean_url = str(url).strip()
+        # If there's an existing section/text component without accessory, attach to it
+        for comp in reversed(self.components):
+            if comp.get("type") == 10:  # upgrade TextDisplay to Section with accessory
+                content = comp.get("content", "")
+                idx = self.components.index(comp)
+                self.components[idx] = {
+                    "type": 9,
+                    "components": [{"type": 10, "content": content}],
+                    "accessory": {
+                        "type": 11,
+                        "media": {"url": clean_url}
+                    }
+                }
+                return self
+            elif comp.get("type") == 9 and "accessory" not in comp:
+                comp["accessory"] = {
+                    "type": 11,
+                    "media": {"url": clean_url}
+                }
+                return self
+
+        # Fallback: add a section with thumbnail
+        self.components.append({
+            "type": 9,
+            "components": [{"type": 10, "content": " "}],
+            "accessory": {
+                "type": 11,
+                "media": {"url": clean_url}
+            }
+        })
+        return self
+
     def add_action_row(self, items: list[dict[str, Any]]) -> KyroContainer:
         """Add an Action Row (type: 1) containing Select Menus or Buttons inside the container."""
         self.components.append({

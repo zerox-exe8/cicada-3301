@@ -1,6 +1,6 @@
 """
 Kyro Discord Bot - Server Avatar & Banner Module
-Display high-resolution server icon, server banner, and invite splash background.
+Display high-resolution server icon, server banner, and invite splash with direct download.
 """
 
 from __future__ import annotations
@@ -45,33 +45,26 @@ class ServerAvatar(commands.Cog, name="General-ServerAvatar"):
         description="Display this server's high-resolution icon.",
     )
     async def server_avatar(self, ctx: CustomContext) -> None:
-        """Display the server's icon in high resolution (`?server avatar`)."""
+        """Display the server's icon (`?server avatar`)."""
         if not ctx.guild or not ctx.guild.icon:
             await ctx.send_warning("This server does not have an icon configured.")
             return
 
         icon_url = str(ctx.guild.icon.url)
-        is_animated = "a_" in icon_url or ".gif" in icon_url.lower()
-        format_badge = "Animated GIF" if is_animated else "Static Icon"
+        hd_url = f"{icon_url}?size=4096" if "?" not in icon_url else f"{icon_url}&size=4096"
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**{ctx.guild.name}**\n"
-                f"> **Server Icon** • `{format_badge}`"
-            )
-        )
+        container.add_section(content=f"**{ctx.guild.name}** • [Download Icon]({hd_url})")
         container.add_separator(divider=True)
         container.add_media(f"{icon_url}?size=1024" if "?" not in icon_url else icon_url)
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
 
         view = discord.ui.View()
         view.add_item(
             discord.ui.Button(
-                label="Open HD",
-                url=f"{icon_url}?size=4096" if "?" not in icon_url else f"{icon_url}&size=4096",
+                label="Download",
+                url=hd_url,
                 style=discord.ButtonStyle.link,
+                emoji="📥",
             )
         )
         await send_container_response(ctx, container, view=view)
@@ -82,7 +75,7 @@ class ServerAvatar(commands.Cog, name="General-ServerAvatar"):
         description="Display this server's high-resolution banner or invite splash.",
     )
     async def server_banner(self, ctx: CustomContext) -> None:
-        """Display the server's banner or invite splash (`?server banner`)."""
+        """Display the server's banner or splash (`?server banner`)."""
         if not ctx.guild:
             await ctx.send_warning("This command can only be used in a server.")
             return
@@ -92,36 +85,28 @@ class ServerAvatar(commands.Cog, name="General-ServerAvatar"):
 
         active_url = banner_url or splash_url
         if not active_url:
-            await ctx.send_warning("This server does not have a server banner or invite splash configured.")
+            await ctx.send_warning("This server does not have a banner or splash background set.")
             return
 
-        label = "Server Banner" if banner_url else "Server Invite Splash"
-        is_animated = "a_" in active_url or ".gif" in active_url.lower()
-        format_badge = "Animated GIF" if is_animated else "Static Asset"
+        hd_url = f"{active_url}?size=4096" if "?" not in active_url else f"{active_url}&size=4096"
+        label = "Server Banner" if banner_url else "Invite Splash"
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**{ctx.guild.name}**\n"
-                f"> **{label}** • `{format_badge}`"
-            )
-        )
+        container.add_section(content=f"**{ctx.guild.name}** • [Download {label}]({hd_url})")
         container.add_separator(divider=True)
         container.add_media(f"{active_url}?size=2048" if "?" not in active_url else active_url)
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
 
         view = discord.ui.View()
         view.add_item(
             discord.ui.Button(
-                label="Open HD",
-                url=f"{active_url}?size=4096" if "?" not in active_url else f"{active_url}&size=4096",
+                label="Download",
+                url=hd_url,
                 style=discord.ButtonStyle.link,
+                emoji="📥",
             )
         )
         await send_container_response(ctx, container, view=view)
 
-    # Shorthand compatibility without space (`?serveravatar` and `?serverbanner`)
     @commands.command(name="serveravatar", hidden=True)
     async def serveravatar_shorthand(self, ctx: CustomContext) -> None:
         await self.server_avatar(ctx)

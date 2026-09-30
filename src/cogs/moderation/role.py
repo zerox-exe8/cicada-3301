@@ -101,21 +101,18 @@ class Role(commands.Cog, name="Moderation-Role"):
             return
 
         if not member or not role:
-            # Show role help summary
             prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"### Role Management Usage\n"
-                    f"> **Toggle Role:** `{prefix}role <@member> <@role>`\n"
-                    f"> **Explicit Add:** `{prefix}role add <@member> <@role>`\n"
-                    f"> **Explicit Remove:** `{prefix}role remove <@member> <@role>`\n"
-                    f"> **Setup Custom Shortcut:** `{prefix}role setup <name> <@role>`\n"
-                    f"> **View Configured Shortcuts:** `{prefix}role config`"
+                    f"**Role Usage**\n"
+                    f"• `{prefix}role <@member> <@role>` — Toggle role\n"
+                    f"• `{prefix}role add <@member> <@role>` — Assign role\n"
+                    f"• `{prefix}role remove <@member> <@role>` — Remove role\n"
+                    f"• `{prefix}role setup <name> <@role>` — Bind custom shortcut\n"
+                    f"• `{prefix}role config` — View configured shortcuts"
                 )
             )
-            container.add_separator(divider=True)
-            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
@@ -124,32 +121,20 @@ class Role(commands.Cog, name="Moderation-Role"):
             await ctx.send_warning(err or "Hierarchy constraint error.")
             return
 
-        # Toggle logic
         if role in member.roles:
-            await member.remove_roles(role, reason=f"Kyro Role Toggle by {ctx.author} ({ctx.author.id})")
-            action = "Removed"
-            badge = "Role Removed"
+            await member.remove_roles(role, reason=f"Role toggle by {ctx.author}")
+            action_text = f"Removed {role.mention} from {member.mention}."
         else:
-            await member.add_roles(role, reason=f"Kyro Role Toggle by {ctx.author} ({ctx.author.id})")
-            action = "Added"
-            badge = "Role Added"
+            await member.add_roles(role, reason=f"Role toggle by {ctx.author}")
+            action_text = f"Added {role.mention} to {member.mention}."
 
         container = KyroContainer(accent_color=role.color.value if role.color.value else None)
-        container.add_section(
-            content=(
-                f"### {badge}\n"
-                f"> **Target:** {member.mention} (`{member.name}`)\n"
-                f"> **Role:** {role.mention} (`{role.name}`)\n"
-                f"> **Action:** Successfully {action.lower()} role."
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Moderated by {ctx.author.display_name}")
+        container.add_section(content=action_text)
         await send_container_response(ctx, container)
 
     @role_group.command(
         name="add",
-        description="Explicitly assign a role to a member.",
+        description="Assign a role to a member.",
     )
     @commands.has_permissions(manage_roles=True)
     @commands.bot_has_permissions(manage_roles=True)
@@ -171,23 +156,14 @@ class Role(commands.Cog, name="Moderation-Role"):
             await ctx.send_warning(err or "Hierarchy constraint error.")
             return
 
-        await member.add_roles(role, reason=f"Kyro Role Add by {ctx.author} ({ctx.author.id})")
+        await member.add_roles(role, reason=f"Role added by {ctx.author}")
         container = KyroContainer(accent_color=role.color.value if role.color.value else None)
-        container.add_section(
-            content=(
-                f"### Role Assigned\n"
-                f"> **Target:** {member.mention} (`{member.name}`)\n"
-                f"> **Role:** {role.mention}\n"
-                f"> **Action:** Assigned successfully."
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Moderated by {ctx.author.display_name}")
+        container.add_section(content=f"Added {role.mention} to {member.mention}.")
         await send_container_response(ctx, container)
 
     @role_group.command(
         name="remove",
-        description="Explicitly remove a role from a member.",
+        description="Remove a role from a member.",
     )
     @commands.has_permissions(manage_roles=True)
     @commands.bot_has_permissions(manage_roles=True)
@@ -209,18 +185,9 @@ class Role(commands.Cog, name="Moderation-Role"):
             await ctx.send_warning(err or "Hierarchy constraint error.")
             return
 
-        await member.remove_roles(role, reason=f"Kyro Role Remove by {ctx.author} ({ctx.author.id})")
+        await member.remove_roles(role, reason=f"Role removed by {ctx.author}")
         container = KyroContainer(accent_color=role.color.value if role.color.value else None)
-        container.add_section(
-            content=(
-                f"### Role Removed\n"
-                f"> **Target:** {member.mention} (`{member.name}`)\n"
-                f"> **Role:** {role.mention}\n"
-                f"> **Action:** Removed successfully."
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Moderated by {ctx.author.display_name}")
+        container.add_section(content=f"Removed {role.mention} from {member.mention}.")
         await send_container_response(ctx, container)
 
     # ─── Dynamic Role Shortcuts Configuration ────────────────────────────────
@@ -241,7 +208,6 @@ class Role(commands.Cog, name="Moderation-Role"):
     ) -> None:
         """Dynamically bind any custom shortcut name to a role."""
         if not name or not role:
-            # If called without arguments, show configured list
             await self.role_config(ctx)
             return
 
@@ -255,7 +221,6 @@ class Role(commands.Cog, name="Moderation-Role"):
             await ctx.send_warning(err or "Cannot bind this role due to hierarchy constraints.")
             return
 
-        # Save to PostgreSQL
         await self.bot.db.execute(
             """
             INSERT INTO guild_role_shortcuts (guild_id, shortcut_name, role_id)
@@ -267,7 +232,6 @@ class Role(commands.Cog, name="Moderation-Role"):
             role.id,
         )
 
-        # Update Memory Cache
         if ctx.guild.id not in self.shortcuts:
             self.shortcuts[ctx.guild.id] = {}
         self.shortcuts[ctx.guild.id][clean_name] = role.id
@@ -276,15 +240,10 @@ class Role(commands.Cog, name="Moderation-Role"):
         container = KyroContainer(accent_color=role.color.value if role.color.value else None)
         container.add_section(
             content=(
-                f"### Role Shortcut Configured\n"
-                f"> **Shortcut Name:** `{clean_name}`\n"
-                f"> **Bound Role:** {role.mention} (`{role.name}`)\n\n"
-                f"Staff members with `Manage Roles` can now execute:\n"
-                f"• `{prefix}{clean_name} @user` *(Instant 1-word role toggle)*"
+                f"Bound shortcut **`{prefix}{clean_name}`** to {role.mention}.\n"
+                f"> Use `{prefix}{clean_name} @user` to toggle this role."
             )
         )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Configured by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
     @role_setup.command(
@@ -311,14 +270,7 @@ class Role(commands.Cog, name="Moderation-Role"):
         guild_shortcuts.pop(clean_name, None)
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"### Shortcut Deleted\n"
-                f"> Successfully removed role shortcut `{clean_name}` from this server."
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Updated by {ctx.author.display_name}")
+        container.add_section(content=f"Removed shortcut **`{clean_name}`** from this server.")
         await send_container_response(ctx, container)
 
     @role_group.command(
@@ -336,33 +288,27 @@ class Role(commands.Cog, name="Moderation-Role"):
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"### Server Role Shortcuts\n"
-                    f"> No custom role shortcuts have been created in this server yet.\n\n"
-                    f"Create any shortcut dynamically using:\n"
-                    f"• `{prefix}role setup <name> @role` (e.g. `{prefix}role setup cutie @Cutie`)"
+                    f"**Role Shortcuts**\n"
+                    f"No custom shortcuts configured yet.\n"
+                    f"> Create one with `{prefix}role setup <name> @role`"
                 )
             )
-            container.add_separator(divider=True)
-            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
         lines: list[str] = []
         for name, role_id in sorted(guild_shortcuts.items()):
             role = ctx.guild.get_role(role_id)
-            role_str = role.mention if role else f"`[Deleted Role ID: {role_id}]`"
+            role_str = role.mention if role else f"`[Deleted Role]`"
             lines.append(f"• **`{prefix}{name}`** ➔ {role_str}")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Configured Role Shortcuts ({len(lines)})\n"
-                f"> Staff can toggle these roles using 1-word commands:\n\n"
+                f"**Role Shortcuts ({len(lines)})**\n\n"
                 + "\n".join(lines)
             )
         )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Total shortcuts: {len(lines)}")
         await send_container_response(ctx, container)
 
     # ─── Dynamic 1-Word Message Listener ──────────────────────────────────────
@@ -394,7 +340,6 @@ class Role(commands.Cog, name="Moderation-Role"):
         if cmd_trigger not in guild_shortcuts:
             return
 
-        # Ensure user has Manage Roles or Administrator
         perms = message.author.guild_permissions
         if not (perms.manage_roles or perms.administrator):
             return
@@ -404,14 +349,12 @@ class Role(commands.Cog, name="Moderation-Role"):
         if not target_role:
             return
 
-        # Target member resolution from tokens[1]
         if len(tokens) < 2:
             return
 
         target_str = tokens[1]
         target_member: Optional[discord.Member] = None
 
-        # Check mention format <@123> or <@!123>
         mention_match = re.match(r"^<@!?(\d+)>$", target_str)
         if mention_match:
             target_id = int(mention_match.group(1))
@@ -422,41 +365,28 @@ class Role(commands.Cog, name="Moderation-Role"):
         if not target_member:
             return
 
-        # Hierarchy validation
         valid, err = self._validate_role_hierarchy(message.author, message.guild, target_role, target=target_member)
         if not valid:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Cannot Toggle Role**\n> {err}")
+            container.add_section(content=f"> {err}")
             await send_container_response(message.channel, container)
             return
 
-        # Toggle action
         if target_role in target_member.roles:
             await target_member.remove_roles(
                 target_role,
-                reason=f"Kyro Shortcut '{cmd_trigger}' by {message.author} ({message.author.id})",
+                reason=f"Shortcut '{cmd_trigger}' by {message.author}",
             )
-            action = "Removed"
-            badge = "Role Removed"
+            action_text = f"Removed {target_role.mention} from {target_member.mention}."
         else:
             await target_member.add_roles(
                 target_role,
-                reason=f"Kyro Shortcut '{cmd_trigger}' by {message.author} ({message.author.id})",
+                reason=f"Shortcut '{cmd_trigger}' by {message.author}",
             )
-            action = "Added"
-            badge = "Role Added"
+            action_text = f"Added {target_role.mention} to {target_member.mention}."
 
         container = KyroContainer(accent_color=target_role.color.value if target_role.color.value else None)
-        container.add_section(
-            content=(
-                f"### {badge}\n"
-                f"> **Target:** {target_member.mention} (`{target_member.name}`)\n"
-                f"> **Role:** {target_role.mention} (`{target_role.name}`)\n"
-                f"> **Action:** Successfully {action.lower()} via shortcut `{cmd_trigger}`."
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Moderated by {message.author.display_name}")
+        container.add_section(content=action_text)
         await send_container_response(message.channel, container)
 
 

@@ -1,6 +1,6 @@
 """
 Kyro Discord Bot - User Banner Module
-Display a user's high-resolution profile banner or Nitro accent color.
+Display a user's high-resolution profile banner or custom accent color.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ logger = logging.getLogger("Kyro.General.Banner")
 
 
 class Banner(commands.Cog, name="General-Banner"):
-    """User Banner and Nitro Accent Color Module."""
+    """User Banner Module."""
     category: str = "General"
 
     def __init__(self, bot: KyroBot) -> None:
@@ -32,7 +32,7 @@ class Banner(commands.Cog, name="General-Banner"):
 
     @commands.hybrid_command(
         name="banner",
-        description="Display a user's high-resolution profile banner or Nitro accent color.",
+        description="Display a user's high-resolution profile banner or accent color.",
     )
     @app_commands.describe(member="Member or user whose banner you wish to view")
     async def banner(
@@ -40,7 +40,7 @@ class Banner(commands.Cog, name="General-Banner"):
         ctx: CustomContext,
         member: Optional[discord.Member | discord.User] = None,
     ) -> None:
-        """View user profile banner or Nitro accent color."""
+        """View user profile banner or accent color."""
         target = member or ctx.author
 
         full_user = target
@@ -54,27 +54,20 @@ class Banner(commands.Cog, name="General-Banner"):
 
         if banner_asset:
             banner_url = str(banner_asset.url)
-            is_animated = "a_" in banner_url or ".gif" in banner_url.lower()
-            format_badge = "Animated GIF" if is_animated else "Static Banner"
+            hd_url = f"{banner_url}?size=4096" if "?" not in banner_url else f"{banner_url}&size=4096"
 
             container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**{target.display_name}** (`{target.name}`)\n"
-                    f"> **Profile Banner** • `{format_badge}`"
-                )
-            )
+            container.add_section(content=f"**{target.display_name}** • [Download Banner]({hd_url})")
             container.add_separator(divider=True)
             container.add_media(f"{banner_url}?size=2048" if "?" not in banner_url else banner_url)
-            container.add_separator(divider=True)
-            container.add_text(f"-# Requested by {ctx.author.display_name}")
 
             view = discord.ui.View()
             view.add_item(
                 discord.ui.Button(
-                    label="Open HD",
-                    url=f"{banner_url}?size=4096" if "?" not in banner_url else f"{banner_url}&size=4096",
+                    label="Download",
+                    url=hd_url,
                     style=discord.ButtonStyle.link,
+                    emoji="📥",
                 )
             )
             await send_container_response(ctx, container, view=view)
@@ -86,30 +79,17 @@ class Banner(commands.Cog, name="General-Banner"):
             container = KyroContainer(accent_color=accent_color.value)
             container.add_section(
                 content=(
-                    f"**{target.display_name}** (`{target.name}`)\n"
-                    f"> **Custom Nitro Banner Accent Color**\n"
-                    f"• **Hex Code:** `{hex_code}`\n"
-                    f"• **RGB Value:** `{rgb_str}`"
+                    f"**{target.display_name}**\n"
+                    f"> **Accent Color:** `{hex_code}` • `{rgb_str}`"
                 )
             )
-            container.add_separator(divider=True)
-            container.add_text(
-                "*(This user has selected a custom solid color banner instead of an image banner)*"
-            )
-            container.add_separator(divider=True)
-            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
 
         else:
             container = KyroContainer(accent_color=None)
             container.add_section(
-                content=(
-                    f"**{target.display_name}** (`{target.name}`)\n"
-                    f"> This user does not currently have a custom profile banner or Nitro accent color set."
-                )
+                content=f"**{target.display_name}** does not have a profile banner or accent color set."
             )
-            container.add_separator(divider=True)
-            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
 
 

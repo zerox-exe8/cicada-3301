@@ -29,6 +29,23 @@ class AutoEvents(commands.Cog):
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
+    async def cog_load(self) -> None:
+        """Dynamically attach embed announce command to embed group so ?embed announce works."""
+        embed_group = self.bot.get_command("embed")
+        if embed_group and isinstance(embed_group, commands.Group):
+            if not embed_group.get_command("announce"):
+                cmd = self.embed_announce_cmd.copy()
+                cmd.cog = self
+                embed_group.add_command(cmd)
+
+    async def cog_unload(self) -> None:
+        """Detach dynamic announce command on cog unload."""
+        embed_group = self.bot.get_command("embed")
+        if embed_group and isinstance(embed_group, commands.Group):
+            cmd = embed_group.get_command("announce")
+            if cmd and getattr(cmd, "cog", None) == self:
+                embed_group.remove_command("announce")
+
     async def _send_event_card(
         self,
         event_type: str,
@@ -549,7 +566,8 @@ class AutoEvents(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(
             f"`{prefix}welcome set #channel {{user}} <embed_name>`\n"
-            f"`{prefix}welcome test` , `{prefix}welcome toggle` , `{prefix}welcome reset`"
+            f"`{prefix}welcome test` , `{prefix}welcome toggle` , `{prefix}welcome reset`\n"
+            f"`{prefix}embed announce #channel <embed_name> [@everyone]`"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -732,6 +750,197 @@ class AutoEvents(commands.Cog):
         """Clear welcome configuration."""
         await self.bot.event_mgr.delete_event_config(ctx.guild.id, "welcome")
         await ctx.send_success("Welcome event configuration has been reset.", title="Welcome Reset")
+
+    @welcome_group.command(
+        name="announce",
+        description="Dispatch a saved embed card with an outer mention ping (@everyone, role, etc.).",
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def welcome_announce(self, ctx: CustomContext, *, args: str = "") -> None:
+        """Dispatch a saved embed card with an outer mention ping."""
+        await self._dispatch_announcement(ctx, args)
+
+    @commands.hybrid_command(
+        name="announce",
+        aliases=["embedannounce"],
+        description="Dispatch a saved embed card with an outer mention ping (@everyone, role, etc.).",
+    )
+    @commands.has_permissions(manage_messages=True)
+    async def embed_announce_cmd(self, ctx: CustomContext, *, args: str = "") -> None:
+        """Dispatch a saved embed card with an outer mention ping."""
+        await self._dispatch_announcement(ctx, args)
+
+    async def _dispatch_announcement(
+        self,
+        ctx: CustomContext,
+        args: str = "",
+    ) -> None:
+        """Internal helper to dispatch an embed announcement card with mention ping."""
+        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
+        raw_text = args.strip()
+
+        if not raw_text:
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Embed Announce Guide**\n"
+                    "> Post a saved embed card with an outer mention ping (@everyone, @here, or role).\n"
+                    f"> **Usage:** `{prefix}embed announce [#channel] <embed_name> [ping_message]`\n"
+                    f"> **Example:** `{prefix}embed announce #announcements my_note @everyone Important update!`\n"
+                    f"> **Note:** If no ping message is specified, it defaults to `@everyone`."
+                )
+            )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+            return
+
+        target_channel: discord.abc.Messageable = ctx.channel
+
+        # 1. Parse target channel if provided
+        if ctx.message.channel_mentions:
+            target_channel = ctx.message.channel_mentions[0]
+            raw_text = re.sub(rf"<#{target_channel.id}>", "", raw_text).strip()
+        else:
+            words = raw_text.split()
+            if words:
+                first_w = words[0].lstrip("#")
+                if first_w.isdigit() and ctx.guild:
+                    ch = ctx.guild.get_channel(int(first_w))
+                    if isinstance(ch, (discord.TextChannel, discord.Thread)):
+                        target_channel = ch
+                        raw_text = " ".join(words[1:]).strip()
+                if (target_channel == ctx.channel) and ctx.guild:
+                    ch = discord.utils.get(ctx.guild.text_channels, name=first_w.lower())
+                    if ch:
+                        target_channel = ch
+                        raw_text = " ".join(words[1:]).strip()
+
+        # 2. Parse embed name and ping message
+        words = raw_text.split()
+        if not words:
+            await ctx.send_warning(
+                f"Please specify a saved embed template name!\n"
+                f"Usage: `{prefix}embed announce [#channel] <embed_name> [ping_message]`",
+                title="Missing Embed Name",
+            )
+            return
+
+        embed_name = None
+        ping_content = "@everyone"
+        template = None
+
+        # Check if first word is the template name
+        first_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[0].lower())
+        template = await self.bot.embed_mgr.get_template(ctx.guild.id, first_clean)
+        if template:
+            embed_name = first_clean
+            if len(words) > 1:
+                ping_content = " ".join(words[1:]).strip()
+        elif len(words) > 1:
+            # Check if last word is the template name
+            last_clean = re.sub(r"[^a-zA-Z0-9_-]", "", words[-1].lower())
+            template_last = await self.bot.embed_mgr.get_template(ctx.guild.id, last_clean)
+            if template_last:
+                embed_name = last_clean
+                template = template_last
+                ping_content = " ".join(words[:-1]).strip() or "@everyone"
+
+        if not embed_name or not template:
+            await ctx.send_error(
+                f"Saved embed template was not found for `{first_clean}`.\n"
+                f"Use `{prefix}embed list` to see all saved templates in this server.",
+                title="Embed Not Found",
+            )
+            return
+
+        # 3. Security / Permission check for mass mentions
+        if ("@everyone" in ping_content or "@here" in ping_content) and not getattr(ctx.author.guild_permissions, "mention_everyone", False):
+            await ctx.send_error(
+                "You need the **Mention @everyone, @here, and All Roles** permission to send mass mention announcements.",
+                title="Permission Denied",
+            )
+            return
+
+        # 4. Bot Channel Permission Check
+        if isinstance(target_channel, discord.TextChannel):
+            bot_perms = target_channel.permissions_for(ctx.guild.me)
+            if not bot_perms.send_messages:
+                await ctx.send_error(f"Bot lacks `Send Messages` permission in {target_channel.mention}.")
+                return
+            if not bot_perms.embed_links:
+                await ctx.send_error(f"Bot lacks `Embed Links` permission in {target_channel.mention}.")
+                return
+            if not bot_perms.manage_webhooks:
+                await ctx.send_error(f"Bot requires `Manage Webhooks` permission in {target_channel.mention} to render Components V2 container cards.")
+                return
+
+        # 5. Resolve outer ping message placeholders
+        resolved_ping = resolve_placeholders(ping_content, user=ctx.author, guild=ctx.guild)
+
+        # 6. Build the container from saved template
+        draft = ContainerDraft.from_dict(template)
+        avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
+        container = draft.to_container(
+            user=ctx.author,
+            guild=ctx.guild,
+            channel=target_channel,
+            bot=self.bot,
+            default_avatar=avatar_url,
+        )
+
+        # 7. Dispatch container with outer ping and allowed mentions
+        try:
+            target_msg = await send_container_response(
+                target_channel,
+                container,
+                content=resolved_ping,
+                allowed_mentions=discord.AllowedMentions(everyone=True, roles=True, users=True),
+            )
+
+            # Record interactive card for dropdown/button handling if interactive
+            msg_id = None
+            if isinstance(target_msg, dict) and "id" in target_msg:
+                msg_id = int(target_msg["id"])
+            elif hasattr(target_msg, "id"):
+                msg_id = int(target_msg.id)
+
+            if msg_id:
+                await self.bot.embed_mgr.record_interactive_card(
+                    guild_id=ctx.guild.id,
+                    message_id=msg_id,
+                    template_name=embed_name,
+                    payload=draft.to_dict(),
+                )
+
+            # Delete the trigger message if dispatched in the same channel to keep it clean
+            if ctx.channel.id == target_channel.id and ctx.guild.me.guild_permissions.manage_messages:
+                try:
+                    await ctx.message.delete()
+                except Exception:
+                    pass
+
+            # If sent to a different channel, send confirmation to invoker
+            if ctx.channel.id != target_channel.id:
+                ch_mention = getattr(target_channel, "mention", f"#{target_channel}")
+                resp_container = KyroContainer(accent_color=None)
+                resp_container.add_section(
+                    content=(
+                        "**Announcement Dispatched**\n"
+                        f"> Saved embed `{embed_name}` successfully posted to {ch_mention}."
+                    )
+                )
+                resp_container.add_separator(divider=True)
+                resp_container.add_text(
+                    f"• **Channel:** {ch_mention}\n"
+                    f"• **Ping Message:** `{resolved_ping}`\n"
+                    f"-# Dispatched by {ctx.author.display_name}"
+                )
+                await send_container_response(ctx, resp_container)
+
+        except Exception as e:
+            logger.error(f"Failed to post announcement for embed '{embed_name}': {e}", exc_info=e)
+            await ctx.send_error(f"Failed to dispatch announcement: {e}")
 
     # ─── Leave / Goodbye Command Group ───────────────────────────────────────
 

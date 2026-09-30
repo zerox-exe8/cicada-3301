@@ -663,6 +663,16 @@ class PostgresDatabase(BaseDatabase):
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
+            # Dynamic Role Shortcuts Configuration
+            """
+            CREATE TABLE IF NOT EXISTS guild_role_shortcuts (
+                guild_id BIGINT NOT NULL,
+                shortcut_name VARCHAR(64) NOT NULL,
+                role_id BIGINT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, shortcut_name)
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

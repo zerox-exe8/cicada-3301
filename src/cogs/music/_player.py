@@ -26,6 +26,15 @@ from src.cogs.music._autoplay import NativeSmartAutoplay, clean_track_title
 from src.cogs.music._extractor import NativeExtractor
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
+try:
+    import audioop
+except ImportError:
+    try:
+        import audioop_lts as audioop
+    except ImportError:
+        audioop = None
+
+
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
@@ -81,12 +90,15 @@ def resolve_ffmpeg_executable() -> str:
 class DirectFFmpegStream(discord.AudioSource):
     """
     High-Performance, Jitter-Buffered FFmpeg Audio Source for Discord Voice.
-    Uses a dedicated daemon background worker to decouple network pipe I/O
-    from Discord's real-time 20ms audio transmission loop.
-    Eliminates packet rushing, stuttering, cutting, and premature EOF.
+    Features:
+    - Pre-buffered RAM cache before playback starts (eliminates initial and jitter silence dropouts).
+    - 5-second resilient frame ring buffer (~250 frames) for silky-smooth 48kHz audio.
+    - Optimized 38.4KB chunk reads from FFmpeg OS pipe to minimize syscall latency.
+    - Browser User-Agent preventing CDN bandwidth throttling.
+    - Zero radio crackle, zero 50Hz audio slicing, and no premature packet rushing.
     """
     FRAME_SIZE = 3840  # 20ms of 48000Hz 16-bit stereo PCM
-    BUFFER_SIZE = 150  # ~3 seconds of pre-buffered RAM audio frames
+    BUFFER_SIZE = 250  # ~5 seconds of pre-buffered RAM audio frames
 
     def __init__(self, stream_url: str, executable: str, volume: float = 1.0) -> None:
         self.stream_url = stream_url
@@ -112,8 +124,8 @@ class DirectFFmpegStream(discord.AudioSource):
             self.executable,
             "-reconnect", "1",
             "-reconnect_streamed", "1",
-            "-reconnect_at_eof", "1",
             "-reconnect_delay_max", "5",
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "-nostdin",
             "-i", self.stream_url,
             "-vn",
@@ -128,7 +140,7 @@ class DirectFFmpegStream(discord.AudioSource):
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            bufsize=512 * 1024,
+            bufsize=1024 * 1024,
         )
         self._reader_thread = threading.Thread(
             target=self._reader_loop,
@@ -136,6 +148,18 @@ class DirectFFmpegStream(discord.AudioSource):
             name="FFmpeg-Audio-Reader",
         )
         self._reader_thread.start()
+
+    async def wait_buffered(self, min_frames: int = 35, timeout: float = 3.5) -> None:
+        """Asynchronously pre-buffer frames before handing over to Discord voice client."""
+        start = time.time()
+        while time.time() - start < timeout and not self._stopped.is_set():
+            if self._queue.qsize() >= min_frames:
+                self._prebuffered = True
+                return
+            if self._process and self._process.poll() is not None:
+                break
+            await asyncio.sleep(0.02)
+        self._prebuffered = True
 
     def _reader_loop(self) -> None:
         """Continuously pull raw PCM bytes from FFmpeg pipe and enqueue exact frames."""
@@ -145,9 +169,12 @@ class DirectFFmpegStream(discord.AudioSource):
             self._queue.put(None)
             return
 
+        # Read in larger 38.4KB blocks (10 frames) to minimize pipe overhead
+        read_chunk_size = self.FRAME_SIZE * 10
+
         while not self._stopped.is_set():
             try:
-                chunk = stdout.read(self.FRAME_SIZE)
+                chunk = stdout.read(read_chunk_size)
                 if not chunk:
                     # True EOF from FFmpeg
                     break
@@ -155,7 +182,6 @@ class DirectFFmpegStream(discord.AudioSource):
                 while len(buf) >= self.FRAME_SIZE and not self._stopped.is_set():
                     frame = bytes(buf[:self.FRAME_SIZE])
                     del buf[:self.FRAME_SIZE]
-                    # Block with timeout so we can exit promptly if stopped
                     while not self._stopped.is_set():
                         try:
                             self._queue.put(frame, timeout=0.05)
@@ -189,11 +215,23 @@ class DirectFFmpegStream(discord.AudioSource):
         if self._stopped.is_set():
             return b""
 
+        # In case wait_buffered wasn't awaited beforehand, do a quick sync fill
+        if not self._prebuffered:
+            deadline = time.time() + 1.5
+            while not self._stopped.is_set() and time.time() < deadline:
+                if self._queue.qsize() >= 30:
+                    break
+                if self._process and self._process.poll() is not None:
+                    break
+                time.sleep(0.01)
+            self._prebuffered = True
+
         try:
-            frame = self._queue.get_nowait()
+            # Wait up to 35ms for the next frame rather than instantly dumping silence
+            frame = self._queue.get(timeout=0.035)
         except queue.Empty:
-            # If process is still running but network temporarily buffering,
-            # return silent frame immediately so Discord's 20ms voice pacing is never stalled
+            # If process is still running but network had a severe hiccup (>35ms),
+            # send a single silent frame so Discord's voice timer loop does not crash
             if self._process and self._process.poll() is None:
                 return b"\x00" * self.FRAME_SIZE
             return b""
@@ -202,9 +240,8 @@ class DirectFFmpegStream(discord.AudioSource):
             # Sentinel reached: End of song
             return b""
 
-        if self._volume != 1.0:
+        if self._volume != 1.0 and audioop:
             try:
-                import audioop
                 frame = audioop.mul(frame, 2, self._volume)
             except Exception:
                 pass
@@ -225,6 +262,7 @@ class DirectFFmpegStream(discord.AudioSource):
                 self._queue.get_nowait()
             except Exception:
                 break
+
 
 
 def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
@@ -424,7 +462,7 @@ class GuildPlayer:
             pass
 
         try:
-            self.voice_client = await channel.connect(cls=cls, self_deaf=False, timeout=15.0, reconnect=True)
+            self.voice_client = await channel.connect(cls=cls, self_deaf=True, timeout=15.0, reconnect=True)
         except Exception as conn_err:
             if cls is not discord.VoiceClient:
                 logger.warning(f"VoiceRecvClient connection failed ({conn_err}), falling back to standard VoiceClient...")
@@ -433,7 +471,7 @@ class GuildPlayer:
                         await self.guild.voice_client.disconnect(force=True)
                     except Exception:
                         pass
-                self.voice_client = await channel.connect(cls=discord.VoiceClient, self_deaf=False, timeout=15.0, reconnect=True)
+                self.voice_client = await channel.connect(cls=discord.VoiceClient, self_deaf=True, timeout=15.0, reconnect=True)
             else:
                 raise conn_err
 
@@ -695,6 +733,9 @@ class GuildPlayer:
                     await send_container_response(self.home_channel, c)
                 return
 
+        # Pre-buffer healthy RAM audio cache before starting playback (eliminates initial stutter)
+        await audio_source.wait_buffered(min_frames=35, timeout=3.5)
+
         self._current_stream = audio_source
         self._current_gen += 1
         current_gen = self._current_gen
@@ -829,6 +870,9 @@ class GuildPlayer:
     async def _prebuffer_worker(self) -> None:
         """Background worker that decodes upcoming track into a standby RAM buffer."""
         try:
+            # Allow current track 4 seconds of uninterrupted network bandwidth to stabilize its buffer
+            await asyncio.sleep(4.0)
+
             candidate: Optional[Track] = None
             if self.loop_mode == "track" and self.current:
                 candidate = self.current

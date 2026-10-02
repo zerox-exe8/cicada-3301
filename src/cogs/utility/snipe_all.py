@@ -24,6 +24,10 @@ class SnipeAllCog(commands.Cog, name="Utility-SnipeAll"):
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
+        if not hasattr(self.bot, "snipe_cache"):
+            self.bot.snipe_cache = {}
+        if not hasattr(self.bot, "guild_snipe_cache"):
+            self.bot.guild_snipe_cache = {}
 
     @commands.hybrid_command(
         name="snipeall",
@@ -45,40 +49,36 @@ class SnipeAllCog(commands.Cog, name="Utility-SnipeAll"):
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    "**No Server Snipes Found**\n"
-                    f"> No recently deleted messages have been tracked in **{ctx.guild.name}**."
+                    f"**No Deleted Messages**\n"
+                    f"> No recently deleted messages tracked in **{ctx.guild.name}**."
                 )
             )
-            container.add_separator(divider=True)
             await send_container_response(ctx, container)
             return
 
-        recent_entries = deleted_entries[:8]
+        recent_entries = deleted_entries[:6]
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Recent Server Deleted Messages**\n"
+                f"**Recent Deleted Messages**\n"
                 f"> Showing the last `{len(recent_entries)}` deleted message(s) across **{ctx.guild.name}**."
             )
         )
         container.add_separator(divider=True)
 
         lines = []
-        for i, entry in enumerate(recent_entries, 1):
+        for entry in recent_entries:
             rel_ts = int(entry.action_at.timestamp())
             channel_ref = f"<#{entry.channel_id}>" if entry.channel_id else f"#{entry.channel_name}"
-            raw_content = entry.content.replace("\n", " ").strip() if entry.content else "*[Attachment only]*"
-            if len(raw_content) > 80:
-                raw_content = raw_content[:77] + "..."
-            lines.append(
-                f"**{i}.** `{entry.author_name}` in {channel_ref} (<t:{rel_ts}:R>)\n"
-                f"> {raw_content}"
-            )
+            raw = entry.content.replace("\n", " ").strip() if entry.content else "*[Media / Attachment]*"
+            if len(raw) > 100:
+                raw = raw[:97] + "..."
+            lines.append(f"• **{entry.author_name}** in {channel_ref} (<t:{rel_ts}:R>)\n  {raw}")
 
         container.add_text("\n\n".join(lines))
         container.add_separator(divider=True)
-        container.add_text(f"-# Tip: Run `{ctx.clean_prefix}snipe` in any channel to view full details")
+        container.add_text(f"-# Use `{ctx.clean_prefix}snipe` in any channel to view full details")
         await send_container_response(ctx, container)
 
     @commands.hybrid_command(
@@ -102,7 +102,6 @@ class SnipeAllCog(commands.Cog, name="Utility-SnipeAll"):
                 f"> Successfully wiped `{count}` tracked server message(s) in **{ctx.guild.name}**."
             )
         )
-        container.add_separator(divider=True)
         await send_container_response(ctx, container)
 
 

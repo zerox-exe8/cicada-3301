@@ -1,6 +1,6 @@
 """
 Kyro Discord Bot - Clean Channel Snipe Utility
-Clean, simple deleted message inspector without button clutter or complex tabs.
+Clean, focused deleted message inspector with direct content display and media rendering.
 """
 
 from __future__ import annotations
@@ -56,8 +56,15 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
         if not message.guild or message.author.bot:
             return
 
-        if not message.content and not message.attachments:
-            return
+        content = message.content or ""
+        attachments = [a.url for a in message.attachments if a.url]
+        stickers = [s.url for s in message.stickers if s.url]
+
+        if not content and not attachments and not stickers:
+            if message.embeds:
+                content = "*[Embed]*"
+            else:
+                return
 
         channel_id = message.channel.id
         guild_id = message.guild.id
@@ -67,13 +74,15 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
         if guild_id not in self.bot.guild_snipe_cache:
             self.bot.guild_snipe_cache[guild_id] = deque(maxlen=100)
 
+        all_media = attachments + stickers
+
         entry = SnipeEntry(
             id=message.id,
             author_id=message.author.id,
             author_name=message.author.display_name,
-            author_avatar=message.author.display_avatar.url,
-            content=message.content,
-            attachments=[a.url for a in message.attachments],
+            author_avatar=message.author.display_avatar.url if message.author.display_avatar else "",
+            content=content,
+            attachments=all_media,
             created_at=message.created_at,
             action_at=discord.utils.utcnow(),
             type="delete",
@@ -106,9 +115,9 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
             id=before.id,
             author_id=before.author.id,
             author_name=before.author.display_name,
-            author_avatar=before.author.display_avatar.url,
+            author_avatar=before.author.display_avatar.url if before.author.display_avatar else "",
             content=before.content,
-            attachments=[a.url for a in before.attachments],
+            attachments=[a.url for a in before.attachments if a.url],
             created_at=before.created_at,
             action_at=discord.utils.utcnow(),
             type="edit",
@@ -140,10 +149,9 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
             container.add_section(
                 content=(
                     f"**No Deleted Messages**\n"
-                    f"> There are no recently deleted messages in #{ctx.channel.name}."
+                    f"> No recently deleted messages found in #{ctx.channel.name}."
                 )
             )
-            container.add_separator(divider=True)
             await send_container_response(ctx, container)
             return
 
@@ -151,43 +159,47 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"**Invalid Snipe Index**\n"
-                    f"> Only `{len(deleted_entries)}` deleted message(s) are cached in this channel (valid: 1 to {len(deleted_entries)})."
+                    f"**Invalid Index**\n"
+                    f"> Only `{len(deleted_entries)}` deleted message(s) cached in #{ctx.channel.name}."
                 )
             )
-            container.add_separator(divider=True)
             await send_container_response(ctx, container)
             return
 
         entry = deleted_entries[index - 1]
         rel_ts = int(entry.action_at.timestamp())
-        created_ts = int(entry.created_at.timestamp())
 
         container = KyroContainer(accent_color=None)
+
+        # Primary section: Author, relative time, and the deleted message content clearly displayed
+        msg_text = entry.content if entry.content else "*[Media / Attachment]*"
+
         container.add_section(
             content=(
-                f"**Deleted Message in #{ctx.channel.name}**\n"
-                f"> **Author:** `{entry.author_name}` (`{entry.author_id}`)\n"
-                f"> **Deleted:** <t:{rel_ts}:R> • **Sent:** <t:{created_ts}:t>"
+                f"**{entry.author_name}** • <t:{rel_ts}:R>\n"
+                f"{msg_text[:1900]}"
             ),
             accessory={
                 "type": 11,
                 "media": {"url": entry.author_avatar},
             } if entry.author_avatar else None,
         )
-        container.add_separator(divider=True)
 
-        text_content = entry.content if entry.content else "*[No text content - Attachment only]*"
-        container.add_text(f">>> {text_content[:1800]}")
+        # Render images directly if any image was attached
+        image_exts = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+        images = [u for u in entry.attachments if any(u.lower().split("?")[0].endswith(ext) for ext in image_exts)]
+        other_files = [u for u in entry.attachments if u not in images]
 
-        if entry.attachments:
+        for img in images[:2]:
+            container.add_media(img)
+
+        if other_files:
             container.add_separator(divider=True)
-            attach_lines = [f"• [Attachment {i+1}]({url})" for i, url in enumerate(entry.attachments[:5])]
-            container.add_text("**Attachments:**\n" + "\n".join(attach_lines))
+            container.add_text("\n".join(f"• [Attached File {i+1}]({u})" for i, u in enumerate(other_files[:3])))
 
         if len(deleted_entries) > 1:
             container.add_separator(divider=True)
-            container.add_text(f"-# Record {index} of {len(deleted_entries)} • Use `{ctx.clean_prefix}snipe <number>` for older messages")
+            container.add_text(f"-# #{ctx.channel.name} • {index}/{len(deleted_entries)} • `{ctx.clean_prefix}snipe <number>`")
 
         await send_container_response(ctx, container)
 
@@ -208,11 +220,10 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Channel Snipe Cache Cleared**\n"
+                f"**Snipe Cache Cleared**\n"
                 f"> Successfully purged `{count}` cached message(s) from #{ctx.channel.name}."
             )
         )
-        container.add_separator(divider=True)
         await send_container_response(ctx, container)
 
 

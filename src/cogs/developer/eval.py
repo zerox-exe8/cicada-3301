@@ -36,8 +36,9 @@ class EvalCog(commands.Cog, name="Developer-Eval"):
             code = "\n".join(lines[1:-1])
         code = code.strip("` \n")
 
+        bot = self.bot
         local_vars = {
-            "bot": self.bot,
+            "bot": bot,
             "ctx": ctx,
             "channel": ctx.channel,
             "author": ctx.author,
@@ -45,6 +46,21 @@ class EvalCog(commands.Cog, name="Developer-Eval"):
             "message": ctx.message,
             "discord": discord,
             "commands": commands,
+            "asyncio": asyncio,
+            "time": time,
+            "os": os,
+            "sys": sys,
+            # Instant flex helpers
+            "cluster": {
+                "cluster_state": "online (nominal)",
+                "node": "kyro-cluster-01",
+                "shards": bot.shard_count,
+                "guilds": len(bot.guilds),
+                "users": len(bot.users),
+                "gateway_ping": f"{round(bot.latency * 1000)}ms",
+                "loaded_cogs": len(bot.cogs),
+            },
+            "top": [f"{g.name} ({g.member_count:,})" for g in sorted(bot.guilds, key=lambda x: x.member_count or 0, reverse=True)[:5]],
         }
 
         stdout = io.StringIO()

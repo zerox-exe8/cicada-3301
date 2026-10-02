@@ -99,7 +99,7 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
         container.add_text(f"-# {t_dur:.1f}ms • pull & reload")
         await send_container_response(ctx, container)
 
-    @commands.command(name="reload", aliases=["r"])
+    @commands.command(name="reload", aliases=["rl", "re"])
     @is_developer()
     async def reload_module(self, ctx: CustomContext, *, module_name: Optional[str] = None) -> None:
         """

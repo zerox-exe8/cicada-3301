@@ -160,10 +160,11 @@ class KyroBot(commands.Bot):
                 )
             )
             container.add_separator(divider=True)
+            dot = self.custom_emojis.get("heart_dot", "•")
             container.add_text(
-                f"• **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
-                f"• **Latency:** `{ws_ping}ms` | **Status:** `Ready`\n"
-                f"• **Quick Start:** `{current_prefix}help`"
+                f"{dot} **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
+                f"{dot} **Latency:** `{ws_ping}ms` | **Status:** `Ready`\n"
+                f"{dot} **Quick Start:** `{current_prefix}help`"
             )
             container.add_separator(divider=True)
             container.add_text(f"-# **Requested by {message.author.display_name}**")
@@ -356,7 +357,7 @@ class KyroBot(commands.Bot):
         from src.utils.containers import KyroContainer, send_container_response
         prefix = self.guild_mgr.get_prefix(guild.id)
         e_reg = self.custom_emojis
-        dot = e_reg.get("heart_dot", "-")
+        dot = e_reg.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
@@ -367,8 +368,8 @@ class KyroBot(commands.Bot):
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"• **Prefix:** `{prefix}` | **Slash:** `/`\n"
-            f"• **Help:** `{prefix}help`"
+            f"{dot} **Prefix:** `{prefix}` | **Slash:** `/`\n"
+            f"{dot} **Quick Start:** `{prefix}help`"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Configured for {guild.name}")

@@ -734,13 +734,13 @@ class TechStatusView(discord.ui.View):
             self.add_item(self.setup_button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id and not (
+        if not (
             interaction.user.guild_permissions.manage_guild
             if isinstance(interaction.user, discord.Member)
             else False
         ):
             await interaction.response.send_message(
-                "Only server administrators can modify tech feed settings.",
+                "You need `Manage Server` permission to modify tech feed settings.",
                 ephemeral=True,
             )
             return False
@@ -1009,6 +1009,8 @@ class TechFeedCog(commands.Cog):
         aliases=["technews", "techfeed"],
         description="Autonomous Tech Intelligence terminal & feed dashboard.",
     )
+    @commands.has_permissions(manage_guild=True)
+    @app_commands.default_permissions(manage_guild=True)
     @commands.guild_only()
     async def tech(self, ctx: CustomContext) -> None:
         """Unified Tech Dashboard: displays live controls if configured, or launches setup if not set."""

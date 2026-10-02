@@ -242,13 +242,19 @@ class DevSetupChannelView(discord.ui.View):
         self.add_item(self.continue_button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id and not (
+        if not (
             interaction.user.guild_permissions.manage_guild
             if isinstance(interaction.user, discord.Member)
             else False
         ):
             await interaction.response.send_message(
-                "Only the command author or server administrators can interact with this setup.",
+                "You need `Manage Server` permission to interact with this setup.",
+                ephemeral=True,
+            )
+            return False
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the user who initiated this setup can interact with these controls.",
                 ephemeral=True,
             )
             return False
@@ -390,13 +396,19 @@ class DevSetupModulesView(discord.ui.View):
         return container
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id and not (
+        if not (
             interaction.user.guild_permissions.manage_guild
             if isinstance(interaction.user, discord.Member)
             else False
         ):
             await interaction.response.send_message(
-                "Only the command author or server administrators can interact with this setup.",
+                "You need `Manage Server` permission to interact with this setup.",
+                ephemeral=True,
+            )
+            return False
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the user who initiated this setup can interact with these controls.",
                 ephemeral=True,
             )
             return False
@@ -611,13 +623,13 @@ class DevCadenceView(discord.ui.View):
         return container
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id and not (
+        if not (
             interaction.user.guild_permissions.manage_guild
             if isinstance(interaction.user, discord.Member)
             else False
         ):
             await interaction.response.send_message(
-                "Only server administrators can modify dev feed settings.",
+                "You need `Manage Server` permission to modify dev feed settings.",
                 ephemeral=True,
             )
             return False
@@ -705,13 +717,13 @@ class DevStatusView(discord.ui.View):
             self.add_item(self.setup_button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id and not (
+        if not (
             interaction.user.guild_permissions.manage_guild
             if isinstance(interaction.user, discord.Member)
             else False
         ):
             await interaction.response.send_message(
-                "Only server administrators can modify dev feed settings.",
+                "You need `Manage Server` permission to modify dev feed settings.",
                 ephemeral=True,
             )
             return False
@@ -904,6 +916,8 @@ class DevFeedCog(commands.Cog):
         aliases=["devpulse", "opportunities", "bounties", "devjobs"],
         description="Autonomous Developer Opportunities & Career Dashboard.",
     )
+    @commands.has_permissions(manage_guild=True)
+    @app_commands.default_permissions(manage_guild=True)
     @app_commands.describe(
         category="Optional category to fetch live right now (bounties, jobs, hackathons, perks, tools)"
     )

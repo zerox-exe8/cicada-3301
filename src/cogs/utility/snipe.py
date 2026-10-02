@@ -56,14 +56,39 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
             return
 
         content = message.content or ""
-        attachments = [a.url for a in message.attachments if a.url]
-        stickers = [s.url for s in message.stickers if s.url]
+        media_urls: list[str] = []
 
-        if not content and not attachments and not stickers:
-            if message.embeds:
-                content = "*[Embed]*"
-            else:
-                return
+        # 1. Attachments
+        for a in message.attachments:
+            if a.url:
+                media_urls.append(a.url)
+            elif a.proxy_url:
+                media_urls.append(a.proxy_url)
+
+        # 2. Stickers
+        for s in message.stickers:
+            if s.url:
+                media_urls.append(s.url)
+
+        # 3. Embeds (Tenor GIFs, Giphy, image embeds)
+        for emb in message.embeds:
+            if emb.image and emb.image.url:
+                media_urls.append(emb.image.url)
+            elif emb.thumbnail and emb.thumbnail.url:
+                media_urls.append(emb.thumbnail.url)
+
+        # 4. Check for direct image or gif link in content if no media detected
+        if not media_urls and content:
+            import re
+            url_match = re.search(r"https?://\S+", content)
+            if url_match:
+                found_url = url_match.group(0)
+                clean_url = found_url.lower().split("?")[0]
+                if clean_url.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                    media_urls.append(found_url)
+
+        if not content and not media_urls:
+            return
 
         channel_id = message.channel.id
         guild_id = message.guild.id
@@ -73,15 +98,13 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
         if guild_id not in self.bot.guild_snipe_cache:
             self.bot.guild_snipe_cache[guild_id] = deque(maxlen=100)
 
-        all_media = attachments + stickers
-
         entry = SnipeEntry(
             id=message.id,
             author_id=message.author.id,
             author_name=message.author.display_name,
             author_avatar=message.author.display_avatar.url if message.author.display_avatar else "",
             content=content,
-            attachments=all_media,
+            attachments=media_urls,
             created_at=message.created_at,
             action_at=discord.utils.utcnow(),
             type="delete",
@@ -110,13 +133,15 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
         if guild_id not in self.bot.guild_snipe_cache:
             self.bot.guild_snipe_cache[guild_id] = deque(maxlen=100)
 
+        media = [a.url or a.proxy_url for a in before.attachments if a.url or a.proxy_url]
+
         entry = SnipeEntry(
             id=before.id,
             author_id=before.author.id,
             author_name=before.author.display_name,
             author_avatar=before.author.display_avatar.url if before.author.display_avatar else "",
             content=before.content,
-            attachments=[a.url for a in before.attachments if a.url],
+            attachments=media,
             created_at=before.created_at,
             action_at=discord.utils.utcnow(),
             type="edit",
@@ -142,14 +167,13 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
         all_entries: deque[SnipeEntry] = self.bot.snipe_cache.get(channel_id, deque())
         deleted_entries = [e for e in all_entries if e.type == "delete"]
 
+        dot = getattr(self.bot, "custom_emojis", {}).get("heart_dot", "•")
+
         if not deleted_entries:
             container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**No Deleted Messages**\n"
-                    f"> No recently deleted messages found in #{ctx.channel.name}."
-                )
-            )
+            container.add_text(f"**Sniped Messages • #{ctx.channel.name}**")
+            container.add_separator(divider=True)
+            container.add_text(f"> No recently deleted messages found in this channel.")
             container.add_separator(divider=True)
             container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
@@ -166,29 +190,82 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
         if not entries_to_show:
             entries_to_show = deleted_entries[:3]
 
+        # Group messages by author in chronological order (oldest to newest)
+        chrono_entries = list(reversed(entries_to_show))
+
+        groups: list[dict[str, Any]] = []
+        user_map: dict[int, dict[str, Any]] = {}
+
+        for entry in chrono_entries:
+            if entry.author_id not in user_map:
+                group = {
+                    "author_id": entry.author_id,
+                    "author_name": entry.author_name,
+                    "entries": [],
+                }
+                user_map[entry.author_id] = group
+                groups.append(group)
+            user_map[entry.author_id]["entries"].append(entry)
+
         container = KyroContainer(accent_color=None)
+        container.add_text(f"**Sniped Messages • #{ctx.channel.name}**")
+        container.add_separator(divider=True)
 
-        for idx, entry in enumerate(entries_to_show):
-            if idx > 0:
-                container.add_separator(divider=True)
+        media_to_render: list[str] = []
+        body_sections: list[str] = []
 
-            rel_ts = int(entry.action_at.timestamp())
-            container.add_text(f"**{entry.author_name}** • <t:{rel_ts}:R>")
-            container.add_separator(divider=True)
+        for group in groups:
+            user_lines = [f"{dot} **{group['author_name']}**"]
 
-            msg_text = entry.content if entry.content else "*[Media / Attachment]*"
-            if "\n" in msg_text:
-                highlighted = f"```{msg_text[:1500]}```"
-            else:
-                highlighted = f"`{msg_text[:1500]}`"
+            for entry in group["entries"]:
+                has_media = bool(entry.attachments)
+                raw_text = entry.content.strip() if entry.content else ""
+                is_gif_link = (
+                    "tenor.com" in raw_text
+                    or "giphy.com" in raw_text
+                    or raw_text.lower().split("?")[0].endswith(".gif")
+                )
 
-            container.add_text(highlighted)
+                # Format text content if present and not just a raw gif link that has media
+                if raw_text and not (is_gif_link and has_media):
+                    if "\n" in raw_text:
+                        for line in raw_text.splitlines():
+                            if line.strip():
+                                user_lines.append(f"> `{line.strip()[:1000]}`")
+                    else:
+                        user_lines.append(f"> `{raw_text[:1000]}`")
 
-            # Render image directly if available
-            image_exts = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-            images = [u for u in entry.attachments if any(u.lower().split("?")[0].endswith(ext) for ext in image_exts)]
-            for img in images[:1]:
-                container.add_media(img)
+                # Handle media (images / gifs / attachments)
+                if has_media:
+                    for att_url in entry.attachments:
+                        clean_url = att_url.lower().split("?")[0]
+                        if clean_url.endswith(".gif") or "tenor" in clean_url or "giphy" in clean_url:
+                            if not raw_text or is_gif_link:
+                                user_lines.append(f"> 🎬 `[GIF Attachment]`")
+                        elif clean_url.endswith((".png", ".jpg", ".jpeg", ".webp")):
+                            if not raw_text:
+                                user_lines.append(f"> 🖼️ `[Image Attachment]`")
+                        else:
+                            user_lines.append(f"> 📎 [Attachment]({att_url})")
+
+                        # Collect valid images/GIFs for media gallery
+                        if clean_url.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                            if att_url not in media_to_render:
+                                media_to_render.append(att_url)
+                elif is_gif_link:
+                    user_lines.append(f"> 🎬 `[GIF Attachment]`")
+                    clean_u = raw_text.lower().split("?")[0]
+                    if clean_u.endswith((".gif", ".png", ".jpg", ".jpeg", ".webp")):
+                        if raw_text not in media_to_render:
+                            media_to_render.append(raw_text)
+
+            body_sections.append("\n".join(user_lines))
+
+        container.add_text("\n\n".join(body_sections))
+
+        # Render images/GIFs directly inside container (up to 2)
+        for media_url in media_to_render[:2]:
+            container.add_media(media_url)
 
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -209,12 +286,9 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
             self.bot.snipe_cache[channel_id].clear()
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Snipe Cache Cleared**\n"
-                f"> Successfully purged `{count}` cached message(s) from #{ctx.channel.name}."
-            )
-        )
+        container.add_text(f"**Snipe Cache Cleared • #{ctx.channel.name}**")
+        container.add_separator(divider=True)
+        container.add_text(f"> Successfully purged `{count}` cached message(s).")
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)

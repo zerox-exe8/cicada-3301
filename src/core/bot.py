@@ -162,8 +162,8 @@ class KyroBot(commands.Bot):
             container.add_separator(divider=True)
             container.add_text(
                 f"• **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
-                f"• **Latency:** `{ws_ping}ms` | **Audio:** `Studio Lossless`\n"
-                f"• **Quick Start:** `{current_prefix}play <song>` • `{current_prefix}playlist` • `{current_prefix}help`"
+                f"• **Latency:** `{ws_ping}ms` | **Status:** `Ready`\n"
+                f"• **Quick Start:** `{current_prefix}help` • `{current_prefix}ticket setup` • `{current_prefix}autorole`"
             )
             container.add_separator(divider=True)
             container.add_text(f"-# **Requested by {message.author.display_name}**")
@@ -368,10 +368,10 @@ class KyroBot(commands.Bot):
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Prefix:** `{prefix}` | **Slash:** `/`\n"
-            f"{dot} **Help Menu:** `{prefix}help` (Browse all interactive modules)\n"
-            f"{dot} **Play Music:** `{prefix}play <song>` (Lossless studio audio)\n"
-            f"{dot} **Auto-Role:** `{prefix}autorole` (Human & Bot join roles)\n"
-            f"{dot} **Support Tickets:** `{prefix}ticket setup` (Interactive support panels)"
+            f"{dot} **Help Menu:** `{prefix}help` (Explore interactive features)\n"
+            f"{dot} **Auto-Role:** `{prefix}autorole` (Automatic join roles)\n"
+            f"{dot} **Support Tickets:** `{prefix}ticket setup` (Interactive support panels)\n"
+            f"{dot} **Moderation:** `{prefix}lock` / `{prefix}mute` (Server security tools)"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Configured for {guild.name} • Kyro Engine v{Config.VERSION}")

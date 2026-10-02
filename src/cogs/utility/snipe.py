@@ -1,6 +1,6 @@
 """
 Kyro Discord Bot - Clean Channel Snipe Utility
-Clean, focused deleted message inspector with direct content display and media rendering.
+Clean, focused deleted message inspector with direct highlighted content and zero clutter.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 from src.core.context import CustomContext
@@ -134,12 +133,11 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
     @commands.hybrid_command(
         name="snipe",
         aliases=["sn"],
-        description="View the most recently deleted message in this channel.",
+        description="View recently deleted messages in this channel.",
     )
-    @app_commands.describe(index="Which deleted message to view (1 = latest)")
     @commands.guild_only()
-    async def snipe(self, ctx: CustomContext, index: int = 1) -> None:
-        """View the most recently deleted message in this channel."""
+    async def snipe(self, ctx: CustomContext) -> None:
+        """View recently deleted messages in this channel."""
         channel_id = ctx.channel.id
         all_entries: deque[SnipeEntry] = self.bot.snipe_cache.get(channel_id, deque())
         deleted_entries = [e for e in all_entries if e.type == "delete"]
@@ -152,55 +150,48 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
                     f"> No recently deleted messages found in #{ctx.channel.name}."
                 )
             )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
-        if index < 1 or index > len(deleted_entries):
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**Invalid Index**\n"
-                    f"> Only `{len(deleted_entries)}` deleted message(s) cached in #{ctx.channel.name}."
-                )
-            )
-            await send_container_response(ctx, container)
-            return
+        # Fetch recent deleted messages (all deleted within 3 minutes of latest, or up to top 5)
+        latest_ts = deleted_entries[0].action_at.timestamp()
+        recent_threshold = latest_ts - 180  # 3 minutes window
+        entries_to_show = [
+            e for e in deleted_entries
+            if e.action_at.timestamp() >= recent_threshold
+        ][:5]
 
-        entry = deleted_entries[index - 1]
-        rel_ts = int(entry.action_at.timestamp())
+        if not entries_to_show:
+            entries_to_show = deleted_entries[:3]
 
         container = KyroContainer(accent_color=None)
 
-        # Primary section: Author, relative time, and the deleted message content clearly displayed
-        msg_text = entry.content if entry.content else "*[Media / Attachment]*"
+        for idx, entry in enumerate(entries_to_show):
+            if idx > 0:
+                container.add_separator(divider=True)
 
-        container.add_section(
-            content=(
-                f"**{entry.author_name}** • <t:{rel_ts}:R>\n"
-                f"{msg_text[:1900]}"
-            ),
-            accessory={
-                "type": 11,
-                "media": {"url": entry.author_avatar},
-            } if entry.author_avatar else None,
-        )
-
-        # Render images directly if any image was attached
-        image_exts = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-        images = [u for u in entry.attachments if any(u.lower().split("?")[0].endswith(ext) for ext in image_exts)]
-        other_files = [u for u in entry.attachments if u not in images]
-
-        for img in images[:2]:
-            container.add_media(img)
-
-        if other_files:
+            rel_ts = int(entry.action_at.timestamp())
+            container.add_text(f"**{entry.author_name}** • <t:{rel_ts}:R>")
             container.add_separator(divider=True)
-            container.add_text("\n".join(f"• [Attached File {i+1}]({u})" for i, u in enumerate(other_files[:3])))
 
-        if len(deleted_entries) > 1:
-            container.add_separator(divider=True)
-            container.add_text(f"-# #{ctx.channel.name} • {index}/{len(deleted_entries)} • `{ctx.clean_prefix}snipe <number>`")
+            msg_text = entry.content if entry.content else "*[Media / Attachment]*"
+            if "\n" in msg_text:
+                highlighted = f"```{msg_text[:1500]}```"
+            else:
+                highlighted = f"`{msg_text[:1500]}`"
 
+            container.add_text(highlighted)
+
+            # Render image directly if available
+            image_exts = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+            images = [u for u in entry.attachments if any(u.lower().split("?")[0].endswith(ext) for ext in image_exts)]
+            for img in images[:1]:
+                container.add_media(img)
+
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
     @commands.hybrid_command(
@@ -224,6 +215,8 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
                 f"> Successfully purged `{count}` cached message(s) from #{ctx.channel.name}."
             )
         )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
 

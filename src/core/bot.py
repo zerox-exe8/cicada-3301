@@ -163,7 +163,7 @@ class KyroBot(commands.Bot):
             container.add_text(
                 f"• **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
                 f"• **Latency:** `{ws_ping}ms` | **Status:** `Ready`\n"
-                f"• **Quick Start:** `{current_prefix}help` • `{current_prefix}ticket setup` • `{current_prefix}autorole`"
+                f"• **Quick Start:** `{current_prefix}help`"
             )
             container.add_separator(divider=True)
             container.add_text(f"-# **Requested by {message.author.display_name}**")

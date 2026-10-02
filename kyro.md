@@ -251,10 +251,9 @@ Kyro/
         ├── developer/           # Portal, DM, Avatar, BotName, Status
         ├── games/               # Hack, Nitro, Mimic
         ├── general/             # BotInfo, Help, Invite, Ping, Profile
-        ├── moderation/          # Ban, Kick, Lock, Mute, Purge, Warn, ModLog
+        ├── moderation/          # Ban, Kick, Lock, Mute, Purge, Warn, ModLog, Emojis
         ├── music/               # Lossless player, queue, controls, playlist manager
         ├── premium/             # License keys & buy console
-        ├── security/            # Anti-Spam, Anti-Raid, Anti-GhostPing
         ├── ticket/              # Ticket panels & transcript logging
         └── utility/             # Welcome/Leave events, Embed builder, AFK, Snipe
 ```

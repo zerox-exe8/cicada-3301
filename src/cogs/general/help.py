@@ -82,7 +82,7 @@ class Help(commands.Cog):
                             categories[category_name].append(cmd)
 
         # Ensure ordered display in dropdown: Moderation, Welcomer, Join to Create, Ticket, Security, Audit Logs, Music, Games, etc.
-        priority_order = ["Moderation", "Welcomer", "Join to Create", "Ticket", "Security", "Audit Logs", "Music", "Games", "Premium"]
+        priority_order = ["Moderation", "Welcomer", "Join to Create", "Ticket", "Audit Logs", "Music", "Games", "Premium"]
         ordered_categories: dict[str, list[commands.Command]] = {}
         for cat in priority_order:
             if cat in categories and categories[cat]:
@@ -102,7 +102,6 @@ class Help(commands.Cog):
             "Welcomer": e_reg.get("icons_join", e_reg.get("icon_join", "")),
             "Moderation": e_reg.get("icon_moderation", e_reg.get("icon_mod", e_reg.get("icons_staff", ""))),
             "Premium": e_reg.get("verified_premium", e_reg.get("icon_premium", "")),
-            "Security": e_reg.get("icons_guardian", e_reg.get("icons_ban", "")),
             "Audit Logs": e_reg.get("icons_podcast", e_reg.get("icon_logging", "")),
             "Games": e_reg.get("icons_magicwand", e_reg.get("icons_tada", e_reg.get("icon_gift", ""))),
             "Join to Create": e_reg.get("icons_connect", e_reg.get("icons_channel", e_reg.get("icons_podcast", ""))),
@@ -118,7 +117,6 @@ class Help(commands.Cog):
             "Welcomer": "icons_join",
             "Moderation": "icon_moderation",
             "Premium": "verified_premium",
-            "Security": "icons_guardian",
             "Audit Logs": "icons_podcast",
             "Games": "icons_magicwand",
             "Join to Create": "icons_connect",

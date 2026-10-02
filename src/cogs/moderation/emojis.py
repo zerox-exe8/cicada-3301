@@ -20,7 +20,7 @@ from src.utils.containers import KyroContainer, send_container_response, edit_co
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
-logger = logging.getLogger("Kyro.Utility.Emojis")
+logger = logging.getLogger("Kyro.Moderation.Emojis")
 
 
 class ExpressionManagerView(discord.ui.View):
@@ -432,8 +432,9 @@ class ExpressionManagerView(discord.ui.View):
             )
 
 
-class Emojis(commands.Cog):
+class Emojis(commands.Cog, name="Moderation-Emojis"):
     """Server expressions management (Emojis & Stickers) with Components V2 dashboard."""
+    category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

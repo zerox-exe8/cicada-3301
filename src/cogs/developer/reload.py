@@ -1,11 +1,7 @@
-"""
-Kyro Discord Bot - Module Hot-Reloading Suite
-Enables real-time code reloading without restarting the bot process.
-Supports reloading all modules, category folders, or specific cogs.
-"""
-
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Optional
 
@@ -20,11 +16,88 @@ if TYPE_CHECKING:
 
 
 class ReloadCog(commands.Cog, name="Developer-Reload"):
-    """Live module reloading."""
+    """Live module hot-reloading and git sync."""
     category: str = "Developer"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
+        self.root_dir = Path(__file__).resolve().parent.parent.parent.parent
+        self.cogs_dir = self.root_dir / "src" / "cogs"
+
+    def _discover_all_cogs(self) -> list[str]:
+        """Discover all valid cog module strings from disk."""
+        modules = []
+        for file in self.cogs_dir.rglob("*.py"):
+            if any(part.startswith("_") for part in file.relative_to(self.cogs_dir).parts):
+                continue
+            rel = file.relative_to(self.root_dir)
+            mod = ".".join(rel.with_suffix("").parts)
+            modules.append(mod)
+        return modules
+
+    async def _reload_or_load(self, ext: str) -> None:
+        """Reload extension if already loaded, otherwise load it."""
+        if ext in self.bot.extensions:
+            await self.bot.reload_extension(ext)
+        else:
+            await self.bot.load_extension(ext)
+
+    @commands.command(name="pull", aliases=["update"])
+    @is_developer()
+    async def git_pull(self, ctx: CustomContext) -> None:
+        """
+        Pull latest code from git remote and hot-reload all cogs.
+        Usage:
+          ?pull
+        """
+        t_start = time.perf_counter()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", str(self.root_dir), "pull",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            out_str = stdout.decode("utf-8", errors="replace").strip()
+            err_str = stderr.decode("utf-8", errors="replace").strip()
+            git_output = out_str or err_str or "No output from git"
+        except Exception as e:
+            await ctx.send_error(f"Git pull failed: `{e}`")
+            return
+
+        # now trigger full reload
+        all_exts = self._discover_all_cogs()
+        self_ext = "src.cogs.developer.reload"
+        if self_ext in all_exts:
+            all_exts.remove(self_ext)
+            all_exts.append(self_ext)
+
+        reloaded = []
+        failed = []
+        for ext in all_exts:
+            try:
+                await self._reload_or_load(ext)
+                reloaded.append(ext.split(".")[-1])
+            except Exception as e:
+                failed.append(f"{ext.split('.')[-1]}: {e}")
+
+        t_dur = (time.perf_counter() - t_start) * 1000
+
+        info = [
+            f"git:      {git_output.splitlines()[-1] if git_output.splitlines() else git_output}",
+            f"reloaded: {len(reloaded)} cogs",
+            f"failed:   {len(failed)}",
+        ]
+        if failed:
+            info.append("errors:")
+            for f in failed[:3]:
+                info.append(f"  - {f}")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(content=f"```yaml\n" + "\n".join(info) + "\n```")
+        container.add_separator(divider=True)
+        container.add_text(f"-# {t_dur:.1f}ms • pull & reload")
+        await send_container_response(ctx, container)
 
     @commands.command(name="reload", aliases=["r"])
     @is_developer()
@@ -32,119 +105,103 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
         """
         Hot-reload cogs without restarting the bot.
         Usage:
-          ?reload           -> Reloads all loaded extensions
-          ?reload all       -> Reloads all loaded extensions
+          ?reload           -> Reloads all cogs on disk
           ?reload music     -> Reloads the music module
           ?reload general   -> Reloads all general category cogs
         """
-        start_time = time.perf_counter()
-        target = (module_name or "").strip().lower()
+        t_start = time.perf_counter()
+        try:
+            target = (module_name or "").strip().lower()
 
-        # Case 1: Reload ALL extensions if no argument or 'all'/'*' passed
-        if not target or target in ("all", "*", "everything"):
-            all_exts = list(self.bot.extensions.keys())
-            reloaded: list[str] = []
-            failed: list[str] = []
+            if target in ("pull", "git"):
+                await self.git_pull(ctx)
+                return
 
-            for ext in all_exts:
+            if not target or target in ("all", "*", "everything"):
+                all_exts = self._discover_all_cogs()
+                self_ext = "src.cogs.developer.reload"
+                if self_ext in all_exts:
+                    all_exts.remove(self_ext)
+                    all_exts.append(self_ext)
+
+                reloaded = []
+                failed = []
+
+                for ext in all_exts:
+                    try:
+                        await self._reload_or_load(ext)
+                        reloaded.append(ext.split(".")[-1])
+                    except Exception as e:
+                        failed.append(f"{ext.split('.')[-1]}: {e}")
+
+                t_dur = (time.perf_counter() - t_start) * 1000
+
+                info = [
+                    f"reloaded: {len(reloaded)} cogs",
+                    f"failed:   {len(failed)}",
+                ]
+                if failed:
+                    info.append("errors:")
+                    for f in failed[:5]:
+                        info.append(f"  - {f}")
+
+                container = KyroContainer(accent_color=None)
+                container.add_section(content=f"```yaml\n" + "\n".join(info) + "\n```")
+                container.add_separator(divider=True)
+                container.add_text(f"-# {t_dur:.1f}ms")
+                await send_container_response(ctx, container)
+                return
+
+            # specific cog or category target
+            discovered = self._discover_all_cogs()
+            matching_exts = []
+            for ext in discovered:
+                if ext.lower().endswith(f".{target}") or ext.lower().endswith(f"._{target}"):
+                    matching_exts.append(ext)
+                elif f".{target}." in ext.lower():
+                    matching_exts.append(ext)
+                elif ext.lower() == target:
+                    matching_exts.append(ext)
+
+            if not matching_exts:
+                available = sorted({e.split(".")[-1] for e in discovered})
+                container = KyroContainer(accent_color=None)
+                container.add_section(content=f"```yaml\nerror: module '{target}' not found\navailable: [{', '.join(available[:15])}...]\n```")
+                container.add_separator(divider=True)
+                container.add_text("-# use ?reload to reload all cogs")
+                await send_container_response(ctx, container)
+                return
+
+            reloaded = []
+            failed = []
+            for ext in matching_exts:
                 try:
-                    await self.bot.reload_extension(ext)
-                    short_name = ext.split(".")[-1]
-                    reloaded.append(short_name)
+                    await self._reload_or_load(ext)
+                    reloaded.append(ext.split(".")[-1])
                 except Exception as e:
-                    failed.append(f"{ext}: {e}")
+                    failed.append(f"{ext.split('.')[-1]}: {e}")
 
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            t_dur = (time.perf_counter() - t_start) * 1000
+            info = [
+                f"reloaded: {', '.join(reloaded) if reloaded else 'none'}",
+                f"failed:   {len(failed)}",
+            ]
+            if failed:
+                info.append("errors:")
+                for f in failed[:3]:
+                    info.append(f"  - {f}")
+
             container = KyroContainer(accent_color=None)
-
-            if not failed:
-                container.add_section(
-                    content=(
-                        f"### System Hot-Reload Complete\n"
-                        f"> **Modules Reloaded:** `{len(reloaded)}` cogs\n"
-                        f"> **Execution Time:** `{elapsed_ms:.1f}ms`\n"
-                        f"> **Status:** `All Extensions Live & Fresh`"
-                    )
-                )
-            else:
-                container.add_section(
-                    content=(
-                        f"### System Hot-Reload Partial\n"
-                        f"> **Reloaded:** `{len(reloaded)}` cogs\n"
-                        f"> **Failed:** `{len(failed)}` cogs\n"
-                        f"> **Errors:**\n" + "\n".join(f"> • `{err}`" for err in failed[:5])
-                    )
-                )
-
+            container.add_section(content=f"```yaml\n" + "\n".join(info) + "\n```")
             container.add_separator(divider=True)
-            container.add_text("-# Powered by Kyro Studio")
+            container.add_text(f"-# {t_dur:.1f}ms")
             await send_container_response(ctx, container)
-            return
 
-        # Case 2: Specific module or category requested
-        # Search for exact matches or partial folder matches
-        matching_exts: list[str] = []
-        for ext in list(self.bot.extensions.keys()):
-            # Exact suffix match (e.g. 'music', 'ping', 'identity')
-            if ext.lower().endswith(f".{target}") or ext.lower().endswith(f"._{target}"):
-                matching_exts.append(ext)
-            # Category folder match (e.g. 'general', 'developer', 'music')
-            elif f".{target}." in ext.lower():
-                matching_exts.append(ext)
-            elif ext.lower() == target:
-                matching_exts.append(ext)
-
-        if not matching_exts:
-            container = KyroContainer(accent_color=None)
-            available = [e.split(".")[-1] for e in self.bot.extensions.keys()]
-            container.add_section(
-                content=(
-                    f"**Module Not Found: `{target}`**\n"
-                    f"> Available cogs:\n"
-                    f"> `{'`, `'.join(sorted(available))}`\n\n"
-                    f"-# Tip: Use `?reload` to reload all extensions at once."
-                )
-            )
-            container.add_separator(divider=True)
-            container.add_text("-# Powered by Kyro Studio")
-            await send_container_response(ctx, container)
-            return
-
-        reloaded = []
-        failed = []
-        for ext in matching_exts:
-            try:
-                await self.bot.reload_extension(ext)
-                reloaded.append(ext.split(".")[-1])
-            except Exception as e:
-                failed.append(f"{ext.split('.')[-1]}: {e}")
-
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
-        container = KyroContainer(accent_color=None)
-
-        if not failed:
-            container.add_section(
-                content=(
-                    f"### Module Reloaded\n"
-                    f"> **Modules:** `{'`, `'.join(reloaded)}`\n"
-                    f"> **Execution Time:** `{elapsed_ms:.1f}ms`\n"
-                    f"> **Status:** `Active & Fresh`"
-                )
-            )
-        else:
-            container.add_section(
-                content=(
-                    f"### Module Reload Issues\n"
-                    f"> **Reloaded:** `{'`, `'.join(reloaded)}`\n"
-                    f"> **Failed:** `{'`, `'.join(failed)}`"
-                )
-            )
-
-        container.add_separator(divider=True)
-        container.add_text("-# Powered by Kyro Studio")
-        await send_container_response(ctx, container)
+        except Exception as e:
+            await ctx.send_error(f"Reload error: `{e}`")
 
 
 async def setup(bot: KyroBot) -> None:
     await bot.add_cog(ReloadCog(bot))
+
 

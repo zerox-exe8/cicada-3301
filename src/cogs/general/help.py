@@ -243,34 +243,34 @@ class Help(commands.Cog):
         container.add_separator(divider=True)
 
         if cat_name.lower() == "moderation":
-            groups = [
-                ("Actions", ["ban", "unban", "kick", "timeout", "mute", "unmute", "warn", "warnings", "clearwarns"]),
-                ("Channels", ["lock", "unlock", "purge", "clear", "slowmode"]),
-                ("Roles", ["role", "roleall", "roleinfo", "inrole", "listroles"]),
-                ("Tools", ["emojis", "expressions", "stickers", "delemoji", "delsticker", "modlog"]),
-                ("Staff & Directory", ["admins", "mods", "bots"]),
-                ("General & Info", ["avatar", "banner", "server", "serverinfo", "userinfo", "botinfo", "membercount", "ping", "profile", "stats", "channelinfo"]),
+            priority_order = [
+                # Core Enforcement
+                "ban", "unban", "kick", "timeout", "mute", "unmute", "warn", "warnings", "clearwarns",
+                # Channels & Cleanup
+                "lock", "unlock", "purge", "clear", "slowmode",
+                # Roles
+                "role", "roleall", "roleinfo", "inrole", "listroles",
+                # Server Tools & Expressions
+                "emojis", "expressions", "stickers", "delemoji", "delsticker", "steal",
+                # Logs & Staff Directory
+                "modlog", "admins", "mods", "bots",
+                # General Utilities
+                "avatar", "banner", "server", "serverinfo", "userinfo", "botinfo", "membercount", "ping", "profile", "stats", "channelinfo",
             ]
-            lines = []
-            claimed_names = set()
-            for group_title, order_names in groups:
-                matched = []
-                for name in order_names:
-                    cmd_obj = next((c for c in commands_list if c.name == name), None)
-                    if cmd_obj and cmd_obj.name not in claimed_names:
-                        matched.append(f"`{cmd_obj.name}`")
-                        claimed_names.add(cmd_obj.name)
-                if matched:
-                    lines.append(f"{dot} **{group_title}:** {', '.join(matched)}")
 
-            remaining = [f"`{c.name}`" for c in sorted(commands_list, key=lambda x: x.name) if c.name not in claimed_names]
-            if remaining:
-                lines.append(f"{dot} **Other Tools:** {', '.join(remaining)}")
+            def _sort_key(cmd: commands.Command) -> tuple[int, str]:
+                n = cmd.name.lower()
+                try:
+                    return (priority_order.index(n), n)
+                except ValueError:
+                    return (999, n)
 
-            container.add_text("\n".join(lines))
+            sorted_cmds = sorted(commands_list, key=_sort_key)
         else:
-            formatted_cmds = ", ".join([f"`{cmd.qualified_name}`" for cmd in sorted(commands_list, key=lambda c: c.qualified_name)])
-            container.add_text(formatted_cmds)
+            sorted_cmds = sorted(commands_list, key=lambda c: c.qualified_name)
+
+        formatted_cmds = ", ".join([f"`{cmd.qualified_name}`" for cmd in sorted_cmds])
+        container.add_text(formatted_cmds)
         container.add_separator(divider=True)
 
         # Dropdown options (custom emojis only, clean labels)

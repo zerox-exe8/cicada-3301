@@ -152,7 +152,7 @@ class Help(commands.Cog):
         container.add_section(
             content=(
                 f"**Hey, I'm {Config.BOT_NAME}**\n"
-                f"> Built for our community."
+                f"> Built for our community — keeping your server safe, active, and effortlessly connected."
             )
         )
         container.add_separator(divider=True)

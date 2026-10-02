@@ -4,7 +4,7 @@
   <img src="./assets/branding/kyro_banner.webp" alt="Kyro Banner" width="100%" style="border-radius: 10px; margin-bottom: 20px;" />
 
   <h3>Built for our community.</h3>
-  <p>Engineered with Python 3.11+, Discord Components V2 Containers, 0ms In-Memory Caching, and Supabase PostgreSQL.</p>
+  <p>Keeping your server safe, active, and effortlessly connected.</p>
 
   <p>
     <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />

@@ -70,7 +70,12 @@ class EvalCog(commands.Cog, name="Developer-Eval"):
 
             res = stdout.getvalue().strip()
             if ret is not None:
-                result_str = f"{res}\n{ret}".strip() if res else str(ret)
+                if isinstance(ret, (dict, list, tuple, set)):
+                    import pprint
+                    formatted_ret = pprint.pformat(ret, indent=2, width=45)
+                else:
+                    formatted_ret = str(ret)
+                result_str = f"{res}\n{formatted_ret}".strip() if res else formatted_ret
             else:
                 result_str = res if res else "None"
 

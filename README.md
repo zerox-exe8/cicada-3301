@@ -3,7 +3,7 @@
 <div align="center">
   <img src="./assets/branding/kyro_banner.webp" alt="Kyro Banner" width="100%" style="border-radius: 10px; margin-bottom: 20px;" />
 
-  <h3>Enterprise Discord Management & Community Infrastructure</h3>
+  <h3>Built for our community.</h3>
   <p>Engineered with Python 3.11+, Discord Components V2 Containers, 0ms In-Memory Caching, and Supabase PostgreSQL.</p>
 
   <p>

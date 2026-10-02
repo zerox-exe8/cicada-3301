@@ -33,7 +33,9 @@
 ## 2. 📋 System Overview & Identity
 
 - **Bot Name**: Kyro
+- **Tagline**: `Built for our community.`
 - **Primary Prefix**: `?` (Configurable per-guild via `?prefix set`)
+- **Branding Assets**: `assets/branding/kyro_icon.webp` (Avatar) • `assets/branding/kyro_banner.webp` (Banner)
 - **Default Rich Presence**: `?help • Developed by zerox.exe`
 - **Lead Architect / Developer**: `zerox.exe`
 - **Core Technology Stack**:

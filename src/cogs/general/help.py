@@ -152,7 +152,7 @@ class Help(commands.Cog):
         container.add_section(
             content=(
                 f"**Hey, I'm {Config.BOT_NAME}**\n"
-                f"> All-in-one Discord ecosystem built for lossless audio streaming, support tickets, and visual server utilities."
+                f"> Built for our community."
             )
         )
         container.add_separator(divider=True)

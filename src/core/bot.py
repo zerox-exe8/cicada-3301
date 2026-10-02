@@ -156,7 +156,7 @@ class KyroBot(commands.Bot):
             container.add_section(
                 content=(
                     f"**Hey, I'm {Config.BOT_NAME}**\n"
-                    f"> All-in-one Discord ecosystem built for lossless audio streaming, support tickets, and visual server utilities."
+                    f"> Built for our community."
                 )
             )
             container.add_separator(divider=True)
@@ -362,7 +362,7 @@ class KyroBot(commands.Bot):
         container.add_section(
             content=(
                 f"**Thanks for inviting {Config.BOT_NAME}!**\n"
-                f"> All-in-one Discord ecosystem built for lossless audio streaming, support tickets, moderation, and visual server utilities."
+                f"> Built for our community."
             )
         )
         container.add_separator(divider=True)

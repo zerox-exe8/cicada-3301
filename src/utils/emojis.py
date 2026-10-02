@@ -162,6 +162,11 @@ class EmojiRegistry:
                 "icons_join": ["icon_join", "icons_welcome", "icons_connect"],
                 "icon_join": ["icons_join", "icons_welcome", "icons_connect"],
                 "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
+                "icons_files": ["icons_file", "icons_todolist", "icon_logging"],
+                "icons_image": ["icon_image", "icons_file"],
+                "icon_image": ["icons_image", "icons_file"],
+                "icons_delete": ["icon_delete", "icon_clear", "icons_wrong"],
+                "icon_delete": ["icons_delete", "icon_clear", "icon_x"],
                 "icons_download": ["icons_download", "icons_Download", "download", "icon_download"],
                 "download": ["icons_download", "icons_Download", "icon_download"],
                 # Music Emojis
@@ -214,6 +219,11 @@ class EmojiRegistry:
                 "icons_join": ["icon_join", "icons_welcome", "icons_connect"],
                 "icon_join": ["icons_join", "icons_welcome", "icons_connect"],
                 "icons_file": ["icons_files", "icons_todolist", "icon_logging"],
+                "icons_files": ["icons_file", "icons_todolist", "icon_logging"],
+                "icons_image": ["icon_image", "icons_file"],
+                "icon_image": ["icons_image", "icons_file"],
+                "icons_delete": ["icon_delete", "icon_clear", "icons_wrong"],
+                "icon_delete": ["icons_delete", "icon_clear", "icon_x"],
                 "icons_download": ["icons_download", "icons_Download", "download", "icon_download"],
                 "download": ["icons_download", "icons_Download", "icon_download"],
                 # Music Emojis

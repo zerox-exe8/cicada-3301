@@ -168,6 +168,10 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
         deleted_entries = [e for e in all_entries if e.type == "delete"]
 
         dot = getattr(self.bot, "custom_emojis", {}).get("heart_dot", "•")
+        img_emoji = getattr(self.bot, "custom_emojis", {}).get("icons_image", "")
+        file_emoji = getattr(self.bot, "custom_emojis", {}).get("icons_file", "")
+        img_prefix = f"{img_emoji} " if img_emoji else ""
+        file_prefix = f"{file_emoji} " if file_emoji else ""
 
         if not deleted_entries:
             container = KyroContainer(accent_color=None)
@@ -241,19 +245,19 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
                         clean_url = att_url.lower().split("?")[0]
                         if clean_url.endswith(".gif") or "tenor" in clean_url or "giphy" in clean_url:
                             if not raw_text or is_gif_link:
-                                user_lines.append(f"> 🎬 `[GIF Attachment]`")
+                                user_lines.append(f"> {img_prefix}`[GIF Attachment]`")
                         elif clean_url.endswith((".png", ".jpg", ".jpeg", ".webp")):
                             if not raw_text:
-                                user_lines.append(f"> 🖼️ `[Image Attachment]`")
+                                user_lines.append(f"> {img_prefix}`[Image Attachment]`")
                         else:
-                            user_lines.append(f"> 📎 [Attachment]({att_url})")
+                            user_lines.append(f"> {file_prefix}[Attachment]({att_url})")
 
                         # Collect valid images/GIFs for media gallery
                         if clean_url.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
                             if att_url not in media_to_render:
                                 media_to_render.append(att_url)
                 elif is_gif_link:
-                    user_lines.append(f"> 🎬 `[GIF Attachment]`")
+                    user_lines.append(f"> {img_prefix}`[GIF Attachment]`")
                     clean_u = raw_text.lower().split("?")[0]
                     if clean_u.endswith((".gif", ".png", ".jpg", ".jpeg", ".webp")):
                         if raw_text not in media_to_render:

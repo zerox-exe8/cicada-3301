@@ -84,11 +84,11 @@ class ServerAvatar(commands.Cog, name="General-ServerAvatar"):
         container.add_media(f"{active_url}?size=2048" if "?" not in active_url else active_url)
         await send_container_response(ctx, container)
 
-    @commands.command(name="serveravatar", hidden=True)
+    @commands.command(name="serveravatar")
     async def serveravatar_shorthand(self, ctx: CustomContext) -> None:
         await self.server_avatar(ctx)
 
-    @commands.command(name="serverbanner", hidden=True)
+    @commands.command(name="serverbanner")
     async def serverbanner_shorthand(self, ctx: CustomContext) -> None:
         await self.server_banner(ctx)
 

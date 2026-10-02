@@ -61,25 +61,18 @@ class Help(commands.Cog):
             if category_name not in categories:
                 categories[category_name] = []
 
-            for cmd in cog.get_commands():
-                if cmd.hidden:
-                    continue
+            def _collect_all(cmd_obj: commands.Command) -> list[commands.Command]:
+                cmd_list = [cmd_obj]
+                if isinstance(cmd_obj, commands.Group):
+                    for sub_cmd in sorted(cmd_obj.commands, key=lambda s: s.qualified_name):
+                        cmd_list.extend(_collect_all(sub_cmd))
+                return cmd_list
 
-                if isinstance(cmd, commands.Group) and cmd.commands:
-                    has_sub = False
-                    for sub in sorted(cmd.commands, key=lambda s: s.name):
-                        if not sub.hidden and await self._can_run_command(sub, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
-                            if sub not in categories[category_name]:
-                                categories[category_name].append(sub)
-                                has_sub = True
-                    if not has_sub or getattr(cmd, "fallback", None) or getattr(cmd, "invoke_without_command", False):
-                        if await self._can_run_command(cmd, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
-                            if cmd not in categories[category_name]:
-                                categories[category_name].append(cmd)
-                else:
-                    if await self._can_run_command(cmd, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
-                        if cmd not in categories[category_name]:
-                            categories[category_name].append(cmd)
+            for cmd in cog.get_commands():
+                for c in _collect_all(cmd):
+                    if await self._can_run_command(c, ctx, is_dev=is_dev, is_server_owner=is_server_owner):
+                        if c not in categories[category_name]:
+                            categories[category_name].append(c)
 
         # Ensure ordered display in dropdown: Moderation, Welcomer, Join to Create, Ticket, Security, Audit Logs, Music, Games, etc.
         priority_order = ["Moderation", "Welcomer", "Join to Create", "Ticket", "Audit Logs", "Music", "Games", "Premium"]
@@ -245,29 +238,40 @@ class Help(commands.Cog):
         if cat_name.lower() == "moderation":
             priority_order = [
                 # Core Enforcement
-                "ban", "unban", "kick", "timeout", "mute", "unmute", "warn", "warnings", "clearwarns",
+                "ban", "unban", "kick", "timeout", "mute", "unmute", "warn", "warnings", "delwarn", "clearwarns",
                 # Channels & Cleanup
-                "lock", "unlock", "purge", "clear", "slowmode",
+                "lock", "unlock", "purge", "clear", "slowmode", "snipe", "snipeall",
                 # Roles
                 "role", "roleall", "roleinfo", "inrole", "listroles",
                 # Server Tools & Expressions
                 "emojis", "expressions", "stickers", "delemoji", "delsticker", "steal",
-                # Logs & Staff Directory
+                # Server Info & Utilities
+                "server", "serveravatar", "serverbanner", "serverinfo", "channelinfo", "membercount", "userinfo", "avatar", "banner", "profile",
+                # System / Bot Info & Settings
+                "prefix", "setprefix", "resetprefix", "botinfo", "stats", "ping", "invite", "help", "afk", "tech", "dev",
+                # Staff Directory & Logs
                 "modlog", "admins", "mods", "bots",
-                # General Utilities
-                "avatar", "banner", "server", "serverinfo", "userinfo", "botinfo", "membercount", "ping", "profile", "stats", "channelinfo",
             ]
 
-            def _sort_key(cmd: commands.Command) -> tuple[int, str]:
-                n = cmd.name.lower()
+            def _sort_key(cmd: commands.Command) -> tuple[int, int, str]:
+                parts = cmd.qualified_name.lower().split()
+                root = parts[0]
+                is_sub = 1 if len(parts) > 1 else 0
                 try:
-                    return (priority_order.index(n), n)
+                    p_idx = priority_order.index(root)
                 except ValueError:
-                    return (999, n)
+                    p_idx = 999
+                return (p_idx, is_sub, cmd.qualified_name.lower())
 
             sorted_cmds = sorted(commands_list, key=_sort_key)
         else:
-            sorted_cmds = sorted(commands_list, key=lambda c: c.qualified_name)
+            def _gen_sort_key(cmd: commands.Command) -> tuple[str, int, str]:
+                parts = cmd.qualified_name.lower().split()
+                root = parts[0]
+                is_sub = 1 if len(parts) > 1 else 0
+                return (root, is_sub, cmd.qualified_name.lower())
+
+            sorted_cmds = sorted(commands_list, key=_gen_sort_key)
 
         formatted_cmds = ", ".join([f"`{cmd.qualified_name}`" for cmd in sorted_cmds])
         container.add_text(formatted_cmds)

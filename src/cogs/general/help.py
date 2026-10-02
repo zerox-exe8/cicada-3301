@@ -238,7 +238,7 @@ class Help(commands.Cog):
                 # Core Enforcement
                 "ban", "unban", "kick", "timeout", "mute", "unmute", "warn", "warnings", "delwarn", "clearwarns",
                 # Channels & Cleanup
-                "lock", "unlock", "purge", "clear", "slowmode", "snipe", "snipeall",
+                "lock", "unlock", "purge", "clear", "slowmode", "snipe", "snipeall", "clearsnipe", "clearsnipeall",
                 # Roles
                 "role", "roleall", "roleinfo", "inrole", "listroles",
                 # Server Tools & Expressions

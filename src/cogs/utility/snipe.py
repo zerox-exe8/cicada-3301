@@ -1,9 +1,6 @@
 """
-Kyro Discord Bot - Interactive Channel Snipe Suite
-Single unified `?snipe` command with button controls:
-- Tab toggle for Deleted vs Edited messages
-- Pagination navigation (Previous / Next)
-- In-place channel cache purge button for moderators
+Kyro Discord Bot - Clean Channel Snipe Utility
+Clean, simple deleted message inspector without button clutter or complex tabs.
 """
 
 from __future__ import annotations
@@ -11,12 +8,13 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -41,201 +39,8 @@ class SnipeEntry:
     channel_name: str = ""
 
 
-class SnipeView(discord.ui.View):
-    """UI-driven interactive card controller for channel snipes."""
-
-    def __init__(
-        self,
-        bot: KyroBot,
-        author_id: int,
-        channel: discord.TextChannel,
-        initial_tab: str = "delete",
-    ) -> None:
-        super().__init__(timeout=120.0)
-        self.bot = bot
-        self.author_id = author_id
-        self.channel = channel
-        self.tab = initial_tab  # "delete" or "edit"
-        self.index = 0
-        self._refresh_state()
-
-    def _get_current_entries(self) -> List[SnipeEntry]:
-        all_entries: deque[SnipeEntry] = self.bot.snipe_cache.get(self.channel.id, deque())
-        if self.tab == "delete":
-            return [e for e in all_entries if e.type == "delete"]
-        return [e for e in all_entries if e.type == "edit"]
-
-    def _refresh_state(self) -> None:
-        all_entries: deque[SnipeEntry] = self.bot.snipe_cache.get(self.channel.id, deque())
-        del_count = sum(1 for e in all_entries if e.type == "delete")
-        edit_count = sum(1 for e in all_entries if e.type == "edit")
-
-        # Tab button styling & labels
-        self.del_tab_btn.label = f"Deleted ({del_count})"
-        self.del_tab_btn.style = (
-            discord.ButtonStyle.primary if self.tab == "delete" else discord.ButtonStyle.secondary
-        )
-
-        self.edit_tab_btn.label = f"Edited ({edit_count})"
-        self.edit_tab_btn.style = (
-            discord.ButtonStyle.primary if self.tab == "edit" else discord.ButtonStyle.secondary
-        )
-
-        entries = self._get_current_entries()
-        total = len(entries)
-
-        if total == 0:
-            self.index = 0
-            self.prev_btn.disabled = True
-            self.next_btn.disabled = True
-            self.counter_btn.label = "0 / 0"
-        else:
-            self.index = max(0, min(self.index, total - 1))
-            self.prev_btn.disabled = self.index <= 0
-            self.next_btn.disabled = self.index >= total - 1
-            self.counter_btn.label = f"{self.index + 1} / {total}"
-
-    def build_container(self) -> KyroContainer:
-        entries = self._get_current_entries()
-        container = KyroContainer(accent_color=None)
-        e_reg = getattr(self.bot, "custom_emojis", {})
-        dot = e_reg.get("heart_dot", "-")
-
-        if not entries:
-            label = "deleted" if self.tab == "delete" else "edited"
-            container.add_section(
-                content=(
-                    f"**No {label.title()} Messages Found**\n"
-                    f"> There are no tracked {label} messages currently recorded in #{self.channel.name}."
-                )
-            )
-            container.add_separator(divider=True)
-            container.add_text("-# Kyro Retention Auditor")
-            return container
-
-        entry = entries[self.index]
-        rel_ts = int(entry.action_at.timestamp())
-        created_ts = int(entry.created_at.timestamp())
-
-        if entry.type == "delete":
-            container.add_section(
-                content=(
-                    f"**Deleted Message in #{self.channel.name}**\n"
-                    f"> **Author:** `{entry.author_name}` (`{entry.author_id}`)\n"
-                    f"> **Deleted:** <t:{rel_ts}:R> • **Sent:** <t:{created_ts}:t>"
-                ),
-                accessory={
-                    "type": 11,
-                    "media": {"url": entry.author_avatar},
-                } if entry.author_avatar else None,
-            )
-            container.add_separator(divider=True)
-            text_content = entry.content if entry.content else "*[No text content - Attachment only]*"
-            container.add_text(f">>> {text_content[:1800]}")
-        else:
-            container.add_section(
-                content=(
-                    f"**Edited Message in #{self.channel.name}**\n"
-                    f"> **Author:** `{entry.author_name}` (`{entry.author_id}`)\n"
-                    f"> **Edited:** <t:{rel_ts}:R> • **Sent:** <t:{created_ts}:t>"
-                ),
-                accessory={
-                    "type": 11,
-                    "media": {"url": entry.author_avatar},
-                } if entry.author_avatar else None,
-            )
-            container.add_separator(divider=True)
-            b_text = entry.before if entry.before else "*[Empty]*"
-            a_text = entry.after if entry.after else "*[Empty]*"
-            container.add_text(
-                f"**Before:**\n>>> {b_text[:850]}\n\n"
-                f"**After:**\n>>> {a_text[:850]}"
-            )
-
-        if entry.attachments:
-            container.add_separator(divider=True)
-            attach_lines = [f"{dot} [Attachment {i+1}]({url})" for i, url in enumerate(entry.attachments[:5])]
-            container.add_text("**Attachments:**\n" + "\n".join(attach_lines))
-
-        container.add_separator(divider=True)
-        container.add_text(f"-# Record {self.index + 1} of {len(entries)} • #{self.channel.name}")
-        return container
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                "Only the user who invoked this snipe menu can interact with its controls.",
-                ephemeral=True,
-            )
-            return False
-        return True
-
-    # --- Row 1: Filter Tabs & Clear ---
-    @discord.ui.button(label="Deleted", style=discord.ButtonStyle.primary, row=0, custom_id="snipe:tab_del")
-    async def del_tab_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if self.tab != "delete":
-            self.tab = "delete"
-            self.index = 0
-            self._refresh_state()
-            await edit_container_response(interaction, self.build_container(), view=self)
-
-    @discord.ui.button(label="Edited", style=discord.ButtonStyle.secondary, row=0, custom_id="snipe:tab_edit")
-    async def edit_tab_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if self.tab != "edit":
-            self.tab = "edit"
-            self.index = 0
-            self._refresh_state()
-            await edit_container_response(interaction, self.build_container(), view=self)
-
-    @discord.ui.button(label="Clear", style=discord.ButtonStyle.danger, row=0, custom_id="snipe:btn_clear")
-    async def clear_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        member = interaction.user if isinstance(interaction.user, discord.Member) else None
-        if not member or not member.guild_permissions.manage_messages:
-            await interaction.response.send_message(
-                "You need `Manage Messages` permission to purge channel snipes.",
-                ephemeral=True,
-            )
-            return
-
-        count = len(self.bot.snipe_cache.get(self.channel.id, []))
-        if self.channel.id in self.bot.snipe_cache:
-            self.bot.snipe_cache[self.channel.id].clear()
-
-        self._refresh_state()
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Channel Snipe History Cleared**\n"
-                f"> Successfully purged `{count}` tracked message(s) from #{self.channel.name}."
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Cleared by {interaction.user.display_name}")
-        await edit_container_response(interaction, container, view=None)
-
-    # --- Row 2: Pagination ---
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=1, custom_id="snipe:nav_prev")
-    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if self.index > 0:
-            self.index -= 1
-            self._refresh_state()
-            await edit_container_response(interaction, self.build_container(), view=self)
-
-    @discord.ui.button(label="1 / 1", style=discord.ButtonStyle.secondary, disabled=True, row=1, custom_id="snipe:nav_counter")
-    async def counter_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        pass
-
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, row=1, custom_id="snipe:nav_next")
-    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        entries = self._get_current_entries()
-        if self.index < len(entries) - 1:
-            self.index += 1
-            self._refresh_state()
-            await edit_container_response(interaction, self.build_container(), view=self)
-
-
 class SnipeCog(commands.Cog, name="Utility-Snipe"):
-    """Channel message retention inspector for deleted and edited messages."""
+    """Channel message retention inspector for deleted messages."""
     category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:
@@ -320,42 +125,95 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
     @commands.hybrid_command(
         name="snipe",
         aliases=["sn"],
-        description="Inspect recently deleted and edited messages in this channel.",
+        description="View the most recently deleted message in this channel.",
     )
+    @app_commands.describe(index="Which deleted message to view (1 = latest)")
     @commands.guild_only()
-    async def snipe(self, ctx: CustomContext) -> None:
-        """
-        Open the interactive channel snipe controller.
-        Use buttons to switch between Deleted/Edited tabs, navigate pages, or clear history.
-        """
+    async def snipe(self, ctx: CustomContext, index: int = 1) -> None:
+        """View the most recently deleted message in this channel."""
         channel_id = ctx.channel.id
-        entries: deque[SnipeEntry] = self.bot.snipe_cache.get(channel_id, deque())
+        all_entries: deque[SnipeEntry] = self.bot.snipe_cache.get(channel_id, deque())
+        deleted_entries = [e for e in all_entries if e.type == "delete"]
 
-        if not entries:
+        if not deleted_entries:
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"**No Sniped Messages Found**\n"
-                    f"> There are no tracked deleted or edited messages in #{ctx.channel.name}."
+                    f"**No Deleted Messages**\n"
+                    f"> There are no recently deleted messages in #{ctx.channel.name}."
                 )
             )
             container.add_separator(divider=True)
-            container.add_text("-# Kyro Retention Auditor")
             await send_container_response(ctx, container)
             return
 
-        # Default to whichever tab has data (prefer deleted if present)
-        has_deleted = any(e.type == "delete" for e in entries)
-        initial_tab = "delete" if has_deleted else "edit"
+        if index < 1 or index > len(deleted_entries):
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    f"**Invalid Snipe Index**\n"
+                    f"> Only `{len(deleted_entries)}` deleted message(s) are cached in this channel (valid: 1 to {len(deleted_entries)})."
+                )
+            )
+            container.add_separator(divider=True)
+            await send_container_response(ctx, container)
+            return
 
-        view = SnipeView(
-            bot=self.bot,
-            author_id=ctx.author.id,
-            channel=ctx.channel,
-            initial_tab=initial_tab,
+        entry = deleted_entries[index - 1]
+        rel_ts = int(entry.action_at.timestamp())
+        created_ts = int(entry.created_at.timestamp())
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"**Deleted Message in #{ctx.channel.name}**\n"
+                f"> **Author:** `{entry.author_name}` (`{entry.author_id}`)\n"
+                f"> **Deleted:** <t:{rel_ts}:R> • **Sent:** <t:{created_ts}:t>"
+            ),
+            accessory={
+                "type": 11,
+                "media": {"url": entry.author_avatar},
+            } if entry.author_avatar else None,
         )
-        container = view.build_container()
-        await send_container_response(ctx, container, view=view)
+        container.add_separator(divider=True)
+
+        text_content = entry.content if entry.content else "*[No text content - Attachment only]*"
+        container.add_text(f">>> {text_content[:1800]}")
+
+        if entry.attachments:
+            container.add_separator(divider=True)
+            attach_lines = [f"• [Attachment {i+1}]({url})" for i, url in enumerate(entry.attachments[:5])]
+            container.add_text("**Attachments:**\n" + "\n".join(attach_lines))
+
+        if len(deleted_entries) > 1:
+            container.add_separator(divider=True)
+            container.add_text(f"-# Record {index} of {len(deleted_entries)} • Use `{ctx.clean_prefix}snipe <number>` for older messages")
+
+        await send_container_response(ctx, container)
+
+    @commands.hybrid_command(
+        name="clearsnipe",
+        aliases=["csnipe"],
+        description="Purge the deleted message snipe cache for this channel.",
+    )
+    @commands.guild_only()
+    @commands.has_permissions(manage_messages=True)
+    async def clearsnipe(self, ctx: CustomContext) -> None:
+        """Purge the deleted message snipe cache for this channel."""
+        channel_id = ctx.channel.id
+        count = len(self.bot.snipe_cache.get(channel_id, []))
+        if channel_id in self.bot.snipe_cache:
+            self.bot.snipe_cache[channel_id].clear()
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"**Channel Snipe Cache Cleared**\n"
+                f"> Successfully purged `{count}` cached message(s) from #{ctx.channel.name}."
+            )
+        )
+        container.add_separator(divider=True)
+        await send_container_response(ctx, container)
 
 
 async def setup(bot: KyroBot) -> None:

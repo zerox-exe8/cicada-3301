@@ -367,14 +367,11 @@ class KyroBot(commands.Bot):
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Prefix:** `{prefix}` | **Slash:** `/`\n"
-            f"{dot} **Help Menu:** `{prefix}help` (Explore interactive features)\n"
-            f"{dot} **Auto-Role:** `{prefix}autorole` (Automatic join roles)\n"
-            f"{dot} **Support Tickets:** `{prefix}ticket setup` (Interactive support panels)\n"
-            f"{dot} **Moderation:** `{prefix}lock` / `{prefix}mute` (Server security tools)"
+            f"• **Prefix:** `{prefix}` | **Slash:** `/`\n"
+            f"• **Help:** `{prefix}help`"
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Configured for {guild.name} • Kyro Engine v{Config.VERSION}")
+        container.add_text(f"-# Configured for {guild.name}")
 
         buttons = []
         if Config.INVITE_URL:

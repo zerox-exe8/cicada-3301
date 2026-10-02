@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Asynchronous Code Evaluation Module
-Owner-restricted Python execution sandbox for real-time debugging and inspections.
-"""
-
 from __future__ import annotations
 
 import io
@@ -65,24 +60,16 @@ class EvalCog(commands.Cog, name="Developer-Eval"):
             result_str = str(ret) if ret is not None else (res.strip() if res else "None")
 
             container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**Evaluation Output**\n"
-                    f"```py\n{result_str[:1500]}\n```"
-                )
-            )
+            container.add_section(content=f"```py\n{result_str[:1800]}\n```")
             container.add_separator(divider=True)
-            container.add_text(f"-# Execution Time: {t_dur:.2f}ms")
+            container.add_text(f"-# {t_dur:.2f}ms")
             await send_container_response(ctx, container)
         except Exception:
             err = traceback.format_exc()
             container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**Evaluation Error**\n"
-                    f"```py\n{err[:1500]}\n```"
-                )
-            )
+            container.add_section(content=f"```py\n{err[:1800]}\n```")
+            container.add_separator(divider=True)
+            container.add_text("-# error")
             await send_container_response(ctx, container)
 
 

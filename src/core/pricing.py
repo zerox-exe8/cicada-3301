@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Centralized Pricing & Plans Configuration
-Defines pricing tiers, durations, dual-currency amounts in USD ($) & INR (₹), and smallest unit charges.
-"""
-
 from __future__ import annotations
 from dataclasses import dataclass
 

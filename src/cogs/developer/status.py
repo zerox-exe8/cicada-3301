@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Secret Developer Status Command
-Live updates the bot's presence and activity across all Discord shards.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -18,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class StatusCog(commands.Cog, name="Developer-Status"):
-    """Live bot presence modifier suite."""
+    """Live bot presence modifier."""
     category: str = "Developer"
 
     def __init__(self, bot: KyroBot) -> None:

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Tree Synchronization Command
-Allows the bot owner to sync slash commands globally or clear duplicate guild-level commands.
-"""
-
 from __future__ import annotations
 
 import discord

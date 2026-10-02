@@ -1,7 +1,3 @@
-"""
-Kyro Discord Bot - Custom Exceptions
-"""
-
 from discord.ext import commands
 
 

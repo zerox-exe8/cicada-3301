@@ -313,7 +313,7 @@ class Help(commands.Cog):
         """Interactive help menu filtered by user permissions."""
         visible_categories = await self._get_visible_categories(ctx)
 
-        # 1. Direct command or module lookup
+        # direct command or module lookup
         if command_or_module:
             query = command_or_module.lower().strip()
 
@@ -372,7 +372,7 @@ class Help(commands.Cog):
                     await send_container_response(ctx, container)
                     return
 
-        # 2. Main Help Console
+        # main Help Console
         custom_id_prefix = f"help_console:{ctx.author.id}:{ctx.guild.id if ctx.guild else 0}:{ctx.message.id if ctx.message else 0}"
         container = self._build_home_container(ctx, visible_categories, custom_id_prefix)
         await send_container_response(ctx, container)

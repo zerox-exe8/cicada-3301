@@ -157,9 +157,9 @@ class VoiceCommandSink(voice_recv.AudioSink if HAS_VOICE_RECV else object):
     def _transcribe(self, pcm_48k_stereo: bytes) -> str | None:
         """Convert 48kHz stereo to 16kHz mono and transcribe via SpeechRecognition."""
         try:
-            # 1. Convert stereo to mono
+            # convert stereo to mono
             mono_pcm = audioop.tomono(pcm_48k_stereo, 2, 0.5, 0.5)
-            # 2. Downsample from 48000Hz to 16000Hz for speech recognition
+            # downsample from 48000Hz to 16000Hz for speech recognition
             resampled_pcm, _ = audioop.ratecv(mono_pcm, 2, 1, 48000, 16000, None)
 
             audio_data = sr.AudioData(resampled_pcm, 16000, 2)

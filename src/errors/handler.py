@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Global Error Handler
-Captures command exceptions and presents clean Components V2 Container cards with sleek typography.
-"""
-
 from __future__ import annotations
 
 import logging

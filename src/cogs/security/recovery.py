@@ -64,7 +64,7 @@ class ChannelPurgeConfirmView(discord.ui.View):
 
 
 class DisasterRecovery(commands.Cog, name="Security-Recovery"):
-    """Server disaster recovery, rogue channel cleanup, and snapshot rollback suite."""
+    """Server disaster recovery, rogue channel cleanup, and snapshot rollback."""
     category: str = "Security"
 
     def __init__(self, bot: KyroBot) -> None:

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Centralized Logging System
-Provides colored terminal output and automatic rotating daily log files.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -20,7 +15,7 @@ def setup_logger(name: str = "Kyro", log_level: int = logging.INFO) -> logging.L
     if logger.hasHandlers():
         return logger
 
-    # 1. Console Handler with Colors
+    # console Handler with Colors
     console_handler = colorlog.StreamHandler()
     console_formatter = colorlog.ColoredFormatter(
         "%(asctime)s [%(log_color)s%(levelname)-8s%(reset)s] %(cyan)s%(name)s%(reset)s: %(message)s",
@@ -36,7 +31,7 @@ def setup_logger(name: str = "Kyro", log_level: int = logging.INFO) -> logging.L
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
-    # 2. File Handler with Daily Rotation
+    # file Handler with Daily Rotation
     project_root = Path(__file__).resolve().parent.parent.parent
     logs_dir = project_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)

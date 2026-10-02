@@ -1,3 +1,0 @@
-"""
-Kyro Discord Bot Package
-"""

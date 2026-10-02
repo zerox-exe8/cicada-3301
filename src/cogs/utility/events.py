@@ -98,7 +98,7 @@ class AutoEvents(commands.Cog):
         embed_name = config.get("embed_name") if config else None
         msg_template = config.get("message_content") if config else None
 
-        # 1. Resolve Outer Message Content (Ping message)
+        # resolve Outer Message Content (Ping message)
         outer_content = None
         if msg_template:
             if msg_template.strip().lower() in ["none", "no_ping", "silent"]:
@@ -106,7 +106,7 @@ class AutoEvents(commands.Cog):
             else:
                 outer_content = resolve_placeholders(msg_template, user=member, guild=guild, extra=extra)
 
-        # 2. Build Container from saved embed or fallback container
+        # build Container from saved embed or fallback container
         container = None
         if embed_name:
             template_data = await self.bot.embed_mgr.get_template(guild.id, embed_name)
@@ -797,7 +797,7 @@ class AutoEvents(commands.Cog):
 
         target_channel: discord.abc.Messageable = ctx.channel
 
-        # 1. Parse target channel if provided
+        # parse target channel if provided
         if ctx.message.channel_mentions:
             target_channel = ctx.message.channel_mentions[0]
             raw_text = re.sub(rf"<#{target_channel.id}>", "", raw_text).strip()
@@ -816,7 +816,7 @@ class AutoEvents(commands.Cog):
                         target_channel = ch
                         raw_text = " ".join(words[1:]).strip()
 
-        # 2. Parse embed name and ping message
+        # parse embed name and ping message
         words = raw_text.split()
         if not words:
             await ctx.send_warning(
@@ -854,7 +854,7 @@ class AutoEvents(commands.Cog):
             )
             return
 
-        # 3. Security / Permission check for mass mentions
+        # security / Permission check for mass mentions
         if ("@everyone" in ping_content or "@here" in ping_content) and not getattr(ctx.author.guild_permissions, "mention_everyone", False):
             await ctx.send_error(
                 "You need the **Mention @everyone, @here, and All Roles** permission to send mass mention announcements.",
@@ -862,7 +862,7 @@ class AutoEvents(commands.Cog):
             )
             return
 
-        # 4. Bot Channel Permission Check
+        # bot Channel Permission Check
         if isinstance(target_channel, discord.TextChannel):
             bot_perms = target_channel.permissions_for(ctx.guild.me)
             if not bot_perms.send_messages:
@@ -875,10 +875,10 @@ class AutoEvents(commands.Cog):
                 await ctx.send_error(f"Bot requires `Manage Webhooks` permission in {target_channel.mention} to render Components V2 container cards.")
                 return
 
-        # 5. Resolve outer ping message placeholders
+        # resolve outer ping message placeholders
         resolved_ping = resolve_placeholders(ping_content, user=ctx.author, guild=ctx.guild)
 
-        # 6. Build the container from saved template
+        # build the container from saved template
         draft = ContainerDraft.from_dict(template)
         avatar_url = str(self.bot.user.display_avatar.url) if self.bot and self.bot.user else ""
         container = draft.to_container(
@@ -889,7 +889,7 @@ class AutoEvents(commands.Cog):
             default_avatar=avatar_url,
         )
 
-        # 7. Dispatch container with outer ping and allowed mentions
+        # dispatch container with outer ping and allowed mentions
         try:
             target_msg = await send_container_response(
                 target_channel,

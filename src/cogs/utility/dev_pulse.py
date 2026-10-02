@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Dev Dashboard & Opportunities Autonomous Feed Cog
-Background ingestion delivering live paid bounties, fresher jobs, hackathons, free perks, and AI tools.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -98,13 +93,13 @@ def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
     last_dispatch = parse_ist_timestamp(cfg.get("last_dispatch_ts"))
     today_str = now_ist.strftime("%Y-%m-%d")
 
-    # 1. Real-time every 15 minutes
+    # real-time every 15 minutes
     if cadence == "15m":
         if last_dispatch is None:
             return True
         return (now_ist - last_dispatch).total_seconds() >= 800
 
-    # 2. Morning 9:00 AM IST
+    # morning 9:00 AM IST
     if cadence == "09:00":
         if now_ist.hour == 9 and 0 <= now_ist.minute < 30:
             if last_dispatch is None:
@@ -112,7 +107,7 @@ def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
             return last_dispatch.strftime("%Y-%m-%d") != today_str
         return False
 
-    # 3. Midnight 12:00 AM IST
+    # midnight 12:00 AM IST
     if cadence == "00:00":
         if now_ist.hour == 0 and 0 <= now_ist.minute < 30:
             if last_dispatch is None:
@@ -120,7 +115,7 @@ def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
             return last_dispatch.strftime("%Y-%m-%d") != today_str
         return False
 
-    # 4. Custom 24h Time: "custom:HH:MM" or "HH:MM" (evaluated strictly in IST)
+    # custom 24h Time: "custom:HH:MM" or "HH:MM" (evaluated strictly in IST)
     if cadence.startswith("custom:") or ":" in cadence:
         raw_time = cadence.replace("custom:", "").strip()
         try:
@@ -137,7 +132,7 @@ def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
         except Exception:
             return False
 
-    # 5. Default fallback: Hourly batch
+    # default fallback: Hourly batch
     if last_dispatch is None:
         return True
     return (now_ist - last_dispatch).total_seconds() >= 3500
@@ -841,7 +836,7 @@ class DevFeedCog(commands.Cog):
             await self.bot.dev_mgr.update_last_dispatch(g_id, now_ist)
 
         try:
-            # 1. Harvest balanced batch of up to 10 top-signal items across all categories
+            # harvest balanced batch of up to 10 top-signal items across all categories
             candidates = await self.bot.dev_mgr.harvest_balanced_batch(target_total=10)
             if not candidates:
                 return
@@ -851,7 +846,7 @@ class DevFeedCog(commands.Cog):
             dot = self.bot.custom_emojis.get("heart_dot", "•")
             logger.info(f"Dispatching batch of {len(candidates)} balanced dev opportunities to {len(eligible_guilds)} scheduled guild(s).")
 
-            # 2. Dispatch items one by one with strict 1-minute (60s) delay between each post
+            # dispatch items one by one with strict 1-minute (60s) delay between each post
             for index, story in enumerate(candidates):
                 card = self.bot.dev_mgr.build_story_container(story, dot=dot)
                 dispatched_any = False

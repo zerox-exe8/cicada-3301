@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Ping & Diagnostic Command
-Uses Discord Components V2 Container card with sleek, compact typography.
-"""
-
 from __future__ import annotations
 
 import time
@@ -27,15 +22,15 @@ class Ping(commands.Cog):
     )
     async def ping(self, ctx: CustomContext) -> None:
         """Measure websocket latency, database roundtrip time, and uptime."""
-        # 1. Measure DB ping
+        # measure DB ping
         start_db = time.perf_counter()
         await self.bot.db.fetch_one("SELECT 1;")
         db_latency = (time.perf_counter() - start_db) * 1000
 
-        # 2. Measure Discord Websocket latency
+        # measure Discord Websocket latency
         ws_latency = self.bot.latency * 1000
 
-        # 3. Calculate Uptime
+        # calculate Uptime
         now = discord.utils.utcnow()
         start = getattr(self.bot, "start_time", now)
         delta = int((now - start).total_seconds())

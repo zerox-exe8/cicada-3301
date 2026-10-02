@@ -43,7 +43,7 @@ logger = logging.getLogger("Kyro.Music.Player")
 
 def resolve_ffmpeg_executable() -> str:
     """Robust multi-platform resolver for FFmpeg binary across Windows, Linux, Render, and Docker."""
-    # 1. System PATH
+    # system PATH
     exe = shutil.which("ffmpeg")
     if exe and os.path.isfile(exe) and os.access(exe, os.X_OK):
         return exe
@@ -58,7 +58,7 @@ def resolve_ffmpeg_executable() -> str:
     except Exception:
         pass
 
-    # 3. Candidate Linux/Render paths
+    # candidate Linux/Render paths
     home = os.path.expanduser("~")
     candidates = [
         "/usr/bin/ffmpeg",
@@ -806,22 +806,22 @@ class GuildPlayer:
                         pass
                 return
 
-            # 1. Loop Track
+            # loop Track
             if self.loop_mode == "track" and self.current:
                 await self.play_track(self.current)
                 return
 
-            # 2. Loop Queue (push finished track to end)
+            # loop Queue (push finished track to end)
             if self.loop_mode == "queue" and self.current:
                 self.queue.append(self.current)
 
-            # 3. Next Track in Queue
+            # next Track in Queue
             if self.queue:
                 next_track = self.queue.pop(0)
                 await self.play_track(next_track)
                 return
 
-            # 4. Smart Autoplay Radio
+            # smart Autoplay Radio
             if self.smart_autoplay and self.current:
                 next_track = await NativeSmartAutoplay.get_next_track(
                     current_track=self.current,
@@ -832,7 +832,7 @@ class GuildPlayer:
                     await self.play_track(next_track)
                     return
 
-            # 5. Queue Ended Notification
+            # queue Ended Notification
             self.current = None
             if self._progress_task and not self._progress_task.done():
                 self._progress_task.cancel()

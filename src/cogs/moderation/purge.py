@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Purge / Message Cleaning Module
-Robust message bulk deletion with rate-limit safety, slash deferral, and race-condition immunity.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +27,7 @@ def can_execute_purge():
             raise commands.NoPrivateMessage("Purge command can only be used in a server channel.")
         author_id = ctx.author.id
         bot = ctx.bot
-        # 1. Bot Owners & Developers bypass
+        # bot Owners & Developers bypass
         if getattr(bot, "owner_id", None) and author_id == bot.owner_id:
             return True
         if getattr(bot, "owner_ids", None) and author_id in bot.owner_ids:
@@ -41,12 +36,12 @@ def can_execute_purge():
             return True
         if author_id in {1082437832087445604, 879986471866630155}:
             return True
-        # 2. Server Owner & Administrators bypass
+        # server Owner & Administrators bypass
         if ctx.guild.owner_id == author_id:
             return True
         if isinstance(ctx.author, discord.Member) and ctx.author.guild_permissions.administrator:
             return True
-        # 3. Channel Manage Messages permission
+        # channel Manage Messages permission
         if ctx.channel.permissions_for(ctx.author).manage_messages:
             return True
         raise commands.MissingPermissions(["manage_messages"])

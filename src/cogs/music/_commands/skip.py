@@ -1,7 +1,3 @@
-"""
-Kyro Discord Bot - Native Skip Command
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

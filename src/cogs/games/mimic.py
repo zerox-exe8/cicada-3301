@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Mimic Impersonation Command
-Sends messages via webhooks copying a member's display name and avatar.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -16,7 +11,7 @@ if TYPE_CHECKING:
 
 
 class MimicCog(commands.Cog, name="Games-Mimic"):
-    """Server member webhook impersonation suite."""
+    """Server member webhook impersonation."""
     category: str = "Games"
 
     def __init__(self, bot: KyroBot) -> None:

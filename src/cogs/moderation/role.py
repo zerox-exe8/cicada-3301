@@ -23,7 +23,7 @@ logger = logging.getLogger("Kyro.Moderation.Role")
 
 
 class Role(commands.Cog, name="Moderation-Role"):
-    """Role assignment and dynamic custom shortcut suite."""
+    """Role assignment and dynamic custom shortcut."""
     category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:

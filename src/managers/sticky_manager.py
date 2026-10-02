@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Sticky Message Manager
-Database persistence, in-memory caching, and asynchronous lock control for auto-pinned live notices.
-"""
-
 from __future__ import annotations
 
 import asyncio

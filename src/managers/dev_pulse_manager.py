@@ -1077,20 +1077,20 @@ class DevPulseManager:
 
         body_elements: list[str] = []
 
-        # 1. Brief
+        # brief
         if story.summary:
             body_elements.append(story.summary)
 
-        # 2. Key Highlights
+        # key Highlights
         if story.highlights:
             hl_text = "\n".join(f"> {dot} {h}" for h in story.highlights[:3])
             body_elements.append(hl_text)
 
-        # 3. Why It Matters
+        # why It Matters
         if story.why_it_matters:
             body_elements.append(f"**Why It Matters:**\n> {story.why_it_matters}")
 
-        # 4. Metadata Pill Row
+        # metadata Pill Row
         meta_items: list[str] = []
         if story.category == "bounties":
             reward = story.metadata.get("reward", "Paid Bounty")

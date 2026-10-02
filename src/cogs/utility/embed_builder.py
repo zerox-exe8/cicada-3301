@@ -329,7 +329,7 @@ class ContainerDraft:
 
         else:
             # ─── BASE OVERVIEW VIEW ──────────────────────────────────────────
-            # 0. Top Header Banner Image (If set, placed at the VERY TOP of the card)
+            # top Header Banner Image (If set, placed at the VERY TOP of the card)
             top_banner_url = parse(self.top_image_url)
             if top_banner_url and top_banner_url.startswith("http"):
                 container.components.append({

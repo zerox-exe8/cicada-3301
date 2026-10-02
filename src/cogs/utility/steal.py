@@ -464,7 +464,7 @@ class Steal(commands.Cog):
 
         target: Optional[StealTarget] = None
 
-        # 1. Check replied message
+        # check replied message
         ref = ctx.message.reference
         if ref and ref.resolved and isinstance(ref.resolved, discord.Message):
             ref_msg: discord.Message = ref.resolved
@@ -516,7 +516,7 @@ class Steal(commands.Cog):
                         )
                         break
 
-        # 2. Check direct command arguments
+        # check direct command arguments
         if not target and target_input:
             for match in EMOJI_REGEX.finditer(ctx.message.content):
                 is_anim = bool(match.group(1))
@@ -541,7 +541,7 @@ class Steal(commands.Cog):
                     target = StealTarget(name=guessed_name, url=url_found, is_animated=is_gif, custom_name=custom_name)
                     break
 
-        # 3. If no target provided in reply or args, show a clean, small 1-line guidance
+        # if no target provided in reply or args, show a clean, small 1-line guidance
         if not target:
             e_reg = getattr(self.bot, "custom_emojis", None)
             info_icon = e_reg.get("icons_generalinfo", "") if e_reg else ""
@@ -556,7 +556,7 @@ class Steal(commands.Cog):
             await send_container_response(ctx, container)
             return
 
-        # 4. Check if target is already in this server (tiny 1-line alert, NO huge card)
+        # check if target is already in this server (tiny 1-line alert, NO huge card)
         if target.source_id:
             e_reg = getattr(self.bot, "custom_emojis", None)
             warn_icon = e_reg.get("icons_warning", "⚠️ ") if e_reg else "⚠️ "
@@ -583,7 +583,7 @@ class Steal(commands.Cog):
                 await send_container_response(ctx, container)
                 return
 
-        # 5. Launch ultra-compact dashboard for genuine new targets
+        # launch ultra-compact dashboard for genuine new targets
         view = StealDashboardView(
             bot=self.bot,
             author=ctx.author,

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Member Count Module
-Fast, responsive server population breakdown.
-"""
-
 from __future__ import annotations
 
 import logging

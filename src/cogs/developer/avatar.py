@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Secret Developer Avatar Command
-Live updates the bot's profile avatar from URL or attachment.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
@@ -19,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class AvatarCog(commands.Cog, name="Developer-Avatar"):
-    """Live bot avatar modifier suite."""
+    """Live bot avatar modifier."""
     category: str = "Developer"
 
     def __init__(self, bot: KyroBot) -> None:

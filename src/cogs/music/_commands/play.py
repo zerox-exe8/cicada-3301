@@ -1,7 +1,3 @@
-"""
-Kyro Discord Bot - Native Play Command
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -98,7 +94,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await send_container_response(ctx, err_container)
             return
 
-        # 1. Resolve first track immediately for instant playback with 0 lag
+        # resolve first track immediately for instant playback with 0 lag
         first_item = pl_result.tracks[0]
         first_track = await NativeExtractor.extract(first_item.query, requester=ctx.author.display_name)
         if not first_track and first_item.title:
@@ -127,7 +123,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
         first_track.requester_id = ctx.author.id
 
-        # 2. Append ALL remaining tracks from playlist to queue immediately so the entire queue is visible
+        # append ALL remaining tracks from playlist to queue immediately so the entire queue is visible
         was_idle = not player.is_playing and not player.is_paused
         insert_start_idx = len(player.queue)
 
@@ -145,14 +141,14 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             )
             player.queue.append(t)
 
-        # 3. Start playback if idle, or append first_track to queue
+        # start playback if idle, or append first_track to queue
         if was_idle:
             await player.play_track(first_track, message_to_edit=search_msg)
         else:
             # Insert first_track at front of this newly enqueued batch
             player.queue.insert(insert_start_idx, first_track)
 
-        # 4. Build preview of upcoming tracks for the playlist announcement card
+        # build preview of upcoming tracks for the playlist announcement card
         if was_idle:
             upcoming_items = player.queue[:6]
         else:
@@ -166,7 +162,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         upcoming_preview = "\n".join(upcoming_lines) if upcoming_lines else "No upcoming tracks."
         remaining_count = pl_result.track_count - (1 if was_idle else 0) - len(upcoming_lines)
 
-        # 5. Send rich playlist announcement card showing all upcoming songs
+        # send rich playlist announcement card showing all upcoming songs
         pl_card = KyroContainer(accent_color=None)
         pl_card.add_section(
             content=(
@@ -200,12 +196,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
         return
 
-    # 1. Send Searching Track card first
+    # send Searching Track card first
     search_container = KyroContainer(accent_color=None)
     search_container.add_text(f"**Searching track:** `{query}`...")
     search_msg = await send_container_response(ctx, search_container)
 
-    # 2. Extract track in background
+    # extract track in background
     track = await NativeExtractor.extract(query, requester=ctx.author.display_name)
     if track:
         track.requester_id = ctx.author.id
@@ -222,7 +218,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         await send_container_response(ctx, err_container)
         return
 
-    # 3. If nothing is currently playing, start playback
+    # if nothing is currently playing, start playback
     if not player.is_playing and not player.is_paused:
         await player.play_track(track, message_to_edit=search_msg)
     else:

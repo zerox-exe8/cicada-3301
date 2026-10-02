@@ -288,7 +288,7 @@ class TechNewsManager:
     async def load_cache(self) -> None:
         """Load recent seen hashes, title hashes, entity hashes, and guild subscriptions into fast memory."""
         try:
-            # 1. Load active guild channel configurations
+            # load active guild channel configurations
             rows = await self.db.fetch_all(
                 "SELECT guild_id, channel_id, categories, thread_enabled, mode, alert_role_id, last_digest_date, cadence, last_dispatch_ts FROM guild_tech_news;"
             )
@@ -307,7 +307,7 @@ class TechNewsManager:
                     for r in rows
                 }
 
-            # 2. Load recent dispatched article hashes, title hashes, and entity hashes (up to 50,000 items)
+            # load recent dispatched article hashes, title hashes, and entity hashes (up to 50,000 items)
             hash_rows = await self.db.fetch_all(
                 "SELECT article_hash, title_hash, entity_hash FROM tech_news_history ORDER BY dispatched_at DESC LIMIT 50000;"
             )
@@ -1257,22 +1257,22 @@ class TechNewsManager:
 
         body_elements: list[str] = []
 
-        # 1. Executive Summary
+        # executive Summary
         if story.summary:
             body_elements.append(story.summary)
 
-        # 2. Key Highlights / Specs
+        # key Highlights / Specs
         if story.highlights:
             hl_text = "\n".join(f"> {dot} {h}" for h in story.highlights[:3])
             body_elements.append(hl_text)
         elif story.what_is_inside:
             body_elements.append(f"> {dot} {story.what_is_inside}")
 
-        # 3. Why It Matters
+        # why It Matters
         if story.why_it_matters:
             body_elements.append(f"**Why It Matters:**\n> {story.why_it_matters}")
 
-        # 4. Metadata Pill Row
+        # metadata Pill Row
         meta_items: list[str] = []
         if story.category == "github":
             lang = story.metadata.get("language", "General")

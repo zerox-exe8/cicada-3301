@@ -105,7 +105,7 @@ class WhisperRevealView(discord.ui.View):
 
 
 class WhisperCog(commands.Cog, name="Games-Whisper"):
-    """Secret in-chat whisper communication suite."""
+    """Secret in-chat whisper communication."""
     category: str = "Games"
 
     def __init__(self, bot: KyroBot) -> None:

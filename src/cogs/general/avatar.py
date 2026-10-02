@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Avatar Module
-Displays clean, high-resolution user avatar with top download link.
-"""
-
 from __future__ import annotations
 
 import logging

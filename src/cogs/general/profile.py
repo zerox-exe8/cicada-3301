@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - User Bot Identity & Profile Command
-Displays concise, enterprise-grade Kyro network passport in Components V2 layout.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -38,7 +33,7 @@ class Profile(commands.Cog):
         target = member or ctx.author
         target_id = target.id
 
-        # 1. Resolve Standing
+        # resolve Standing
         is_owner_user = await self.bot.perm_mgr.is_owner(target_id)
         is_dev_user = await self.bot.perm_mgr.is_developer(target_id)
         has_no_prefix = target_id in getattr(self.bot, "no_prefix_users", set()) or is_dev_user
@@ -52,7 +47,7 @@ class Profile(commands.Cog):
         else:
             standing = "Standard Client"
 
-        # 2. Resolve Access & Tier
+        # resolve Access & Tier
         access_str = "No-Prefix Active" if has_no_prefix else "Standard"
 
         tier_str = "Standard"
@@ -69,7 +64,7 @@ class Profile(commands.Cog):
         except Exception:
             pass
 
-        # 3. Music Telemetry (Saved Playlists)
+        # music Telemetry (Saved Playlists)
         pl_display = "None"
         try:
             pl_rows = await self.bot.db.fetch_all(
@@ -85,7 +80,7 @@ class Profile(commands.Cog):
         except Exception:
             pass
 
-        # 4. Live Audio Detection
+        # live Audio Detection
         live_audio_title: str | None = None
         live_audio_author: str | None = None
         live_audio_url: str | None = None

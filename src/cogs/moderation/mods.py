@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Moderators & Staff Discovery Module
-Lists all staff and moderators possessing moderation privileges without unwanted pings.
-"""
-
 from __future__ import annotations
 
 import logging

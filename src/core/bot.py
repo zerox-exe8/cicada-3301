@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Core Bot Class
-Subclasses commands.AutoShardedBot for high scalability and lifecycle control.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -116,7 +111,7 @@ class KyroBot(commands.Bot):
 
     async def _global_command_check(self, ctx: commands.Context) -> bool:
         """Global guard: blocks blacklisted users/guilds and handles maintenance mode."""
-        # 1. Blacklist Check
+        # blacklist Check
         if self.blacklist_mgr.is_user_blacklisted(ctx.author.id):
             reason = self.blacklist_mgr.get_blacklist_reason(ctx.author.id)
             raise commands.CheckFailure(f"You are globally blacklisted from using this bot.\n> Reason: `{reason}`")
@@ -125,7 +120,7 @@ class KyroBot(commands.Bot):
             reason = self.blacklist_mgr.get_blacklist_reason(ctx.guild.id)
             raise commands.CheckFailure(f"This server is blacklisted from using this bot.\n> Reason: `{reason}`")
 
-        # 2. Maintenance Mode Check
+        # maintenance Mode Check
         if self.sys_mgr.maintenance_mode:
             is_dev = await self.perm_mgr.is_developer(ctx.author.id)
             if not is_dev:
@@ -133,7 +128,7 @@ class KyroBot(commands.Bot):
                     f"Bot is currently in Maintenance Mode.\n> Reason: `{self.sys_mgr.maintenance_reason}`"
                 )
 
-        # 3. Disabled Command Check
+        # disabled Command Check
         cmd_name = ctx.command.qualified_name if ctx.command else ""
         if self.sys_mgr.is_command_disabled(cmd_name):
             is_dev = await self.perm_mgr.is_developer(ctx.author.id)
@@ -201,13 +196,13 @@ class KyroBot(commands.Bot):
         """Asynchronous initialization before websocket login."""
         logger.info("Initializing async subsystems and managers...")
 
-        # 1. Start HTTP Client Session
+        # start HTTP Client Session
         self.session = aiohttp.ClientSession()
 
-        # 2. Connect to Database Pool
+        # connect to Database Pool
         await self.db.connect()
 
-        # 3. Load all Manager Caches & Custom Emojis
+        # load all Manager Caches & Custom Emojis
         await self.guild_mgr.load_cache()
         await self.perm_mgr.load_cache()
         await self.blacklist_mgr.load_cache()
@@ -240,10 +235,10 @@ class KyroBot(commands.Bot):
         except Exception as e:
             logger.debug(f"Notice loading custom status: {e}")
 
-        # 4. Load Error Handler
+        # load Error Handler
         await self.load_extension("src.errors.handler")
 
-        # 5. Dynamically Load all Cogs
+        # dynamically Load all Cogs
         await self._load_all_extensions()
 
         logger.info("Setup hook completed successfully.")

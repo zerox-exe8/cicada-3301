@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Role Information Module
-Deep inspection of a single role's properties, color, position, and permissions without dots or unwanted pings.
-"""
-
 from __future__ import annotations
 
 import logging

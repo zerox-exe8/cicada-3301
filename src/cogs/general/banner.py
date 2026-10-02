@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - User Banner Module
-Display a user's high-resolution profile banner or custom accent color.
-"""
-
 from __future__ import annotations
 
 import logging

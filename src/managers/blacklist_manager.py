@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Blacklist Manager
-Handles global blocking of malicious users and servers with in-memory caching.
-"""
-
 from __future__ import annotations
 
 import logging

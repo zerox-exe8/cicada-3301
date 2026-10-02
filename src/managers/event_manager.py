@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Server Auto-Events Manager
-Handles database persistence and in-memory caching for Welcome, Leave, and Boost event bindings.
-"""
-
 from __future__ import annotations
 
 import logging

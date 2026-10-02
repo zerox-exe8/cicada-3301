@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Server Avatar & Banner Module
-Display high-resolution server icon, server banner, and invite splash with direct top download link.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -23,7 +18,7 @@ logger = logging.getLogger("Kyro.General.ServerAvatar")
 
 
 class ServerAvatar(commands.Cog, name="General-ServerAvatar"):
-    """Server Icon and Server Banner suite."""
+    """Server Icon and Server Banner."""
     category: str = "General"
 
     def __init__(self, bot: KyroBot) -> None:

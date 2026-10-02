@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Sticky Messages Cog
-Auto-pinned live notices that stay pinned to the bottom of the channel with rate-limit debounce.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -29,17 +24,17 @@ class Sticky(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
         """Monitor chat activity and move sticky notice to the bottom."""
-        # 1. Ignore bot messages, system messages, or DMs
+        # ignore bot messages, system messages, or DMs
         if message.author.bot or not message.guild or not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
             return
 
         channel_id = message.channel.id
 
-        # 2. Check if channel has an active sticky message
+        # check if channel has an active sticky message
         if not self.bot.sticky_mgr.has_sticky(channel_id):
             return
 
-        # 3. Debounce check: ensure at least 1 message and 2.0s passed to prevent 429 rate limit spam
+        # debounce check: ensure at least 1 message and 2.0s passed to prevent 429 rate limit spam
         if not self.bot.sticky_mgr.increment_and_check_debounce(channel_id, min_messages=1, min_seconds=2.0):
             return
 
@@ -49,7 +44,7 @@ class Sticky(commands.Cog):
 
         lock = self.bot.sticky_mgr.get_lock(channel_id)
         async with lock:
-            # 4. Safe deletion of previous sticky message
+            # safe deletion of previous sticky message
             old_msg_id = sticky_data.get("last_message_id")
             if old_msg_id:
                 try:
@@ -60,7 +55,7 @@ class Sticky(commands.Cog):
                 except Exception as e:
                     logger.debug(f"Notice deleting old sticky message in {channel_id}: {e}")
 
-            # 5. Build and send new sticky note at the bottom
+            # build and send new sticky note at the bottom
             container = KyroContainer(accent_color=None)
             title = sticky_data.get("embed_title") or "📌 Pinned Notice"
             container.add_section(

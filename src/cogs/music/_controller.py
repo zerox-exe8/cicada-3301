@@ -1,7 +1,3 @@
-"""
-Kyro Discord Bot - Native Music Controller Manager
-"""
-
 from __future__ import annotations
 
 import logging

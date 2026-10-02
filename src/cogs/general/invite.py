@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Official Invite & Community Links Command (Components V2)
-Presents a sleek, aesthetic Discord Components V2 card with instant authorization links.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

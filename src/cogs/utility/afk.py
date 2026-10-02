@@ -294,7 +294,7 @@ class AFKCog(commands.Cog, name="AFK"):
         author_key = (author_id, guild_id)
 
         # ----------------------------------------------------
-        # 1. Check if the message author was AFK (Welcome back)
+        # check if the message author was AFK (Welcome back)
         # ----------------------------------------------------
         if author_key in self._afk_cache:
             afk_data = self._afk_cache[author_key]
@@ -386,7 +386,7 @@ class AFKCog(commands.Cog, name="AFK"):
                     logger.debug(f"Failed to send AFK welcome back notice: {e}")
 
         # ----------------------------------------------------
-        # 2. Check if any mentioned users are AFK
+        # check if any mentioned users are AFK
         # ----------------------------------------------------
         if message.mentions:
             now_ts = time.time()

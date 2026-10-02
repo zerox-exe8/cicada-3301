@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - System Telemetry & Statistics Module
-Live system resource utilization, network metrics, and process uptime.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -37,7 +32,7 @@ class Stats(commands.Cog, name="General-Stats"):
     )
     async def stats(self, ctx: CustomContext) -> None:
         """Display live bot performance telemetry."""
-        # 1. Uptime calculation
+        # uptime calculation
         now = discord.utils.utcnow()
         uptime_delta = now - self.bot.start_time
         days = uptime_delta.days
@@ -52,7 +47,7 @@ class Stats(commands.Cog, name="General-Stats"):
         else:
             uptime_str = f"{minutes}m"
 
-        # 2. Memory & CPU
+        # memory & CPU
         process = psutil.Process()
         mem_info = process.memory_info()
         ram_used_mb = mem_info.rss / (1024 * 1024)
@@ -61,12 +56,12 @@ class Stats(commands.Cog, name="General-Stats"):
         sys_mem = psutil.virtual_memory()
         total_sys_ram_gb = sys_mem.total / (1024 * 1024 * 1024)
 
-        # 3. Network & Bot metrics
+        # network & Bot metrics
         total_guilds = len(self.bot.guilds)
         total_members = sum(g.member_count or 0 for g in self.bot.guilds)
         ws_ping = round(self.bot.latency * 1000) if self.bot.latency else 0
 
-        # 4. Container
+        # container
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - In-Role Members Explorer Module
-Lists all members who possess a specific role with interactive pagination.
-"""
-
 from __future__ import annotations
 
 import logging

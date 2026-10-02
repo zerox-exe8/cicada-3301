@@ -1,7 +1,3 @@
-"""
-Kyro Discord Bot - Ban & Unban Moderation Module
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

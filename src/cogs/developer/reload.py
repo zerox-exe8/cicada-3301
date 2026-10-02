@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 class ReloadCog(commands.Cog, name="Developer-Reload"):
-    """Live module reloading suite."""
+    """Live module reloading."""
     category: str = "Developer"
 
     def __init__(self, bot: KyroBot) -> None:

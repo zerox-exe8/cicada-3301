@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Universal Custom Decorators & Feature Guards
-Provides clean, reusable decorators for permission and premium feature gating.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable

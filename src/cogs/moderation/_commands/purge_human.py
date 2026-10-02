@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Purge Human Messages Module
-Bulk deletes messages sent by real users/humans.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

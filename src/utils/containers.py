@@ -311,7 +311,7 @@ async def send_container_response(
     allowed_mentions: discord.AllowedMentions | dict[str, Any] | None = None,
 ) -> Any:
     """Send or edit a message using Components V2 Container(s) with optional file attachments."""
-    # 1. Resolve hybrid context interaction if present
+    # resolve hybrid context interaction if present
     interaction = getattr(interaction_or_ctx, "interaction", None)
     if interaction is not None:
         target = interaction
@@ -546,7 +546,7 @@ async def edit_container_response(
         or (bot.user.id if bot and bot.user else None)
     )
 
-    # 1. Try interaction response callback (type 7 UPDATE_MESSAGE) if not done
+    # try interaction response callback (type 7 UPDATE_MESSAGE) if not done
     try:
         if not interaction.response.is_done():
             if file_list:
@@ -572,7 +572,7 @@ async def edit_container_response(
                 bot._connection.store_view(view, msg_id)
             return
         else:
-            # 2. If interaction is already done/deferred, edit original webhook message
+            # if interaction is already done/deferred, edit original webhook message
             if file_list:
                 form = _prepare_multipart_form(payload, file_list)
                 msg_data = await bot.http.request(
@@ -602,7 +602,7 @@ async def edit_container_response(
     except Exception as e:
         logger.warning(f"Interaction callback edit failed ({e}). Attempting channel PATCH fallback.")
 
-    # 3. Fallback to direct channel message edit if interaction expired
+    # fallback to direct channel message edit if interaction expired
     try:
         if interaction.message and interaction.channel_id:
             if file_list:

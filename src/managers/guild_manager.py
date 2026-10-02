@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Guild Manager
-Handles per-server custom prefixes and settings with in-memory caching.
-"""
-
 from __future__ import annotations
 
 import logging

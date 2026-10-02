@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Bot Information & Telemetry Command
-Displays clean, enterprise-grade public system metrics with official invite and support actions.
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -54,7 +49,7 @@ class BotInfo(commands.Cog):
     )
     async def botinfo(self, ctx: CustomContext) -> None:
         """Display safe, high-level public bot telemetry."""
-        # 1. Calculate Uptime
+        # calculate Uptime
         now = discord.utils.utcnow()
         uptime_delta = now - self.bot.start_time
         days = uptime_delta.days
@@ -69,13 +64,13 @@ class BotInfo(commands.Cog):
         else:
             uptime_str = f"{minutes}m"
 
-        # 2. Network Metrics
+        # network Metrics
         total_guilds = len(self.bot.guilds)
         total_members = sum(g.member_count or 0 for g in self.bot.guilds)
         gateway_ping = round(self.bot.latency * 1000) if (self.bot.latency and self.bot.latency == self.bot.latency) else 0
         current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
 
-        # 3. Resolve Developer Name dynamically
+        # resolve Developer Name dynamically
         owner_str = "zerox.exe"
         if getattr(self.bot, "owner_id", None):
             owner_obj = self.bot.get_user(self.bot.owner_id)
@@ -87,11 +82,11 @@ class BotInfo(commands.Cog):
             if valid_owners:
                 owner_str = ", ".join(valid_owners)
 
-        # 4. Resolve Bot Identity dynamically
+        # resolve Bot Identity dynamically
         bot_name = self.bot.user.name if self.bot.user else Config.BOT_NAME
         bot_avatar = self.bot.user.display_avatar.url if self.bot.user else None
 
-        # 5. Construct Components V2 Container
+        # construct Components V2 Container
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(

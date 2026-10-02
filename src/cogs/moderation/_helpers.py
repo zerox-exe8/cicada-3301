@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Moderation Helpers
-Shared utility functions for role hierarchy verification, duration parsing, and audit log dispatching.
-"""
-
 from __future__ import annotations
 
 import datetime

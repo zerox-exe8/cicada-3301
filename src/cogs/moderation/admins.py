@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Administrators & Admin Roles Audit Module
-Discovers and lists all roles and members holding full Administrator permissions without unwanted pings.
-"""
-
 from __future__ import annotations
 
 import logging

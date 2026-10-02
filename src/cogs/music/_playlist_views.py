@@ -100,7 +100,7 @@ async def execute_saved_playlist_playback(
     if shuffle:
         random.shuffle(play_order)
 
-    # 1. Resolve first track immediately for instant start
+    # resolve first track immediately for instant start
     first_row = play_order[0]
     first_query = resolve_track_query(first_row)
     first_track = await NativeExtractor.extract(first_query, requester=user.display_name)
@@ -121,7 +121,7 @@ async def execute_saved_playlist_playback(
 
     first_track.requester_id = user.id
 
-    # 2. Append all remaining tracks to queue immediately
+    # append all remaining tracks to queue immediately
     was_idle = not player.is_playing and not player.is_paused
     insert_start_idx = len(player.queue)
 
@@ -145,7 +145,7 @@ async def execute_saved_playlist_playback(
     else:
         player.queue.insert(insert_start_idx, first_track)
 
-    # 3. Build preview of upcoming tracks
+    # build preview of upcoming tracks
     if was_idle:
         upcoming_items = player.queue[:6]
     else:

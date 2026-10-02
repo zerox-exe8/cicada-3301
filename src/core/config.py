@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Configuration Module
-Loads and validates environment variables and provides theme colors and emojis.
-"""
-
 from __future__ import annotations
 
 import os

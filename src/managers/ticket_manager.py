@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Ticket Manager
-Handles high-performance caching, database persistence, and lifecycle for ticket panels and active tickets.
-"""
-
 from __future__ import annotations
 
 import logging

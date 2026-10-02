@@ -60,7 +60,7 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
     db = ctx.bot.db
     user_id = ctx.author.id
 
-    # 1. Ensure 'Favorites' playlist exists
+    # ensure 'Favorites' playlist exists
     pl_row = await db.fetch_one(
         "SELECT id FROM user_playlists WHERE user_id = $1 AND LOWER(playlist_name) = 'favorites';",
         user_id,
@@ -83,7 +83,7 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
     save_title = (current.title or "Unknown Track")[:250]
     save_author = (current.author or "Official Artist")[:250]
 
-    # 2. Check for duplicate track in Favorites
+    # check for duplicate track in Favorites
     existing = await db.fetch_one(
         "SELECT id FROM user_playlist_tracks WHERE playlist_id = $1 AND LOWER(title) = LOWER($2);",
         playlist_id,
@@ -93,7 +93,7 @@ async def handle_like(ctx: CustomContext, cog: Music) -> None:
         await ctx.send_warning(f"`{save_title}` is already saved in your Favorites playlist.")
         return
 
-    # 3. Add track to playlist (safely access URL)
+    # add track to playlist (safely access URL)
     track_web_url = getattr(current, "url", None) or getattr(current, "stream_url", "")
     await db.execute(
         "INSERT INTO user_playlist_tracks (playlist_id, title, author, duration, url) VALUES ($1, $2, $3, $4, $5);",
@@ -273,7 +273,7 @@ async def handle_playlist(
         await send_container_response(ctx, container, view=hub_view)
         return
 
-    # 1. CREATE EMPTY PLAYLIST
+    # cREATE EMPTY PLAYLIST
     elif act in ("create", "new", "make"):
         if not name:
             await ctx.send_warning("Please specify a playlist name.\n> Example: `?playlist create Gym`")
@@ -318,7 +318,7 @@ async def handle_playlist(
         await send_container_response(ctx, container)
         return
 
-    # 2. ADD / IMPORT TRACK OR PLAYLIST
+    # aDD / IMPORT TRACK OR PLAYLIST
     elif act in ("add", "import"):
         if not name:
             await ctx.send_warning("Please specify a playlist name.\n> Example: `?playlist add Gym Starboy` or `?playlist import Gym <url>`")
@@ -454,7 +454,7 @@ async def handle_playlist(
         )
         await send_container_response(ctx, container)
 
-    # 3. REMOVE TRACK FROM PLAYLIST
+    # rEMOVE TRACK FROM PLAYLIST
     elif act in ("removetrack", "rmtrack", "deltrack", "removesong", "delsong", "remove"):
         if not name:
             await ctx.send_warning("Specify which playlist and song to remove.\n> Example: `?playlist removetrack Gym 2` or `?playlist removetrack Gym Starboy`")
@@ -524,7 +524,7 @@ async def handle_playlist(
         )
         await send_container_response(ctx, container)
 
-    # 4. PLAY / SHUFFLE PLAYLIST
+    # pLAY / SHUFFLE PLAYLIST
     elif act in ("play", "start", "load", "shuffle"):
         if not name:
             await ctx.send_warning(f"Please specify which playlist to play.\n> Example: `?playlist {act} Gym`")
@@ -579,7 +579,7 @@ async def handle_playlist(
         )
         return
 
-    # 5. VIEW PLAYLIST (Interactive Paginated Browser)
+    # vIEW PLAYLIST (Interactive Paginated Browser)
     elif act in ("view", "show", "info"):
         if not name:
             await ctx.send_warning("Please specify which playlist to view.\n> Example: `?playlist view Gym`")
@@ -653,7 +653,7 @@ async def handle_playlist(
         await send_container_response(ctx, container, view=browse_view)
         return
 
-    # 6. EXPORT PLAYLIST
+    # eXPORT PLAYLIST
     elif act in ("export", "share"):
         if not name:
             await ctx.send_warning("Please specify which playlist to export.\n> Example: `?playlist export Gym`")
@@ -698,7 +698,7 @@ async def handle_playlist(
         await send_container_response(ctx, container)
         return
 
-    # 7. DELETE PLAYLIST
+    # dELETE PLAYLIST
     elif act in ("delete", "del", "drop"):
         if not name:
             await ctx.send_warning("Please specify which playlist to delete.\n> Example: `?playlist delete Gym`")

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Music Types & Streaming Constants
-Enterprise-Grade Zero-Overhead Streaming Configuration with Jitter-Proof RAM Ring Buffer.
-"""
-
 from __future__ import annotations
 
 import queue

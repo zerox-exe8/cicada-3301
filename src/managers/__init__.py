@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Managers Package
-Centralized in-memory cache and state managers.
-"""
-
 from src.managers.guild_manager import GuildManager
 from src.managers.permission_manager import PermissionManager
 from src.managers.blacklist_manager import BlacklistManager

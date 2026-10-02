@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Native Music Cog
-High-Fidelity in-process Discord Audio Engine with zero Lavalink dependencies.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -59,11 +54,11 @@ class Music(commands.Cog):
         after: discord.VoiceState,
     ) -> None:
         """Handle voice channel disconnects, empty VC timeouts, and 24/7 pause/resume."""
-        # 0. Ignore state updates where channel did not change (mute/unmute/deafen/stream)
+        # ignore state updates where channel did not change (mute/unmute/deafen/stream)
         if before.channel == after.channel:
             return
 
-        # 1. Bot itself was disconnected from voice
+        # bot itself was disconnected from voice
         if member.id == self.bot.user.id and after.channel is None:
             player = self.controller.get_player(member.guild.id)
             if player:
@@ -94,7 +89,7 @@ class Music(commands.Cog):
                 player.voice_client = None
             return
 
-        # 2. Non-bot member joined or moved into bot's voice channel
+        # non-bot member joined or moved into bot's voice channel
         if after.channel and not member.bot:
             player = self.controller.get_player(after.channel.guild.id)
             if player and player.voice_client and player.voice_client.channel == after.channel:
@@ -116,7 +111,7 @@ class Music(commands.Cog):
                             pass
                     await player.update_controller_message(force=True)
 
-        # 3. Non-bot member left or moved out of bot's voice channel
+        # non-bot member left or moved out of bot's voice channel
         if before.channel and not member.bot:
             player = self.controller.get_player(before.channel.guild.id)
             if player and player.voice_client and player.voice_client.channel == before.channel:

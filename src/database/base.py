@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Abstract Database Interface
-Defines standard CRUD contracts for database backends (SQLite, PostgreSQL, etc.).
-"""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

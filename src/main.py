@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Main Entry Point
-Production Cloud Engine with 24/7 Web Server and Resilient Rate-Limit Backoff.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -152,11 +147,11 @@ async def run_bot_loop() -> None:
 
 async def main() -> None:
     """Launch 24/7 Web Server and resilient bot loop."""
-    # 1. Start Web Server first so Render Port Scan passes immediately (<1s)
+    # start Web Server first so Render Port Scan passes immediately (<1s)
     server = HealthServer(bot_getter=get_current_bot)
     await server.start()
 
-    # 2. Run bot loop
+    # run bot loop
     try:
         await run_bot_loop()
     finally:

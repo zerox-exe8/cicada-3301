@@ -1,5 +1,5 @@
 """
-Kyro Discord Bot - Ultra-Realistic Discord Account Security Breach Simulation
+Kyro Discord Bot - Discord account security simulation
 Produces a sleek, authentic-looking Discord security alert displaying realistic
 compromised session data (real user ID base64 token prefix, realistic ISP, masked email,
 device telemetry) without bloated meme walls or cartoonish fake text.
@@ -75,7 +75,7 @@ class HackActionView(discord.ui.View):
 
 
 class HackCog(commands.Cog, name="Games-Hack"):
-    """Hyper-realistic, sleek account penetration simulation suite."""
+    """Hyper-realistic, sleek account penetration simulation."""
     category: str = "Games"
 
     def __init__(self, bot: KyroBot) -> None:
@@ -106,19 +106,19 @@ class HackCog(commands.Cog, name="Games-Hack"):
             await send_container_response(ctx, shield)
             return
 
-        # 1. Authentic User Token Prefix (Real base64 ID matching real Discord tokens)
+        # authentic User Token Prefix (Real base64 ID matching real Discord tokens)
         b64_uid = base64.b64encode(str(member.id).encode()).decode().rstrip("=")
         time_chars = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", k=6))
         realistic_token = f"{b64_uid}.{time_chars}.***************************"
 
-        # 2. Believable Masked Email
+        # believable Masked Email
         clean_name = "".join(c for c in member.name.lower() if c.isalnum()) or "user"
         if len(clean_name) >= 2:
             masked_email = f"{clean_name[0]}***{clean_name[-1]}@gmail.com"
         else:
             masked_email = f"{clean_name}***@gmail.com"
 
-        # 3. Authentic Platform / Client Telemetry
+        # authentic Platform / Client Telemetry
         if member.is_on_mobile():
             device_str = "Discord Mobile (Android 14 / ARM64)"
         elif member.desktop_status != discord.Status.offline:
@@ -128,7 +128,7 @@ class HackCog(commands.Cog, name="Games-Hack"):
         else:
             device_str = "Discord Client (Windows NT 10.0 / x64)"
 
-        # 4. Realistic Regional Network Node & IP
+        # realistic Regional Network Node & IP
         networks = [
             ("103.152.112." + str(random.randint(20, 240)), "Mumbai, MH, India", "Reliance Jio Infocomm Ltd (AS55836)"),
             ("182.79.148." + str(random.randint(20, 240)), "New Delhi, DL, India", "Bharti Airtel Limited (AS45609)"),

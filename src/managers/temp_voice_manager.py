@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Temp Voice Manager
-High-performance database persistence and memory caching for Dynamic Temp Voice channels (Join-to-Create).
-"""
-
 from __future__ import annotations
 
 import asyncio

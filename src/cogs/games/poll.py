@@ -35,7 +35,7 @@ def parse_poll_input(raw: str) -> tuple[Optional[str], list[str]]:
     if not text:
         return None, []
 
-    # 1. Quoted options (handles standard ", ', and mobile smart quotes “, ”, ‘, ’)
+    # quoted options (handles standard ", ', and mobile smart quotes “, ”, ‘, ’)
     quoted = re.findall(r'["“](.+?)["”]|[\'‘](.+?)[\'’]', text)
     if quoted:
         items = [q[0] or q[1] for q in quoted if (q[0] or q[1]).strip()]
@@ -44,13 +44,13 @@ def parse_poll_input(raw: str) -> tuple[Optional[str], list[str]]:
             options = [it.strip() for it in items[1:] if it.strip()]
             return question, options
 
-    # 2. Pipe separation: Question | Option 1 | Option 2 ...
+    # pipe separation: Question | Option 1 | Option 2 ...
     if "|" in text:
         parts = [p.strip() for p in text.split("|") if p.strip()]
         if len(parts) >= 2:
             return parts[0], parts[1:]
 
-    # 3. Question mark followed by comma-separated options:
+    # question mark followed by comma-separated options:
     # e.g. "Best food? Pizza, Burger, Pasta"
     if "?" in text:
         q_part, opts_part = text.split("?", 1)
@@ -62,14 +62,14 @@ def parse_poll_input(raw: str) -> tuple[Optional[str], list[str]]:
             # Just a question with no options -> default to Yes / No
             return question, ["Yes", "No"]
 
-    # 4. Comma separation without question mark:
+    # comma separation without question mark:
     # e.g. "Valorant or GTA, Valorant, GTA"
     if "," in text:
         parts = [p.strip() for p in text.split(",") if p.strip()]
         if len(parts) >= 3:
             return parts[0], parts[1:]
 
-    # 5. Single sentence/question without '?' or commas -> defaults to Yes / No
+    # single sentence/question without '?' or commas -> defaults to Yes / No
     return text, ["Yes", "No"]
 
 
@@ -248,7 +248,7 @@ class PollView(discord.ui.View):
 
 
 class PollCog(commands.Cog, name="Games-Poll"):
-    """Community voting and live interactive polling suite."""
+    """Community voting and live interactive polling."""
     category: str = "Games"
 
     def __init__(self, bot: KyroBot) -> None:

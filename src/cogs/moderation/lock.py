@@ -1,7 +1,3 @@
-"""
-Kyro Discord Bot - Channel Lock & Unlock Moderation Module
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional

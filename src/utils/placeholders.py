@@ -36,7 +36,7 @@ def resolve_placeholders(
     now = datetime.datetime.now(datetime.timezone.utc)
     ts_now = int(time.time())
 
-    # 1. User variables
+    # user variables
     user_mention = user.mention if user else "@User"
     user_name = user.name if user else "User"
     user_display = user.display_name if user else user_name
@@ -51,7 +51,7 @@ def resolve_placeholders(
         joined_ts = int(user.joined_at.timestamp())
         user_joined = f"<t:{joined_ts}:R>"
 
-    # 2. Guild / Server variables
+    # guild / Server variables
     guild_name = guild.name if guild else "Server"
     guild_id = str(guild.id) if guild else "000000000000000000"
     guild_icon = str(guild.icon.url) if (guild and guild.icon) else avatar_url
@@ -63,12 +63,12 @@ def resolve_placeholders(
     boost_tier = f"Level {getattr(guild, 'premium_tier', 0)}" if guild else "Level 0"
     owner_mention = guild.owner.mention if (guild and guild.owner) else "@Owner"
 
-    # 3. Boost / Event Extra variables
+    # boost / Event Extra variables
     booster_mention = extra.get("booster", user_mention)
     extra_boost_count = extra.get("boost_count", boost_count)
     extra_boost_tier = extra.get("boost_tier", boost_tier)
 
-    # 4. Replacements Mapping
+    # replacements Mapping
     replacements = {
         # Comprehensive User mention variations (longer specific patterns first)
         "@{user.mention}": user_mention,

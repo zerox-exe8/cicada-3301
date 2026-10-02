@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Custom Command Context
-Extends commands.Context to add Components V2 container responses and interactive helpers.
-"""
-
 from __future__ import annotations
 
 from typing import Any

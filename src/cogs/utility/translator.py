@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Translator Cog
-Multilingual translation with country flag reactions, slash commands, and context menu support.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -66,7 +61,7 @@ class Translator(commands.Cog):
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         """Translate message when a country flag reaction is attached."""
-        # 1. Ignore bot reactions or reactions outside guilds
+        # ignore bot reactions or reactions outside guilds
         if not payload.guild_id or (self.bot.user and payload.user_id == self.bot.user.id):
             return
 
@@ -75,11 +70,11 @@ class Translator(commands.Cog):
         if not target_lang:
             return
 
-        # 2. Check guild & channel permissions
+        # check guild & channel permissions
         if not self.bot.translator_mgr.is_channel_enabled(payload.guild_id, payload.channel_id):
             return
 
-        # 3. Check reaction debounce
+        # check reaction debounce
         if self.bot.translator_mgr.is_debounce_active(payload.message_id, payload.user_id, target_lang):
             return
 
@@ -104,7 +99,7 @@ class Translator(commands.Cog):
         if not user:
             return
 
-        # 4. Perform translation
+        # perform translation
         translated_text, detected_lang = await self.bot.translator_mgr.translate(raw_text, target_lang)
         if not translated_text or translated_text.lower() == raw_text.lower():
             return

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Translator Manager
-High-performance translation engine supporting flag reaction detection, Google GTX, and Gemini intelligence fallback.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -209,7 +204,7 @@ class TranslatorManager:
         if cache_key in self._translation_cache:
             return self._translation_cache[cache_key]
 
-        # 1. Primary Engine: Google GTX Endpoint (Fast & Free)
+        # primary Engine: Google GTX Endpoint (Fast & Free)
         local_session = False
         if session is None:
             session = aiohttp.ClientSession()
@@ -244,7 +239,7 @@ class TranslatorManager:
             if local_session:
                 await session.close()
 
-        # 2. Fallback Engine: Gemini Language Intelligence
+        # fallback Engine: Gemini Language Intelligence
         api_key = os.getenv("GEMINI_API_KEY", "").strip()
         if api_key:
             try:

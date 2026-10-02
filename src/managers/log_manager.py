@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Modular Log Manager
-Handles server audit log channel mapping and ultra-fast in-memory caching.
-"""
-
 from __future__ import annotations
 
 import logging

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - System Manager
-Handles Maintenance Mode and Global Command Killswitches.
-"""
-
 from __future__ import annotations
 
 import logging

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Premium License & Subscription Manager
-Handles cryptographically secure license key generation, redemption, and in-memory zero-latency cache.
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -37,7 +32,7 @@ class PremiumManager:
         """
         now = datetime.datetime.now(datetime.timezone.utc)
 
-        # 1. Check if user is currently blocked
+        # check if user is currently blocked
         blocked_until = self._blocked_users.get(user_id)
         if blocked_until:
             if blocked_until > now:
@@ -81,7 +76,7 @@ class PremiumManager:
         """Load all active guild and user premiums into memory on bot startup."""
         now = datetime.datetime.now(datetime.timezone.utc)
 
-        # 1. Load active guild premiums
+        # load active guild premiums
         guild_rows = await self.db.fetch_all("SELECT guild_id, tier, expires_at FROM guild_premium;")
         for row in guild_rows:
             g_id = int(row["guild_id"])
@@ -96,7 +91,7 @@ class PremiumManager:
                     "expires_at": exp,
                 }
 
-        # 2. Load active user premiums
+        # load active user premiums
         user_rows = await self.db.fetch_all("SELECT user_id, tier, expires_at FROM user_premium;")
         for row in user_rows:
             u_id = int(row["user_id"])
@@ -276,7 +271,7 @@ class PremiumManager:
         duration_days = int(row["duration_days"])
         now = datetime.datetime.now(datetime.timezone.utc)
 
-        # 1. Calculate expiration (0 = lifetime)
+        # calculate expiration (0 = lifetime)
         if duration_days == 0:
             expires_at = None
             duration_text = "Lifetime"
@@ -291,7 +286,7 @@ class PremiumManager:
             expires_at = base_time + datetime.timedelta(days=duration_days)
             duration_text = f"{duration_days} Days"
 
-        # 2. Mark key as used
+        # mark key as used
         await self.db.execute(
             """
             UPDATE premium_keys 
@@ -303,7 +298,7 @@ class PremiumManager:
             clean_key,
         )
 
-        # 3. Save into guild_premium or user_premium
+        # save into guild_premium or user_premium
         db_expires_at = expires_at.astimezone(datetime.timezone.utc).replace(tzinfo=None) if expires_at else None
 
         if target_type == "guild":
@@ -340,7 +335,7 @@ class PremiumManager:
             )
             self._user_cache[target_id] = {"tier": "pro", "expires_at": expires_at}
 
-        # 4. Record Customer Intelligence & Repeat History
+        # record Customer Intelligence & Repeat History
         await self.db.execute(
             """
             INSERT INTO premium_customers (target_id, target_type, total_redemptions, total_days_purchased, first_redeemed_at, last_redeemed_at)
@@ -532,7 +527,7 @@ class PremiumManager:
         now = datetime.datetime.now(datetime.timezone.utc)
         db_now = now.replace(tzinfo=None)
 
-        # 1. Fetch expired guilds
+        # fetch expired guilds
         expired_guild_rows = await self.db.fetch_all(
             "SELECT guild_id FROM guild_premium WHERE expires_at IS NOT NULL AND expires_at <= ?;",
             db_now,
@@ -545,7 +540,7 @@ class PremiumManager:
                 self._guild_cache.pop(g_id, None)
             logger.info(f"Swept {len(expired_guild_ids)} expired guild subscription(s).")
 
-        # 2. Fetch expired users
+        # fetch expired users
         expired_user_rows = await self.db.fetch_all(
             "SELECT user_id FROM user_premium WHERE expires_at IS NOT NULL AND expires_at <= ?;",
             db_now,
@@ -634,7 +629,7 @@ class PremiumManager:
 
         total_keys = row_total["count"] if row_total else 0
         unused_keys = row_unused["count"] if row_unused else 0
-        # 1. Live Active Guilds
+        # live Active Guilds
         active_guild_rows = await self.db.fetch_all(
             """
             SELECT guild_id, tier, activated_by, key_used, expires_at
@@ -643,7 +638,7 @@ class PremiumManager:
             """
         )
 
-        # 2. Live Active Users
+        # live Active Users
         active_user_rows = await self.db.fetch_all(
             """
             SELECT user_id, tier, key_used, expires_at
@@ -655,7 +650,7 @@ class PremiumManager:
         active_guilds_count = len(active_guild_rows)
         active_users_count = len(active_user_rows)
 
-        # 3. Available Unused Keys
+        # available Unused Keys
         available_keys = await self.db.fetch_all(
             """
             SELECT key, duration_days, target_type, created_at
@@ -666,7 +661,7 @@ class PremiumManager:
             """
         )
 
-        # 4. Redemption & Audit History
+        # redemption & Audit History
         history_keys = await self.db.fetch_all(
             """
             SELECT key, duration_days, target_type, is_used, redeemed_by, redeemed_target_id, redeemed_at, created_at

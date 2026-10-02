@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Dynamic Temp Voice Cog (/vc setup j2c)
-Provides Join-to-Create voice infrastructure with automated channel generation and a permanent Master Interface Dashboard.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -211,11 +206,11 @@ class PersistentVoiceMasterView(discord.ui.View):
             await self._send_card(interaction, "Server Only", "This command can only be used in a server.", ephemeral=True)
             return None, None
 
-        # 1. Check if user owns an active room in this guild
+        # check if user owns an active room in this guild
         owned_cid = self.bot.temp_voice_mgr.get_active_room_for_user(guild.id, interaction.user.id)
         target_cid = owned_cid
 
-        # 2. If not owned, check if they are currently inside an active temp room
+        # if not owned, check if they are currently inside an active temp room
         if not target_cid and isinstance(interaction.user, discord.Member) and interaction.user.voice and interaction.user.voice.channel:
             if self.bot.temp_voice_mgr.is_temp_channel(interaction.user.voice.channel.id):
                 target_cid = interaction.user.voice.channel.id
@@ -475,11 +470,11 @@ class TempVoice(commands.Cog):
         if not settings:
             return
 
-        # 1. Anti-Spam: In-flight creation lock (prevents duplicate triggers)
+        # anti-Spam: In-flight creation lock (prevents duplicate triggers)
         if member.id in self._creating_users:
             return
 
-        # 2. Existing Room Check: If user already owns an active room in this guild, move them there
+        # existing Room Check: If user already owns an active room in this guild, move them there
         existing_cid = self.bot.temp_voice_mgr.get_active_room_for_user(guild.id, member.id)
         if existing_cid:
             existing_channel = guild.get_channel(existing_cid)
@@ -490,7 +485,7 @@ class TempVoice(commands.Cog):
                     pass
                 return
 
-        # 3. Anti-Spam Rate Limit: 5-second cooldown between creation attempts
+        # anti-Spam Rate Limit: 5-second cooldown between creation attempts
         now = time.time()
         last_created = self._creation_cooldowns.get(member.id, 0.0)
         if now - last_created < 5.0:
@@ -657,7 +652,7 @@ class TempVoice(commands.Cog):
         if not guild:
             return
 
-        # 1. Check existing configuration to prevent accidental spam / duplicates
+        # check existing configuration to prevent accidental spam / duplicates
         existing_settings = self.bot.temp_voice_mgr.get_settings(guild.id)
         if existing_settings and not reset:
             old_cat = guild.get_channel(existing_settings.get("category_id") or 0)
@@ -686,7 +681,7 @@ class TempVoice(commands.Cog):
                 await send_container_response(ctx, alert_c, ephemeral=True)
                 return
 
-        # 2. If reset=True and old channels exist, clean them up safely
+        # if reset=True and old channels exist, clean them up safely
         if reset and existing_settings:
             old_cat = guild.get_channel(existing_settings.get("category_id") or 0)
             old_master = guild.get_channel(existing_settings.get("master_channel_id") or 0)
@@ -703,17 +698,17 @@ class TempVoice(commands.Cog):
         i_title = interface_name.strip() if interface_name else "Interface"
 
         try:
-            # 1. Create Category
+            # create Category
             category = await guild.create_category(name=cat_title, reason=f"J2C setup by {ctx.author}")
 
-            # 2. Create Master Voice Channel
+            # create Master Voice Channel
             master_channel = await guild.create_voice_channel(
                 name=v_title,
                 category=category,
                 reason=f"J2C master channel by {ctx.author}",
             )
 
-            # 3. Create Interface Text Channel (Read-only for @everyone, but button clicks allowed)
+            # create Interface Text Channel (Read-only for @everyone, but button clicks allowed)
             interface_overwrites: dict[Any, discord.PermissionOverwrite] = {
                 guild.default_role: discord.PermissionOverwrite(
                     view_channel=True,
@@ -737,7 +732,7 @@ class TempVoice(commands.Cog):
                 reason=f"J2C interface channel by {ctx.author}",
             )
 
-            # 4. Post the Master Interface Dashboard
+            # post the Master Interface Dashboard
             dashboard_container = KyroContainer(accent_color=None)
             dashboard_container.add_section(
                 content=(
@@ -751,7 +746,7 @@ class TempVoice(commands.Cog):
             master_msg = await send_container_response(interface_channel, dashboard_container, view=view)
             msg_id = master_msg.id if isinstance(master_msg, discord.Message) else (int(master_msg["id"]) if isinstance(master_msg, dict) and "id" in master_msg else None)
 
-            # 5. Save Configuration to Database and Cache
+            # save Configuration to Database and Cache
             await self.bot.temp_voice_mgr.set_settings(
                 guild_id=guild.id,
                 category_id=category.id,
@@ -760,7 +755,7 @@ class TempVoice(commands.Cog):
                 interface_message_id=msg_id,
             )
 
-            # 6. Respond with Success Card to Administrator
+            # respond with Success Card to Administrator
             resp_container = KyroContainer(accent_color=None)
             resp_container.add_section(
                 content=(

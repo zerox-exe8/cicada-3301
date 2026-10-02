@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Tech Intelligence Autonomous Feed Cog
-Background ingestion and dispatch engine delivering zero-noise engineering, AI, security, and hardware intel.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -99,13 +94,13 @@ def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
     last_dispatch = parse_ist_timestamp(cfg.get("last_dispatch_ts"))
     today_str = now_ist.strftime("%Y-%m-%d")
 
-    # 1. Real-time every 15 minutes
+    # real-time every 15 minutes
     if cadence == "15m":
         if last_dispatch is None:
             return True
         return (now_ist - last_dispatch).total_seconds() >= 800
 
-    # 2. Morning 9:00 AM IST
+    # morning 9:00 AM IST
     if cadence == "09:00":
         if now_ist.hour == 9 and 0 <= now_ist.minute < 30:
             if last_dispatch is None:
@@ -113,7 +108,7 @@ def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
             return last_dispatch.strftime("%Y-%m-%d") != today_str
         return False
 
-    # 3. Midnight 12:00 AM IST
+    # midnight 12:00 AM IST
     if cadence == "00:00":
         if now_ist.hour == 0 and 0 <= now_ist.minute < 30:
             if last_dispatch is None:
@@ -121,7 +116,7 @@ def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
             return last_dispatch.strftime("%Y-%m-%d") != today_str
         return False
 
-    # 4. Custom 24h Time: "custom:HH:MM" or "HH:MM" (evaluated strictly in IST)
+    # custom 24h Time: "custom:HH:MM" or "HH:MM" (evaluated strictly in IST)
     if cadence.startswith("custom:") or ":" in cadence:
         raw_time = cadence.replace("custom:", "").strip()
         try:
@@ -138,7 +133,7 @@ def is_cadence_eligible(cfg: dict[str, Any], now_ist: datetime) -> bool:
         except Exception:
             return False
 
-    # 5. Default fallback: Hourly batch
+    # default fallback: Hourly batch
     if last_dispatch is None:
         return True
     return (now_ist - last_dispatch).total_seconds() >= 3500
@@ -895,7 +890,7 @@ class TechFeedCog(commands.Cog):
             await self.bot.tech_mgr.update_last_dispatch(g_id, now_ist)
 
         try:
-            # 1. Harvest balanced batch of up to 10 top-signal items across all categories
+            # harvest balanced batch of up to 10 top-signal items across all categories
             stories = await self.bot.tech_mgr.harvest_balanced_batch(target_total=10)
             if not stories:
                 return
@@ -903,7 +898,7 @@ class TechFeedCog(commands.Cog):
             dot = self.bot.custom_emojis.get("heart_dot", "•")
             today_str = now_ist.strftime("%Y-%m-%d")
 
-            # 2. Handle Morning Digest for guilds configured in 'digest' mode (Trigger at or after 9 AM IST)
+            # handle Morning Digest for guilds configured in 'digest' mode (Trigger at or after 9 AM IST)
             if now_ist.hour >= 9:
                 for guild_id, cfg in list(eligible_guilds.items()):
                     if cfg.get("mode") == "digest" and cfg.get("last_digest_date") != today_str:
@@ -919,7 +914,7 @@ class TechFeedCog(commands.Cog):
                             except Exception as d_err:
                                 logger.debug(f"Notice sending digest to guild {guild_id}: {d_err}")
 
-            # 3. Pre-flight health check: Verify candidate URLs live before broadcasting
+            # pre-flight health check: Verify candidate URLs live before broadcasting
             batch_to_send: list[TechStory] = []
             connector = aiohttp.TCPConnector(ssl=False)
             timeout = aiohttp.ClientTimeout(total=4)
@@ -938,7 +933,7 @@ class TechFeedCog(commands.Cog):
             batch_to_send = batch_to_send[:10]
             logger.info(f"Dispatching batch of {len(batch_to_send)} balanced tech story/stories to {len(eligible_guilds)} scheduled guild(s).")
 
-            # 4. Dispatch items one by one with strict 1-minute (60s) delay between each post
+            # dispatch items one by one with strict 1-minute (60s) delay between each post
             for index, story in enumerate(batch_to_send):
                 card = self.bot.tech_mgr.build_story_container(story, dot=dot)
                 dispatched_any = False

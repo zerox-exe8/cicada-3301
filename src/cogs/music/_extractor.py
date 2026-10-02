@@ -230,13 +230,13 @@ def normalize_unicode_text(text: str) -> str:
     """
     if not text:
         return ""
-    # 1. NFKD converts mathematical bold/italic/sans/serif/fullwidth into plain letters & numbers
+    # nFKD converts mathematical bold/italic/sans/serif/fullwidth into plain letters & numbers
     norm = unicodedata.normalize("NFKD", text)
-    # 2. Remove variation selectors & zero-width characters
+    # remove variation selectors & zero-width characters
     norm = re.sub(r"[\ufe00-\ufe0f\u200b-\u200d]", "", norm)
-    # 3. Remove non-BMP characters (emojis and extra planes)
+    # remove non-BMP characters (emojis and extra planes)
     norm = re.sub(r"[\U00010000-\U0010ffff]", " ", norm)
-    # 4. Remove standard symbols (dingbats, misc symbols, enclosed characters)
+    # remove standard symbols (dingbats, misc symbols, enclosed characters)
     norm = re.sub(r"[\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55]", " ", norm)
     return norm
 
@@ -349,7 +349,7 @@ class NativeExtractor:
         if raw_q.startswith("<") and raw_q.endswith(">"):
             raw_q = raw_q[1:-1].strip()
 
-        # 1. Check in-memory search cache for instant playback
+        # check in-memory search cache for instant playback
         cache_key = raw_q.lower()
         now = time.time()
         if cache_key in _SEARCH_CACHE:
@@ -366,7 +366,7 @@ class NativeExtractor:
                     is_autoplay=is_autoplay,
                 )
 
-        # 2. Direct YouTube URL Handling
+        # direct YouTube URL Handling
         yt_match = YOUTUBE_URL_REGEX.search(raw_q)
         orig_yt_url = None
         if yt_match:
@@ -386,14 +386,14 @@ class NativeExtractor:
                     return track
                 return None
 
-        # 3. Direct SoundCloud URL Handling
+        # direct SoundCloud URL Handling
         elif "soundcloud.com/" in raw_q:
             track = await cls._extract_soundcloud(raw_q, requester, is_autoplay)
             if track:
                 _SEARCH_CACHE[cache_key] = (now, track)
                 return track
 
-        # 4. Spotify URL Handling (Extract '{Title} {Artist}' metadata to bridge to 320kbps HD audio)
+        # spotify URL Handling (Extract '{Title} {Artist}' metadata to bridge to 320kbps HD audio)
         is_spotify = any(sp in raw_q for sp in ("spotify.com/", "spotify.link/", "spotify:track:"))
         orig_spotify_url = None
         if is_spotify:
@@ -925,7 +925,7 @@ class NativeExtractor:
                     except Exception:
                         pass
 
-                # 1. Primary: Scrape Spotify HTML using Discordbot UA for full Title + Artist
+                # primary: Scrape Spotify HTML using Discordbot UA for full Title + Artist
                 async with session.get(
                     spotify_url,
                     headers=headers,
@@ -963,7 +963,7 @@ class NativeExtractor:
                             elif song_title and "spotify" not in song_title.lower():
                                 return normalize_unicode_text(song_title)
 
-                # 2. Fallback: Spotify oEmbed API
+                # fallback: Spotify oEmbed API
                 oembed_url = f"https://open.spotify.com/oembed?url={spotify_url}"
                 async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=4)) as o_resp:
                     if o_resp.status == 200:
@@ -978,7 +978,7 @@ class NativeExtractor:
     @staticmethod
     async def _fetch_youtube_title(youtube_url: str) -> Optional[str]:
         """Extract title and artist metadata from YouTube URL without streaming chunk blocks."""
-        # 1. Official YouTube oEmbed protocol (Super fast, 100% unblocked on Cloud/Render)
+        # official YouTube oEmbed protocol (Super fast, 100% unblocked on Cloud/Render)
         try:
             oembed_url = f"https://www.youtube.com/oembed?url={urllib.parse.quote(youtube_url)}&format=json"
             async with aiohttp.ClientSession() as session:
@@ -998,7 +998,7 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"YouTube oEmbed fetch error: {e}")
 
-        # 2. HTML scrape fallback for title tag
+        # hTML scrape fallback for title tag
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
@@ -1018,7 +1018,7 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"YouTube HTML scrape error: {e}")
 
-        # 3. Fallback to flat yt-dlp extract
+        # fallback to flat yt-dlp extract
         try:
             def _get_title():
                 opts = {
@@ -1051,15 +1051,15 @@ class NativeExtractor:
         if clean_u.startswith("<") and clean_u.endswith(">"):
             clean_u = clean_u[1:-1].strip()
 
-        # 1. Spotify Playlist or Album (Do not fallback to yt-dlp to avoid DRM errors)
+        # spotify Playlist or Album (Do not fallback to yt-dlp to avoid DRM errors)
         if "spotify.com/" in clean_u or "spotify.link/" in clean_u:
             return await cls._extract_spotify_playlist(clean_u, requester=requester)
 
-        # 2. YouTube Playlist
+        # youTube Playlist
         if any(d in clean_u for d in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
             return await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
 
-        # 3. SoundCloud / Generic Fallback via yt-dlp
+        # soundCloud / Generic Fallback via yt-dlp
         return await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
 
     @classmethod

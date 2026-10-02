@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Secret Developer Direct Message Command
-Delivers anonymous official container DMs to any Discord user.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -18,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class DMCog(commands.Cog, name="Developer-DM"):
-    """Stealth anonymous direct messaging suite."""
+    """Stealth anonymous direct messaging."""
     category: str = "Developer"
 
     def __init__(self, bot: KyroBot) -> None:

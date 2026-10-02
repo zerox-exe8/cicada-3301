@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Music Analytics & User Taste Engine
-Tracks listening habits, Spotify Rich Presence, and cross-bot activity to personalize AI Autoplay.
-"""
-
 from __future__ import annotations
 
 import logging

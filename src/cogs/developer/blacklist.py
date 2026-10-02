@@ -61,7 +61,7 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
         target_type: str = "user"
         actual_reason = reason.strip() if reason else "Violation of bot usage terms"
 
-        # 1. Check if user replied to a message
+        # check if user replied to a message
         if not target and ctx.message.reference and ctx.message.reference.message_id:
             try:
                 ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
@@ -70,7 +70,7 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
             except Exception:
                 pass
 
-        # 2. Parse target parameter if provided
+        # parse target parameter if provided
         if not resolved_id and target:
             clean = target.strip("<@!#&> ")
             if clean.isdigit():
@@ -102,14 +102,14 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
             await send_container_response(ctx, container)
             return
 
-        # 3. Security Guard: Prevent blacklisting Bot Owner or Developers
+        # security Guard: Prevent blacklisting Bot Owner or Developers
         if await self.bot.perm_mgr.is_developer(resolved_id):
             container = KyroContainer(accent_color=None)
             container.add_text("**Security Violation:** Root administrators and developers cannot be blacklisted.")
             await send_container_response(ctx, container)
             return
 
-        # 4. Check if already blacklisted
+        # check if already blacklisted
         if (target_type == "user" and self.bot.blacklist_mgr.is_user_blacklisted(resolved_id)) or \
            (target_type == "guild" and self.bot.blacklist_mgr.is_guild_blacklisted(resolved_id)):
             container = KyroContainer(accent_color=None)
@@ -117,7 +117,7 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
             await send_container_response(ctx, container)
             return
 
-        # 5. Enforce Blacklist via Manager (updates memory cache and PostgreSQL)
+        # enforce Blacklist via Manager (updates memory cache and PostgreSQL)
         try:
             await self.bot.blacklist_mgr.add_blacklist(
                 target_id=resolved_id,

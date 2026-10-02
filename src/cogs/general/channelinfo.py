@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Channel Information Module
-Inspect channel metadata, type, topic, slowmode, and creation timestamp.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -21,7 +16,7 @@ logger = logging.getLogger("Kyro.General.ChannelInfo")
 
 
 class ChannelInfo(commands.Cog, name="General-ChannelInfo"):
-    """Channel inspection suite."""
+    """Channel inspection."""
     category: str = "General"
 
     def __init__(self, bot: KyroBot) -> None:

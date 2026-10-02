@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Secret Developer Portal Command
-Generates an instant 1-hour access invite link to any connected server.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional

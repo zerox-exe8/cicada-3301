@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Role List Module
-Lists all server roles in hierarchy order with member counts and interactive pagination.
-"""
-
 from __future__ import annotations
 
 import logging

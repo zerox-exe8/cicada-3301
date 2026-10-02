@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - HTML Transcript Generator
-Generates clean, responsive, dark-mode Discord chat transcripts in HTML format.
-"""
-
 from __future__ import annotations
 
 import html

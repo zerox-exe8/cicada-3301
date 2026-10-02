@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - PostgreSQL / Supabase Database Driver
-High-performance asynchronous PostgreSQL database connector using asyncpg connection pool.
-"""
-
 from __future__ import annotations
 
 import asyncio

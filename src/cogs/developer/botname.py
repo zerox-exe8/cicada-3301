@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Secret Developer Bot Name Command
-Live updates the bot's Discord username.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -18,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class BotNameCog(commands.Cog, name="Developer-BotName"):
-    """Live bot username modifier suite."""
+    """Live bot username modifier."""
     category: str = "Developer"
 
     def __init__(self, bot: KyroBot) -> None:

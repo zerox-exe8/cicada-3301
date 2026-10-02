@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Bots & Integrations Explorer Module
-Discovers and lists all bot accounts in the server with their top roles and join timestamps.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -100,7 +95,7 @@ class BotsPaginationView(discord.ui.View):
 
 
 class Bots(commands.Cog, name="Moderation-Bots"):
-    """Server bot discovery suite."""
+    """Server bot discovery."""
     category: str = "Moderation"
 
     def __init__(self, bot: KyroBot) -> None:

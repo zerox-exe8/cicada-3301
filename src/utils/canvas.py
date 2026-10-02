@@ -1,5 +1,5 @@
 """
-Kyro Discord Bot - Dynamic Real-Time Canvas Rendering Pipeline
+Kyro Discord Bot - Canvas image rendering
 Renders high-resolution, anti-aliased dynamic graphic cards (Profile/Rank cards, Audio Waveforms)
 directly in memory using Pillow C-extensions with zero external API dependencies.
 """
@@ -40,7 +40,7 @@ def render_profile_card(
     im = Image.new("RGBA", (w, h), (14, 17, 23, 255))
     draw = ImageDraw.Draw(im)
 
-    # 1. Subtle Background Accents & Glass Glow
+    # subtle Background Accents & Glass Glow
     # Accent color: Violet/Cyan gradient accent
     accent_rgb = (147, 51, 234) if is_owner else ((59, 130, 246) if is_dev else (99, 102, 241))
     
@@ -49,7 +49,7 @@ def render_profile_card(
     # Top accent line
     draw.rounded_rectangle([(18, 12), (w - 18, 14)], radius=2, fill=accent_rgb)
 
-    # 2. Avatar rendering (Anti-aliased circle with outer glow ring)
+    # avatar rendering (Anti-aliased circle with outer glow ring)
     avatar_size = 120
     av_x, av_y = 30, 45
 
@@ -74,7 +74,7 @@ def render_profile_card(
     else:
         draw.ellipse([(av_x, av_y), (av_x + avatar_size, av_y + avatar_size)], fill=(30, 35, 45, 255))
 
-    # 3. Typography & Info Placement
+    # typography & Info Placement
     # Text positioning
     text_x = av_x + avatar_size + 30
     curr_y = 45
@@ -118,7 +118,7 @@ def render_profile_card(
     draw.rounded_rectangle([(badge_x3, badge_y), (badge_x3 + badge_w3, badge_y + 24)], radius=6, fill=(24, 24, 27, 255), outline=(71, 85, 105, 255), width=1)
     draw.text((badge_x3 + 10, badge_y + 4), f"Playlists: {playlists_count}", fill=(203, 213, 225, 255), font=font_badge)
 
-    # 4. Bottom Activity Bar (Simulated Dynamic Energy/Progress Bar)
+    # bottom Activity Bar (Simulated Dynamic Energy/Progress Bar)
     bar_x = text_x
     bar_y = 175
     bar_w = w - text_x - 35

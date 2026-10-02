@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Permission Manager
-Handles Owner and Developer authorization levels and custom decorators.
-"""
-
 from __future__ import annotations
 
 import logging

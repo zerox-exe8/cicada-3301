@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Image Processing & Slim Banner Tools
-Converts tall / oversized images into slim, widescreen Discord header banners using transparent canvas fitting or smart cropping.
-"""
-
 from __future__ import annotations
 
 import io
@@ -44,11 +39,11 @@ def create_slim_banner(
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     orig_w, orig_h = img.size
 
-    # 1. Background: Stretch image to 1000x300 and apply a gentle blur so the exact background color/hue matches
+    # background: Stretch image to 1000x300 and apply a gentle blur so the exact background color/hue matches
     bg = img.resize((target_width, target_height), Image.Resampling.BILINEAR).convert("RGBA")
     bg = bg.filter(ImageFilter.GaussianBlur(radius=16))
 
-    # 2. Crisp artwork: Scale to fit inside target_height with safe vertical padding (265px)
+    # crisp artwork: Scale to fit inside target_height with safe vertical padding (265px)
     safe_h = max(100, target_height - 30)
     scale = safe_h / orig_h
     new_w = int(orig_w * scale)
@@ -61,7 +56,7 @@ def create_slim_banner(
 
     crisp_art = img.resize((new_w, new_h), Image.Resampling.LANCZOS).convert("RGBA")
 
-    # 3. Apply soft horizontal feathering to melt center card smoothly into background
+    # apply soft horizontal feathering to melt center card smoothly into background
     feather_w = min(40, new_w // 8)
     if feather_w > 5:
         mask = Image.new("L", (new_w, new_h), 255)
@@ -72,7 +67,7 @@ def create_slim_banner(
             m_draw.line([(new_w - 1 - x, 0), (new_w - 1 - x, new_h)], fill=alpha)
         crisp_art.putalpha(mask)
 
-    # 4. Paste the crisp artwork in the center
+    # paste the crisp artwork in the center
     offset_x = (target_width - new_w) // 2
     offset_y = (target_height - new_h) // 2
 

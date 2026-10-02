@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Network Guilds Telemetry
-Developer diagnostics for connected server nodes and member population.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

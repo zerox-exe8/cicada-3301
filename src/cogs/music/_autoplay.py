@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Native Smart Autoplay AI Engine
-Dynamic Genre & Artist Clustering Recommendation Algorithm.
-"""
-
 from __future__ import annotations
 
 import html
@@ -86,14 +81,14 @@ class NativeSmartAutoplay:
         primary_artist = extract_primary_artist(current_track.author)
         artist_key = primary_artist.lower()
 
-        # 1. Determine Related Artists from Cluster Graph
+        # determine Related Artists from Cluster Graph
         related_artists: List[str] = []
         for known_key, cluster in ARTIST_CLUSTERS.items():
             if known_key in artist_key or artist_key in known_key or known_key in clean_title.lower():
                 related_artists = list(cluster)
                 break
 
-        # 2. Build Candidate Queries
+        # build Candidate Queries
         candidates_queries: List[str] = []
         if consecutive_same_artist >= 2 and related_artists:
             pick_artist = random.choice(related_artists)
@@ -105,7 +100,7 @@ class NativeSmartAutoplay:
             if related_artists:
                 candidates_queries.append(f"{random.choice(related_artists)} song")
 
-        # 3. Extract and check against session history
+        # extract and check against session history
         for query in candidates_queries:
             try:
                 candidate = await NativeExtractor.extract(query, requester="⚡ Smart Autoplay Radio", is_autoplay=True)

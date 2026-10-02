@@ -1,7 +1,3 @@
-"""
-Kyro Discord Bot - Warning System Moderation Module
-"""
-
 from __future__ import annotations
 
 import datetime

@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - Real-Time Ghost-Ping & Stealth Audit Monitor
-Detects stealth deleted messages containing user or role mentions and logs them immediately.
-"""
-
 from __future__ import annotations
 
 import logging

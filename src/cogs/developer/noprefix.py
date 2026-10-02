@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - No-Prefix Management Module
-Enables Bot Owners and Developers to grant/revoke Direct Command Execution authority.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -87,10 +82,10 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
             await send_container_response(ctx, container)
             return
 
-        # 1. Update in-memory set (0ms immediate effect)
+        # update in-memory set (0ms immediate effect)
         self.bot.no_prefix_users.add(target_id)
 
-        # 2. Persist to PostgreSQL database
+        # persist to PostgreSQL database
         try:
             await self.bot.db.execute(
                 """
@@ -147,10 +142,10 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
             await send_container_response(ctx, container)
             return
 
-        # 1. Update in-memory set
+        # update in-memory set
         self.bot.no_prefix_users.discard(target_id)
 
-        # 2. Delete from PostgreSQL database
+        # delete from PostgreSQL database
         try:
             await self.bot.db.execute(
                 "DELETE FROM system_no_prefix WHERE user_id = $1;",

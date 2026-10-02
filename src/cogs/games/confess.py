@@ -125,7 +125,7 @@ class ConfessDashboardView(discord.ui.View):
 
 
 class ConfessionsCog(commands.Cog, name="Games-Confessions"):
-    """Anonymous confessions and community secrets suite."""
+    """Anonymous confessions and community secrets."""
     category: str = "Games"
 
     def __init__(self, bot: KyroBot) -> None:

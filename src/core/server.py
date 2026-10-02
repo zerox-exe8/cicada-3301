@@ -1,8 +1,3 @@
-"""
-Kyro Discord Bot - 24/7 Keep-Alive Web Server & Razorpay Webhook Receiver
-Provides HTTP endpoints for Render uptime health checks and automated payment webhook fulfillment.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -256,7 +251,7 @@ class HealthServer:
         Razorpay Webhook receiver for automated subscription fulfillment.
         Verifies HMAC-SHA256 signature and enforces race-condition-free atomic DB updates.
         """
-        # 1. Verify Webhook Signature
+        # verify Webhook Signature
         signature = request.headers.get("X-Razorpay-Signature", "")
         if not signature:
             logger.warning("Razorpay webhook rejected: Missing X-Razorpay-Signature header.")
@@ -278,7 +273,7 @@ class HealthServer:
             logger.warning("Razorpay webhook rejected: Invalid signature.")
             return web.Response(status=400, text="Invalid webhook signature")
 
-        # 2. Parse Event Payload
+        # parse Event Payload
         try:
             data: dict[str, Any] = json.loads(body_bytes.decode("utf-8"))
         except Exception:
@@ -291,7 +286,7 @@ class HealthServer:
             logger.error("Razorpay webhook received but bot database is not ready.")
             return web.Response(status=503, text="Bot database connecting")
 
-        # 3. Handle Payment Captures & Link Paid Events
+        # handle Payment Captures & Link Paid Events
         if event in ["payment.captured", "payment_link.paid", "order.paid"]:
             payload_data = data.get("payload", {})
             payment_entity = payload_data.get("payment", {}).get("entity", {})
@@ -385,7 +380,7 @@ class HealthServer:
             # E. Instant Webhook Acknowledge (<20ms)
             return web.json_response({"status": "fulfilled", "payment_id": payment_id}, status=200)
 
-        # 4. Handle Payment Failures
+        # handle Payment Failures
         elif event in ["payment.failed"]:
             payment_entity = data.get("payload", {}).get("payment", {}).get("entity", {})
             payment_id = payment_entity.get("id", "")
@@ -396,7 +391,7 @@ class HealthServer:
             logger.info(f"Payment marked as failed: {payment_id}")
             return web.json_response({"status": "marked_failed"}, status=200)
 
-        # 5. Handle Refunds
+        # handle Refunds
         elif event in ["refund.processed", "payment.refunded"]:
             refund_entity = data.get("payload", {}).get("refund", {}).get("entity", {})
             payment_id = refund_entity.get("payment_id", "")

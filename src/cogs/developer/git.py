@@ -48,7 +48,7 @@ class GitCog(commands.Cog, name="Developer-Git"):
         date_str = await self._run_git("log", "-1", "--format=%cd", "--date=relative") or "Recently"
         subject = await self._run_git("log", "-1", "--format=%s") or "No commit message"
         status_raw = await self._run_git("status", "--porcelain")
-
+        is_dirty = bool(status_raw)
         dirty_flag = "dirty" if is_dirty else "clean"
         info_lines = [
             f"branch:  {branch}",

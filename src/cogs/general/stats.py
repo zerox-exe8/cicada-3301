@@ -27,7 +27,7 @@ class Stats(commands.Cog, name="General-Stats"):
 
     @commands.hybrid_command(
         name="stats",
-        aliases=["system", "uptime"],
+        aliases=["uptime"],
         description="View live system telemetry, RAM/CPU metrics, and process health.",
     )
     async def stats(self, ctx: CustomContext) -> None:

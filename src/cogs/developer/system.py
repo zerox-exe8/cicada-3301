@@ -55,7 +55,7 @@ class SystemCog(commands.Cog, name="Developer-System"):
         used_sys_gb = vm.used / (1024 * 1024 * 1024)
 
         # CPU info
-        cpu_usage = psutil.cpu_percent(interval=0.1)
+        cpu_usage = psutil.cpu_percent(interval=None)
         cpu_cores = psutil.cpu_count(logical=True)
 
         # Discord Gateway latency

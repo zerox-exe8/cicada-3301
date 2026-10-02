@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import io
 import time
 import textwrap
@@ -31,7 +32,8 @@ class EvalCog(commands.Cog, name="Developer-Eval"):
         """Execute asynchronous Python code snippet in safe sandbox."""
         # Clean markdown code blocks if provided
         if code.startswith("```") and code.endswith("```"):
-            code = "\n".join(code.split("\n")[1:-1])
+            lines = code.split("\n")
+            code = "\n".join(lines[1:-1])
         code = code.strip("` \n")
 
         local_vars = {
@@ -46,18 +48,31 @@ class EvalCog(commands.Cog, name="Developer-Eval"):
         }
 
         stdout = io.StringIO()
-        func_def = f"async def _eval_func():\n{textwrap.indent(code, '    ')}"
 
         try:
-            exec(func_def, local_vars)
+            fn_code = f"async def _eval_func():\n{textwrap.indent(code, '    ')}"
+            parsed = ast.parse(fn_code)
+            fn_node = parsed.body[0]
+
+            # convert trailing expression into return statement
+            if fn_node.body and isinstance(fn_node.body[-1], ast.Expr):
+                fn_node.body[-1] = ast.Return(value=fn_node.body[-1].value)
+                ast.fix_missing_locations(fn_node.body[-1])
+
+            compiled = compile(parsed, filename="<eval>", mode="exec")
+            exec(compiled, local_vars)
             func = local_vars["_eval_func"]
+
             t_start = time.perf_counter()
             with redirect_stdout(stdout):
                 ret = await func()
             t_dur = (time.perf_counter() - t_start) * 1000
 
-            res = stdout.getvalue()
-            result_str = str(ret) if ret is not None else (res.strip() if res else "None")
+            res = stdout.getvalue().strip()
+            if ret is not None:
+                result_str = f"{res}\n{ret}".strip() if res else str(ret)
+            else:
+                result_str = res if res else "None"
 
             container = KyroContainer(accent_color=None)
             container.add_section(content=f"```py\n{result_str[:1800]}\n```")

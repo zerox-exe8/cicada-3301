@@ -148,47 +148,8 @@ class KyroBot(commands.Bot):
         # Check if message is purely mentioning the bot (with optional spaces)
         clean_content = message.content.strip()
         if self.user and clean_content in [f"<@{self.user.id}>", f"<@!{self.user.id}>"]:
-            from src.utils.containers import KyroContainer, send_container_response
-            current_prefix = self.guild_mgr.get_prefix(message.guild.id if message.guild else None)
-            import math
-            ws_ping = round(self.latency * 1000) if (self.latency and not math.isnan(self.latency)) else 0
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    f"**Hey, I'm {Config.BOT_NAME}**\n"
-                    f"> Built for our community — keeping your server safe, active, and effortlessly connected."
-                )
-            )
-            container.add_separator(divider=True)
-            dot = self.custom_emojis.get("heart_dot", "•")
-            container.add_text(
-                f"{dot} **Prefix:** `{current_prefix}` | **Slash:** `/`\n"
-                f"{dot} **Latency:** `{ws_ping}ms` | **Status:** `Ready`\n"
-                f"{dot} **Quick Start:** `{current_prefix}help`"
-            )
-            container.add_separator(divider=True)
-            container.add_text(f"-# **Requested by {message.author.display_name}**")
-            container.add_separator(divider=True)
-
-            buttons = []
-            if Config.INVITE_URL:
-                buttons.append({
-                    "type": 2,
-                    "style": 5,
-                    "label": "Invite Kyro",
-                    "url": Config.INVITE_URL,
-                })
-            if Config.SUPPORT_URL:
-                buttons.append({
-                    "type": 2,
-                    "style": 5,
-                    "label": "Support Server",
-                    "url": Config.SUPPORT_URL,
-                })
-            if buttons:
-                container.add_action_row(buttons)
-
-            await send_container_response(message.channel, container)
+            from src.core.greetings import send_bot_mention_card
+            await send_bot_mention_card(self, message)
             return
 
         await self.process_commands(message)
@@ -333,69 +294,8 @@ class KyroBot(commands.Bot):
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         """Fired when Kyro is invited to a new server."""
-        logger.info(f"Joined new guild: {guild.name} ({guild.id}) with {getattr(guild, 'member_count', 0)} members.")
-
-        # Find best text channel to send the welcome introduction card
-        target_channel: discord.TextChannel | None = None
-        if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
-            target_channel = guild.system_channel
-        else:
-            for ch in guild.text_channels:
-                if ch.permissions_for(guild.me).send_messages and ch.permissions_for(guild.me).embed_links:
-                    if ch.name in ["general", "chat", "main", "bot-commands", "commands", "lounge"]:
-                        target_channel = ch
-                        break
-            if not target_channel:
-                for ch in guild.text_channels:
-                    if ch.permissions_for(guild.me).send_messages and ch.permissions_for(guild.me).embed_links:
-                        target_channel = ch
-                        break
-
-        if not target_channel:
-            return
-
-        from src.utils.containers import KyroContainer, send_container_response
-        prefix = self.guild_mgr.get_prefix(guild.id)
-        e_reg = self.custom_emojis
-        dot = e_reg.get("heart_dot", "•")
-
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Thanks for inviting {Config.BOT_NAME}!**\n"
-                f"> Built for our community — keeping your server safe, active, and effortlessly connected."
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(
-            f"{dot} **Prefix:** `{prefix}` | **Slash:** `/`\n"
-            f"{dot} **Quick Start:** `{prefix}help`"
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Configured for {guild.name}")
-
-        buttons = []
-        if Config.INVITE_URL:
-            buttons.append({
-                "type": 2,
-                "style": 5,
-                "label": "Invite Kyro",
-                "url": Config.INVITE_URL,
-            })
-        if Config.SUPPORT_URL:
-            buttons.append({
-                "type": 2,
-                "style": 5,
-                "label": "Support Server",
-                "url": Config.SUPPORT_URL,
-            })
-        if buttons:
-            container.add_action_row(buttons)
-
-        try:
-            await send_container_response(target_channel, container)
-        except Exception as e:
-            logger.warning(f"Failed to send welcome container in {guild.name}: {e}")
+        from src.core.greetings import send_guild_welcome_card
+        await send_guild_welcome_card(self, guild)
 
     async def on_guild_remove(self, guild: discord.Guild) -> None:
         """Fired when Kyro is removed from a server."""

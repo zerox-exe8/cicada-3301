@@ -223,6 +223,7 @@ Kyro/
     │   ├── bot.py               # KyroBot subclass with cache warming & dynamic cogs
     │   ├── config.py            # Environment configuration
     │   ├── context.py           # CustomContext with send_container, send_success, etc.
+    │   ├── greetings.py         # Dedicated introduction & welcome card builder
     │   ├── pricing.py           # Dual-currency pricing tier catalog
     │   └── server.py            # Uptime healthcheck & Razorpay webhook listener
     │

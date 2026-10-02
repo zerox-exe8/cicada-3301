@@ -29,7 +29,7 @@ class SystemCog(commands.Cog, name="Developer-System"):
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
-    @commands.command(name="sys", aliases=["cluster", "aura", "nodes", "bench", "host", "hardware"])
+    @commands.command(name="sys", aliases=["cluster", "aura", "nodes", "host", "hardware"])
     @is_developer()
     async def view_system(self, ctx: CustomContext) -> None:
         """

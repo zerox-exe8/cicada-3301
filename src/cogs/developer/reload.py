@@ -136,19 +136,39 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
 
                 t_dur = (time.perf_counter() - t_start) * 1000
 
-                info = [
-                    f"reloaded: {len(reloaded)} cogs",
-                    f"failed:   {len(failed)}",
-                ]
-                if failed:
-                    info.append("errors:")
+                # summarize cogs by category
+                cats: dict[str, int] = {}
+                for ext in reloaded:
+                    parts = ext.split(".")
+                    cat = parts[2].title() if len(parts) > 2 else "Core"
+                    cats[cat] = cats.get(cat, 0) + 1
+                cat_summary = ", ".join(f"{k} ({v})" for k, v in sorted(cats.items()))
+
+                if not failed:
+                    matrix = [
+                        "================ [ EXTENSION HOT-RELOAD ] ================",
+                        f"STATE         SYNCED (100% Operational)",
+                        f"LATENCY       {t_dur:.1f}ms",
+                        f"EXTENSIONS    {len(reloaded)} / {len(all_exts)} cogs live (0 faults)",
+                        f"CATEGORIES    {cat_summary}",
+                        "=========================================================",
+                    ]
+                else:
+                    matrix = [
+                        "================ [ EXTENSION HOT-RELOAD ] ================",
+                        f"STATE         PARTIAL ({len(failed)} Faults)",
+                        f"LATENCY       {t_dur:.1f}ms",
+                        f"RELOADED      {len(reloaded)} / {len(all_exts)} cogs live",
+                        "FAULTS:",
+                    ]
                     for f in failed[:5]:
-                        info.append(f"  - {f}")
+                        matrix.append(f"  - {f}")
+                    matrix.append("=========================================================")
 
                 container = KyroContainer(accent_color=None)
-                container.add_section(content=f"```yaml\n" + "\n".join(info) + "\n```")
+                container.add_section(content=f"```yaml\n" + "\n".join(matrix) + "\n```")
                 container.add_separator(divider=True)
-                container.add_text(f"-# {t_dur:.1f}ms")
+                container.add_text(f"-# hot-reload synchronized • {len(reloaded)} cogs fresh")
                 await send_container_response(ctx, container)
                 return
 

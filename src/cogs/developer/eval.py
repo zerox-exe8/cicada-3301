@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import io
+import os
+import sys
 import time
 import textwrap
 import traceback

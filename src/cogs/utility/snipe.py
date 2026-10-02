@@ -212,7 +212,21 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
             user_map[entry.author_id]["entries"].append(entry)
 
         container = KyroContainer(accent_color=None)
-        container.add_text(f"**Sniped Messages • #{ctx.channel.name}**")
+        title_text = f"**Sniped Message • #{ctx.channel.name}**" if len(groups) == 1 else f"**Sniped Messages • #{ctx.channel.name}**"
+
+        # Attach latest deleted author's avatar as thumbnail
+        primary_avatar = entries_to_show[0].author_avatar if entries_to_show[0].author_avatar else ""
+        if primary_avatar:
+            container.add_section(
+                content=title_text,
+                accessory={
+                    "type": 11,
+                    "media": {"url": primary_avatar}
+                }
+            )
+        else:
+            container.add_text(title_text)
+
         container.add_separator(divider=True)
 
         media_to_render: list[str] = []
@@ -230,14 +244,14 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
                     or raw_text.lower().split("?")[0].endswith(".gif")
                 )
 
-                # Format text content if present and not just a raw gif link that has media
+                # Format text content naturally with blockquote (clean Discord chat formatting)
                 if raw_text and not (is_gif_link and has_media):
                     if "\n" in raw_text:
                         for line in raw_text.splitlines():
                             if line.strip():
-                                user_lines.append(f"> `{line.strip()[:1000]}`")
+                                user_lines.append(f"> {line.strip()[:1000]}")
                     else:
-                        user_lines.append(f"> `{raw_text[:1000]}`")
+                        user_lines.append(f"> {raw_text[:1000]}")
 
                 # Handle media (images / gifs / attachments)
                 if has_media:
@@ -245,10 +259,10 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
                         clean_url = att_url.lower().split("?")[0]
                         if clean_url.endswith(".gif") or "tenor" in clean_url or "giphy" in clean_url:
                             if not raw_text or is_gif_link:
-                                user_lines.append(f"> {img_prefix}`[GIF Attachment]`")
+                                user_lines.append(f"> {img_prefix}[GIF Attachment]")
                         elif clean_url.endswith((".png", ".jpg", ".jpeg", ".webp")):
                             if not raw_text:
-                                user_lines.append(f"> {img_prefix}`[Image Attachment]`")
+                                user_lines.append(f"> {img_prefix}[Image Attachment]")
                         else:
                             user_lines.append(f"> {file_prefix}[Attachment]({att_url})")
 
@@ -257,7 +271,7 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
                             if att_url not in media_to_render:
                                 media_to_render.append(att_url)
                 elif is_gif_link:
-                    user_lines.append(f"> {img_prefix}`[GIF Attachment]`")
+                    user_lines.append(f"> {img_prefix}[GIF Attachment]")
                     clean_u = raw_text.lower().split("?")[0]
                     if clean_u.endswith((".gif", ".png", ".jpg", ".jpeg", ".webp")):
                         if raw_text not in media_to_render:

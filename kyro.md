@@ -244,8 +244,7 @@ Kyro/
     │   ├── containers.py        # KyroContainer (Components V2), send_container_response
     │   ├── placeholders.py      # Universal variable replacement engine
     │   ├── emojis.py            # Dynamic custom application emoji resolver
-    │   ├── logger.py            # Colorlog & rotating file logging
-    │   └── views.py             # Reusable Discord UI Views
+    │   └── logger.py            # Colorlog & rotating file logging
     │
     └── cogs/
         ├── admin/               # Prefix & command synchronization

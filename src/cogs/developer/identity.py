@@ -512,6 +512,24 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
             container.add_text(f"**Failed to update status:** `{e}`")
             await send_container_response(ctx, container)
 
+    @commands.command(name="setavatar", aliases=["changeavatar"], hidden=True)
+    @is_developer()
+    async def set_avatar_cmd(self, ctx: CustomContext, url: Optional[str] = None) -> None:
+        """Shortcut command for ?botedit avatar"""
+        await self.edit_avatar(ctx, url=url)
+
+    @commands.command(name="setname", aliases=["changename", "botname"], hidden=True)
+    @is_developer()
+    async def set_name_cmd(self, ctx: CustomContext, *, new_name: str) -> None:
+        """Shortcut command for ?botedit name"""
+        await self.edit_name(ctx, new_name=new_name)
+
+    @commands.command(name="setstatus", aliases=["activity", "changestatus"], hidden=True)
+    @is_developer()
+    async def set_status_cmd(self, ctx: CustomContext, *, new_status: str) -> None:
+        """Shortcut command for ?botedit status"""
+        await self.edit_status(ctx, new_status=new_status)
+
 
 async def setup(bot: KyroBot) -> None:
     await bot.add_cog(IdentityCog(bot))

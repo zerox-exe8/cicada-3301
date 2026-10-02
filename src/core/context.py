@@ -5,7 +5,6 @@ import discord
 from discord.ext import commands
 
 from src.utils.containers import KyroContainer, send_container_response
-from src.utils.views import ConfirmView
 
 
 class CustomContext(commands.Context):

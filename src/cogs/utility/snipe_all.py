@@ -92,19 +92,7 @@ class SnipeAllCog(commands.Cog, name="Utility-SnipeAll"):
 
         container = KyroContainer(accent_color=None)
         title_text = "**Server Sniped Messages**"
-        server_icon = ctx.guild.icon.url if ctx.guild.icon else (recent_entries[0].author_avatar if recent_entries[0].author_avatar else "")
-
-        if server_icon:
-            container.add_section(
-                content=title_text,
-                accessory={
-                    "type": 11,
-                    "media": {"url": server_icon}
-                }
-            )
-        else:
-            container.add_text(title_text)
-
+        container.add_text(title_text)
         container.add_separator(divider=True)
 
         media_to_render: list[str] = []

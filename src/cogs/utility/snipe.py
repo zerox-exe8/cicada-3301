@@ -213,20 +213,7 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
 
         container = KyroContainer(accent_color=None)
         title_text = f"**Sniped Message • #{ctx.channel.name}**" if len(groups) == 1 else f"**Sniped Messages • #{ctx.channel.name}**"
-
-        # Attach latest deleted author's avatar as thumbnail
-        primary_avatar = entries_to_show[0].author_avatar if entries_to_show[0].author_avatar else ""
-        if primary_avatar:
-            container.add_section(
-                content=title_text,
-                accessory={
-                    "type": 11,
-                    "media": {"url": primary_avatar}
-                }
-            )
-        else:
-            container.add_text(title_text)
-
+        container.add_text(title_text)
         container.add_separator(divider=True)
 
         media_to_render: list[str] = []

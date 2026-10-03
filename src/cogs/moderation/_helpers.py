@@ -33,6 +33,51 @@ def parse_duration(duration_str: str) -> Optional[datetime.timedelta]:
     return None
 
 
+def resolve_role(guild: discord.Guild, query: str) -> Optional[discord.Role]:
+    """
+    Resolve a role in the guild from:
+    1. Role mention (<@&123456789>)
+    2. Role ID (123456789)
+    3. Exact role name (case-insensitive)
+    4. Role name starting with query (case-insensitive)
+    5. Substring match on role name (case-insensitive, ignoring @everyone)
+    """
+    clean_query = query.strip()
+    if not clean_query:
+        return None
+
+    # 1. Mention check: <@&123456789>
+    mention_match = re.match(r"^<@&(\d+)>$", clean_query)
+    if mention_match:
+        role_id = int(mention_match.group(1))
+        return guild.get_role(role_id)
+
+    # 2. Raw Digits (Role ID): 123456789
+    if clean_query.isdigit():
+        role = guild.get_role(int(clean_query))
+        if role:
+            return role
+
+    clean_lower = clean_query.lower()
+
+    # 3. Exact name match (case-insensitive)
+    for r in guild.roles:
+        if r.name.lower() == clean_lower:
+            return r
+
+    # 4. Starts with match (case-insensitive)
+    for r in guild.roles:
+        if r.name.lower().startswith(clean_lower):
+            return r
+
+    # 5. Substring match (case-insensitive, ignoring @everyone)
+    for r in guild.roles:
+        if not r.is_default() and clean_lower in r.name.lower():
+            return r
+
+    return None
+
+
 def check_hierarchy(bot: KyroBot, ctx: CustomContext, target: discord.Member) -> tuple[bool, str | None]:
     """Verify role hierarchy rules between author, bot, and target."""
     if target.id == ctx.author.id:

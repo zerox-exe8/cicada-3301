@@ -14,58 +14,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.cogs.moderation._helpers import check_hierarchy, dispatch_mod_log
+from src.cogs.moderation._helpers import check_hierarchy, dispatch_mod_log, resolve_role
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
 logger = logging.getLogger("Kyro.Moderation.Role")
-
-
-def resolve_role(guild: discord.Guild, query: str) -> Optional[discord.Role]:
-    """
-    Resolve a role in the guild from:
-    1. Role mention (<@&123456789>)
-    2. Role ID (123456789)
-    3. Exact role name (case-insensitive)
-    4. Role name starting with query (case-insensitive)
-    5. Substring match on role name (case-insensitive, ignoring @everyone)
-    """
-    clean_query = query.strip()
-    if not clean_query:
-        return None
-
-    # 1. Mention check: <@&123456789>
-    mention_match = re.match(r"^<@&(\d+)>$", clean_query)
-    if mention_match:
-        role_id = int(mention_match.group(1))
-        return guild.get_role(role_id)
-
-    # 2. Raw Digits (Role ID): 123456789
-    if clean_query.isdigit():
-        role = guild.get_role(int(clean_query))
-        if role:
-            return role
-
-    clean_lower = clean_query.lower()
-
-    # 3. Exact name match (case-insensitive)
-    for r in guild.roles:
-        if r.name.lower() == clean_lower:
-            return r
-
-    # 4. Starts with match (case-insensitive)
-    for r in guild.roles:
-        if r.name.lower().startswith(clean_lower):
-            return r
-
-    # 5. Substring match (case-insensitive, ignoring @everyone)
-    for r in guild.roles:
-        if not r.is_default() and clean_lower in r.name.lower():
-            return r
-
-    return None
 
 
 class Role(commands.Cog, name="Moderation-Role"):
@@ -98,8 +53,15 @@ class Role(commands.Cog, name="Moderation-Role"):
         if ctx_or_member.id != guild.owner_id and role >= ctx_or_member.top_role:
             return False, "You cannot assign or remove this role because it is higher than or equal to your highest role."
 
-        if target and target.id == guild.owner_id and ctx_or_member.id != guild.owner_id:
-            return False, "You cannot modify roles of the server owner."
+        if target:
+            if target.id == guild.owner_id and ctx_or_member.id != guild.owner_id:
+                return False, "You cannot modify roles of the server owner."
+
+            if target.top_role >= bot_member.top_role:
+                return False, "I cannot manage this member because their highest role is higher than or equal to mine."
+
+            if ctx_or_member.id != guild.owner_id and target.id != ctx_or_member.id and target.top_role >= ctx_or_member.top_role:
+                return False, "You cannot modify roles of this member because their highest role is higher than or equal to yours."
 
         return True, None
 
@@ -218,18 +180,31 @@ class Role(commands.Cog, name="Moderation-Role"):
             return
 
         # Smart Toggle Logic
-        if target_role in member.roles:
-            await member.remove_roles(target_role, reason=f"Role toggle by {ctx.author} ({ctx.author.id})")
-            await dispatch_mod_log(self.bot, ctx.guild, "Role Removed", member, ctx.author, extra=f"Role: {target_role.name}")
-            container = self._build_role_card(ctx, "Removed", member, target_role)
+        try:
+            if target_role in member.roles:
+                await member.remove_roles(target_role, reason=f"Role toggle by {ctx.author} ({ctx.author.id})")
+                await dispatch_mod_log(self.bot, ctx.guild, "Role Removed", member, ctx.author, extra=f"Role: {target_role.name}")
+                container = self._build_role_card(ctx, "Removed", member, target_role)
+                await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await member.add_roles(target_role, reason=f"Role toggle by {ctx.author} ({ctx.author.id})")
+                await dispatch_mod_log(self.bot, ctx.guild, "Role Added", member, ctx.author, extra=f"Role: {target_role.name}")
+                container = self._build_role_card(ctx, "Added", member, target_role)
+                # Only ping target member receiving the role
+                user_ping = discord.AllowedMentions(users=[member], roles=False, everyone=False, replied_user=False)
+                await send_container_response(ctx, container, allowed_mentions=user_ping)
+        except discord.Forbidden:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Permission Error**\n> I lack the necessary permissions to update this role.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
-        else:
-            await member.add_roles(target_role, reason=f"Role toggle by {ctx.author} ({ctx.author.id})")
-            await dispatch_mod_log(self.bot, ctx.guild, "Role Added", member, ctx.author, extra=f"Role: {target_role.name}")
-            container = self._build_role_card(ctx, "Added", member, target_role)
-            # Only ping target member receiving the role
-            user_ping = discord.AllowedMentions(users=[member], roles=False, everyone=False, replied_user=False)
-            await send_container_response(ctx, container, allowed_mentions=user_ping)
+        except discord.HTTPException as e:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content=f"**Discord Error**\n> Failed to update role: `{e.text}`")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
 
     @role_group.command(
         name="add",
@@ -289,12 +264,25 @@ class Role(commands.Cog, name="Moderation-Role"):
             await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
             return
 
-        await member.add_roles(target_role, reason=f"Role added by {ctx.author} ({ctx.author.id})")
-        await dispatch_mod_log(self.bot, ctx.guild, "Role Added", member, ctx.author, extra=f"Role: {target_role.name}")
-        container = self._build_role_card(ctx, "Added", member, target_role)
-        # Only ping target member receiving the role
-        user_ping = discord.AllowedMentions(users=[member], roles=False, everyone=False, replied_user=False)
-        await send_container_response(ctx, container, allowed_mentions=user_ping)
+        try:
+            await member.add_roles(target_role, reason=f"Role added by {ctx.author} ({ctx.author.id})")
+            await dispatch_mod_log(self.bot, ctx.guild, "Role Added", member, ctx.author, extra=f"Role: {target_role.name}")
+            container = self._build_role_card(ctx, "Added", member, target_role)
+            # Only ping target member receiving the role
+            user_ping = discord.AllowedMentions(users=[member], roles=False, everyone=False, replied_user=False)
+            await send_container_response(ctx, container, allowed_mentions=user_ping)
+        except discord.Forbidden:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Permission Error**\n> I lack the necessary permissions to update this role.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as e:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content=f"**Discord Error**\n> Failed to update role: `{e.text}`")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
 
     @role_group.command(
         name="remove",
@@ -353,10 +341,23 @@ class Role(commands.Cog, name="Moderation-Role"):
             await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
             return
 
-        await member.remove_roles(target_role, reason=f"Role removed by {ctx.author} ({ctx.author.id})")
-        await dispatch_mod_log(self.bot, ctx.guild, "Role Removed", member, ctx.author, extra=f"Role: {target_role.name}")
-        container = self._build_role_card(ctx, "Removed", member, target_role)
-        await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
+        try:
+            await member.remove_roles(target_role, reason=f"Role removed by {ctx.author} ({ctx.author.id})")
+            await dispatch_mod_log(self.bot, ctx.guild, "Role Removed", member, ctx.author, extra=f"Role: {target_role.name}")
+            container = self._build_role_card(ctx, "Removed", member, target_role)
+            await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
+        except discord.Forbidden:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Permission Error**\n> I lack the necessary permissions to update this role.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as e:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content=f"**Discord Error**\n> Failed to update role: `{e.text}`")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
 
 
 async def setup(bot: KyroBot) -> None:

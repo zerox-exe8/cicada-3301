@@ -279,21 +279,44 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
     @commands.hybrid_command(
         name="clearsnipe",
         aliases=["csnipe"],
-        description="Purge the deleted message snipe cache for this channel.",
+        description="Purge the deleted message snipe cache for this channel (or 'all' for entire server).",
     )
     @commands.guild_only()
     @commands.has_permissions(manage_messages=True)
-    async def clearsnipe(self, ctx: CustomContext) -> None:
-        """Purge the deleted message snipe cache for this channel."""
+    async def clearsnipe(self, ctx: CustomContext, scope: Optional[str] = None) -> None:
+        """
+        Purge the deleted message snipe cache for this channel.
+        Pass 'all' as scope to wipe all channels across the server.
+        """
+        if scope and scope.strip().lower() in ("all", "server", "guild"):
+            clearsnipeall_cmd = self.bot.get_command("clearsnipeall")
+            if clearsnipeall_cmd:
+                await clearsnipeall_cmd(ctx)
+                return
+
         channel_id = ctx.channel.id
+        guild_id = ctx.guild.id
         count = len(self.bot.snipe_cache.get(channel_id, []))
         if channel_id in self.bot.snipe_cache:
             self.bot.snipe_cache[channel_id].clear()
 
+        # Also remove this channel's entries from guild_snipe_cache
+        if hasattr(self.bot, "guild_snipe_cache") and guild_id in self.bot.guild_snipe_cache:
+            self.bot.guild_snipe_cache[guild_id] = deque(
+                [e for e in self.bot.guild_snipe_cache[guild_id] if e.channel_id != channel_id],
+                maxlen=100
+            )
+
         container = KyroContainer(accent_color=None)
-        container.add_text(f"**Snipe Cache Cleared • #{ctx.channel.name}**")
-        container.add_separator(divider=True)
-        container.add_text(f"> Successfully purged `{count}` cached message(s).")
+        if count == 0:
+            container.add_text(f"**Snipe Cache is Empty • #{ctx.channel.name}**")
+            container.add_separator(divider=True)
+            container.add_text(f"> No cached deleted messages found in #{ctx.channel.name}.")
+        else:
+            container.add_text(f"**Snipe Cache Cleared • #{ctx.channel.name}**")
+            container.add_separator(divider=True)
+            container.add_text(f"> Successfully purged `{count}` cached message(s) from #{ctx.channel.name}.")
+
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)

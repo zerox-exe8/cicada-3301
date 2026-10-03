@@ -6,7 +6,7 @@ Clean, focused overview of recently deleted messages across all server channels.
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 import discord
 from discord.ext import commands
 
@@ -155,21 +155,52 @@ class SnipeAllCog(commands.Cog, name="Utility-SnipeAll"):
     @commands.hybrid_command(
         name="clearsnipeall",
         aliases=["csnipeall", "wipesnipeall"],
-        description="Wipe the server-wide deleted message cache.",
+        description="Wipe the server-wide deleted message cache across all channels.",
     )
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @commands.has_permissions(manage_messages=True)
     async def clearsnipeall(self, ctx: CustomContext) -> None:
-        """Wipe the server-wide deleted message cache."""
+        """
+        Wipe the server-wide deleted message cache across all channels.
+        Requires Manage Messages permission.
+        """
         guild_id = ctx.guild.id
-        count = len(getattr(self.bot, "guild_snipe_cache", {}).get(guild_id, []))
-        if guild_id in getattr(self.bot, "guild_snipe_cache", {}):
-            self.bot.guild_snipe_cache[guild_id].clear()
+        guild_cache = getattr(self.bot, "guild_snipe_cache", {})
+        snipe_cache = getattr(self.bot, "snipe_cache", {})
+
+        cleared_ids = set()
+
+        # 1. Clear server-wide cache
+        if guild_id in guild_cache:
+            for entry in list(guild_cache[guild_id]):
+                cleared_ids.add(entry.id)
+            guild_cache[guild_id].clear()
+
+        # 2. Clear all channel-specific snipe caches in this guild
+        for channel in ctx.guild.channels:
+            if channel.id in snipe_cache:
+                for entry in list(snipe_cache[channel.id]):
+                    cleared_ids.add(entry.id)
+                snipe_cache[channel.id].clear()
+
+        for thread in getattr(ctx.guild, "threads", []):
+            if thread.id in snipe_cache:
+                for entry in list(snipe_cache[thread.id]):
+                    cleared_ids.add(entry.id)
+                snipe_cache[thread.id].clear()
+
+        total_cleared = len(cleared_ids)
 
         container = KyroContainer(accent_color=None)
-        container.add_text(f"**Server Snipe Cache Cleared**")
-        container.add_separator(divider=True)
-        container.add_text(f"> Successfully wiped `{count}` tracked server message(s) in **{ctx.guild.name}**.")
+        if total_cleared == 0:
+            container.add_text("**Server Snipe Cache is Empty**")
+            container.add_separator(divider=True)
+            container.add_text(f"> No deleted messages were found in the cache for **{ctx.guild.name}**.")
+        else:
+            container.add_text("**Server Snipe Cache Cleared**")
+            container.add_separator(divider=True)
+            container.add_text(f"> Successfully wiped `{total_cleared}` cached deleted message(s) across all channels.")
+
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)

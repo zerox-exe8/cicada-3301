@@ -123,8 +123,15 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
             except Exception as e:
                 logger.debug(f"Guild chunking skipped/failed: {e}")
 
-        # Target human members who don't already have the role
-        targets = [m for m in ctx.guild.members if not m.bot and target_role not in m.roles]
+        # Target human members who don't already have the role and can be managed by the bot
+        bot_top = ctx.guild.me.top_role
+        targets = [
+            m for m in ctx.guild.members
+            if not m.bot
+            and target_role not in m.roles
+            and m.id != ctx.guild.owner_id
+            and m.top_role < bot_top
+        ]
         await self._execute_mass_role(ctx, target_role, targets, action="add", scope_label="All Human Members")
 
     @roleall_group.command(
@@ -171,7 +178,13 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
             except Exception as e:
                 logger.debug(f"Guild chunking skipped/failed: {e}")
 
-        targets = [m for m in ctx.guild.members if target_role in m.roles]
+        bot_top = ctx.guild.me.top_role
+        targets = [
+            m for m in ctx.guild.members
+            if target_role in m.roles
+            and m.id != ctx.guild.owner_id
+            and m.top_role < bot_top
+        ]
         await self._execute_mass_role(ctx, target_role, targets, action="remove", scope_label="Members with Role")
 
     @roleall_group.command(

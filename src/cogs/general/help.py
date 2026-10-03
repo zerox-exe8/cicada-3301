@@ -240,7 +240,7 @@ class Help(commands.Cog):
                 # Channels & Cleanup
                 "lock", "unlock", "purge", "clear", "slowmode", "snipe", "snipeall", "clearsnipe", "clearsnipeall",
                 # Roles
-                "role", "roleall", "roleinfo", "inrole", "listroles",
+                "role", "roleall", "roleinfo", "listroles",
                 # Server Tools & Expressions
                 "emojis", "expressions", "stickers", "delemoji", "delsticker", "steal",
                 # Server Info & Utilities

@@ -56,15 +56,15 @@ class EmojiRegistry:
                 if "white_line" not in self._emojis:
                     from pathlib import Path
                     wl_path = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji" / "white_line.png"
-                    if wl_path.exists() and len(self._emojis) < 50:
+                    if wl_path.exists():
                         try:
                             with open(wl_path, "rb") as f:
                                 data = f.read()
                             new_e = await self.bot.create_application_emoji(name="white_line", image=data)
                             self._emojis["white_line"] = new_e
-                            logger.info(f"Auto-uploaded white_line to application emojis.")
+                            logger.info("Auto-uploaded white_line to application emojis.")
                         except Exception as e:
-                            logger.debug(f"Could not auto-upload white_line: {e}")
+                            logger.warning(f"Could not auto-upload white_line: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 
@@ -162,6 +162,7 @@ class EmojiRegistry:
         # Smart alias fallbacks for arrow, music, and common icons
         if not emoji:
             alias_map = {
+                "white_line": ["whiteline", "line", "icon_line"],
                 "white_arrow": ["icons_rightarrow", "tts_right_arrow", "icons_arrow"],
                 "tts_right_arrow": ["icons_rightarrow", "icons_arrow"],
                 "icons_arrow": ["icons_rightarrow", "heart_dot", "icon_arrow_left"],
@@ -225,6 +226,7 @@ class EmojiRegistry:
 
         if not emoji:
             alias_map = {
+                "white_line": ["whiteline", "line", "icon_line"],
                 "white_arrow": ["icons_rightarrow", "tts_right_arrow", "icons_arrow"],
                 "tts_right_arrow": ["icons_rightarrow", "icons_arrow"],
                 "icons_arrow": ["icons_rightarrow", "heart_dot"],

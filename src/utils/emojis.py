@@ -148,6 +148,7 @@ class EmojiRegistry:
         # Smart alias fallbacks for arrow, music, and common icons
         if not emoji:
             alias_map = {
+                "tts_right_arrow": ["icons_rightarrow", "icons_arrow"],
                 "icons_arrow": ["icons_rightarrow", "heart_dot", "icon_arrow_left"],
                 "icons_rightarrow": ["icons_arrow", "heart_dot"],
                 "icon_arrow_left": ["icons_leftarrow"],
@@ -209,6 +210,7 @@ class EmojiRegistry:
 
         if not emoji:
             alias_map = {
+                "tts_right_arrow": ["icons_rightarrow", "icons_arrow"],
                 "icons_arrow": ["icons_rightarrow", "heart_dot"],
                 "icons_rightarrow": ["icons_arrow", "heart_dot"],
                 "icon_arrow_left": ["icons_leftarrow"],

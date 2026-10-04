@@ -138,11 +138,14 @@ class RoleListPaginationView(discord.ui.View):
         end = start + self.per_page
         current_slice = self.roles[start:end]
 
+        e_reg = self.ctx.bot.custom_emojis
+        arrow = e_reg.get("tts_right_arrow", "➔")
+
         lines = []
-        for idx, r in enumerate(current_slice, start=start + 1):
+        for r in current_slice:
             member_count = len(r.members)
             member_suffix = "member" if member_count == 1 else "members"
-            lines.append(f"`#{idx:02d}` │ `@{r.name}` ➔ `{member_count:,} {member_suffix}`")
+            lines.append(f"{arrow} `@{r.name}` — {member_count:,} {member_suffix}")
 
         container = KyroContainer(accent_color=0xF472B6)
         container.add_text(

@@ -146,7 +146,7 @@ class RoleListPaginationView(discord.ui.View):
             member_count = len(r.members)
             lines.append(f"{arrow} `@{r.name}` — `{member_count:,}`")
 
-        container = KyroContainer(accent_color=0xF472B6)
+        container = KyroContainer(accent_color=None)
         container.add_text(
             f"### {self.ctx.guild.name} — Roles\n"
             f"-# Total {len(self.roles)} roles in this server"

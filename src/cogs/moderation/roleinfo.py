@@ -164,16 +164,14 @@ class RoleInfoView(discord.ui.View):
             role_type = "Standard Role"
 
         perms = self.role.permissions
-        key_perms: list[str] = []
         if perms.administrator:
-            key_perms.append("Administrator")
+            perms_str = "`Administrator`"
         else:
+            key_perms: list[str] = []
             if perms.manage_guild:
                 key_perms.append("Manage Server")
             if perms.manage_roles:
                 key_perms.append("Manage Roles")
-            if perms.manage_channels:
-                key_perms.append("Manage Channels")
             if perms.ban_members:
                 key_perms.append("Ban Members")
             if perms.kick_members:
@@ -182,18 +180,17 @@ class RoleInfoView(discord.ui.View):
                 key_perms.append("Timeout Members")
             if perms.manage_messages:
                 key_perms.append("Manage Messages")
-            if perms.mention_everyone:
-                key_perms.append("Mention Everyone")
-            if perms.view_audit_log:
-                key_perms.append("View Audit Log")
 
-        perms_str = " ".join(f"`{p}`" for p in key_perms) if key_perms else "`Standard Member Permissions`"
+            if key_perms:
+                perms_str = " ".join(f"`{p}`" for p in key_perms[:4])
+            else:
+                perms_str = "`Member Permissions`"
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"**Role Information**\n"
-                f"> Details, permissions, and members for {self.role.mention}."
+                f"> Details, permissions, and members overview."
             )
         )
         container.add_separator(divider=True)
@@ -201,15 +198,17 @@ class RoleInfoView(discord.ui.View):
         container.add_text(
             f"{dot} **Role:** {self.role.mention}\n"
             f"{dot} **Role ID:** `{self.role.id}`\n"
-            f"{dot} **Color:** `{hex_color}` • **Position:** `{hierarchy_pos}`\n"
-            f"{dot} **Members:** `{len(self.members)}` members\n"
+            f"{dot} **Color:** `{hex_color}`\n"
+            f"{dot} **Position:** `{hierarchy_pos}`\n"
+            f"{dot} **Members:** `{len(self.members)}`\n"
             f"{dot} **Created:** <t:{created_ts}:D>"
         )
         container.add_separator(divider=True)
 
         container.add_text(
             f"**Settings & Type**\n"
-            f"{dot} **Hoisted:** `{hoist_str}` • **Mentionable:** `{mention_str}`\n"
+            f"{dot} **Hoisted:** `{hoist_str}`\n"
+            f"{dot} **Mentionable:** `{mention_str}`\n"
             f"{dot} **Role Type:** `{role_type}`"
         )
         container.add_separator(divider=True)
@@ -218,9 +217,6 @@ class RoleInfoView(discord.ui.View):
             f"**Key Permissions**\n"
             f"{perms_str}"
         )
-
-        if self.role.display_icon:
-            container.add_thumbnail(str(self.role.display_icon.url))
 
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {self.ctx.author.display_name}")
@@ -238,7 +234,7 @@ class RoleInfoView(discord.ui.View):
         container.add_section(
             content=(
                 f"**Role Permissions**\n"
-                f"> Enabled permissions for {self.role.mention}."
+                f"> Active and enabled permissions breakdown."
             )
         )
         container.add_separator(divider=True)
@@ -284,7 +280,7 @@ class RoleInfoView(discord.ui.View):
         container.add_section(
             content=(
                 f"**Role Members**\n"
-                f"> Showing {count_str} with {self.role.mention}."
+                f"> Showing {count_str} in this server role."
             )
         )
         container.add_separator(divider=True)

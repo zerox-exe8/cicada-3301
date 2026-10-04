@@ -139,11 +139,10 @@ class RoleListPaginationView(discord.ui.View):
         current_slice = self.roles[start:end]
 
         lines = []
-        for r in current_slice:
+        for idx, r in enumerate(current_slice, start=start + 1):
             member_count = len(r.members)
-            member_str = f"{member_count:,} member" if member_count == 1 else f"{member_count:,} members"
-            hex_color = f"#{r.color.value:06X}" if r.color.value else "Default"
-            lines.append(f"`@{r.name}` — {member_str} [{hex_color}]")
+            member_suffix = "member" if member_count == 1 else "members"
+            lines.append(f"`#{idx:02d}` │ `@{r.name}` ➔ `{member_count:,} {member_suffix}`")
 
         container = KyroContainer(accent_color=0xF472B6)
         container.add_text(

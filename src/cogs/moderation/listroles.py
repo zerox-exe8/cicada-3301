@@ -84,7 +84,7 @@ class RoleListPaginationView(discord.ui.View):
         lines = []
         for r in current_slice:
             member_count = len(r.members)
-            lines.append(f"{dot} `@{r.name}` `「{r.id}」` **—** `「{member_count:,}」`")
+            lines.append(f"{dot} `@{r.name}` **—** `「{member_count:,}」`\n  └ `「{r.id}」`")
 
         container = KyroContainer(accent_color=None)
         container.add_text(

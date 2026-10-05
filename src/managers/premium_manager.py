@@ -24,6 +24,8 @@ class PremiumManager:
         self._failed_attempts: dict[int, list[datetime.datetime]] = {}
         # Cooldown blocks: {user_id: blocked_until_datetime}
         self._blocked_users: dict[int, datetime.datetime] = {}
+        # Renewal reminder dedup: {guild_id: last_sent_datetime}
+        self._reminder_sent: dict[int, datetime.datetime] = {}
 
     def check_rate_limit(self, user_id: int) -> tuple[bool, int]:
         """
@@ -562,9 +564,8 @@ class PremiumManager:
 
         rows = await self.db.fetch_all(
             """
-            SELECT gp.guild_id, gp.activated_by, gp.expires_at, pt.id as tx_id, pt.last_reminder_sent_at
+            SELECT gp.guild_id, gp.activated_by, gp.expires_at
             FROM guild_premium gp
-            LEFT JOIN payment_transactions pt ON gp.guild_id = pt.guild_id AND pt.status = 'paid'
             WHERE gp.expires_at IS NOT NULL 
               AND gp.expires_at > ? 
               AND gp.expires_at <= ?;
@@ -577,10 +578,9 @@ class PremiumManager:
             g_id = int(row["guild_id"])
             user_id = int(row["activated_by"]) if row.get("activated_by") else None
             exp: datetime.datetime = row["expires_at"]
-            last_sent = row.get("last_reminder_sent_at")
-            tx_id = row.get("tx_id")
 
-            # Avoid sending multiple reminders in the same cycle
+            # Avoid sending multiple reminders in the same cycle (in-memory 24h guard)
+            last_sent = self._reminder_sent.get(g_id)
             if last_sent and (db_now - last_sent).total_seconds() < 86400:
                 continue
 
@@ -606,19 +606,14 @@ class PremiumManager:
                 container.add_text(
                     f"**Kyro Pro Subscription Expiring Soon**\n\n"
                     f"> Your Pro subscription for **{guild_name}** will expire in **{days_left} day(s)** (<t:{int(exp.replace(tzinfo=datetime.timezone.utc).timestamp())}:R>).\n\n"
-                    f"• **Renew Seamlessly:** Run `?buy` in your server to renew without any feature downtime!"
+                    f"• **Renew Seamlessly:** Ask the Kyro team for a fresh premium key to renew without any feature downtime!"
                 )
                 container.add_separator(divider=True)
                 container.add_text("-# Kyro Subscription Renewal Alert")
 
                 await send_container_response(user, container)
                 logger.info(f"Sent renewal reminder DM to user {user_id} for guild {g_id}.")
-
-                if tx_id:
-                    await self.db.execute(
-                        "UPDATE payment_transactions SET last_reminder_sent_at = CURRENT_TIMESTAMP WHERE id = ?;",
-                        tx_id,
-                    )
+                self._reminder_sent[g_id] = db_now
             except Exception as e:
                 logger.warning(f"Could not send renewal reminder to user {user_id}: {e}")
 

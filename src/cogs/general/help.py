@@ -437,28 +437,6 @@ class Help(commands.Cog):
 
                     await edit_container_response(interaction, new_container)
 
-                elif action == "action_trial":
-                    buy_cog = self.bot.get_cog("PremiumPurchase")
-                    if buy_cog:
-                        c = KyroContainer()
-                        c.add_section(
-                            content=(
-                                "**Kyro Prime Trial**\n"
-                                "> Type `?buy` and select **Claim 3-Day Free Trial** to activate Pro for this server."
-                            )
-                        )
-                        await send_container_response(interaction, c, ephemeral=True)
-
-                elif action == "action_buy":
-                    c = KyroContainer()
-                    c.add_section(
-                        content=(
-                            "**Kyro Checkout**\n"
-                            "> Type `?buy` to open the interactive Checkout Console and select a plan."
-                        )
-                    )
-                    await send_container_response(interaction, c, ephemeral=True)
-
             except asyncio.TimeoutError:
                 break
 

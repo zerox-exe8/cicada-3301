@@ -4,6 +4,7 @@
 > **Bot Name**: Kyro | **Primary Prefix**: `?` (Configurable per-guild)  
 > **Audience**: AI Coding Assistants, Lead System Architects, and Software Engineers.  
 > **Purpose**: Single authoritative source of truth for the entire Kyro codebase. Contains all architectural rules, developer directives, database schemas, and feature specifications.
+> **Payments**: REMOVED — no Razorpay, no `?buy`, no webhooks. Premium via manual license keys only.
 
 ---
 
@@ -43,7 +44,7 @@
   - **Discord API Framework**: `discord.py` 2.4+ (Extended with Components V2 Layouts)
   - **Database Persistence**: Supabase (Cloud PostgreSQL) via `asyncpg` connection pool
   - **HTTP Server**: `aiohttp` Keep-Alive & Payment Webhook Server on port `8080`
-  - **Payment Gateway**: Razorpay API (Automated checkout in `$USD` and `₹INR` with HMAC-SHA256 webhook fulfillment)
+  - **Payment Gateway**: none (removed — premium via manual license keys only)
   - **Cloud Hosting Platform**: Render.com (Web Service with 24/7 background worker)
 
 ---
@@ -148,25 +149,7 @@ CREATE TABLE IF NOT EXISTS premium_customers (
     last_redeemed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 10. Automated Payment Transactions & Webhooks
-CREATE TABLE IF NOT EXISTS payment_transactions (
-    id SERIAL PRIMARY KEY,
-    razorpay_order_id VARCHAR(64),
-    razorpay_payment_id VARCHAR(64) UNIQUE,
-    razorpay_payment_link_id VARCHAR(64),
-    discord_user_id BIGINT NOT NULL,
-    guild_id BIGINT,
-    target_type VARCHAR(20) NOT NULL,      -- 'guild' or 'user'
-    duration_days INT NOT NULL,
-    plan_tier VARCHAR(50) DEFAULT 'pro',
-    amount_smallest_unit INT NOT NULL,
-    currency VARCHAR(10) DEFAULT 'INR',
-    status VARCHAR(20) DEFAULT 'created',  -- created | paid | failed | refunded
-    is_trial BOOLEAN DEFAULT FALSE,
-    last_reminder_sent_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    paid_at TIMESTAMP
-);
+-- 10. Automated Payment Transactions REMOVED (no payment gateway).
 
 -- 11. Server Auto-Events (Welcome, Leave, Boost)
 CREATE TABLE IF NOT EXISTS guild_events (
@@ -196,16 +179,11 @@ CREATE TABLE IF NOT EXISTS embed_templates (
 
 ---
 
-## 5. 💳 Monetization & Payment Architecture
+## 5. 🔑 Premium Key System (Manual Distribution)
 
-- **Pricing Engine** (`src/core/pricing.py`):
-  - **3-Day Free Trial**: `$0.00 / ₹0` (1-time claim per server, Administrator permission).
-  - **1 Month Pro**: `$4.99 / ₹399` (`30d`).
-  - **3 Months Pro**: `$11.99 / ₹999` (`90d` — Save 20%).
-  - **1 Year Pro**: `$39.99 / ₹3,299` (`365d` — Enterprise).
-  - **Lifetime Pro**: `$69.99 / ₹5,799` (VIP, zero recurring fees).
-- **Checkout Console (`?buy`)**: 3-Tab interactive Components V2 card (`[Overview]`, `[Plans & Checkout]`, `[Free vs Pro]`).
-- **Webhook Security**: Razorpay HMAC-SHA256 signature verification on `/webhook/razorpay`. Idempotent updates prevent race conditions and duplicate grants.
+- **No payment gateway**: Razorpay integration fully removed. No checkout, no webhooks, no `payment_transactions` table.
+- **License keys only**: Developers generate keys (`premium_keys` table), users redeem via `redeem_key`. Expiry reminders point to the Kyro team for fresh keys.
+- Premium state lives in `guild_premium` / `user_premium` + `premium_customers` analytics.
 
 ---
 
@@ -224,8 +202,7 @@ Kyro/
     │   ├── config.py            # Environment configuration
     │   ├── context.py           # CustomContext with send_container, send_success, etc.
     │   ├── greetings.py         # Dedicated introduction & welcome card builder
-    │   ├── pricing.py           # Dual-currency pricing tier catalog
-    │   └── server.py            # Uptime healthcheck & Razorpay webhook listener
+    │   └── server.py            # Uptime healthcheck & telemetry API server
     │
     ├── database/
     │   ├── base.py              # Abstract database base
@@ -269,7 +246,6 @@ Kyro/
 | `?embed create <name>` | Utility | Manage Messages | Interactive builder for Components V2 container cards |
 | `?embed show <name>` | Utility | Manage Messages | Preview saved container card |
 | `?embed send <ch> <name>`| Utility | Manage Messages | Dispatch saved container card to channel |
-| `?buy` | Premium | Everyone | Interactive 3-tab checkout console for Server Pro plans |
 | `?premium` | Premium | Everyone | Dual-Status card (Server Plan + Personal VIP Status) |
 | `?help` | General | Everyone | Interactive Components V2 Help Menu with dropdown navigation |
 | `?invite` | General | Everyone | Official bot authorization links and support server |

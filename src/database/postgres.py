@@ -205,27 +205,6 @@ class PostgresDatabase(BaseDatabase):
                 last_redeemed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
-            # Automated Payment Transactions & Webhooks table
-            """
-            CREATE TABLE IF NOT EXISTS payment_transactions (
-                id SERIAL PRIMARY KEY,
-                razorpay_order_id VARCHAR(64),
-                razorpay_payment_id VARCHAR(64) UNIQUE,
-                razorpay_payment_link_id VARCHAR(64),
-                discord_user_id BIGINT NOT NULL,
-                guild_id BIGINT,
-                target_type VARCHAR(20) NOT NULL,
-                duration_days INT NOT NULL,
-                plan_tier VARCHAR(50) DEFAULT 'pro',
-                amount_smallest_unit INT NOT NULL,
-                currency VARCHAR(10) DEFAULT 'INR',
-                status VARCHAR(20) DEFAULT 'created',
-                is_trial BOOLEAN DEFAULT FALSE,
-                last_reminder_sent_at TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                paid_at TIMESTAMP
-            );
-            """,
             # Custom Components V2 Embed / Container Templates table
             """
             CREATE TABLE IF NOT EXISTS server_embeds (

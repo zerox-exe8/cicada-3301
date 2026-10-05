@@ -60,7 +60,7 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
     ]
 
     # Straight vertical lines with > blockquote, switch on/off emoji first, then module name
-    mod_lines = []
+    mod_lines = ["**Protection Overview**", ""]
     for name, state in modules:
         is_active = state and is_enabled
         switch = sw_on if is_active else sw_off

@@ -18,7 +18,7 @@ logger = logging.getLogger("Kyro.Moderation.ListRoles")
 class RoleListPaginationView(discord.ui.View):
     """Clean interactive pagination view for server roles list."""
 
-    def __init__(self, ctx: CustomContext, roles: list[discord.Role], per_page: int = 15) -> None:
+    def __init__(self, ctx: CustomContext, roles: list[discord.Role], per_page: int = 10) -> None:
         super().__init__(timeout=90)
         self.ctx = ctx
         self.roles = roles
@@ -30,88 +30,28 @@ class RoleListPaginationView(discord.ui.View):
     def _update_buttons(self) -> None:
         self.clear_items()
         if self.max_page > 0:
-            if self.max_page > 2:
-                first_btn = discord.ui.Button(
-                    label="⏮",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=self.page == 0,
-                )
-                first_btn.callback = self._first_callback
-                self.add_item(first_btn)
+            prev_btn = discord.ui.Button(
+                label="◀",
+                style=discord.ButtonStyle.secondary,
+                disabled=self.page == 0,
+            )
+            prev_btn.callback = self._prev_callback
+            self.add_item(prev_btn)
 
-                prev_btn = discord.ui.Button(
-                    label="◀",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=self.page == 0,
-                )
-                prev_btn.callback = self._prev_callback
-                self.add_item(prev_btn)
+            page_indicator = discord.ui.Button(
+                label=f"{self.page + 1} / {self.max_page + 1}",
+                style=discord.ButtonStyle.secondary,
+                disabled=True,
+            )
+            self.add_item(page_indicator)
 
-                page_indicator = discord.ui.Button(
-                    label=f"{self.page + 1} / {self.max_page + 1}",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=True,
-                )
-                self.add_item(page_indicator)
-
-                next_btn = discord.ui.Button(
-                    label="▶",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=self.page == self.max_page,
-                )
-                next_btn.callback = self._next_callback
-                self.add_item(next_btn)
-
-                last_btn = discord.ui.Button(
-                    label="⏭",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=self.page == self.max_page,
-                )
-                last_btn.callback = self._last_callback
-                self.add_item(last_btn)
-            else:
-                prev_btn = discord.ui.Button(
-                    label="◀ Previous",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=self.page == 0,
-                )
-                prev_btn.callback = self._prev_callback
-                self.add_item(prev_btn)
-
-                page_indicator = discord.ui.Button(
-                    label=f"{self.page + 1} / {self.max_page + 1}",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=True,
-                )
-                self.add_item(page_indicator)
-
-                next_btn = discord.ui.Button(
-                    label="Next ▶",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=self.page == self.max_page,
-                )
-                next_btn.callback = self._next_callback
-                self.add_item(next_btn)
-
-    async def _first_callback(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message("Only the command invoker can flip pages.", ephemeral=True)
-            return
-        if self.page > 0:
-            self.page = 0
-            self._update_buttons()
-            container = self.render_container()
-            await edit_container_response(interaction, container, view=self)
-
-    async def _last_callback(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message("Only the command invoker can flip pages.", ephemeral=True)
-            return
-        if self.page < self.max_page:
-            self.page = self.max_page
-            self._update_buttons()
-            container = self.render_container()
-            await edit_container_response(interaction, container, view=self)
+            next_btn = discord.ui.Button(
+                label="▶",
+                style=discord.ButtonStyle.secondary,
+                disabled=self.page == self.max_page,
+            )
+            next_btn.callback = self._next_callback
+            self.add_item(next_btn)
 
     async def _prev_callback(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self.ctx.author.id:
@@ -140,12 +80,11 @@ class RoleListPaginationView(discord.ui.View):
 
         e_reg = self.ctx.bot.custom_emojis
         dot = e_reg.get("heart_dot", "❥")
-        line = e_reg.get("white_line", "―")
 
         lines = []
         for r in current_slice:
             member_count = len(r.members)
-            lines.append(f"{dot} `@{r.name}` \u2002{line}\u2002 `{member_count:,}`")
+            lines.append(f"{dot} `@{r.name}` **-** `「{member_count:,}」`")
 
         container = KyroContainer(accent_color=None)
         container.add_text(
@@ -195,7 +134,7 @@ class ListRoles(commands.Cog, name="Moderation-ListRoles"):
             await ctx.send_warning("This server has no custom roles created.")
             return
 
-        view = RoleListPaginationView(ctx, roles, per_page=15)
+        view = RoleListPaginationView(ctx, roles, per_page=10)
         container = view.render_container()
         if view.max_page > 0:
             await send_container_response(ctx, container, view=view)

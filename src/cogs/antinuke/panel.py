@@ -38,19 +38,28 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
         "",
     ]
 
-    # Individual modules with clean bracket tags and no cheap emojis
+    # Full granular protection modules list (20 individual protections)
     modules = [
         ("Anti-Ban", cfg.get("ban_protection", True)),
         ("Anti-Kick", cfg.get("kick_protection", True)),
         ("Anti-Bot", cfg.get("bot_protection", True)),
-        ("Anti-Channel", cfg.get("channel_protection", True)),
-        ("Anti-Role", cfg.get("role_protection", True)),
-        ("Anti-Everyone", cfg.get("everyone_protection", True)),
+        ("Anti-Channel Create", cfg.get("channel_create_protection", cfg.get("channel_protection", True))),
+        ("Anti-Channel Delete", cfg.get("channel_delete_protection", cfg.get("channel_protection", True))),
+        ("Anti-Channel Update", cfg.get("channel_update_protection", cfg.get("channel_protection", True))),
+        ("Anti-Role Create", cfg.get("role_create_protection", cfg.get("role_protection", True))),
+        ("Anti-Role Delete", cfg.get("role_delete_protection", cfg.get("role_protection", True))),
+        ("Anti-Role Update", cfg.get("role_update_protection", cfg.get("role_protection", True))),
+        ("Anti-Everyone Disarm", cfg.get("everyone_protection", True)),
+        ("Anti-Member Role", cfg.get("member_role_protection", True)),
         ("Anti-Vanity", cfg.get("vanity_protection", True)),
-        ("Anti-Webhook", cfg.get("webhook_protection", True)),
+        ("Anti-Webhook Create", cfg.get("webhook_create_protection", cfg.get("webhook_protection", True))),
+        ("Anti-Webhook Delete", cfg.get("webhook_delete_protection", cfg.get("webhook_protection", True))),
         ("Anti-Prune", cfg.get("prune_protection", True)),
-        ("Anti-Server", cfg.get("guild_update_protection", True)),
-        ("Anti-AutoMod", cfg.get("automod_protection", True)),
+        ("Anti-Server Update", cfg.get("guild_update_protection", True)),
+        ("Anti-AutoMod Rule", cfg.get("automod_protection", True)),
+        ("Anti-Emoji", cfg.get("emoji_protection", True)),
+        ("Anti-Sticker", cfg.get("sticker_protection", True)),
+        ("Anti-Integration", cfg.get("integration_protection", True)),
     ]
 
     for name, state in modules:

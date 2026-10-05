@@ -126,7 +126,12 @@ class AntinukeManager:
             return False
         cfg = self.get_settings(guild_id)
         key = f"{module_name}_protection"
-        return cfg.get(key, True)
+        if key in cfg:
+            return cfg[key]
+        for parent in ["channel", "role", "webhook", "automod"]:
+            if module_name.startswith(parent):
+                return cfg.get(f"{parent}_protection", True)
+        return True
 
     def get_punishment(self, guild_id: int) -> str:
         """Get the configured punishment action ('ban', 'kick', 'strip_roles')."""

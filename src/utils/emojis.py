@@ -65,6 +65,22 @@ class EmojiRegistry:
                             logger.info("Auto-uploaded white_line to application emojis.")
                         except Exception as e:
                             logger.warning(f"Could not auto-upload white_line: {e}")
+
+                # Auto-sync switch on/off emojis if not yet uploaded
+                from pathlib import Path
+                emoji2_dir = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji2"
+                for sw_name in ("icon_switch_on", "icon_switch_off"):
+                    if sw_name not in self._emojis and len(self._emojis) < 50:
+                        sw_file = emoji2_dir / f"{sw_name}.png"
+                        if sw_file.exists():
+                            try:
+                                with open(sw_file, "rb") as f:
+                                    data = f.read()
+                                new_e = await self.bot.create_application_emoji(name=sw_name, image=data)
+                                self._emojis[sw_name] = new_e
+                                logger.info(f"Auto-uploaded {sw_name} to application emojis.")
+                            except Exception as e:
+                                logger.debug(f"Could not auto-upload {sw_name}: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 

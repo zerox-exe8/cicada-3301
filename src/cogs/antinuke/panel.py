@@ -59,24 +59,25 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
         ("Integrations", cfg.get("integration_protection", True)),
     ]
 
-    # Straight vertical lines: heart_dot + Module Name + em-dash + switch emoji
+    # Straight vertical lines with > blockquote, switch on/off emoji first, then module name
     mod_lines = []
     for name, state in modules:
-        switch = sw_on if (state and is_enabled) else sw_off
-        mod_lines.append(f"{dot} **{name}** **—** {switch}")
+        is_active = state and is_enabled
+        switch = sw_on if is_active else sw_off
+        mod_lines.append(f"> {switch} **{name}**")
 
     container.add_text("\n".join(mod_lines))
     container.add_separator(divider=True)
 
-    # Configuration & status cleanly positioned at the bottom with heart_dot
+    # Configuration & status cleanly positioned at the bottom with > blockquotes
     status_switch = sw_on if is_enabled else sw_off
     punish_tag = f"`[{punishment}]`"
     log_tag = log_ch.mention if log_ch else "`[None]`"
 
     bottom_lines = [
-        f"{dot} **Status:** {status_switch} **—** **Punishment:** {punish_tag}",
-        f"{dot} **Log Channel:** {log_tag}",
-        f"{dot} **Extra Owners:** `{eo_count}`",
+        f"> **Status:** {status_switch} **—** **Punishment:** {punish_tag}",
+        f"> **Log Channel:** {log_tag}",
+        f"> **Extra Owners:** `{eo_count}`",
     ]
     container.add_text("\n".join(bottom_lines))
 

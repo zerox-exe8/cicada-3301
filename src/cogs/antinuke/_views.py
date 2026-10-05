@@ -7,6 +7,29 @@ from discord import ui
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
+ALL_PROTECTION_KEYS = [
+    "ban",
+    "kick",
+    "bot",
+    "prune",
+    "channel_create",
+    "channel_delete",
+    "channel_update",
+    "role_create",
+    "role_delete",
+    "role_update",
+    "everyone",
+    "member_role",
+    "vanity",
+    "webhook_create",
+    "webhook_delete",
+    "guild_update",
+    "automod",
+    "emoji",
+    "sticker",
+    "integration",
+]
+
 
 class AntinukeControlView(ui.View):
     """Interactive Control Panel for Server Antinuke configuration."""
@@ -44,9 +67,9 @@ class AntinukeControlView(ui.View):
         cls=ui.Select,
         placeholder="Select Punishment Action...",
         options=[
-            discord.SelectOption(label="Ban Perpetrator", value="ban", description="Bans the unauthorized attacker"),
-            discord.SelectOption(label="Kick Perpetrator", value="kick", description="Kicks the unauthorized attacker"),
-            discord.SelectOption(label="Strip Roles Only", value="strip_roles", description="Strips all manageable roles"),
+            discord.SelectOption(label="Ban Perpetrator", value="ban"),
+            discord.SelectOption(label="Kick Perpetrator", value="kick"),
+            discord.SelectOption(label="Strip Roles Only", value="strip_roles"),
         ],
         row=1,
     )
@@ -64,37 +87,52 @@ class AntinukeControlView(ui.View):
 
     @ui.select(
         cls=ui.Select,
-        placeholder="Toggle Protection Module...",
+        placeholder="Select module(s) to toggle...",
+        min_values=1,
+        max_values=21,
         options=[
-            discord.SelectOption(label="Anti-Ban", value="ban", description="Rollback unauthorized bans"),
-            discord.SelectOption(label="Anti-Kick", value="kick", description="Prevent unauthorized member kicks"),
-            discord.SelectOption(label="Anti-Bot", value="bot", description="Block unauthorized bot additions"),
-            discord.SelectOption(label="Anti-Channel Create", value="channel_create", description="Block mass channel spam"),
-            discord.SelectOption(label="Anti-Channel Delete", value="channel_delete", description="Auto-recreate deleted channels"),
-            discord.SelectOption(label="Anti-Channel Update", value="channel_update", description="Prevent channel overwrites tampering"),
-            discord.SelectOption(label="Anti-Role Create", value="role_create", description="Block mass role spam"),
-            discord.SelectOption(label="Anti-Role Delete", value="role_delete", description="Auto-recreate deleted roles"),
-            discord.SelectOption(label="Anti-Role Update", value="role_update", description="Prevent role tampering"),
-            discord.SelectOption(label="Anti-Everyone Disarm", value="everyone", description="Disarm @everyone permissions escalation"),
-            discord.SelectOption(label="Anti-Member Role", value="member_role", description="Prevent backdoor admin role grants"),
-            discord.SelectOption(label="Anti-Vanity", value="vanity", description="Restore hijacked vanity URLs"),
-            discord.SelectOption(label="Anti-Webhook Create", value="webhook_create", description="Instant rogue webhook killer"),
-            discord.SelectOption(label="Anti-Webhook Delete", value="webhook_delete", description="Protect webhook deletions"),
-            discord.SelectOption(label="Anti-Prune", value="prune", description="Intercept mass member prune raids"),
-            discord.SelectOption(label="Anti-Server Update", value="guild_update", description="Prevent server settings tampering"),
-            discord.SelectOption(label="Anti-AutoMod Rule", value="automod", description="Protect AutoMod rules against abuse"),
-            discord.SelectOption(label="Anti-Emoji", value="emoji", description="Prevent mass emoji deletion raids"),
-            discord.SelectOption(label="Anti-Sticker", value="sticker", description="Prevent mass sticker deletion raids"),
-            discord.SelectOption(label="Anti-Integration", value="integration", description="Block unauthorized integrations"),
+            discord.SelectOption(label="All Modules", value="all"),
+            discord.SelectOption(label="Anti-Ban", value="ban"),
+            discord.SelectOption(label="Anti-Kick", value="kick"),
+            discord.SelectOption(label="Anti-Bot", value="bot"),
+            discord.SelectOption(label="Anti-Prune", value="prune"),
+            discord.SelectOption(label="Channel Create", value="channel_create"),
+            discord.SelectOption(label="Channel Delete", value="channel_delete"),
+            discord.SelectOption(label="Channel Update", value="channel_update"),
+            discord.SelectOption(label="Role Create", value="role_create"),
+            discord.SelectOption(label="Role Delete", value="role_delete"),
+            discord.SelectOption(label="Role Update", value="role_update"),
+            discord.SelectOption(label="Everyone Disarm", value="everyone"),
+            discord.SelectOption(label="Member Role", value="member_role"),
+            discord.SelectOption(label="Vanity URL", value="vanity"),
+            discord.SelectOption(label="Webhook Create", value="webhook_create"),
+            discord.SelectOption(label="Webhook Delete", value="webhook_delete"),
+            discord.SelectOption(label="Server Update", value="guild_update"),
+            discord.SelectOption(label="AutoMod Rule", value="automod"),
+            discord.SelectOption(label="Emoji Delete", value="emoji"),
+            discord.SelectOption(label="Sticker Delete", value="sticker"),
+            discord.SelectOption(label="Integrations", value="integration"),
         ],
         row=2,
     )
     async def toggle_module(self, interaction: discord.Interaction, select: ui.Select) -> None:
-        """Toggle an individual protection module."""
-        chosen_module = select.values[0]
-        curr_state = self.bot.antinuke_mgr.is_module_enabled(self.guild.id, chosen_module)
-        key = f"{chosen_module}_protection"
-        await self.bot.antinuke_mgr.update_settings(self.guild.id, **{key: not curr_state})
+        """Toggle one or more selected protection modules."""
+        selected_values = select.values
+        updates = {}
+
+        if "all" in selected_values:
+            curr_cfg = self.bot.antinuke_mgr.get_settings(self.guild.id)
+            # If any module is currently False, enable all; else disable all
+            any_disabled = any(not curr_cfg.get(f"{m}_protection", True) for m in ALL_PROTECTION_KEYS)
+            new_target = True if any_disabled else False
+            for m in ALL_PROTECTION_KEYS:
+                updates[f"{m}_protection"] = new_target
+        else:
+            for mod in selected_values:
+                curr_state = self.bot.antinuke_mgr.is_module_enabled(self.guild.id, mod)
+                updates[f"{mod}_protection"] = not curr_state
+
+        await self.bot.antinuke_mgr.update_settings(self.guild.id, **updates)
 
         from src.cogs.antinuke.panel import build_antinuke_card
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)

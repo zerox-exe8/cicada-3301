@@ -14,15 +14,19 @@ if TYPE_CHECKING:
 
 
 def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> tuple[KyroContainer, AntinukeControlView]:
-    """Assemble the clean, premium Antinuke dashboard container."""
+    """Assemble the clean, straight-line Antinuke dashboard container with heart dot and switch emojis."""
     cfg = bot.antinuke_mgr.get_settings(guild.id)
     is_enabled = cfg.get("enabled", False)
     punishment = cfg.get("punishment", "ban").capitalize()
     log_ch = bot.antinuke_mgr.get_log_channel(guild)
     eo_count = len(bot.antinuke_mgr.get_extra_owners(guild.id))
 
+    dot = bot.custom_emojis.get("heart_dot", "•")
+    sw_on = bot.custom_emojis.get("icon_switch_on", "`[ON]`")
+    sw_off = bot.custom_emojis.get("icon_switch_off", "`[OFF]`")
+
     container = KyroContainer(accent_color=None)
-    # Title with clean user-friendly tagline directly beneath
+    # Title with user-friendly tagline directly beneath
     container.add_section(
         content=(
             "**Kyro Antinuke**\n"
@@ -55,32 +59,24 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
         ("Integrations", cfg.get("integration_protection", True)),
     ]
 
-    # Render compact 2-per-line display without category clutter
-    mod_items = []
+    # Straight vertical lines: heart_dot + Module Name + em-dash + switch emoji
+    mod_lines = []
     for name, state in modules:
-        mod_tag = "`[Active]`" if (state and is_enabled) else "`[Disabled]`"
-        mod_items.append(f"• {name} {mod_tag}")
+        switch = sw_on if (state and is_enabled) else sw_off
+        mod_lines.append(f"{dot} **{name}** **—** {switch}")
 
-    paired_lines = []
-    for i in range(0, len(mod_items), 2):
-        if i + 1 < len(mod_items):
-            second = mod_items[i + 1].lstrip("• ")
-            paired_lines.append(f"{mod_items[i]}  •  {second}")
-        else:
-            paired_lines.append(mod_items[i])
-
-    container.add_text("\n".join(paired_lines))
+    container.add_text("\n".join(mod_lines))
     container.add_separator(divider=True)
 
-    # Core configuration & status cleanly positioned at the bottom
-    status_tag = "`[Active]`" if is_enabled else "`[Disabled]`"
+    # Configuration & status cleanly positioned at the bottom with heart_dot
+    status_switch = sw_on if is_enabled else sw_off
     punish_tag = f"`[{punishment}]`"
     log_tag = log_ch.mention if log_ch else "`[None]`"
 
     bottom_lines = [
-        f"• **Status:** {status_tag} **—** **Punishment:** {punish_tag}",
-        f"• **Log Channel:** {log_tag}",
-        f"• **Extra Owners:** `{eo_count}`",
+        f"{dot} **Status:** {status_switch} **—** **Punishment:** {punish_tag}",
+        f"{dot} **Log Channel:** {log_tag}",
+        f"{dot} **Extra Owners:** `{eo_count}`",
     ]
     container.add_text("\n".join(bottom_lines))
 
@@ -123,10 +119,13 @@ class AntinukePanelCog(commands.Cog):
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, enabled=True)
         self.bot.antinuke_mgr.snapshot_guild_state(ctx.guild)
 
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "`[ON]`")
+
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Activated**")
         container.add_separator(divider=True)
-        container.add_text("• **Status:** `[Active]` **—** **Punishment:** `[Ban]`")
+        container.add_text(f"{dot} **Status:** {sw_on} **—** **Punishment:** `[Ban]`")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="disable", description="Disable the Antinuke defense protocol.")
@@ -134,10 +133,13 @@ class AntinukePanelCog(commands.Cog):
         """Turn off Antinuke protection."""
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, enabled=False)
 
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        sw_off = self.bot.custom_emojis.get("icon_switch_off", "`[OFF]`")
+
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Deactivated**")
         container.add_separator(divider=True)
-        container.add_text("• **Status:** `[Disabled]`\n> *Use `,antinuke enable` to re-arm protection.*")
+        container.add_text(f"{dot} **Status:** {sw_off}\n> *Use `,antinuke enable` to re-arm protection.*")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="punishment", description="Set the punishment for unauthorized actions.")
@@ -157,10 +159,12 @@ class AntinukePanelCog(commands.Cog):
             return
 
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, punishment=clean_action)
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Punishment Updated**")
         container.add_separator(divider=True)
-        container.add_text(f"• **New Action:** `[{clean_action.capitalize()}]`")
+        container.add_text(f"{dot} **New Action:** `[{clean_action.capitalize()}]`")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="log", description="Bind a channel for antinuke incident alerts.")
@@ -169,10 +173,11 @@ class AntinukePanelCog(commands.Cog):
         """Set antinuke incident logging channel."""
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, log_channel_id=channel.id)
 
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Log Channel Configured**")
         container.add_separator(divider=True)
-        container.add_text(f"• **Target Channel:** {channel.mention}")
+        container.add_text(f"{dot} **Target Channel:** {channel.mention}")
         await send_container_response(ctx, container)
 
 

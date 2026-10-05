@@ -37,3 +37,6 @@ lavalink/
 # Temporary scratch
 scratch/
 
+# Website (local only, not pushed yet)
+website/
+

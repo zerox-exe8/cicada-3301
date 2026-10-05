@@ -22,54 +22,67 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
     eo_count = len(bot.antinuke_mgr.get_extra_owners(guild.id))
 
     container = KyroContainer(accent_color=None)
-    # Clean title without any blockquote tagline directly under it
-    container.add_section(content="**Kyro Antinuke**")
+    # Title with clean user-friendly tagline directly beneath
+    container.add_section(
+        content=(
+            "**Kyro Antinuke**\n"
+            "> *Real-time protection against nukes, raids, and unauthorized changes.*"
+        )
+    )
     container.add_separator(divider=True)
-
-    status_tag = "`[Active]`" if is_enabled else "`[Disabled]`"
-    punish_tag = f"`[{punishment}]`"
-    log_tag = log_ch.mention if log_ch else "`[None]`"
-
-    # Core configuration lines
-    lines = [
-        f"• **Status:** {status_tag} **—** **Punishment:** {punish_tag}",
-        f"• **Log Channel:** {log_tag}",
-        f"• **Extra Owners:** `{eo_count}`",
-        "",
-    ]
 
     # Full granular protection modules list (20 individual protections)
     modules = [
         ("Anti-Ban", cfg.get("ban_protection", True)),
         ("Anti-Kick", cfg.get("kick_protection", True)),
         ("Anti-Bot", cfg.get("bot_protection", True)),
-        ("Anti-Channel Create", cfg.get("channel_create_protection", cfg.get("channel_protection", True))),
-        ("Anti-Channel Delete", cfg.get("channel_delete_protection", cfg.get("channel_protection", True))),
-        ("Anti-Channel Update", cfg.get("channel_update_protection", cfg.get("channel_protection", True))),
-        ("Anti-Role Create", cfg.get("role_create_protection", cfg.get("role_protection", True))),
-        ("Anti-Role Delete", cfg.get("role_delete_protection", cfg.get("role_protection", True))),
-        ("Anti-Role Update", cfg.get("role_update_protection", cfg.get("role_protection", True))),
-        ("Anti-Everyone Disarm", cfg.get("everyone_protection", True)),
-        ("Anti-Member Role", cfg.get("member_role_protection", True)),
-        ("Anti-Vanity", cfg.get("vanity_protection", True)),
-        ("Anti-Webhook Create", cfg.get("webhook_create_protection", cfg.get("webhook_protection", True))),
-        ("Anti-Webhook Delete", cfg.get("webhook_delete_protection", cfg.get("webhook_protection", True))),
         ("Anti-Prune", cfg.get("prune_protection", True)),
-        ("Anti-Server Update", cfg.get("guild_update_protection", True)),
-        ("Anti-AutoMod Rule", cfg.get("automod_protection", True)),
-        ("Anti-Emoji", cfg.get("emoji_protection", True)),
-        ("Anti-Sticker", cfg.get("sticker_protection", True)),
-        ("Anti-Integration", cfg.get("integration_protection", True)),
+        ("Channel Create", cfg.get("channel_create_protection", cfg.get("channel_protection", True))),
+        ("Channel Delete", cfg.get("channel_delete_protection", cfg.get("channel_protection", True))),
+        ("Channel Update", cfg.get("channel_update_protection", cfg.get("channel_protection", True))),
+        ("Role Create", cfg.get("role_create_protection", cfg.get("role_protection", True))),
+        ("Role Delete", cfg.get("role_delete_protection", cfg.get("role_protection", True))),
+        ("Role Update", cfg.get("role_update_protection", cfg.get("role_protection", True))),
+        ("Everyone Disarm", cfg.get("everyone_protection", True)),
+        ("Member Role", cfg.get("member_role_protection", True)),
+        ("Vanity URL", cfg.get("vanity_protection", True)),
+        ("Webhook Create", cfg.get("webhook_create_protection", cfg.get("webhook_protection", True))),
+        ("Webhook Delete", cfg.get("webhook_delete_protection", cfg.get("webhook_protection", True))),
+        ("Server Update", cfg.get("guild_update_protection", True)),
+        ("AutoMod Rule", cfg.get("automod_protection", True)),
+        ("Emoji Delete", cfg.get("emoji_protection", True)),
+        ("Sticker Delete", cfg.get("sticker_protection", True)),
+        ("Integrations", cfg.get("integration_protection", True)),
     ]
 
+    # Render compact 2-per-line display without category clutter
+    mod_items = []
     for name, state in modules:
         mod_tag = "`[Active]`" if (state and is_enabled) else "`[Disabled]`"
-        lines.append(f"• **{name}** **—** {mod_tag}")
+        mod_items.append(f"• {name} {mod_tag}")
 
-    container.add_text("\n".join(lines))
+    paired_lines = []
+    for i in range(0, len(mod_items), 2):
+        if i + 1 < len(mod_items):
+            second = mod_items[i + 1].lstrip("• ")
+            paired_lines.append(f"{mod_items[i]}  •  {second}")
+        else:
+            paired_lines.append(mod_items[i])
+
+    container.add_text("\n".join(paired_lines))
     container.add_separator(divider=True)
-    # Tagline cleanly placed at the bottom
-    container.add_text("> *Configure real-time defenses, triggers, and whitelists using the controls below.*")
+
+    # Core configuration & status cleanly positioned at the bottom
+    status_tag = "`[Active]`" if is_enabled else "`[Disabled]`"
+    punish_tag = f"`[{punishment}]`"
+    log_tag = log_ch.mention if log_ch else "`[None]`"
+
+    bottom_lines = [
+        f"• **Status:** {status_tag} **—** **Punishment:** {punish_tag}",
+        f"• **Log Channel:** {log_tag}",
+        f"• **Extra Owners:** `{eo_count}`",
+    ]
+    container.add_text("\n".join(bottom_lines))
 
     view = AntinukeControlView(bot, guild, author_id)
     return container, view

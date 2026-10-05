@@ -17,7 +17,8 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
     """Assemble the clean, straight-line Antinuke dashboard container with heart dot and switch emojis."""
     cfg = bot.antinuke_mgr.get_settings(guild.id)
     is_enabled = cfg.get("enabled", False)
-    punishment = cfg.get("punishment", "ban").capitalize()
+    raw_punishment = cfg.get("punishment", "ban")
+    punishment = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}.get(raw_punishment, str(raw_punishment).capitalize())
     log_ch = bot.antinuke_mgr.get_log_channel(guild)
     eo_count = len(bot.antinuke_mgr.get_extra_owners(guild.id))
 
@@ -117,9 +118,46 @@ class AntinukePanelCog(commands.Cog):
 
     @antinuke.command(name="enable", description="Enable the Antinuke defense protocol.")
     async def antinuke_enable(self, ctx: CustomContext) -> None:
-        """Turn on Antinuke protection."""
-        await self.bot.antinuke_mgr.update_settings(ctx.guild.id, enabled=True)
-        self.bot.antinuke_mgr.snapshot_guild_state(ctx.guild)
+        """Turn on Antinuke protection + auto-create kyro_logs unified log channel."""
+        guild = ctx.guild
+
+        # 1. Find or auto-create the unified kyro_logs channel
+        log_channel: discord.TextChannel | None = None
+        for ch in guild.text_channels:
+            if ch.name.lower() in ("kyro_logs", "kyro-logs"):
+                log_channel = ch
+                break
+
+        channel_note = ""
+        if log_channel is None:
+            try:
+                log_channel = await guild.create_text_channel(
+                    "kyro_logs",
+                    topic="Kyro unified logs — security alerts + message / member / server / voice audit.",
+                    reason="Kyro Antinuke: auto-create unified log channel",
+                )
+                channel_note = f"\n{self.bot.custom_emojis.get('heart_dot', '•')} **Logs:** {log_channel.mention} `(auto-created)`"
+            except discord.Forbidden:
+                channel_note = "\n> *Missing Manage Channels — create `kyro_logs` manually or run `,antinuke log #channel`.*"
+                log_channel = None
+            except Exception:
+                log_channel = None
+
+        # 2. Bind all log streams to this single channel
+        if log_channel is not None:
+            await self.bot.antinuke_mgr.update_settings(
+                guild.id, enabled=True, log_channel_id=log_channel.id
+            )
+            try:
+                await self.bot.log_mgr.set_log_channel(guild.id, "all", log_channel.id)
+            except Exception:
+                pass
+            if not channel_note:
+                channel_note = f"\n{self.bot.custom_emojis.get('heart_dot', '•')} **Logs:** {log_channel.mention}"
+        else:
+            await self.bot.antinuke_mgr.update_settings(guild.id, enabled=True)
+
+        self.bot.antinuke_mgr.snapshot_guild_state(guild)
 
         dot = self.bot.custom_emojis.get("heart_dot", "•")
         sw_on = self.bot.custom_emojis.get("icon_switch_on", "`[ON]`")
@@ -127,7 +165,7 @@ class AntinukePanelCog(commands.Cog):
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Activated**")
         container.add_separator(divider=True)
-        container.add_text(f"{dot} **Status:** {sw_on} **—** **Punishment:** `Ban`")
+        container.add_text(f"{dot} **Status:** {sw_on} **—** **Punishment:** `Ban`{channel_note}")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="disable", description="Disable the Antinuke defense protocol.")
@@ -148,25 +186,29 @@ class AntinukePanelCog(commands.Cog):
     @app_commands.describe(action="Punishment to execute on attackers")
     @app_commands.choices(
         action=[
-            app_commands.Choice(name="Ban Perpetrator", value="ban"),
-            app_commands.Choice(name="Kick Perpetrator", value="kick"),
-            app_commands.Choice(name="Strip Roles Only", value="strip_roles"),
+            app_commands.Choice(name="ban", value="ban"),
+            app_commands.Choice(name="kick", value="kick"),
+            app_commands.Choice(name="quarantine", value="strip_roles"),
         ]
     )
     async def antinuke_punishment(self, ctx: CustomContext, action: str) -> None:
         """Configure antinuke action upon breach."""
         clean_action = action.lower()
+        # Alias: allow `quarantine` as user-friendly name for strip_roles
+        if clean_action in ("quarantine", "quarantine_only", "quarantaine"):
+            clean_action = "strip_roles"
         if clean_action not in ["ban", "kick", "strip_roles"]:
-            await ctx.send_error("Invalid punishment. Choose from: `ban`, `kick`, `strip_roles`.")
+            await ctx.send_error("Invalid punishment. Choose from: `ban`, `kick`, `quarantine`.")
             return
 
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, punishment=clean_action)
         dot = self.bot.custom_emojis.get("heart_dot", "•")
 
+        display_name = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}.get(clean_action, clean_action.capitalize())
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Punishment Updated**")
         container.add_separator(divider=True)
-        container.add_text(f"{dot} **New Action:** `{clean_action.capitalize()}`")
+        container.add_text(f"{dot} **New Action:** `{display_name}`")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="log", description="Bind a channel for antinuke incident alerts.")

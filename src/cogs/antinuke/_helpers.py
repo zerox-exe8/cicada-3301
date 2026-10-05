@@ -82,7 +82,7 @@ async def execute_punishment(
         else:
             return "Offender not in guild"
 
-    return "Roles Stripped"
+    return "Quarantined"
 
 
 async def restore_channel(guild: discord.Guild, cached_data: dict[str, Any]) -> discord.abc.GuildChannel | None:

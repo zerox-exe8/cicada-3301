@@ -119,9 +119,9 @@ class AntinukeControlView(ui.View):
         cls=ui.Select,
         placeholder="Select Punishment Action...",
         options=[
-            discord.SelectOption(label="Ban Perpetrator", value="ban"),
-            discord.SelectOption(label="Kick Perpetrator", value="kick"),
-            discord.SelectOption(label="Strip Roles Only", value="strip_roles"),
+            discord.SelectOption(label="ban", value="ban"),
+            discord.SelectOption(label="kick", value="kick"),
+            discord.SelectOption(label="quarantine", value="strip_roles", description="Remove all roles, no ban/kick"),
         ],
         row=1,
     )

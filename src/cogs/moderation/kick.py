@@ -56,15 +56,10 @@ class KickCog(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Member Kicked**\n"
-                f"> **{member}** has been kicked from the server."
-            )
-        )
+        container.add_section(content="**Member Kicked**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** **{member.display_name}** (`{member.id}`)\n"
+            f"{dot} **Target:** **{member.display_name}** 「`{member.id}`」\n"
             f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
         )

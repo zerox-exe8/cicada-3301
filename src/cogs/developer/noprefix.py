@@ -103,7 +103,7 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
         container.add_section(
             content=(
                 f"**No-Prefix Authorized**\n"
-                f"> **User:** `{target_name}` (`{target_id}`)\n"
+                f"> **User:** `{target_name}` 「`{target_id}`」\n"
                 f"> **Standing:** `Direct Execution Active`\n"
                 f"> **Granted By:** `{ctx.author.name}`"
             )
@@ -158,7 +158,7 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
         container.add_section(
             content=(
                 f"**No-Prefix Revoked**\n"
-                f"> **User:** `{target_name}` (`{target_id}`)\n"
+                f"> **User:** `{target_name}` 「`{target_id}`」\n"
                 f"> **Standing:** `Standard Prefix Enforced`"
             )
         )

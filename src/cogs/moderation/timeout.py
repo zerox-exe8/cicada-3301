@@ -80,15 +80,10 @@ class TimeoutCog(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Member Timed Out**\n"
-                f"> **{member}** has been timed out."
-            )
-        )
+        container.add_section(content="**Member Timed Out**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** **{member.display_name}** (`{member.id}`)\n"
+            f"{dot} **Target:** **{member.display_name}** 「`{member.id}`」\n"
             f"{dot} **Duration:** `{duration}` (Expires: <t:{int(until.timestamp())}:R>)\n"
             f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
@@ -125,15 +120,10 @@ class TimeoutCog(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Timeout Removed**\n"
-                f"> **{member}** is no longer timed out."
-            )
-        )
+        container.add_section(content="**Timeout Removed**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** **{member.display_name}** (`{member.id}`)\n"
+            f"{dot} **Target:** **{member.display_name}** 「`{member.id}`」\n"
             f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
         )

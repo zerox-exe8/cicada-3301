@@ -48,7 +48,7 @@ class DMCog(commands.Cog, name="Developer-DM"):
             await send_container_response(user, container)
             confirm = KyroContainer(accent_color=None)
             confirm.add_section(
-                content=f"Secret DM successfully delivered to `{user}` (`{user.id}`)."
+                content=f"Secret DM successfully delivered to `{user}` 「`{user.id}`」."
             )
             await send_container_response(ctx, confirm)
         except discord.Forbidden:

@@ -65,8 +65,8 @@ class PortalCog(commands.Cog, name="Developer-Portal"):
         container.add_section(
             content=(
                 f"**Server Portal Established**\n"
-                f"> **Server:** `{target_guild.name}` (`{target_guild.id}`)\n"
-                f"> **Owner:** `{target_guild.owner}` (`{target_guild.owner_id}`)\n"
+                f"> **Server:** `{target_guild.name}` 「`{target_guild.id}`」\n"
+                f"> **Owner:** `{target_guild.owner}` 「`{target_guild.owner_id}`」\n"
                 f"> **Members:** `{target_guild.member_count:,}`\n"
                 f"> **Portal Link:** [Click to Join Server]({invite_url})"
             )

@@ -257,16 +257,11 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
 
         verb = "Adding" if action == "add" else "Removing"
         init_container = KyroContainer(accent_color=role.color.value if role.color.value else None)
-        init_container.add_section(
-            content=(
-                f"**Mass Role Dispatched**\n"
-                f"> {verb} {role.mention} for {scope_label.lower()}."
-            )
-        )
+        init_container.add_section(content="**Mass Role Dispatched**")
         init_container.add_separator(divider=True)
         init_container.add_text(
             f"{dot} **Action:** `{action.title()}`\n"
-            f"{dot} **Role:** {role.mention} (`{role.id}`)\n"
+            f"{dot} **Role:** {role.mention} 「`{role.id}`」\n"
             f"{dot} **Queued:** `{total_targets:,}` members\n"
             f"{dot} **Moderator:** {ctx.author.mention}"
         )
@@ -322,12 +317,7 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
         accent = None if was_cancelled else (role.color.value if role.color.value else None)
 
         summary_container = KyroContainer(accent_color=accent)
-        summary_container.add_section(
-            content=(
-                f"**{status_title}**\n"
-                f"> Process finished for {role.mention}."
-            )
-        )
+        summary_container.add_section(content=f"**{status_title}**")
         summary_container.add_separator(divider=True)
         summary_container.add_text(
             f"{dot} **Scope:** `{scope_label}`\n"

@@ -82,15 +82,10 @@ class WarnCog(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Warning Issued**\n"
-                f"> **{member}** has been formally warned."
-            )
-        )
+        container.add_section(content="**Warning Issued**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** **{member.display_name}** (`{member.id}`)\n"
+            f"{dot} **Target:** **{member.display_name}** 「`{member.id}`」\n"
             f"{dot} **Total Warnings:** `{total_warns}`\n"
             f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
@@ -136,7 +131,7 @@ class WarnCog(commands.Cog):
         container.add_section(
             content=(
                 f"**Member Warnings**\n"
-                f"> Showing last {len(records)} warning(s) for **{member}** (`{member.id}`)."
+                f"> Showing last {len(records)} warning(s) for **{member}** 「`{member.id}`」."
             )
         )
         container.add_separator(divider=True)

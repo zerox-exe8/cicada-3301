@@ -141,7 +141,7 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
         container.add_section(
             content=(
                 f"**Entity Blacklisted**\n"
-                f"> **Target:** `{target_name}` (`{resolved_id}`)\n"
+                f"> **Target:** `{target_name}` 「`{resolved_id}`」\n"
                 f"> **Scope:** `Global {target_type.capitalize()} Restriction`\n"
                 f"> **Reason:** `{actual_reason}`\n"
                 f"> **Enforced By:** `{ctx.author.name}`"
@@ -193,7 +193,7 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
         container.add_section(
             content=(
                 f"**Entity Unblacklisted**\n"
-                f"> **Target:** `{target_name}` (`{resolved_id}`)\n"
+                f"> **Target:** `{target_name}` 「`{resolved_id}`」\n"
                 f"> **Standing:** `Restoration Approved • Access Restored`"
             )
         )

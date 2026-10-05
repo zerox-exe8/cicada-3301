@@ -57,15 +57,10 @@ class BanCog(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Member Banned**\n"
-                f"> **{member}** has been banned from the server."
-            )
-        )
+        container.add_section(content="**Member Banned**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** **{member.display_name}** (`{member.id}`)\n"
+            f"{dot} **Target:** **{member.display_name}** 「`{member.id}`」\n"
             f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
         )
@@ -94,15 +89,10 @@ class BanCog(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Member Unbanned**\n"
-                f"> **{user}** has been unbanned from the server."
-            )
-        )
+        container.add_section(content="**Member Unbanned**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** **{user}** (`{user.id}`)\n"
+            f"{dot} **Target:** **{user}** 「`{user.id}`」\n"
             f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
         )

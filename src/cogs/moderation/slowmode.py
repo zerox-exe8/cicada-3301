@@ -61,19 +61,9 @@ class SlowmodeCog(commands.Cog):
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
         if seconds == 0:
-            container.add_section(
-                content=(
-                    f"**Slowmode Disabled**\n"
-                    f"> Slowmode has been deactivated for {target_channel.mention}."
-                )
-            )
+            container.add_section(content="**Slowmode Disabled**")
         else:
-            container.add_section(
-                content=(
-                    f"**Slowmode Updated**\n"
-                    f"> Slowmode set to **{seconds}s** for {target_channel.mention}."
-                )
-            )
+            container.add_section(content="**Slowmode Updated**")
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Channel:** {target_channel.mention}\n"

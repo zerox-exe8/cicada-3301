@@ -60,16 +60,11 @@ class LockCog(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Channel Locked**\n"
-                f"> {target_channel.mention} has been locked."
-            )
-        )
+        container.add_section(content="**Channel Locked**")
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Channel:** {target_channel.mention}\n"
-            f"{dot} **Moderator:** **{ctx.author.display_name}** (`{ctx.author.id}`)\n"
+            f"{dot} **Moderator:** **{ctx.author.display_name}** 「`{ctx.author.id}`」\n"
             f"{dot} **Reason:** `{reason}`"
         )
         await send_container_response(ctx, container)
@@ -114,16 +109,11 @@ class LockCog(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**Channel Unlocked**\n"
-                f"> {target_channel.mention} has been unlocked."
-            )
-        )
+        container.add_section(content="**Channel Unlocked**")
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Channel:** {target_channel.mention}\n"
-            f"{dot} **Moderator:** **{ctx.author.display_name}** (`{ctx.author.id}`)\n"
+            f"{dot} **Moderator:** **{ctx.author.display_name}** 「`{ctx.author.id}`」\n"
             f"{dot} **Reason:** `{reason}`"
         )
         await send_container_response(ctx, container)

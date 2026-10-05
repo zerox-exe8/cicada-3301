@@ -20,8 +20,15 @@ class KyroContainer:
     """Builder for Discord Components V2 Container cards."""
 
     def __init__(self, accent_color: int | None = None) -> None:
-        self.accent_color = accent_color
         self.components: list[dict[str, Any]] = []
+
+    @property
+    def accent_color(self) -> None:
+        return None
+
+    @accent_color.setter
+    def accent_color(self, value: Any) -> None:
+        pass
 
     def add_text(self, content: str) -> KyroContainer:
         """Add a TextDisplay component (type: 10) inside the container."""

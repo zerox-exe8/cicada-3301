@@ -154,9 +154,47 @@ class PurgeCog(commands.Cog):
                         except Exception:
                             pass
             else:
-                # No filter: direct bulk purge of recent messages
-                raw_deleted = await ctx.channel.purge(limit=count)
-                deleted = list(raw_deleted)
+                # No filter: fetch fresh history and delete resiliently.
+                # (Raw channel.purge() aborts the whole batch with 10008
+                # Unknown Message if even one message vanished mid-flight.)
+                to_delete_all: list[discord.Message] = []
+                async for msg in ctx.channel.history(limit=count):
+                    if not ctx.interaction and ctx.message and msg.id == ctx.message.id:
+                        continue
+                    to_delete_all.append(msg)
+
+                cutoff_all = discord.utils.utcnow() - datetime.timedelta(days=14)
+                young_all = [m for m in to_delete_all if m.created_at > cutoff_all]
+                old_all = [m for m in to_delete_all if m.created_at <= cutoff_all]
+
+                if young_all:
+                    if len(young_all) == 1:
+                        try:
+                            await young_all[0].delete()
+                            deleted.append(young_all[0])
+                        except discord.NotFound:
+                            pass
+                    else:
+                        for i in range(0, len(young_all), 100):
+                            batch = young_all[i : i + 100]
+                            try:
+                                await ctx.channel.delete_messages(batch)
+                                deleted.extend(batch)
+                            except discord.HTTPException:
+                                for bm in batch:
+                                    try:
+                                        await bm.delete()
+                                        deleted.append(bm)
+                                    except (discord.NotFound, discord.HTTPException):
+                                        pass
+
+                for om in old_all:
+                    try:
+                        await om.delete()
+                        deleted.append(om)
+                        await asyncio.sleep(0.3)
+                    except (discord.NotFound, discord.HTTPException):
+                        pass
 
         except discord.Forbidden:
             container = KyroContainer(accent_color=None)
@@ -173,8 +211,12 @@ class PurgeCog(commands.Cog):
             return
         except discord.HTTPException as e:
             logger.warning(f"Purge error: {e}")
+            if getattr(e, "code", None) == 10008:
+                notice = "Those messages no longer exist (already deleted). Nothing to purge."
+            else:
+                notice = f"Discord API notice: `{e}`"
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Purge Failed**\n> Discord API notice: `{e}`")
+            container.add_section(content=f"**Purge Failed**\n> {notice}")
             try:
                 await send_container_response(ctx, container)
             except Exception:

@@ -668,6 +668,42 @@ class PostgresDatabase(BaseDatabase):
                 PRIMARY KEY (guild_id, shortcut_name)
             );
             """,
+            # Antinuke Core Settings table
+            """
+            CREATE TABLE IF NOT EXISTS antinuke_settings (
+                guild_id BIGINT PRIMARY KEY,
+                enabled BOOLEAN DEFAULT FALSE,
+                log_channel_id BIGINT,
+                punishment VARCHAR(20) DEFAULT 'ban',
+                vanity_protection BOOLEAN DEFAULT TRUE,
+                everyone_protection BOOLEAN DEFAULT TRUE,
+                role_protection BOOLEAN DEFAULT TRUE,
+                channel_protection BOOLEAN DEFAULT TRUE,
+                ban_protection BOOLEAN DEFAULT TRUE,
+                kick_protection BOOLEAN DEFAULT TRUE,
+                bot_protection BOOLEAN DEFAULT TRUE,
+                webhook_protection BOOLEAN DEFAULT TRUE,
+                prune_protection BOOLEAN DEFAULT TRUE,
+                automod_protection BOOLEAN DEFAULT TRUE,
+                integration_protection BOOLEAN DEFAULT TRUE,
+                emoji_protection BOOLEAN DEFAULT TRUE,
+                guild_update_protection BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            # Antinuke Whitelist and Extra Owners table
+            """
+            CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+                guild_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                is_extra_owner BOOLEAN DEFAULT FALSE,
+                is_full BOOLEAN DEFAULT TRUE,
+                scope TEXT DEFAULT '',
+                added_by BIGINT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, user_id)
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

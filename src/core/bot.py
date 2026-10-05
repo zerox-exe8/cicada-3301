@@ -26,6 +26,7 @@ from src.managers.tech_realtime_manager import TechRealtimeManager
 from src.managers.temp_voice_manager import TempVoiceManager
 from src.managers.translator_manager import TranslatorManager
 from src.managers.sticky_manager import StickyManager
+from src.managers.antinuke_manager import AntinukeManager
 from src.utils.emojis import EmojiRegistry
 
 logger = logging.getLogger("Kyro.Core")
@@ -96,6 +97,7 @@ class KyroBot(commands.Bot):
         self.temp_voice_mgr: TempVoiceManager = TempVoiceManager(self.db)
         self.translator_mgr: TranslatorManager = TranslatorManager(self.db)
         self.sticky_mgr: StickyManager = StickyManager(self.db)
+        self.antinuke_mgr: AntinukeManager = AntinukeManager(self.db)
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
         self.no_prefix_users: set[int] = set()
         self.custom_status: str | None = None
@@ -178,6 +180,7 @@ class KyroBot(commands.Bot):
         await self.temp_voice_mgr.load_cache()
         await self.translator_mgr.load_cache()
         await self.sticky_mgr.load_cache()
+        await self.antinuke_mgr.load_cache()
         await self.custom_emojis.load()
 
         # Load No-Prefix authorized users into memory
@@ -269,6 +272,13 @@ class KyroBot(commands.Bot):
             logger.info("Application owner credentials cached in memory.")
         except Exception as e:
             logger.debug(f"Notice caching application info: {e}")
+
+        # Snapshot guild states for zero-latency antinuke self-healing
+        for g in self.guilds:
+            try:
+                self.antinuke_mgr.snapshot_guild_state(g)
+            except Exception as e:
+                logger.debug(f"Notice snapshotting guild {g.id}: {e}")
 
         # Immediately lock presence to DND with persistent custom status
         try:

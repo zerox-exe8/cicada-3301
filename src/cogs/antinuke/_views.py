@@ -58,10 +58,8 @@ class AntinukeControlView(ui.View):
 
         from src.cogs.antinuke.panel import build_antinuke_card
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
-        from src.utils.containers import build_container_payload
-
-        payload = build_container_payload(container)
-        await interaction.response.edit_message(content=payload.get("content"), embed=payload.get("embed"), view=new_view)
+        from src.utils.containers import edit_container_response
+        await edit_container_response(interaction, container, view=new_view)
 
     @ui.select(
         cls=ui.Select,
@@ -80,10 +78,8 @@ class AntinukeControlView(ui.View):
 
         from src.cogs.antinuke.panel import build_antinuke_card
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
-        from src.utils.containers import build_container_payload
-
-        payload = build_container_payload(container)
-        await interaction.response.edit_message(content=payload.get("content"), embed=payload.get("embed"), view=new_view)
+        from src.utils.containers import edit_container_response
+        await edit_container_response(interaction, container, view=new_view)
 
     @ui.select(
         cls=ui.Select,
@@ -136,7 +132,5 @@ class AntinukeControlView(ui.View):
 
         from src.cogs.antinuke.panel import build_antinuke_card
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
-        from src.utils.containers import build_container_payload
-
-        payload = build_container_payload(container)
-        await interaction.response.edit_message(content=payload.get("content"), embed=payload.get("embed"), view=new_view)
+        from src.utils.containers import edit_container_response
+        await edit_container_response(interaction, container, view=new_view)

@@ -80,6 +80,7 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
         f"> **Extra Owners:** `{eo_count}`",
     ]
     container.add_text("\n".join(bottom_lines))
+    container.add_separator(divider=True)
 
     view = AntinukeControlView(bot, guild, author_id)
     return container, view

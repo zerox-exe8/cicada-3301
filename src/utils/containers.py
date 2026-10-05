@@ -241,7 +241,10 @@ def build_container_payload(
 
     # Place view action rows (builder buttons and dropdowns) directly INSIDE the container
     if view is not None:
-        view_comps = view.to_components()
+        if hasattr(view, "to_container_components"):
+            view_comps = view.to_container_components()
+        else:
+            view_comps = view.to_components()
         if view_comps:
             if root_comps and root_comps[-1].get("type") == 17:
                 root_comps[-1]["components"].extend(view_comps)

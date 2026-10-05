@@ -49,37 +49,17 @@ class AntinukeControlView(ui.View):
             return False
         return True
 
-    @ui.button(label="Toggle Antinuke", style=discord.ButtonStyle.primary, row=0)
-    async def toggle_switch(self, interaction: discord.Interaction, button: ui.Button) -> None:
-        """Toggle Antinuke master switch on or off."""
-        is_active = self.bot.antinuke_mgr.is_enabled(self.guild.id)
-        new_state = not is_active
-        await self.bot.antinuke_mgr.update_settings(self.guild.id, enabled=new_state)
-
-        from src.cogs.antinuke.panel import build_antinuke_card
-        container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
-        from src.utils.containers import edit_container_response
-        await edit_container_response(interaction, container, view=new_view)
-
-    @ui.select(
-        cls=ui.Select,
-        placeholder="Select Punishment Action...",
-        options=[
-            discord.SelectOption(label="Ban Perpetrator", value="ban"),
-            discord.SelectOption(label="Kick Perpetrator", value="kick"),
-            discord.SelectOption(label="Strip Roles Only", value="strip_roles"),
-        ],
-        row=1,
-    )
-    async def select_punishment(self, interaction: discord.Interaction, select: ui.Select) -> None:
-        """Update punishment type."""
-        chosen = select.values[0]
-        await self.bot.antinuke_mgr.update_settings(self.guild.id, punishment=chosen)
-
-        from src.cogs.antinuke.panel import build_antinuke_card
-        container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
-        from src.utils.containers import edit_container_response
-        await edit_container_response(interaction, container, view=new_view)
+    def to_container_components(self) -> list[dict[str, Any]]:
+        """Return container components with a visual separator line between dropdown categories and the button."""
+        raw = self.to_components()
+        comps: list[dict[str, Any]] = []
+        for r in raw:
+            items = r.get("components", [])
+            is_button_row = any(item.get("type") == 2 for item in items)
+            if is_button_row and comps:
+                comps.append({"type": 14, "divider": True})
+            comps.append(r)
+        return comps
 
     @ui.select(
         cls=ui.Select,
@@ -109,7 +89,7 @@ class AntinukeControlView(ui.View):
             discord.SelectOption(label="Anti-Sticker Delete", value="sticker"),
             discord.SelectOption(label="Anti-Integration", value="integration"),
         ],
-        row=2,
+        row=0,
     )
     async def toggle_module(self, interaction: discord.Interaction, select: ui.Select) -> None:
         """Toggle one or more selected protection modules."""
@@ -129,6 +109,38 @@ class AntinukeControlView(ui.View):
                 updates[f"{mod}_protection"] = not curr_state
 
         await self.bot.antinuke_mgr.update_settings(self.guild.id, **updates)
+
+        from src.cogs.antinuke.panel import build_antinuke_card
+        container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
+        from src.utils.containers import edit_container_response
+        await edit_container_response(interaction, container, view=new_view)
+
+    @ui.select(
+        cls=ui.Select,
+        placeholder="Select Punishment Action...",
+        options=[
+            discord.SelectOption(label="Ban Perpetrator", value="ban"),
+            discord.SelectOption(label="Kick Perpetrator", value="kick"),
+            discord.SelectOption(label="Strip Roles Only", value="strip_roles"),
+        ],
+        row=1,
+    )
+    async def select_punishment(self, interaction: discord.Interaction, select: ui.Select) -> None:
+        """Update punishment type."""
+        chosen = select.values[0]
+        await self.bot.antinuke_mgr.update_settings(self.guild.id, punishment=chosen)
+
+        from src.cogs.antinuke.panel import build_antinuke_card
+        container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
+        from src.utils.containers import edit_container_response
+        await edit_container_response(interaction, container, view=new_view)
+
+    @ui.button(label="Toggle Antinuke", style=discord.ButtonStyle.secondary, row=2)
+    async def toggle_switch(self, interaction: discord.Interaction, button: ui.Button) -> None:
+        """Toggle Antinuke master switch on or off."""
+        is_active = self.bot.antinuke_mgr.is_enabled(self.guild.id)
+        new_state = not is_active
+        await self.bot.antinuke_mgr.update_settings(self.guild.id, enabled=new_state)
 
         from src.cogs.antinuke.panel import build_antinuke_card
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)

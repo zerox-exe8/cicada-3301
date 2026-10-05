@@ -60,7 +60,7 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
     ]
 
     # Straight vertical lines with > blockquote, switch on/off emoji first, then module name
-    mod_lines = ["**Protection Overview**", ""]
+    mod_lines = ["**Protection Overview**"]
     for name, state in modules:
         is_active = state and is_enabled
         switch = sw_on if is_active else sw_off
@@ -71,8 +71,8 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
 
     # Configuration & status cleanly positioned at the bottom with > blockquotes
     status_switch = sw_on if is_enabled else sw_off
-    punish_tag = f"`[{punishment}]`"
-    log_tag = log_ch.mention if log_ch else "`[None]`"
+    punish_tag = f"`{punishment}`"
+    log_tag = log_ch.mention if log_ch else "`None`"
 
     bottom_lines = [
         f"> **Status:** {status_switch} **—** **Punishment:** {punish_tag}",
@@ -126,7 +126,7 @@ class AntinukePanelCog(commands.Cog):
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Activated**")
         container.add_separator(divider=True)
-        container.add_text(f"{dot} **Status:** {sw_on} **—** **Punishment:** `[Ban]`")
+        container.add_text(f"{dot} **Status:** {sw_on} **—** **Punishment:** `Ban`")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="disable", description="Disable the Antinuke defense protocol.")
@@ -165,7 +165,7 @@ class AntinukePanelCog(commands.Cog):
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Punishment Updated**")
         container.add_separator(divider=True)
-        container.add_text(f"{dot} **New Action:** `[{clean_action.capitalize()}]`")
+        container.add_text(f"{dot} **New Action:** `{clean_action.capitalize()}`")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="log", description="Bind a channel for antinuke incident alerts.")

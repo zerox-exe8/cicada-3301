@@ -261,7 +261,7 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
         init_container.add_separator(divider=True)
         init_container.add_text(
             f"{dot} **Action:** `{action.title()}`\n"
-            f"{dot} **Role:** {role.mention} 「`{role.id}`」\n"
+            f"{dot} **Role:** {role.mention} `「{role.id}」`\n"
             f"{dot} **Queued:** `{total_targets:,}` members\n"
             f"{dot} **Moderator:** {ctx.author.mention}"
         )

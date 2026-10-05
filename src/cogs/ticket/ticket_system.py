@@ -780,7 +780,7 @@ class TicketSystem(commands.Cog):
                 log_c.add_section(
                     content=(
                         f"**Ticket Opened • #{ticket_str}**\n"
-                        f"> User: {interaction.user.mention} 「`{interaction.user.id}`」\n"
+                        f"> User: {interaction.user.mention} `「{interaction.user.id}」`\n"
                         f"> Channel: {ticket_channel.mention}\n"
                         f"> Panel: `{panel.get('panel_name')}`"
                     )
@@ -860,8 +860,8 @@ class TicketSystem(commands.Cog):
                         content=(
                             f"**Ticket Closed • #{t_num_int:04d}**\n"
                             f"> Channel: `#{channel.name}`\n"
-                            f"> Creator: <@{user_id}> 「`{user_id}`」\n"
-                            f"> Closed By: {closer.mention} 「`{closer.id}`」\n"
+                            f"> Creator: <@{user_id}> `「{user_id}」`\n"
+                            f"> Closed By: {closer.mention} `「{closer.id}」`\n"
                             f"> Reason: `{reason}`"
                         )
                     )

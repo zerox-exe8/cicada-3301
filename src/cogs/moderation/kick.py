@@ -59,7 +59,7 @@ class KickCog(commands.Cog):
         container.add_section(content="**Member Kicked**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** **{member.display_name}** 「`{member.id}`」\n"
+            f"{dot} **Target:** **{member.display_name}** `「{member.id}」`\n"
             f"{dot} **Moderator:** **{ctx.author.display_name}**\n"
             f"{dot} **Reason:** `{reason}`"
         )

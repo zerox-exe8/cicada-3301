@@ -64,7 +64,7 @@ class LockCog(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Channel:** {target_channel.mention}\n"
-            f"{dot} **Moderator:** **{ctx.author.display_name}** 「`{ctx.author.id}`」\n"
+            f"{dot} **Moderator:** **{ctx.author.display_name}** `「{ctx.author.id}」`\n"
             f"{dot} **Reason:** `{reason}`"
         )
         await send_container_response(ctx, container)
@@ -113,7 +113,7 @@ class LockCog(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Channel:** {target_channel.mention}\n"
-            f"{dot} **Moderator:** **{ctx.author.display_name}** 「`{ctx.author.id}`」\n"
+            f"{dot} **Moderator:** **{ctx.author.display_name}** `「{ctx.author.id}」`\n"
             f"{dot} **Reason:** `{reason}`"
         )
         await send_container_response(ctx, container)

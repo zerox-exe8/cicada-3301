@@ -98,8 +98,8 @@ class Role(commands.Cog, name="Moderation-Role"):
         container.add_section(content=f"**Role {action}**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Target:** {member.mention} 「`{member.id}`」\n"
-            f"{dot} **Role:** {role.mention} 「`{role.id}`」\n"
+            f"{dot} **Target:** {member.mention} `「{member.id}」`\n"
+            f"{dot} **Role:** {role.mention} `「{role.id}」`\n"
             f"{dot} **Moderator:** {ctx.author.mention}"
         )
         container.add_separator(divider=True)

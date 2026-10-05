@@ -28,7 +28,7 @@ class GuildsCog(commands.Cog, name="Developer-Guilds"):
 
         lines = []
         for g in guilds[:10]:
-            lines.append(f"> `{g.name}` • `{g.member_count} members` 「`{g.id}`」")
+            lines.append(f"> `{g.name}` • `{g.member_count} members` `「{g.id}」`")
 
         container = KyroContainer(accent_color=None)
         container.add_section(

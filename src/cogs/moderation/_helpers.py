@@ -125,14 +125,14 @@ async def dispatch_mod_log(
     items = []
     if target is not None:
         target_name = getattr(target, "display_name", str(target))
-        items.append(f"{dot} **Target:** **{target_name}** 「`{target.id}`」")
+        items.append(f"{dot} **Target:** **{target_name}** `「{target.id}」`")
 
     if channel is not None:
         items.append(f"{dot} **Channel:** {channel.mention}")
 
     if moderator is not None:
         mod_name = getattr(moderator, "display_name", str(moderator))
-        items.append(f"{dot} **Moderator:** **{mod_name}** 「`{moderator.id}`」")
+        items.append(f"{dot} **Moderator:** **{mod_name}** `「{moderator.id}」`")
 
     if extra and str(extra).strip():
         items.append(f"{dot} **Details:** `{str(extra).strip()}`")

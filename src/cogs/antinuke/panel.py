@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -14,49 +14,53 @@ if TYPE_CHECKING:
 
 
 def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> tuple[KyroContainer, AntinukeControlView]:
-    """Assemble the clean Components V2 Dashboard Card for Antinuke."""
+    """Assemble the clean, premium Antinuke dashboard container."""
     cfg = bot.antinuke_mgr.get_settings(guild.id)
     is_enabled = cfg.get("enabled", False)
     punishment = cfg.get("punishment", "ban").capitalize()
     log_ch = bot.antinuke_mgr.get_log_channel(guild)
-
-    e_reg = bot.custom_emojis
-    dot = e_reg.get("heart_dot", "-")
-    shield = e_reg.get("icon_shield", "")
-    badge_str = f"{shield} " if shield else ""
+    eo_count = len(bot.antinuke_mgr.get_extra_owners(guild.id))
 
     container = KyroContainer(accent_color=None)
-    status_badge = "🟢 `Active`" if is_enabled else "🔴 `Disabled`"
-    container.add_section(
-        content=(
-            f"**{badge_str}Kyro Antinuke Protocol — Dashboard**\n"
-            f"> System Status: {status_badge} • Punishment: `{punishment}`"
-        )
-    )
+    # Clean title without any blockquote tagline directly under it
+    container.add_section(content="**Kyro Antinuke**")
     container.add_separator(divider=True)
 
-    # Sub-modules checklist
-    modules = [
-        ("Vanity URL Protection", cfg.get("vanity_protection", True)),
-        ("@everyone Escalation Disarm", cfg.get("everyone_protection", True)),
-        ("Role Protection (Nuke/Tamper)", cfg.get("role_protection", True)),
-        ("Channel Protection (Nuke/Tamper)", cfg.get("channel_protection", True)),
-        ("Anti-Bot (Unauthorized Adds)", cfg.get("bot_protection", True)),
-        ("Anti-Webhook (Instant Killer)", cfg.get("webhook_protection", True)),
-        ("Anti-Ban & Anti-Kick Protection", cfg.get("ban_protection", True)),
-        ("Anti-AutoMod Rule Hijack", cfg.get("automod_protection", True)),
+    status_tag = "`[Active]`" if is_enabled else "`[Disabled]`"
+    punish_tag = f"`[{punishment}]`"
+    log_tag = log_ch.mention if log_ch else "`[None]`"
+
+    # Core configuration lines
+    lines = [
+        f"• **Status:** {status_tag} **—** **Punishment:** {punish_tag}",
+        f"• **Log Channel:** {log_tag}",
+        f"• **Extra Owners:** `{eo_count}`",
+        "",
     ]
 
-    mod_lines = []
-    for name, state in modules:
-        icon = "✅" if (state and is_enabled) else ("⚪" if state else "❌")
-        mod_lines.append(f"{icon} **{name}**")
+    # Individual modules with clean bracket tags and no cheap emojis
+    modules = [
+        ("Anti-Ban", cfg.get("ban_protection", True)),
+        ("Anti-Kick", cfg.get("kick_protection", True)),
+        ("Anti-Bot", cfg.get("bot_protection", True)),
+        ("Anti-Channel", cfg.get("channel_protection", True)),
+        ("Anti-Role", cfg.get("role_protection", True)),
+        ("Anti-Everyone", cfg.get("everyone_protection", True)),
+        ("Anti-Vanity", cfg.get("vanity_protection", True)),
+        ("Anti-Webhook", cfg.get("webhook_protection", True)),
+        ("Anti-Prune", cfg.get("prune_protection", True)),
+        ("Anti-Server", cfg.get("guild_update_protection", True)),
+        ("Anti-AutoMod", cfg.get("automod_protection", True)),
+    ]
 
-    container.add_text(
-        f"{dot} **Security Alert Log:** {log_ch.mention if log_ch else '`None (Fallback to ModLog)`'}\n"
-        f"{dot} **Extra Owners:** `{len(bot.antinuke_mgr.get_extra_owners(guild.id))}` registered\n\n"
-        + "\n".join(mod_lines)
-    )
+    for name, state in modules:
+        mod_tag = "`[Active]`" if (state and is_enabled) else "`[Disabled]`"
+        lines.append(f"• **{name}** **—** {mod_tag}")
+
+    container.add_text("\n".join(lines))
+    container.add_separator(divider=True)
+    # Tagline cleanly placed at the bottom
+    container.add_text("> *Configure real-time defenses, triggers, and whitelists using the controls below.*")
 
     view = AntinukeControlView(bot, guild, author_id)
     return container, view
@@ -89,26 +93,18 @@ class AntinukePanelCog(commands.Cog):
     async def antinuke(self, ctx: CustomContext) -> None:
         """Display the interactive Antinuke control card."""
         container, view = build_antinuke_card(self.bot, ctx.guild, ctx.author.id)
-        from src.utils.containers import send_container_response
         await send_container_response(ctx, container, view=view)
 
     @antinuke.command(name="enable", description="Enable the Antinuke defense protocol.")
     async def antinuke_enable(self, ctx: CustomContext) -> None:
         """Turn on Antinuke protection."""
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, enabled=True)
-        # Snapshot state immediately upon activation
         self.bot.antinuke_mgr.snapshot_guild_state(ctx.guild)
 
-        dot = self.bot.custom_emojis.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "**Kyro Antinuke Activated**\n"
-                "> The server is now actively protected against malicious nukes, rogue admins, and webhook attacks."
-            )
-        )
+        container.add_section(content="**Antinuke Activated**")
         container.add_separator(divider=True)
-        container.add_text(f"{dot} **Status:** 🟢 `Active`\n{dot} **Default Punishment:** `Ban`")
+        container.add_text("• **Status:** `[Active]` **—** **Punishment:** `[Ban]`")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="disable", description="Disable the Antinuke defense protocol.")
@@ -116,16 +112,10 @@ class AntinukePanelCog(commands.Cog):
         """Turn off Antinuke protection."""
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, enabled=False)
 
-        dot = self.bot.custom_emojis.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "**Kyro Antinuke Deactivated**\n"
-                "> Real-time antinuke triggers, instant rollback, and unauthorized action traps are now offline."
-            )
-        )
+        container.add_section(content="**Antinuke Deactivated**")
         container.add_separator(divider=True)
-        container.add_text(f"{dot} **Status:** 🔴 `Disabled`\n{dot} Use `?antinuke enable` to re-arm protection.")
+        container.add_text("• **Status:** `[Disabled]`\n> *Use `,antinuke enable` to re-arm protection.*")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="punishment", description="Set the punishment for unauthorized actions.")
@@ -145,11 +135,10 @@ class AntinukePanelCog(commands.Cog):
             return
 
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, punishment=clean_action)
-        dot = self.bot.custom_emojis.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Punishment Updated**")
         container.add_separator(divider=True)
-        container.add_text(f"{dot} **New Action:** `{clean_action.capitalize()}`")
+        container.add_text(f"• **New Action:** `[{clean_action.capitalize()}]`")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="log", description="Bind a channel for antinuke incident alerts.")
@@ -158,14 +147,10 @@ class AntinukePanelCog(commands.Cog):
         """Set antinuke incident logging channel."""
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, log_channel_id=channel.id)
 
-        dot = self.bot.custom_emojis.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Log Channel Configured**")
         container.add_separator(divider=True)
-        container.add_text(
-            f"{dot} **Target Channel:** {channel.mention}\n"
-            f"{dot} All security intercepts and self-healing actions will be recorded here."
-        )
+        container.add_text(f"• **Target Channel:** {channel.mention}")
         await send_container_response(ctx, container)
 
 

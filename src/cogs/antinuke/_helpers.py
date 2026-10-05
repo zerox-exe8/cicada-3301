@@ -204,17 +204,17 @@ async def dispatch_antinuke_log(
     badge_str = f"{shield} " if shield else ""
 
     container = KyroContainer(accent_color=None)
-    container.add_section(content=f"**{badge_str}Security Alert — {action}**")
+    container.add_section(content=f"**Security Alert — {action}**")
     container.add_separator(divider=True)
 
     items = [
-        f"{dot} **Perpetrator:** **{offender}** `「{offender.id}」`",
-        f"{dot} **Punishment:** `{punishment_result}`",
-        f"{dot} **Mitigation:** `{recovery_status}`",
+        f"• **Perpetrator:** **{offender}** `「{offender.id}」`",
+        f"• **Punishment:** `{punishment_result}`",
+        f"• **Mitigation:** `{recovery_status}`",
     ]
 
     if extra:
-        items.append(f"{dot} **Details:** {extra}")
+        items.append(f"• **Details:** {extra}")
 
     container.add_text("\n".join(items))
 
@@ -236,7 +236,7 @@ async def dispatch_antinuke_log(
                 from src.utils.containers import build_container_payload
                 dm_container = KyroContainer(accent_color=None)
                 dm_container.add_section(
-                    content=f"**🚨 Critical Security Incident in {guild.name}**\n> Action: **{action}**"
+                    content=f"**Critical Security Incident in {guild.name}**"
                 )
                 dm_container.add_separator(divider=True)
                 dm_container.add_text("\n".join(items))

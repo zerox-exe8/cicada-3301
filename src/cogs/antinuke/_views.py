@@ -4,8 +4,6 @@ from typing import TYPE_CHECKING
 import discord
 from discord import ui
 
-from src.utils.containers import KyroContainer
-
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
@@ -20,7 +18,7 @@ class AntinukeControlView(ui.View):
         self.author_id = author_id
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Only the invoker (who must be Owner or Extra Owner) can click the controls."""
+        """Only the invoker (Server Owner or Extra Owner) can click the controls."""
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
                 "You are not authorized to interact with this control panel.", ephemeral=True
@@ -35,9 +33,7 @@ class AntinukeControlView(ui.View):
         new_state = not is_active
         await self.bot.antinuke_mgr.update_settings(self.guild.id, enabled=new_state)
 
-        # Re-render dashboard
         from src.cogs.antinuke.panel import build_antinuke_card
-
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
         from src.utils.containers import build_container_payload
 
@@ -48,9 +44,9 @@ class AntinukeControlView(ui.View):
         cls=ui.Select,
         placeholder="Select Punishment Action...",
         options=[
-            discord.SelectOption(label="Ban Perpetrator", value="ban", description="Instantly bans the unauthorized attacker"),
-            discord.SelectOption(label="Kick Perpetrator", value="kick", description="Kicks the unauthorized attacker from server"),
-            discord.SelectOption(label="Strip Roles", value="strip_roles", description="Strips all roles without banning or kicking"),
+            discord.SelectOption(label="Ban Perpetrator", value="ban", description="Bans the unauthorized attacker"),
+            discord.SelectOption(label="Kick Perpetrator", value="kick", description="Kicks the unauthorized attacker"),
+            discord.SelectOption(label="Strip Roles Only", value="strip_roles", description="Strips all manageable roles"),
         ],
         row=1,
     )
@@ -60,7 +56,6 @@ class AntinukeControlView(ui.View):
         await self.bot.antinuke_mgr.update_settings(self.guild.id, punishment=chosen)
 
         from src.cogs.antinuke.panel import build_antinuke_card
-
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
         from src.utils.containers import build_container_payload
 
@@ -71,26 +66,28 @@ class AntinukeControlView(ui.View):
         cls=ui.Select,
         placeholder="Toggle Protection Module...",
         options=[
-            discord.SelectOption(label="Vanity URL Protection", value="vanity"),
-            discord.SelectOption(label="@everyone Escalation Disarm", value="everyone"),
-            discord.SelectOption(label="Role Protection (Create/Delete/Edit)", value="role"),
-            discord.SelectOption(label="Channel Protection (Create/Delete/Edit)", value="channel"),
-            discord.SelectOption(label="Anti-Bot (Unauthorized Bot Adds)", value="bot"),
-            discord.SelectOption(label="Anti-Webhook (Instant Webhook Killer)", value="webhook"),
-            discord.SelectOption(label="Anti-Ban & Anti-Kick Protection", value="ban"),
-            discord.SelectOption(label="Anti-AutoMod Rule Hijack", value="automod"),
+            discord.SelectOption(label="Anti-Ban", value="ban", description="Rollback unauthorized bans"),
+            discord.SelectOption(label="Anti-Kick", value="kick", description="Prevent unauthorized member kicks"),
+            discord.SelectOption(label="Anti-Bot", value="bot", description="Block unauthorized bot additions"),
+            discord.SelectOption(label="Anti-Channel", value="channel", description="Protect channel deletions and spam"),
+            discord.SelectOption(label="Anti-Role", value="role", description="Protect role deletions and tampering"),
+            discord.SelectOption(label="Anti-Everyone", value="everyone", description="Disarm @everyone permission escalations"),
+            discord.SelectOption(label="Anti-Vanity", value="vanity", description="Restore hijacked vanity URLs"),
+            discord.SelectOption(label="Anti-Webhook", value="webhook", description="Instant rogue webhook killer"),
+            discord.SelectOption(label="Anti-Prune", value="prune", description="Intercept mass member prune raids"),
+            discord.SelectOption(label="Anti-Server", value="guild_update", description="Prevent server settings tampering"),
+            discord.SelectOption(label="Anti-AutoMod", value="automod", description="Protect AutoMod rules against abuse"),
         ],
         row=2,
     )
     async def toggle_module(self, interaction: discord.Interaction, select: ui.Select) -> None:
-        """Toggle an individual sub-protection module."""
+        """Toggle an individual protection module."""
         chosen_module = select.values[0]
         curr_state = self.bot.antinuke_mgr.is_module_enabled(self.guild.id, chosen_module)
         key = f"{chosen_module}_protection"
         await self.bot.antinuke_mgr.update_settings(self.guild.id, **{key: not curr_state})
 
         from src.cogs.antinuke.panel import build_antinuke_card
-
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
         from src.utils.containers import build_container_payload
 

@@ -11,49 +11,44 @@ from src.cogs.antinuke._helpers import execute_punishment, restore_channel, disp
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
-logger = logging.getLogger("Kyro.Antinuke.ChannelEvents")
+logger = logging.getLogger("Kyro.Antinuke.AntiChannel")
 
 
-class AntinukeChannelCog(commands.Cog):
-    """Event listeners for channel deletion, mass channel spam, and permission tampering."""
+class AntiChannelCog(commands.Cog):
+    """Anti-Channel protection: Intercepts channel deletions and mass channel spam."""
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel) -> None:
-        """Intercept unauthorized channel deletion and instantly restore."""
+        """Intercept unauthorized channel deletion and auto-recreate."""
         guild = channel.guild
         if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "channel"):
             return
 
-        # Snapshot retrieval before deletion wipe
         cached = self.bot.antinuke_mgr.get_cached_channel(guild.id, channel.id)
 
-        # Audit log resolution
-        await asyncio.sleep(0.3)  # Small yield for Discord audit log propagation
+        await asyncio.sleep(0.3)
         perpetrator: discord.Member | discord.User | None = None
         try:
             async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
                 if entry.target and entry.target.id == channel.id:
                     perpetrator = entry.user
                     break
-        except Exception as e:
-            logger.debug(f"Audit log check failed on channel delete: {e}")
+        except Exception:
+            pass
 
         if not perpetrator:
             return
 
-        # Immunity check (Owner, Bot, Whitelist)
         if self.bot.antinuke_mgr.is_immune(guild, perpetrator.id, "channel"):
             return
 
-        # Attack detected: Punish offender
         punish_res = await execute_punishment(
-            self.bot, guild, perpetrator, "Channel Delete", f"Deleted #{channel.name}"
+            self.bot, guild, perpetrator, "Anti-Channel", f"Deleted #{channel.name}"
         )
 
-        # Self-healing: Recreate channel
         recreated = None
         if cached:
             recreated = await restore_channel(guild, cached)
@@ -63,7 +58,7 @@ class AntinukeChannelCog(commands.Cog):
         await dispatch_antinuke_log(
             self.bot,
             guild,
-            "Channel Deletion Intercepted",
+            "Anti-Channel",
             perpetrator,
             punish_res,
             recovery_msg,
@@ -72,7 +67,7 @@ class AntinukeChannelCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel) -> None:
-        """Catch mass channel creation attacks (e.g. 50 channels created in 5 sec)."""
+        """Catch mass channel creation attacks."""
         guild = channel.guild
         if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "channel"):
             return
@@ -93,26 +88,24 @@ class AntinukeChannelCog(commands.Cog):
         if self.bot.antinuke_mgr.is_immune(guild, perpetrator.id, "channel"):
             return
 
-        # Check rate limit (mass channel spam > 2 in 8 seconds)
         is_raid = self.bot.antinuke_mgr.check_rate_limit(
             guild.id, perpetrator.id, "channel_create", max_allowed=2, window_seconds=8.0
         )
 
         if is_raid:
-            # Delete spam channel
             try:
                 await channel.delete(reason="Kyro Antinuke: Mass Channel Raid Cleanup")
             except Exception:
                 pass
 
             punish_res = await execute_punishment(
-                self.bot, guild, perpetrator, "Mass Channel Creation", f"Created spam channel #{channel.name}"
+                self.bot, guild, perpetrator, "Anti-Channel", f"Mass channel spam #{channel.name}"
             )
 
             await dispatch_antinuke_log(
                 self.bot,
                 guild,
-                "Mass Channel Creation Raid",
+                "Anti-Channel",
                 perpetrator,
                 punish_res,
                 "Spam Channel Deleted",
@@ -121,5 +114,5 @@ class AntinukeChannelCog(commands.Cog):
 
 
 async def setup(bot: KyroBot) -> None:
-    """Load AntinukeChannelCog."""
-    await bot.add_cog(AntinukeChannelCog(bot))
+    """Load AntiChannelCog."""
+    await bot.add_cog(AntiChannelCog(bot))

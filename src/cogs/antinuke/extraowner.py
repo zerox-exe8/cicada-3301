@@ -19,6 +19,24 @@ class AntinukeExtraOwnerCog(commands.Cog):
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
+    def _build_usage_card(self, ctx: CustomContext) -> KyroContainer:
+        """Construct the Components V2 usage guide for extraowner commands (same style as role)."""
+        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "•")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(content="**Extra Owner Commands**")
+        container.add_separator(divider=True)
+        container.add_text(
+            f"{dot} `{prefix}extraowner add <@user>`\n"
+            f"{dot} `{prefix}extraowner remove <@user>`\n"
+            f"{dot} `{prefix}extraowner list`"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        return container
+
     @commands.hybrid_group(
         name="extraowner",
         aliases=["eo"],
@@ -27,8 +45,12 @@ class AntinukeExtraOwnerCog(commands.Cog):
     )
     @commands.guild_only()
     async def extraowner(self, ctx: CustomContext) -> None:
-        """View list of current Extra Owners."""
-        await ctx.invoke(self.bot.get_command("extraowner list"))
+        """Show Extra Owner usage guide (same style as role command)."""
+        if ctx.invoked_subcommand is not None:
+            return
+
+        container = self._build_usage_card(ctx)
+        await send_container_response(ctx, container)
 
     @extraowner.command(name="add", description="Promote a trusted user to Extra Owner (Server Owner only).")
     @app_commands.describe(user="User to promote to Extra Owner")
@@ -77,25 +99,29 @@ class AntinukeExtraOwnerCog(commands.Cog):
         container.add_text(f"• **User:** **{user.name}** `「{user.id}」` has been demoted.")
         await send_container_response(ctx, container)
 
-    @extraowner.command(name="list", description="List all registered Extra Owners.")
+    @extraowner.command(name="list", aliases=["show"], description="List all registered Extra Owners.")
     async def extraowner_list(self, ctx: CustomContext) -> None:
         """Display list of all registered Extra Owners."""
         owner_ids = self.bot.antinuke_mgr.get_extra_owners(ctx.guild.id)
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Extra Owners Registry**")
         container.add_separator(divider=True)
 
         if not owner_ids:
-            container.add_text("• No Extra Owners configured.")
+            container.add_text(f"{dot} No Extra Owners configured.")
         else:
             lines = []
             for uid in owner_ids:
                 u = self.bot.get_user(uid)
                 u_str = f"**{u.name}**" if u else f"<@{uid}>"
-                lines.append(f"• {u_str} `「{uid}」`")
+                lines.append(f"{dot} {u_str} `「{uid}」`")
             container.add_text("\n".join(lines))
 
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
 

@@ -20,6 +20,24 @@ class AntinukeWhitelistCog(commands.Cog):
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
+    def _build_usage_card(self, ctx: CustomContext) -> KyroContainer:
+        """Construct the Components V2 usage guide for whitelist commands (same style as role)."""
+        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "•")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(content="**Whitelist Commands**")
+        container.add_separator(divider=True)
+        container.add_text(
+            f"{dot} `{prefix}whitelist add <@user or bot>`\n"
+            f"{dot} `{prefix}whitelist remove <@user or bot>`\n"
+            f"{dot} `{prefix}whitelist list`"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        return container
+
     @commands.hybrid_group(
         name="whitelist",
         aliases=["wl"],
@@ -28,8 +46,12 @@ class AntinukeWhitelistCog(commands.Cog):
     )
     @commands.guild_only()
     async def whitelist(self, ctx: CustomContext) -> None:
-        """View list of all whitelisted entities."""
-        await ctx.invoke(self.bot.get_command("whitelist list"))
+        """Show Whitelist usage guide (same style as role command)."""
+        if ctx.invoked_subcommand is not None:
+            return
+
+        container = self._build_usage_card(ctx)
+        await send_container_response(ctx, container)
 
     @whitelist.command(name="add", description="Add a user or bot to the antinuke whitelist.")
     @app_commands.describe(
@@ -99,17 +121,21 @@ class AntinukeWhitelistCog(commands.Cog):
         container.add_text(f"• **Target:** **{target.name}** `「{target.id}」` has been removed.")
         await send_container_response(ctx, container)
 
-    @whitelist.command(name="list", description="List all whitelisted users and bots.")
+    @whitelist.command(name="list", aliases=["show"], description="List all whitelisted users and bots.")
     async def whitelist_list(self, ctx: CustomContext) -> None:
         """Display all whitelisted members and bots."""
         wl_dict = self.bot.antinuke_mgr.get_whitelist(ctx.guild.id)
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Antinuke Whitelist Registry**")
         container.add_separator(divider=True)
 
         if not wl_dict:
-            container.add_text("• No entities currently whitelisted.")
+            container.add_text(f"{dot} No entities currently whitelisted.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
@@ -119,14 +145,16 @@ class AntinukeWhitelistCog(commands.Cog):
             u_name = f"**{u.name}**" if u else f"<@{uid}>"
 
             if data.get("is_extra_owner"):
-                lines.append(f"• {u_name} `「{uid}」` **—** `[Extra Owner]`")
+                lines.append(f"{dot} {u_name} `「{uid}」` **—** `[Extra Owner]`")
             elif data.get("is_full"):
-                lines.append(f"• {u_name} `「{uid}」` **—** `[Full Whitelist]`")
+                lines.append(f"{dot} {u_name} `「{uid}」` **—** `[Full Whitelist]`")
             else:
                 scopes = ", ".join(data.get("scope", set()))
-                lines.append(f"• {u_name} `「{uid}」` **—** `[Scoped: {scopes}]`")
+                lines.append(f"{dot} {u_name} `「{uid}」` **—** `[Scoped: {scopes}]`")
 
         container.add_text("\n".join(lines[:25]))
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
 

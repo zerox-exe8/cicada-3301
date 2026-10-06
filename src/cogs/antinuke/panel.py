@@ -251,16 +251,15 @@ class AntinukePanelCog(commands.Cog):
         """Launch the Antinuke setup, or show a notice if already enabled."""
         cfg = self.bot.antinuke_mgr.get_settings(ctx.guild.id)
         if cfg.get("enabled", False):
-            # Already enabled — show a small clean notice instead of full setup
+            # Already enabled — show a small clean notice
             dot = self.bot.custom_emojis.get("heart_dot", "•")
             sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
             c = KyroContainer(accent_color=None)
             c.add_section(content="**Kyro Antinuke**\n> Antinuke is already active on this server.")
             c.add_separator(divider=True)
-            c.add_text(
-                f"> {dot} **Status:** {sw_on}\n"
-                f"-# Use `,antinuke disable` to turn it off."
-            )
+            c.add_text(f"> {dot} **Status:** {sw_on}")
+            c.add_separator(divider=True)
+            c.add_text(f"-# Use `,antinuke disable` to turn it off.")
             await send_container_response(ctx, c)
             return
 
@@ -269,43 +268,61 @@ class AntinukePanelCog(commands.Cog):
         container = wizard.get_dashboard_container()
         await send_container_response(ctx, container, view=wizard)
 
-    @antinuke.command(name="enable", description="Enable the Antinuke defense protocol.")
+    @antinuke.command(name="enable", description="Enable Antinuke protection on your server.")
     async def antinuke_enable(self, ctx: CustomContext) -> None:
-        """Turn on Antinuke protection + auto-create and secure kyro_logs unified log channel."""
+        """Turn on Antinuke protection + auto-create private kyro_logs channel."""
         guild = ctx.guild
+        cfg = self.bot.antinuke_mgr.get_settings(guild.id)
 
-        # 1. Ensure strictly private unified kyro_logs channel and bind settings
+        # If already enabled, show a small notice — don't re-run setup
+        if cfg.get("enabled", False):
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+            c = KyroContainer(accent_color=None)
+            c.add_section(content="**Kyro Antinuke**\n> Antinuke is already active on this server.")
+            c.add_separator(divider=True)
+            c.add_text(f"> {dot} **Status:** {sw_on}")
+            c.add_separator(divider=True)
+            c.add_text("-# Use `,antinuke disable` to turn it off.")
+            await send_container_response(ctx, c)
+            return
+
+        # Enable antinuke and auto-create logs channel
         log_channel, _ = await ensure_unified_log_channel(self.bot, guild, ctx.author)
-
         if log_channel is None:
             await self.bot.antinuke_mgr.update_settings(guild.id, enabled=True)
-
         self.bot.antinuke_mgr.snapshot_guild_state(guild)
 
-        # 2. Render primary Antinuke dashboard card (with interactive view)
-        container, view = build_antinuke_card(self.bot, guild, ctx.author.id)
-        await send_container_response(ctx, container, view=view)
+        # Show clean success embed — no control panel buttons
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content="**Kyro Antinuke**\n> Antinuke is now active and protecting your server."
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"> {dot} **Status:** {sw_on}")
+        container.add_separator(divider=True)
+        container.add_text(f"-# Enabled by {ctx.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
+        await send_container_response(ctx, container)
 
-    @antinuke.command(name="disable", description="Disable the Antinuke defense protocol.")
+    @antinuke.command(name="disable", description="Disable Antinuke protection on your server.")
     async def antinuke_disable(self, ctx: CustomContext) -> None:
         """Turn off Antinuke protection."""
         await self.bot.antinuke_mgr.update_settings(ctx.guild.id, enabled=False)
 
         dot = self.bot.custom_emojis.get("heart_dot", "•")
-        sw_off = self.bot.custom_emojis.get("icon_switch_off", "`[OFF]`")
+        sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                "**Antinuke Deactivated**\n"
-                "> *Server defense protocol has been temporarily disarmed.*"
+                "**Kyro Antinuke**\n"
+                "> Antinuke has been turned off."
             )
         )
         container.add_separator(divider=True)
-        container.add_text(
-            f"> {dot} **Status:** {sw_off}\n"
-            f"> *Use `,antinuke enable` to re-arm protection.*"
-        )
+        container.add_text(f"> {dot} **Status:** {sw_off}")
         container.add_separator(divider=True)
         container.add_text(f"-# Disabled by {ctx.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
         await send_container_response(ctx, container)

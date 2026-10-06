@@ -71,13 +71,8 @@ class AntinukeSetupWizard(ui.View):
         existing_cfg = self.bot.antinuke_mgr.get_settings(guild.id)
         self.punishment: str = existing_cfg.get("punishment", "ban")
 
-        # Load currently enabled modules (default to all if new setup)
+        # Always start fresh — no pre-selection, user picks explicitly
         self.selected_modules: set[str] = set()
-        for k in ALL_MODULE_KEYS:
-            if existing_cfg.get(f"{k}_protection", True):
-                self.selected_modules.add(k)
-        if not self.selected_modules:
-            self.selected_modules = set(ALL_MODULE_KEYS)
 
         existing_log = self.bot.antinuke_mgr.get_log_channel(guild)
         if existing_log:
@@ -106,36 +101,23 @@ class AntinukeSetupWizard(ui.View):
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 
         if slide_key == "modules":
-            # Slide 1: Multi-Select Modules with "Select All" at top
+            # Slide 1: Multi-Select Modules — fresh each time, no pre-selected chips
             is_all_selected = len(self.selected_modules) == len(ALL_MODULE_KEYS)
             options: list[discord.SelectOption] = []
 
             for key, label in MODULE_CHOICES:
-                if key == "all":
-                    options.append(
-                        discord.SelectOption(
-                            label=label,
-                            value=key,
-                            # Only mark "Select All" as selected when all are chosen
-                            # but DON'T set individual defaults when all selected (avoids chip spam)
-                            default=False,
-                        )
-                    )
-                else:
-                    options.append(
-                        discord.SelectOption(
-                            label=label,
-                            value=key,
-                            # Show individual chips only when user has picked a partial subset
-                            default=(key in self.selected_modules and not is_all_selected),
-                        )
-                    )
+                # Never set default=True — avoids chip spam
+                # Partial selections are tracked internally and shown via placeholder
+                options.append(discord.SelectOption(label=label, value=key, default=False))
 
-            # Placeholder clearly states the current state
-            if is_all_selected:
-                placeholder = "All 20 modules enabled — click to change"
+            # Placeholder tells user current state clearly
+            sel_count = len(self.selected_modules)
+            if sel_count == 0:
+                placeholder = "Select modules to enable..."
+            elif is_all_selected:
+                placeholder = "All 20 modules selected"
             else:
-                placeholder = f"{len(self.selected_modules)}/20 modules selected"
+                placeholder = f"{sel_count}/20 modules selected"
 
             select = ui.Select(
                 placeholder=placeholder,
@@ -272,10 +254,12 @@ class AntinukeSetupWizard(ui.View):
 
         total_mods = len(ALL_MODULE_KEYS)
         sel_count = len(self.selected_modules)
-        if sel_count == total_mods:
-            mod_disp = f"`All Modules ({total_mods}/{total_mods})`"
+        if sel_count == 0:
+            mod_disp = "`None selected`"
+        elif sel_count == total_mods:
+            mod_disp = f"`All ({total_mods}/{total_mods})`"
         else:
-            mod_disp = f"`{sel_count}/{total_mods} Modules Selected`"
+            mod_disp = f"`{sel_count}/{total_mods} selected`"
 
         overview_lines = [
             f"> {dot} **Protection Modules:** {mod_disp}",
@@ -289,21 +273,14 @@ class AntinukeSetupWizard(ui.View):
 
     async def _on_modules_selected(self, interaction: discord.Interaction) -> None:
         values = interaction.data.get("values", [])
-        was_all_selected = len(self.selected_modules) == len(ALL_MODULE_KEYS)
-
         if not values:
+            pass  # keep existing state
+        elif "all" in values:
+            # Select All chosen — enable everything
             self.selected_modules = set(ALL_MODULE_KEYS)
-        elif "all" in values and not was_all_selected:
-            # User newly selected "Select All"
-            self.selected_modules = set(ALL_MODULE_KEYS)
-        elif "all" in values and was_all_selected and len(values) < len(MODULE_CHOICES):
-            # User was at all selected, but unchecked one or more specific items
-            self.selected_modules = set(v for v in values if v != "all")
         else:
-            # Explicit selection of specific modules
-            self.selected_modules = set(v for v in values if v != "all")
-            if not self.selected_modules and "all" in values:
-                self.selected_modules = set(ALL_MODULE_KEYS)
+            # Only the specifically ticked items
+            self.selected_modules = set(values)
 
         self._build_components_for_slide()
         await edit_container_response(interaction, self.get_dashboard_container(), view=self)

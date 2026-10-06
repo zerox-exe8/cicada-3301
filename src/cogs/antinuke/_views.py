@@ -140,6 +140,10 @@ class AntinukeControlView(ui.View):
         """Toggle Antinuke master switch on or off."""
         is_active = self.bot.antinuke_mgr.is_enabled(self.guild.id)
         new_state = not is_active
+        if new_state:
+            from src.cogs.antinuke.panel import ensure_unified_log_channel
+            await ensure_unified_log_channel(self.bot, self.guild, interaction.user)
+
         await self.bot.antinuke_mgr.update_settings(self.guild.id, enabled=new_state)
 
         from src.cogs.antinuke.panel import build_antinuke_card

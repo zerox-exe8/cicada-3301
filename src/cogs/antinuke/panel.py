@@ -13,6 +13,132 @@ if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
 
+logger = logging.getLogger("Kyro.Antinuke.Panel")
+
+
+async def ensure_unified_log_channel(
+    bot: KyroBot,
+    guild: discord.Guild,
+    invoker: discord.Member | discord.User | None = None,
+) -> tuple[discord.TextChannel | None, bool]:
+    """
+    Find or auto-create a strictly private unified `kyro_logs` channel.
+    Secures permissions against public access (@everyone denied view_channel).
+    Binds the channel to both antinuke and unified server audit logs.
+    Returns (channel, is_newly_created).
+    """
+    log_channel: discord.TextChannel | None = None
+    for ch in guild.text_channels:
+        if ch.name.lower() in ("kyro_logs", "kyro-logs"):
+            log_channel = ch
+            break
+
+    is_new = False
+    if log_channel is None:
+        try:
+            # Strictly private: hide from @everyone, allow bot and extra owners
+            overwrites: dict[Any, discord.PermissionOverwrite] = {
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=False,
+                    read_messages=False,
+                    send_messages=False,
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    read_messages=True,
+                    send_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    read_message_history=True,
+                    manage_messages=True,
+                ),
+            }
+            extra_owner_ids = bot.antinuke_mgr.get_extra_owners(guild.id)
+            for eo_id in extra_owner_ids:
+                eo_m = guild.get_member(eo_id)
+                if eo_m:
+                    overwrites[eo_m] = discord.PermissionOverwrite(
+                        view_channel=True,
+                        read_messages=True,
+                        read_message_history=True,
+                    )
+
+            log_channel = await guild.create_text_channel(
+                "kyro_logs",
+                overwrites=overwrites,
+                topic="Kyro unified logs — security alerts + message / member / server / voice audit.",
+                reason="Kyro Antinuke: auto-create unified log channel (secured private)",
+            )
+            is_new = True
+        except (discord.Forbidden, Exception) as e:
+            logger.warning(f"Could not auto-create kyro_logs in guild {guild.id}: {e}")
+            log_channel = None
+    else:
+        # Secure existing channel so it is NOT public to regular members
+        try:
+            default_perms = log_channel.permissions_for(guild.default_role)
+            if default_perms.view_channel:
+                await log_channel.set_permissions(
+                    guild.default_role,
+                    view_channel=False,
+                    read_messages=False,
+                    send_messages=False,
+                    reason="Kyro Antinuke: secure log channel from public access",
+                )
+            bot_perms = log_channel.permissions_for(guild.me)
+            if not (bot_perms.view_channel and bot_perms.send_messages and bot_perms.embed_links):
+                await log_channel.set_permissions(
+                    guild.me,
+                    view_channel=True,
+                    read_messages=True,
+                    send_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    read_message_history=True,
+                    reason="Kyro Antinuke: grant bot required permissions in log channel",
+                )
+        except (discord.Forbidden, Exception) as e:
+            logger.warning(f"Could not secure permissions for existing log channel {log_channel.id}: {e}")
+
+    if log_channel is not None:
+        await bot.antinuke_mgr.update_settings(
+            guild.id, enabled=True, log_channel_id=log_channel.id
+        )
+        try:
+            await bot.log_mgr.set_log_channel(guild.id, "all", log_channel.id)
+        except Exception:
+            pass
+
+        # Post initialization card into the new logs channel
+        if is_new:
+            try:
+                dot = bot.custom_emojis.get("heart_dot", "•")
+                shield = bot.custom_emojis.get("icon_shield", "")
+                badge_str = f"{shield} " if shield else ""
+
+                init_card = KyroContainer(accent_color=None)
+                init_card.add_section(
+                    content=(
+                        f"**{badge_str}Kyro Unified Audit Logs**\n"
+                        "> *Centralized security alerts, antinuke triggers, and server audit logging.*"
+                    )
+                )
+                init_card.add_separator(divider=True)
+                init_card.add_text(
+                    f"> {dot} **Security Status:** `Armed & Monitoring`\n"
+                    f"> {dot} **Channel Privacy:** `Private (Hidden from @everyone)`\n"
+                    f"> {dot} **Monitored Streams:** `Antinuke Alerts` • `Member Events` • `Message Audit` • `Server Changes` • `Voice Activity`"
+                )
+                init_card.add_separator(divider=True)
+                invoker_str = f"Initialized by {invoker.mention} • " if invoker else ""
+                init_card.add_text(f"-# {invoker_str}Timestamp: <t:{int(discord.utils.utcnow().timestamp())}:f>")
+                await send_container_response(log_channel, init_card)
+            except Exception as e:
+                logger.warning(f"Could not send initialization card to log channel: {e}")
+
+    return log_channel, is_new
+
+
 def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> tuple[KyroContainer, AntinukeControlView]:
     """Assemble the clean, straight-line Antinuke dashboard container with heart dot and switch emojis."""
     cfg = bot.antinuke_mgr.get_settings(guild.id)
@@ -20,6 +146,11 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
     raw_punishment = cfg.get("punishment", "ban")
     punishment = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}.get(raw_punishment, str(raw_punishment).capitalize())
     log_ch = bot.antinuke_mgr.get_log_channel(guild)
+    if not log_ch:
+        try:
+            log_ch = bot.log_mgr.get_log_channel(guild, "all")
+        except Exception:
+            pass
     eo_count = len(bot.antinuke_mgr.get_extra_owners(guild.id))
 
     dot = bot.custom_emojis.get("heart_dot", "•")
@@ -27,11 +158,15 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
     sw_off = bot.custom_emojis.get("icon_switch_off", "`[OFF]`")
 
     container = KyroContainer(accent_color=None)
-    # Title with user-friendly tagline directly beneath
+    tagline = (
+        "> *Real-time protection against nukes, raids, and unauthorized changes.*"
+        if is_enabled
+        else "> *Protection is currently inactive. Use `,antinuke enable` to arm.*"
+    )
     container.add_section(
         content=(
             "**Kyro Antinuke**\n"
-            "> *Real-time protection against nukes, raids, and unauthorized changes.*"
+            f"{tagline}"
         )
     )
     container.add_separator(divider=True)
@@ -116,57 +251,31 @@ class AntinukePanelCog(commands.Cog):
         container, view = build_antinuke_card(self.bot, ctx.guild, ctx.author.id)
         await send_container_response(ctx, container, view=view)
 
+    @antinuke.command(name="setup", description="Interactive step-by-step Antinuke setup wizard.")
+    @commands.guild_only()
+    async def antinuke_setup(self, ctx: CustomContext) -> None:
+        """Launch the slide-based Antinuke setup wizard."""
+        from src.cogs.antinuke._setup_view import AntinukeSetupWizard
+        wizard = AntinukeSetupWizard(self.bot, ctx.guild, ctx.author)
+        container = wizard.get_dashboard_container()
+        await send_container_response(ctx, container, view=wizard)
+
     @antinuke.command(name="enable", description="Enable the Antinuke defense protocol.")
     async def antinuke_enable(self, ctx: CustomContext) -> None:
-        """Turn on Antinuke protection + auto-create kyro_logs unified log channel."""
+        """Turn on Antinuke protection + auto-create and secure kyro_logs unified log channel."""
         guild = ctx.guild
 
-        # 1. Find or auto-create the unified kyro_logs channel
-        log_channel: discord.TextChannel | None = None
-        for ch in guild.text_channels:
-            if ch.name.lower() in ("kyro_logs", "kyro-logs"):
-                log_channel = ch
-                break
+        # 1. Ensure strictly private unified kyro_logs channel and bind settings
+        log_channel, _ = await ensure_unified_log_channel(self.bot, guild, ctx.author)
 
-        channel_note = ""
         if log_channel is None:
-            try:
-                log_channel = await guild.create_text_channel(
-                    "kyro_logs",
-                    topic="Kyro unified logs — security alerts + message / member / server / voice audit.",
-                    reason="Kyro Antinuke: auto-create unified log channel",
-                )
-                channel_note = f"\n{self.bot.custom_emojis.get('heart_dot', '•')} **Logs:** {log_channel.mention} `(auto-created)`"
-            except discord.Forbidden:
-                channel_note = "\n> *Missing Manage Channels — create `kyro_logs` manually or run `,antinuke log #channel`.*"
-                log_channel = None
-            except Exception:
-                log_channel = None
-
-        # 2. Bind all log streams to this single channel
-        if log_channel is not None:
-            await self.bot.antinuke_mgr.update_settings(
-                guild.id, enabled=True, log_channel_id=log_channel.id
-            )
-            try:
-                await self.bot.log_mgr.set_log_channel(guild.id, "all", log_channel.id)
-            except Exception:
-                pass
-            if not channel_note:
-                channel_note = f"\n{self.bot.custom_emojis.get('heart_dot', '•')} **Logs:** {log_channel.mention}"
-        else:
             await self.bot.antinuke_mgr.update_settings(guild.id, enabled=True)
 
         self.bot.antinuke_mgr.snapshot_guild_state(guild)
 
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
-        sw_on = self.bot.custom_emojis.get("icon_switch_on", "`[ON]`")
-
-        container = KyroContainer(accent_color=None)
-        container.add_section(content="**Antinuke Activated**")
-        container.add_separator(divider=True)
-        container.add_text(f"{dot} **Status:** {sw_on} **—** **Punishment:** `Ban`{channel_note}")
-        await send_container_response(ctx, container)
+        # 2. Render primary Antinuke dashboard card (with interactive view)
+        container, view = build_antinuke_card(self.bot, guild, ctx.author.id)
+        await send_container_response(ctx, container, view=view)
 
     @antinuke.command(name="disable", description="Disable the Antinuke defense protocol.")
     async def antinuke_disable(self, ctx: CustomContext) -> None:
@@ -177,9 +286,19 @@ class AntinukePanelCog(commands.Cog):
         sw_off = self.bot.custom_emojis.get("icon_switch_off", "`[OFF]`")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Antinuke Deactivated**")
+        container.add_section(
+            content=(
+                "**Antinuke Deactivated**\n"
+                "> *Server defense protocol has been temporarily disarmed.*"
+            )
+        )
         container.add_separator(divider=True)
-        container.add_text(f"{dot} **Status:** {sw_off}\n> *Use `,antinuke enable` to re-arm protection.*")
+        container.add_text(
+            f"> {dot} **Status:** {sw_off}\n"
+            f"> *Use `,antinuke enable` to re-arm protection.*"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Disabled by {ctx.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="punishment", description="Set the punishment for unauthorized actions.")

@@ -199,31 +199,32 @@ async def dispatch_antinuke_log(
         log_channel = bot.log_mgr.get_log_channel(guild, "mod")
 
     e_reg = getattr(bot, "custom_emojis", {})
-    dot = e_reg.get("heart_dot", "-")
+    dot = e_reg.get("heart_dot", "•")
     shield = e_reg.get("icon_shield", "")
     badge_str = f"{shield} " if shield else ""
 
     container = KyroContainer(accent_color=None)
-    container.add_section(content=f"**Security Alert — {action}**")
+    container.add_section(content=f"**{badge_str}Security Alert — {action}**")
     container.add_separator(divider=True)
 
     items = [
-        f"• **Perpetrator:** **{offender}** `「{offender.id}」`",
-        f"• **Punishment:** `{punishment_result}`",
-        f"• **Mitigation:** `{recovery_status}`",
+        f"> {dot} **Perpetrator:** **{offender}** `「{offender.id}」`",
+        f"> {dot} **Punishment:** `{punishment_result}`",
+        f"> {dot} **Mitigation:** `{recovery_status}`",
     ]
 
     if extra:
-        items.append(f"• **Details:** {extra}")
+        items.append(f"> {dot} **Details:** {extra}")
 
     container.add_text("\n".join(items))
+    container.add_separator(divider=True)
+    container.add_text(f"-# Timestamp: <t:{int(discord.utils.utcnow().timestamp())}:f>")
 
     # Send to log channel
     if log_channel:
         try:
-            from src.utils.containers import build_container_payload
-            payload = build_container_payload(container)
-            await log_channel.send(**payload)
+            from src.utils.containers import send_container_response
+            await send_container_response(log_channel, container)
         except Exception as e:
             logger.warning(f"Guild {guild.id}: Could not send antinuke log to channel {log_channel.id}: {e}")
 
@@ -233,14 +234,15 @@ async def dispatch_antinuke_log(
         try:
             owner = guild.owner or await guild.fetch_member(guild.owner_id)
             if owner:
-                from src.utils.containers import build_container_payload
+                from src.utils.containers import send_container_response
                 dm_container = KyroContainer(accent_color=None)
                 dm_container.add_section(
-                    content=f"**Critical Security Incident in {guild.name}**"
+                    content=f"**{badge_str}Critical Security Incident in {guild.name}**"
                 )
                 dm_container.add_separator(divider=True)
                 dm_container.add_text("\n".join(items))
-                payload = build_container_payload(dm_container)
-                await owner.send(**payload)
+                dm_container.add_separator(divider=True)
+                dm_container.add_text(f"-# Timestamp: <t:{int(discord.utils.utcnow().timestamp())}:f>")
+                await send_container_response(owner, dm_container)
         except Exception as e:
             logger.debug(f"Notice sending owner DM alert: {e}")

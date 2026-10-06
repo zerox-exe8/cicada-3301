@@ -50,12 +50,15 @@ class ServerLogsCog(commands.Cog):
             return
 
         e_reg = getattr(self.bot, "custom_emojis", {})
-        dot = e_reg.get("heart_dot", "-")
+        dot = e_reg.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
         container.add_section(content=f"**{title}**")
         container.add_separator(divider=True)
-        body = "\n".join(f"{dot} {ln}" if not ln.startswith(f"{dot}") else ln for ln in lines)
+        body = "\n".join(
+            f"> {dot} {ln}" if not ln.startswith(("> ", f"{dot} ")) else (f"> {ln}" if not ln.startswith("> ") else ln)
+            for ln in lines
+        )
         container.add_text(body)
         container.add_separator(divider=True)
         container.add_text(f"-# Timestamp: <t:{int(discord.utils.utcnow().timestamp())}:f>")

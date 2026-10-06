@@ -5,6 +5,7 @@ import logging
 import math
 import os
 from typing import TYPE_CHECKING, Callable
+import discord
 from aiohttp import web
 
 from src.core.config import Config
@@ -43,8 +44,34 @@ class HealthServer:
         self.app.router.add_get("/", self._handle_home)
         self.app.router.add_get("/health", self._handle_health)
         self.app.router.add_get("/api/stats", self._handle_api_stats)
+        self.app.router.add_get("/api/guilds", self._handle_api_guilds)
         self.app.router.add_get("/api/guilds/{id}", self._handle_api_guild)
+        self.app.router.add_get("/api/guilds/{id}/antinuke", self._handle_api_antinuke_get)
+        self.app.router.add_patch("/api/guilds/{id}/antinuke", self._handle_api_antinuke_patch)
+        self.app.router.add_get("/api/commands", self._handle_api_commands)
         self.app.router.add_get("/api/music/{id}", self._handle_api_music)
+        # CORS preflight for website (localhost + prod)
+        self.app.router.add_options("/api/{tail:.*}", self._handle_options)
+        self.app.router.add_options("/health", self._handle_options)
+
+    async def _handle_options(self, request: web.Request) -> web.Response:
+        return web.Response(status=204, headers=self._cors_headers())
+
+    @staticmethod
+    def _cors_headers() -> dict:
+        return {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        }
+
+    def _check_dashboard_auth(self, request: web.Request) -> bool:
+        """Bearer-token guard for write endpoints (empty token = local dev, allow)."""
+        expected = os.getenv("DASHBOARD_TOKEN", "").strip()
+        if not expected:
+            return True
+        auth = request.headers.get("Authorization", "")
+        return auth == f"Bearer {expected}"
 
     async def _handle_home(self, request: web.Request) -> web.Response:
         """Root endpoint returning basic status."""
@@ -64,7 +91,7 @@ class HealthServer:
             "guilds": len(bot.guilds) if bot else 0,
             "ping_ms": ws_ping,
         }
-        return web.json_response(data, status=200)
+        return web.json_response(data, status=200, headers=self._cors_headers())
 
     async def _handle_api_stats(self, request: web.Request) -> web.Response:
         """Real-time bot telemetry metrics JSON API."""
@@ -132,6 +159,100 @@ class HealthServer:
             "icon_url": str(guild.icon.url) if guild.icon else None,
         }
         return web.json_response(data, headers={"Access-Control-Allow-Origin": "*"})
+
+    async def _handle_api_guilds(self, request: web.Request) -> web.Response:
+        """Real guild list — every server the bot is actually in."""
+        bot = self.bot
+        if not bot:
+            return web.json_response({"error": "Bot gateway offline"}, status=503)
+        guilds = [
+            {
+                "id": str(g.id),
+                "name": g.name,
+                "member_count": getattr(g, "member_count", 0) or 0,
+                "icon_url": str(g.icon.url) if g.icon else None,
+            }
+            for g in bot.guilds
+        ]
+        return web.json_response({"guilds": guilds}, headers=self._cors_headers())
+
+    async def _handle_api_antinuke_get(self, request: web.Request) -> web.Response:
+        """Real antinuke state for a guild, straight from AntinukeManager memory."""
+        bot = self.bot
+        try:
+            guild_id = int(request.match_info.get("id"))
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Invalid guild ID"}, status=400)
+        if not bot:
+            return web.json_response({"error": "Bot gateway offline"}, status=503)
+        if not bot.get_guild(guild_id):
+            return web.json_response({"error": "Guild not found"}, status=404)
+
+        from src.managers.antinuke_manager import PROTECTION_MODULES
+        cfg = bot.antinuke_mgr.get_settings(guild_id)
+        data = {
+            "guild_id": str(guild_id),
+            "enabled": bool(cfg.get("enabled", False)),
+            "punishment": cfg.get("punishment", "ban"),
+            "log_channel_id": str(cfg["log_channel_id"]) if cfg.get("log_channel_id") else None,
+            "modules": {m: bool(cfg.get(f"{m}_protection", True)) for m in PROTECTION_MODULES},
+        }
+        return web.json_response(data, headers=self._cors_headers())
+
+    async def _handle_api_antinuke_patch(self, request: web.Request) -> web.Response:
+        """Apply antinuke changes for real — master switch, punishment, modules."""
+        bot = self.bot
+        try:
+            guild_id = int(request.match_info.get("id"))
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Invalid guild ID"}, status=400)
+        if not bot:
+            return web.json_response({"error": "Bot gateway offline"}, status=503)
+        if not bot.get_guild(guild_id):
+            return web.json_response({"error": "Guild not found"}, status=404)
+        if not self._check_dashboard_auth(request):
+            return web.json_response(
+                {"error": "Unauthorized — Discord login required"}, status=401,
+                headers=self._cors_headers(),
+            )
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON body"}, status=400,
+                                     headers=self._cors_headers())
+
+        from src.managers.antinuke_manager import PROTECTION_MODULES
+        updates: dict = {}
+        if "enabled" in body:
+            updates["enabled"] = bool(body["enabled"])
+        if "punishment" in body and str(body["punishment"]).lower() in ("ban", "kick", "quarantine", "strip_roles"):
+            updates["punishment"] = str(body["punishment"]).lower()
+        if isinstance(body.get("modules"), dict):
+            for m in PROTECTION_MODULES:
+                if m in body["modules"]:
+                    updates[f"{m}_protection"] = bool(body["modules"][m])
+        if not updates:
+            return web.json_response({"error": "Nothing to update"}, status=400,
+                                     headers=self._cors_headers())
+
+        await bot.antinuke_mgr.update_settings(guild_id, **updates)
+        return await self._handle_api_antinuke_get(request)
+
+    async def _handle_api_commands(self, request: web.Request) -> web.Response:
+        """Real command registry — every loaded prefix command with its help text."""
+        bot = self.bot
+        if not bot:
+            return web.json_response({"error": "Bot gateway offline"}, status=503)
+        cmds = []
+        for cmd in sorted(bot.commands, key=lambda c: c.qualified_name):
+            if getattr(cmd, "hidden", False):
+                continue
+            cmds.append({
+                "name": cmd.qualified_name,
+                "help": (cmd.help or cmd.description or "No description yet.").strip().split("\n")[0][:160],
+                "cog": cmd.cog_name or "General",
+            })
+        return web.json_response({"count": len(cmds), "commands": cmds}, headers=self._cors_headers())
 
     async def _handle_api_music(self, request: web.Request) -> web.Response:
         """Real-time audio streaming telemetry per guild."""

@@ -387,7 +387,4 @@ class AntinukeSetupWizard(ui.View):
         success_container.add_separator(divider=True)
         success_container.add_text(f"-# Configured by {self.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
 
-        # Attach control panel view so user can manage further
-        from src.cogs.antinuke._views import AntinukeControlView
-        ctrl_view = AntinukeControlView(self.bot, self.guild, self.author.id)
-        await edit_container_response(interaction, success_container, view=ctrl_view)
+        await edit_container_response(interaction, success_container, view=None)

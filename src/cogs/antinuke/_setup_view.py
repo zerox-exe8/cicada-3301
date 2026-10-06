@@ -261,10 +261,24 @@ class AntinukeSetupWizard(ui.View):
         else:
             mod_disp = f"`{sel_count}/{total_mods} selected`"
 
-        overview_lines = [
-            f"> {dot} **Protection Modules:** {mod_disp}",
-            f"> {dot} **Status:** {sw_on}",
-        ]
+        punish_map = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}
+        punish_disp = f"`{punish_map.get(self.punishment, self.punishment.capitalize())}`"
+
+        if self.log_mode == "auto":
+            log_disp = "`Auto-create #kyro_logs`"
+        elif self.selected_log_channel_id:
+            log_disp = f"<#{self.selected_log_channel_id}>"
+        else:
+            log_disp = "`Not set`"
+
+        # Progressive reveal — show fields completed so far
+        overview_lines = [f"> {dot} **Modules:** {mod_disp}"]
+        if slide_key in ("punishment", "logs", "deploy"):
+            overview_lines.append(f"> {dot} **Punishment:** {punish_disp}")
+        if slide_key in ("logs", "deploy"):
+            overview_lines.append(f"> {dot} **Logs:** {log_disp}")
+        overview_lines.append(f"> {dot} **Status:** {sw_on}")
+
         container.add_text("\n".join(overview_lines))
         container.add_separator(divider=True)
         container.add_text(f"-# Step {self.current_slide_idx + 1}/4 • Setup for {self.author.display_name}")

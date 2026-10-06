@@ -54,6 +54,10 @@ class Help(commands.Cog):
             if category_name.lower() == "developer":
                 continue
 
+            # Display-only rename: Security -> Antinuke (help embed only, cogs untouched)
+            if category_name.lower() == "security":
+                category_name = "Antinuke"
+
             # Merge any legacy General / Utility commands directly into Moderation
             if category_name.lower() in ("general", "utility"):
                 category_name = "Moderation"
@@ -74,8 +78,8 @@ class Help(commands.Cog):
                         if c not in categories[category_name]:
                             categories[category_name].append(c)
 
-        # Ensure ordered display in dropdown: Security, Moderation, Welcomer, Join to Create, Ticket, Security, Audit Logs, Music, etc.
-        priority_order = ["Security", "Moderation", "Welcomer", "Join to Create", "Ticket", "Audit Logs", "Music", "Premium"]
+        # Ensure ordered display in dropdown: Antinuke, Moderation, Welcomer, Join to Create, Ticket, Audit Logs, Music, etc.
+        priority_order = ["Antinuke", "Moderation", "Welcomer", "Join to Create", "Ticket", "Audit Logs", "Music", "Premium"]
         ordered_categories: dict[str, list[commands.Command]] = {}
         for cat in priority_order:
             if cat in categories and categories[cat]:
@@ -90,7 +94,7 @@ class Help(commands.Cog):
         """Resolve custom application emoji for category header from assets/emoji and assets/emoji2."""
         e_reg = self.bot.custom_emojis
         mapping = {
-            "Security": e_reg.get("icon_shield", ""),
+            "Antinuke": e_reg.get("antinuke_shield", e_reg.get("icon_shield", "")),
             "Music": e_reg.get("music", e_reg.get("icon_music", e_reg.get("Music_Playing", ""))),
             "Ticket": e_reg.get("icon_ticket", e_reg.get("ticket_support", e_reg.get("ticket", ""))),
             "Welcomer": e_reg.get("icons_join", e_reg.get("icon_join", "")),
@@ -105,7 +109,7 @@ class Help(commands.Cog):
         """Resolve emoji dict for Select Menu options."""
         e_reg = self.bot.custom_emojis
         mapping = {
-            "Security": "icon_shield",
+            "Antinuke": "antinuke_shield",
             "Music": "music",
             "Ticket": "icon_ticket",
             "Welcomer": "icons_join",
@@ -352,6 +356,8 @@ class Help(commands.Cog):
                 cat = getattr(target_cmd.cog, "category", "Moderation")
                 if cat.lower() in ("general", "utility"):
                     cat = "Moderation"
+                elif cat.lower() == "security":
+                    cat = "Antinuke"
                 cat_icon = self._get_category_emoji(cat)
                 desc = target_cmd.description or target_cmd.help or "No detailed description available."
                 aliases = ", ".join([f"`{a}`" for a in target_cmd.aliases]) if target_cmd.aliases else "`None`"
@@ -386,6 +392,9 @@ class Help(commands.Cog):
                 "tempvoice": "Join to Create",
                 "mod": "Moderation",
                 "welcome": "Welcomer",
+                "security": "Antinuke",
+                "antinuke": "Antinuke",
+                "anti-nuke": "Antinuke",
             }
             target_cat_name = category_aliases.get(query)
             if not target_cat_name:

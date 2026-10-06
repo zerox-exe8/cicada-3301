@@ -150,3 +150,11 @@ class AntinukeControlView(ui.View):
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)
         from src.utils.containers import edit_container_response
         await edit_container_response(interaction, container, view=new_view)
+
+    @ui.button(label="Setup Wizard", style=discord.ButtonStyle.secondary, row=2)
+    async def open_setup_wizard(self, interaction: discord.Interaction, button: ui.Button) -> None:
+        """Launch the step-by-step setup wizard directly from the control card."""
+        from src.cogs.antinuke._setup_view import AntinukeSetupWizard
+        wizard = AntinukeSetupWizard(self.bot, self.guild, interaction.user)
+        from src.utils.containers import edit_container_response
+        await edit_container_response(interaction, wizard.get_dashboard_container(), view=wizard)

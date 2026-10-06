@@ -74,8 +74,8 @@ class Help(commands.Cog):
                         if c not in categories[category_name]:
                             categories[category_name].append(c)
 
-        # Ensure ordered display in dropdown: Moderation, Welcomer, Join to Create, Ticket, Security, Audit Logs, Music, etc.
-        priority_order = ["Moderation", "Welcomer", "Join to Create", "Ticket", "Audit Logs", "Music", "Premium"]
+        # Ensure ordered display in dropdown: Security, Moderation, Welcomer, Join to Create, Ticket, Security, Audit Logs, Music, etc.
+        priority_order = ["Security", "Moderation", "Welcomer", "Join to Create", "Ticket", "Audit Logs", "Music", "Premium"]
         ordered_categories: dict[str, list[commands.Command]] = {}
         for cat in priority_order:
             if cat in categories and categories[cat]:
@@ -90,6 +90,7 @@ class Help(commands.Cog):
         """Resolve custom application emoji for category header from assets/emoji and assets/emoji2."""
         e_reg = self.bot.custom_emojis
         mapping = {
+            "Security": e_reg.get("icon_shield", ""),
             "Music": e_reg.get("music", e_reg.get("icon_music", e_reg.get("Music_Playing", ""))),
             "Ticket": e_reg.get("icon_ticket", e_reg.get("ticket_support", e_reg.get("ticket", ""))),
             "Welcomer": e_reg.get("icons_join", e_reg.get("icon_join", "")),
@@ -104,6 +105,7 @@ class Help(commands.Cog):
         """Resolve emoji dict for Select Menu options."""
         e_reg = self.bot.custom_emojis
         mapping = {
+            "Security": "icon_shield",
             "Music": "music",
             "Ticket": "icon_ticket",
             "Welcomer": "icons_join",

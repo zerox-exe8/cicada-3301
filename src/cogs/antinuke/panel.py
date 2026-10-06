@@ -243,19 +243,27 @@ class AntinukePanelCog(commands.Cog):
     @commands.hybrid_group(
         name="antinuke",
         aliases=["security", "an"],
-        description="Master Antinuke control panel and configuration.",
+        description="Open the Antinuke setup for your server.",
         invoke_without_command=True,
     )
     @commands.guild_only()
     async def antinuke(self, ctx: CustomContext) -> None:
-        """Display the interactive Antinuke control card."""
-        container, view = build_antinuke_card(self.bot, ctx.guild, ctx.author.id)
-        await send_container_response(ctx, container, view=view)
+        """Launch the Antinuke setup, or show a notice if already enabled."""
+        cfg = self.bot.antinuke_mgr.get_settings(ctx.guild.id)
+        if cfg.get("enabled", False):
+            # Already enabled — show a small clean notice instead of full setup
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+            c = KyroContainer(accent_color=None)
+            c.add_section(content="**Kyro Antinuke**\n> Antinuke is already active on this server.")
+            c.add_separator(divider=True)
+            c.add_text(
+                f"> {dot} **Status:** {sw_on}\n"
+                f"-# Use `,antinuke disable` to turn it off."
+            )
+            await send_container_response(ctx, c)
+            return
 
-    @antinuke.command(name="setup", description="Interactive step-by-step Antinuke setup.")
-    @commands.guild_only()
-    async def antinuke_setup(self, ctx: CustomContext) -> None:
-        """Launch the slide-based Antinuke setup."""
         from src.cogs.antinuke._setup_view import AntinukeSetupWizard
         wizard = AntinukeSetupWizard(self.bot, ctx.guild, ctx.author)
         container = wizard.get_dashboard_container()

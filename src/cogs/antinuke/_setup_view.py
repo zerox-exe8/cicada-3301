@@ -10,23 +10,49 @@ from src.utils.containers import KyroContainer, edit_container_response, send_co
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
-logger = logging.getLogger("Kyro.Antinuke.SetupWizard")
+logger = logging.getLogger("Kyro.Antinuke.Setup")
+
+MODULE_CHOICES = [
+    ("all", "Select All"),
+    ("ban", "Anti-Ban"),
+    ("kick", "Anti-Kick"),
+    ("bot", "Anti-Bot"),
+    ("prune", "Anti-Prune"),
+    ("channel_create", "Anti-Channel Create"),
+    ("channel_delete", "Anti-Channel Delete"),
+    ("channel_update", "Anti-Channel Update"),
+    ("role_create", "Anti-Role Create"),
+    ("role_delete", "Anti-Role Delete"),
+    ("role_update", "Anti-Role Update"),
+    ("everyone", "Anti-Everyone"),
+    ("member_role", "Anti-Member Role"),
+    ("vanity", "Anti-Vanity"),
+    ("webhook_create", "Anti-Webhook Create"),
+    ("webhook_delete", "Anti-Webhook Delete"),
+    ("guild_update", "Anti-Server Update"),
+    ("automod", "Anti-AutoMod"),
+    ("emoji", "Anti-Emoji Delete"),
+    ("sticker", "Anti-Sticker Delete"),
+    ("integration", "Anti-Integration"),
+]
+
+ALL_MODULE_KEYS = [k for k, _ in MODULE_CHOICES if k != "all"]
 
 
 class AntinukeSetupWizard(ui.View):
     """
-    Slide-Based Setup Wizard for `,antinuke setup`:
-    Slide 1: Master Defense Switch (Enable / Disable) + Continue >
-    Slide 2: Attacker Punishment Action (Ban / Kick / Quarantine) + < Back + Continue >
-    Slide 3: Unified Security & Audit Logs (Auto-Create Private #kyro_logs OR Select Channel) + < Back + Continue >
-    Slide 4: Review Summary & Deploy / Arm Action
+    Slide-Based Setup for `,antinuke setup`:
+    Slide 1: Select Protection Modules (Multi-Select with 'Select All' at top) + Continue >
+    Slide 2: Punishment Action (Ban / Kick / Quarantine) + < Back + Continue >
+    Slide 3: Logs Channel (Auto-Create Private #kyro_logs OR Select Channel) + < Back + Continue >
+    Slide 4: Review Summary & Save Action
     """
 
     SLIDES = [
-        ("status", "Step 1: Master Defense Switch", "Enable or activate real-time Antinuke protection across your server."),
-        ("punishment", "Step 2: Punishment Action", "Choose the disciplinary measure taken against unauthorized attackers or compromised admins."),
-        ("logs", "Step 3: Unified Security Logs", "Configure where security alerts and server audit streams are posted (strictly secured)."),
-        ("deploy", "Step 4: Review & Deploy", "Review your configured settings and activate real-time protection."),
+        ("modules", "Step 1: Select Modules", "Choose which protection modules you want to enable for your server."),
+        ("punishment", "Step 2: Punishment Action", "Choose what action to take when someone attacks or breaks rules."),
+        ("logs", "Step 3: Logs Channel", "Choose where antinuke alerts and server audit logs should be sent."),
+        ("deploy", "Step 4: Review & Finish", "Review your settings and enable Antinuke."),
     ]
 
     def __init__(
@@ -43,8 +69,16 @@ class AntinukeSetupWizard(ui.View):
 
         # Pre-populate state from existing settings if available
         existing_cfg = self.bot.antinuke_mgr.get_settings(guild.id)
-        self.enabled: bool = True  # Default to armed for wizard setup
         self.punishment: str = existing_cfg.get("punishment", "ban")
+
+        # Load currently enabled modules (default to all if new setup)
+        self.selected_modules: set[str] = set()
+        for k in ALL_MODULE_KEYS:
+            if existing_cfg.get(f"{k}_protection", True):
+                self.selected_modules.add(k)
+        if not self.selected_modules:
+            self.selected_modules = set(ALL_MODULE_KEYS)
+
         existing_log = self.bot.antinuke_mgr.get_log_channel(guild)
         if existing_log:
             self.log_mode: str = "existing"
@@ -56,11 +90,11 @@ class AntinukeSetupWizard(ui.View):
         self._build_components_for_slide()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Only the invoker can control this setup wizard session."""
+        """Only the invoker can control this setup session."""
         if interaction.user.id != self.author.id:
             container = KyroContainer(accent_color=None)
             container.add_section(
-                content=f"**Access Denied**\n> Only {self.author.mention} can control this setup wizard session."
+                content=f"**Access Denied**\n> Only {self.author.mention} can control this setup session."
             )
             await send_container_response(interaction, container, ephemeral=True)
             return False
@@ -71,28 +105,38 @@ class AntinukeSetupWizard(ui.View):
         self.clear_items()
         slide_key, _, _ = self.SLIDES[self.current_slide_idx]
 
-        if slide_key == "status":
-            # Slide 1: Status Select Menu
+        if slide_key == "modules":
+            # Slide 1: Multi-Select Modules with "Select All" at top
+            is_all_selected = len(self.selected_modules) == len(ALL_MODULE_KEYS)
+            options: list[discord.SelectOption] = []
+
+            for key, label in MODULE_CHOICES:
+                if key == "all":
+                    options.append(
+                        discord.SelectOption(
+                            label=label,
+                            value=key,
+                            default=is_all_selected,
+                        )
+                    )
+                else:
+                    options.append(
+                        discord.SelectOption(
+                            label=label,
+                            value=key,
+                            default=(key in self.selected_modules),
+                        )
+                    )
+
             select = ui.Select(
-                placeholder="Choose defense protocol status...",
-                options=[
-                    discord.SelectOption(
-                        label="Enabled & Active (Recommended)",
-                        value="true",
-                        description="Activate master defense and enable all 20 protection modules",
-                        default=self.enabled,
-                    ),
-                    discord.SelectOption(
-                        label="Disabled (Configure Only)",
-                        value="false",
-                        description="Save configuration but keep master switch turned off",
-                        default=not self.enabled,
-                    ),
-                ],
-                custom_id="wiz_select_status",
+                placeholder="Select modules to enable...",
+                min_values=1,
+                max_values=len(options),
+                options=options,
+                custom_id="setup_select_modules",
                 row=0,
             )
-            select.callback = self._on_status_selected
+            select.callback = self._on_modules_selected
             self.add_item(select)
 
             # Back button (disabled on Slide 1)
@@ -113,30 +157,27 @@ class AntinukeSetupWizard(ui.View):
             self.add_item(btn_continue)
 
         elif slide_key == "punishment":
-            # Slide 2: Punishment Select Menu
+            # Slide 2: Punishment Select Menu (Clean options: Ban, Kick, Quarantine)
             select = ui.Select(
-                placeholder="Select disciplinary punishment...",
+                placeholder="Select punishment action...",
                 options=[
                     discord.SelectOption(
-                        label="Ban Perpetrator (Recommended)",
+                        label="Ban",
                         value="ban",
-                        description="Instantly strip permissions and ban unauthorized attacker",
                         default=(self.punishment == "ban"),
                     ),
                     discord.SelectOption(
-                        label="Kick Perpetrator",
+                        label="Kick",
                         value="kick",
-                        description="Instantly strip permissions and kick attacker from server",
                         default=(self.punishment == "kick"),
                     ),
                     discord.SelectOption(
-                        label="Quarantine (Strip Roles Only)",
+                        label="Quarantine",
                         value="strip_roles",
-                        description="Neutralize dangerous permissions without ban or kick",
                         default=(self.punishment == "strip_roles"),
                     ),
                 ],
-                custom_id="wiz_select_punishment",
+                custom_id="setup_select_punishment",
                 row=0,
             )
             select.callback = self._on_punishment_selected
@@ -159,21 +200,12 @@ class AntinukeSetupWizard(ui.View):
             self.add_item(btn_continue)
 
         elif slide_key == "logs":
-            # Slide 3: Unified Logs Configuration
-            btn_auto = ui.Button(
-                label="✓ Auto-Create #kyro_logs (Private)" if self.log_mode == "auto" else "Auto-Create #kyro_logs (Private)",
-                style=discord.ButtonStyle.primary if self.log_mode == "auto" else discord.ButtonStyle.secondary,
-                custom_id="wiz_btn_auto_logs",
-                row=0,
-            )
-            btn_auto.callback = self._on_auto_logs_clicked
-            self.add_item(btn_auto)
-
+            # Slide 3: Unified Logs Configuration (Optional dropdown - defaults to auto-created #kyro_logs)
             channel_select = ui.ChannelSelect(
                 channel_types=[discord.ChannelType.text],
-                placeholder="Or pick an existing text channel...",
-                custom_id="wiz_select_log_ch",
-                row=1,
+                placeholder="Select logs channel (Optional)...",
+                custom_id="setup_select_log_ch",
+                row=0,
             )
             channel_select.callback = self._on_log_channel_selected
             self.add_item(channel_select)
@@ -181,7 +213,7 @@ class AntinukeSetupWizard(ui.View):
             btn_back = ui.Button(
                 label="< Back",
                 style=discord.ButtonStyle.secondary,
-                row=2,
+                row=1,
             )
             btn_back.callback = self._on_back_clicked
             self.add_item(btn_back)
@@ -189,7 +221,7 @@ class AntinukeSetupWizard(ui.View):
             btn_continue = ui.Button(
                 label="Continue >",
                 style=discord.ButtonStyle.secondary,
-                row=2,
+                row=1,
             )
             btn_continue.callback = self._on_continue_clicked
             self.add_item(btn_continue)
@@ -205,58 +237,65 @@ class AntinukeSetupWizard(ui.View):
             self.add_item(btn_back)
 
             btn_deploy = ui.Button(
-                label="Activate Antinuke 🛡️",
+                label="Enable Antinuke",
                 style=discord.ButtonStyle.success,
-                custom_id="wiz_btn_deploy",
+                custom_id="setup_btn_deploy",
                 row=0,
             )
             btn_deploy.callback = self._on_deploy_clicked
             self.add_item(btn_deploy)
 
     def get_dashboard_container(self) -> KyroContainer:
-        """Render the sleek Components V2 Antinuke Setup container."""
+        """Render the clean Components V2 Antinuke Setup container."""
         container = KyroContainer(accent_color=None)
         slide_key, slide_title, slide_desc = self.SLIDES[self.current_slide_idx]
         dot = self.bot.custom_emojis.get("heart_dot", "•")
-        sw_on = self.bot.custom_emojis.get("icon_switch_on", "`[ON]`")
-        sw_off = self.bot.custom_emojis.get("icon_switch_off", "`[OFF]`")
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
 
         container.add_section(
             content=(
-                "**Kyro Antinuke Setup**\n"
+                "**Kyro Antinuke**\n"
                 f"> **{slide_title}**\n"
                 f"> *{slide_desc}*"
             )
         )
         container.add_separator(divider=True)
 
-        status_tag = f"{sw_on} `Enabled`" if self.enabled else f"{sw_off} `Disabled`"
-        punish_map = {"ban": "Ban Perpetrator", "kick": "Kick Perpetrator", "strip_roles": "Quarantine"}
-        punish_tag = f"`{punish_map.get(self.punishment, self.punishment.capitalize())}`"
-
-        if self.log_mode == "auto":
-            log_tag = "`Auto-Create #kyro_logs (Private)`"
-        elif self.selected_log_channel_id:
-            log_tag = f"<#{self.selected_log_channel_id}>"
+        total_mods = len(ALL_MODULE_KEYS)
+        sel_count = len(self.selected_modules)
+        if sel_count == total_mods:
+            mod_disp = f"`All Modules ({total_mods}/{total_mods})`"
         else:
-            log_tag = "`Unassigned`"
+            mod_disp = f"`{sel_count}/{total_mods} Modules Selected`"
 
         overview_lines = [
-            f"> {dot} **Master Switch:** {status_tag}",
-            f"> {dot} **Attack Punishment:** {punish_tag}",
-            f"> {dot} **Unified Logs:** {log_tag}",
-            f"> {dot} **Protection Modules:** `All 20 Active`" if self.enabled else f"> {dot} **Protection Modules:** `Inactive`",
+            f"> {dot} **Protection Modules:** {mod_disp}",
+            f"> {dot} **Status:** {sw_on}",
         ]
         container.add_text("\n".join(overview_lines))
         container.add_separator(divider=True)
-        container.add_text(f"-# Step {self.current_slide_idx + 1}/4 • Setup Session for {self.author.display_name}")
+        container.add_text(f"-# Step {self.current_slide_idx + 1}/4 • Setup for {self.author.display_name}")
 
         return container
 
-    async def _on_status_selected(self, interaction: discord.Interaction) -> None:
+    async def _on_modules_selected(self, interaction: discord.Interaction) -> None:
         values = interaction.data.get("values", [])
-        if values:
-            self.enabled = (values[0] == "true")
+        was_all_selected = len(self.selected_modules) == len(ALL_MODULE_KEYS)
+
+        if not values:
+            self.selected_modules = set(ALL_MODULE_KEYS)
+        elif "all" in values and not was_all_selected:
+            # User newly selected "Select All"
+            self.selected_modules = set(ALL_MODULE_KEYS)
+        elif "all" in values and was_all_selected and len(values) < len(MODULE_CHOICES):
+            # User was at all selected, but unchecked one or more specific items
+            self.selected_modules = set(v for v in values if v != "all")
+        else:
+            # Explicit selection of specific modules
+            self.selected_modules = set(v for v in values if v != "all")
+            if not self.selected_modules and "all" in values:
+                self.selected_modules = set(ALL_MODULE_KEYS)
+
         self._build_components_for_slide()
         await edit_container_response(interaction, self.get_dashboard_container(), view=self)
 
@@ -264,12 +303,6 @@ class AntinukeSetupWizard(ui.View):
         values = interaction.data.get("values", [])
         if values:
             self.punishment = values[0]
-        self._build_components_for_slide()
-        await edit_container_response(interaction, self.get_dashboard_container(), view=self)
-
-    async def _on_auto_logs_clicked(self, interaction: discord.Interaction) -> None:
-        self.log_mode = "auto"
-        self.selected_log_channel_id = None
         self._build_components_for_slide()
         await edit_container_response(interaction, self.get_dashboard_container(), view=self)
 
@@ -294,7 +327,7 @@ class AntinukeSetupWizard(ui.View):
         await edit_container_response(interaction, self.get_dashboard_container(), view=self)
 
     async def _on_deploy_clicked(self, interaction: discord.Interaction) -> None:
-        """Persist settings, initialize unified logs channel, snapshot guild, and display final armed panel."""
+        """Persist settings, initialize unified logs channel, snapshot guild, and display final panel."""
         await interaction.response.defer()
 
         # 1. Resolve & secure log channel
@@ -306,7 +339,6 @@ class AntinukeSetupWizard(ui.View):
             target_log_channel = self.guild.get_channel(self.selected_log_channel_id)
             if target_log_channel:
                 try:
-                    # Secure permissions on existing selected channel if needed
                     if target_log_channel.permissions_for(self.guild.default_role).view_channel:
                         await target_log_channel.set_permissions(
                             self.guild.default_role,
@@ -326,47 +358,50 @@ class AntinukeSetupWizard(ui.View):
                 except Exception:
                     pass
 
-        # 2. Update master settings
+        # 2. Update all module settings
+        module_updates = {}
+        for k in ALL_MODULE_KEYS:
+            module_updates[f"{k}_protection"] = (k in self.selected_modules)
+
+        # 3. Update master settings
         await self.bot.antinuke_mgr.update_settings(
             self.guild.id,
-            enabled=self.enabled,
+            enabled=True,
             punishment=self.punishment,
+            **module_updates,
         )
 
-        # 3. Snapshot state
+        # 4. Snapshot state
         self.bot.antinuke_mgr.snapshot_guild_state(self.guild)
 
-        # 4. Success confirmation response
+        # 5. Success confirmation response
         dot = self.bot.custom_emojis.get("heart_dot", "•")
-        shield = self.bot.custom_emojis.get("icon_shield", "")
-        badge_str = f"{shield} " if shield else ""
-        sw_on = self.bot.custom_emojis.get("icon_switch_on", "`[ON]`")
-        sw_off = self.bot.custom_emojis.get("icon_switch_off", "`[OFF]`")
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
 
-        punish_map = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}
-        punish_tag = f"`{punish_map.get(self.punishment, self.punishment.capitalize())}`"
-        status_switch = sw_on if self.enabled else sw_off
-        log_tag = target_log_channel.mention if target_log_channel else "`None`"
+        total_mods = len(ALL_MODULE_KEYS)
+        sel_count = len(self.selected_modules)
+        if sel_count == total_mods:
+            mod_disp = f"`All Modules ({total_mods}/{total_mods})`"
+        else:
+            mod_disp = f"`{sel_count}/{total_mods} Modules Selected`"
 
         success_container = KyroContainer(accent_color=None)
         success_container.add_section(
             content=(
-                f"**{badge_str}Antinuke Protocol Deployed**\n"
-                "> *Server defense configuration has been successfully saved and armed.*"
+                "**Kyro Antinuke**\n"
+                "> *Antinuke is now active and protecting your server.*"
             )
         )
         success_container.add_separator(divider=True)
         summary_lines = [
-            f"> {dot} **Master Status:** {status_switch}",
-            f"> {dot} **Disciplinary Action:** {punish_tag}",
-            f"> {dot} **Unified Logs:** {log_tag}",
-            f"> {dot} **Protection Modules:** `20 Modules Configured`",
+            f"> {dot} **Protection Modules:** {mod_disp}",
+            f"> {dot} **Status:** {sw_on}",
         ]
         success_container.add_text("\n".join(summary_lines))
         success_container.add_separator(divider=True)
-        success_container.add_text(f"-# Deployed by {self.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
+        success_container.add_text(f"-# Configured by {self.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
 
-        # Also provide the standard control view so user can manage further
+        # Attach control panel view so user can manage further
         from src.cogs.antinuke._views import AntinukeControlView
         ctrl_view = AntinukeControlView(self.bot, self.guild, self.author.id)
         await edit_container_response(interaction, success_container, view=ctrl_view)

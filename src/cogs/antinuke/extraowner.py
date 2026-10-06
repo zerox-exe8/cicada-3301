@@ -31,7 +31,7 @@ class AntinukeExtraOwnerCog(commands.Cog):
         container.add_text(
             f"{dot} `{prefix}extraowner add <@user>`\n"
             f"{dot} `{prefix}extraowner remove <@user>`\n"
-            f"{dot} `{prefix}extraowner list`"
+            f"{dot} `{prefix}extraowner list/show`"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -70,13 +70,12 @@ class AntinukeExtraOwnerCog(commands.Cog):
 
         await self.bot.antinuke_mgr.add_extra_owner(ctx.guild.id, user.id, ctx.author.id)
 
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "•")
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Extra Owner Assigned**")
+        container.add_section(content="**Extra Owner**")
         container.add_separator(divider=True)
-        container.add_text(
-            f"• **User:** **{user.name}** `「{user.id}」`\n"
-            f"• **Access:** Full Antinuke immunity and configuration access."
-        )
+        container.add_text(f"{dot} **User:** **{user.name}** `「{user.id}」`")
         await send_container_response(ctx, container)
 
     @extraowner.command(name="remove", description="Revoke Extra Owner status from a user (Server Owner only).")

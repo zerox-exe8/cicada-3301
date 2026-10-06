@@ -32,7 +32,7 @@ class AntinukeWhitelistCog(commands.Cog):
         container.add_text(
             f"{dot} `{prefix}whitelist add <@user or bot>`\n"
             f"{dot} `{prefix}whitelist remove <@user or bot>`\n"
-            f"{dot} `{prefix}whitelist list`"
+            f"{dot} `{prefix}whitelist list/show`"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -87,15 +87,12 @@ class AntinukeWhitelistCog(commands.Cog):
             ctx.guild.id, target.id, ctx.author.id, is_full=is_full, scope=clean_scope
         )
 
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "•")
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Antinuke Whitelist Updated**")
+        container.add_section(content="**Antinuke Whitelist**")
         container.add_separator(divider=True)
-
-        tier_str = "`[Full Whitelist]`" if is_full else f"`[Scoped: {clean_scope}]`"
-        container.add_text(
-            f"• **Target:** **{target.name}** `「{target.id}」`\n"
-            f"• **Access:** {tier_str}"
-        )
+        container.add_text(f"{dot} **Target:** **{target.name}** `「{target.id}」`")
         await send_container_response(ctx, container)
 
     @whitelist.command(name="remove", description="Remove a user or bot from the antinuke whitelist.")
@@ -129,7 +126,7 @@ class AntinukeWhitelistCog(commands.Cog):
         dot = e_reg.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Antinuke Whitelist Registry**")
+        container.add_section(content="**Antinuke Whitelist**")
         container.add_separator(divider=True)
 
         if not wl_dict:

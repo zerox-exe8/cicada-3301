@@ -114,25 +114,18 @@ async def ensure_unified_log_channel(
         if is_new:
             try:
                 dot = bot.custom_emojis.get("heart_dot", "•")
-                shield = bot.custom_emojis.get("icon_shield", "")
-                badge_str = f"{shield} " if shield else ""
-
                 init_card = KyroContainer(accent_color=None)
                 init_card.add_section(
-                    content=(
-                        f"**{badge_str}Kyro Unified Audit Logs**\n"
-                        "> *Centralized security alerts, antinuke triggers, and server audit logging.*"
-                    )
+                    content="**Kyro Logs**\n> This channel is used by Kyro to record server activity and antinuke alerts."
                 )
                 init_card.add_separator(divider=True)
                 init_card.add_text(
-                    f"> {dot} **Security Status:** `Armed & Monitoring`\n"
-                    f"> {dot} **Channel Privacy:** `Private (Hidden from @everyone)`\n"
-                    f"> {dot} **Monitored Streams:** `Antinuke Alerts` • `Member Events` • `Message Audit` • `Server Changes` • `Voice Activity`"
+                    f"> {dot} **Access:** Private (hidden from @everyone)\n"
+                    f"> {dot} **Logs:** Antinuke, Member, Message, Server, Voice"
                 )
                 init_card.add_separator(divider=True)
-                invoker_str = f"Initialized by {invoker.mention} • " if invoker else ""
-                init_card.add_text(f"-# {invoker_str}Timestamp: <t:{int(discord.utils.utcnow().timestamp())}:f>")
+                invoker_str = f"Created by {invoker.mention} • " if invoker else ""
+                init_card.add_text(f"-# {invoker_str}<t:{int(discord.utils.utcnow().timestamp())}:f>")
                 await send_container_response(log_channel, init_card)
             except Exception as e:
                 logger.warning(f"Could not send initialization card to log channel: {e}")
@@ -308,8 +301,17 @@ class AntinukePanelCog(commands.Cog):
 
     @antinuke.command(name="disable", description="Disable Antinuke protection on your server.")
     async def antinuke_disable(self, ctx: CustomContext) -> None:
-        """Turn off Antinuke protection."""
-        await self.bot.antinuke_mgr.update_settings(ctx.guild.id, enabled=False)
+        """Turn off Antinuke protection and auto-delete the kyro_logs channel."""
+        guild = ctx.guild
+        await self.bot.antinuke_mgr.update_settings(guild.id, enabled=False)
+
+        # Auto-delete the kyro_logs channel that was created during enable
+        log_channel = self.bot.antinuke_mgr.get_log_channel(guild)
+        if log_channel is not None:
+            try:
+                await log_channel.delete(reason="Kyro Antinuke disabled — auto-removing kyro_logs channel")
+            except (discord.Forbidden, discord.HTTPException) as e:
+                logger.warning(f"Could not delete kyro_logs in guild {guild.id}: {e}")
 
         dot = self.bot.custom_emojis.get("heart_dot", "•")
         sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")

@@ -683,6 +683,18 @@ class PostgresDatabase(BaseDatabase):
                 PRIMARY KEY (guild_id, user_id)
             );
             """,
+            # Antinuke Role Whitelist table (any member holding a whitelisted role is immune)
+            """
+            CREATE TABLE IF NOT EXISTS antinuke_role_whitelist (
+                guild_id BIGINT NOT NULL,
+                role_id BIGINT NOT NULL,
+                is_full BOOLEAN DEFAULT TRUE,
+                scope TEXT DEFAULT '',
+                added_by BIGINT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, role_id)
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

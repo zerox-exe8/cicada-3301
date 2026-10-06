@@ -37,6 +37,8 @@ class AntinukeManager:
         self._settings: dict[int, dict[str, Any]] = {}
         # guild_id -> {user_id: {"is_extra_owner": bool, "is_full": bool, "scope": set[str]}}
         self._whitelist: dict[int, dict[int, dict[str, Any]]] = {}
+        # guild_id -> {role_id: {"is_full": bool, "scope": set[str]}}
+        self._role_whitelist: dict[int, dict[int, dict[str, Any]]] = {}
         # Rate-limiting sliding window: key -> list of float timestamps
         self._action_history: dict[str, list[float]] = {}
         # Channel snapshots: guild_id -> {channel_id: dict_metadata}
@@ -87,8 +89,24 @@ class AntinukeManager:
                 "scope": scope_set,
             }
 
+        # 3. Load role whitelists
+        role_wl_rows = await self.db.fetch_all("SELECT * FROM antinuke_role_whitelist;")
+        for row in role_wl_rows:
+            g_id = int(row["guild_id"])
+            r_id = int(row["role_id"])
+            if g_id not in self._role_whitelist:
+                self._role_whitelist[g_id] = {}
+
+            scope_str = row.get("scope") or ""
+            scope_set = {s.strip().lower() for s in scope_str.split(",") if s.strip()}
+            self._role_whitelist[g_id][r_id] = {
+                "is_full": bool(row.get("is_full", True)),
+                "scope": scope_set,
+            }
+
         logger.info(
-            f"Loaded antinuke configs for {len(self._settings)} guild(s) and {len(wl_rows)} whitelisted entity/entities into memory."
+            f"Loaded antinuke configs for {len(self._settings)} guild(s), {len(wl_rows)} whitelisted entity/entities "
+            f"and {len(role_wl_rows)} whitelisted role(s) into memory."
         )
 
     # ------------------ SETTINGS METHODS ------------------
@@ -202,17 +220,29 @@ class AntinukeManager:
 
         guild_wl = self._whitelist.get(guild.id, {})
         entry = guild_wl.get(user_id)
-        if not entry:
-            return False
+        if entry:
+            if entry.get("is_extra_owner"):
+                return True
 
-        if entry.get("is_extra_owner"):
-            return True
+            if entry.get("is_full"):
+                return True
 
-        if entry.get("is_full"):
-            return True
+            if module_name and module_name.lower() in entry.get("scope", set()):
+                return True
 
-        if module_name and module_name.lower() in entry.get("scope", set()):
-            return True
+        # Role-based immunity: any whitelisted role held by the member grants immunity.
+        role_wl = self._role_whitelist.get(guild.id, {})
+        if role_wl:
+            member = guild.get_member(user_id)
+            if member is not None:
+                for role in member.roles:
+                    r_entry = role_wl.get(role.id)
+                    if not r_entry:
+                        continue
+                    if r_entry.get("is_full"):
+                        return True
+                    if module_name and module_name.lower() in r_entry.get("scope", set()):
+                        return True
 
         return False
 
@@ -307,6 +337,48 @@ class AntinukeManager:
             "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ? AND is_extra_owner = FALSE;",
             guild_id,
             user_id,
+        )
+
+    def get_role_whitelist(self, guild_id: int) -> dict[int, dict[str, Any]]:
+        """Return whitelisted roles registry for a guild."""
+        return self._role_whitelist.get(guild_id, {})
+
+    async def add_role_whitelist(
+        self, guild_id: int, role_id: int, added_by: int, is_full: bool = True, scope: str = ""
+    ) -> None:
+        """Whitelist a role — every member holding it inherits immunity."""
+        if guild_id not in self._role_whitelist:
+            self._role_whitelist[guild_id] = {}
+
+        clean_scope = {s.strip().lower() for s in scope.split(",") if s.strip()}
+        self._role_whitelist[guild_id][role_id] = {
+            "is_full": is_full,
+            "scope": clean_scope,
+        }
+
+        scope_str = ",".join(clean_scope)
+        await self.db.execute(
+            """
+            INSERT INTO antinuke_role_whitelist (guild_id, role_id, is_full, scope, added_by)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, role_id) DO UPDATE SET is_full = excluded.is_full, scope = excluded.scope;
+            """,
+            guild_id,
+            role_id,
+            is_full,
+            scope_str,
+            added_by,
+        )
+
+    async def remove_role_whitelist(self, guild_id: int, role_id: int) -> None:
+        """Remove a role from the whitelist."""
+        if guild_id in self._role_whitelist and role_id in self._role_whitelist[guild_id]:
+            self._role_whitelist[guild_id].pop(role_id)
+
+        await self.db.execute(
+            "DELETE FROM antinuke_role_whitelist WHERE guild_id = ? AND role_id = ?;",
+            guild_id,
+            role_id,
         )
 
     # ------------------ SLIDING WINDOW RATE LIMITER ------------------

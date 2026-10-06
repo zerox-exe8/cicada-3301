@@ -106,7 +106,7 @@ class AntinukeExtraOwnerCog(commands.Cog):
         dot = e_reg.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Extra Owners Registry**")
+        container.add_section(content="**Extra Owners**")
         container.add_separator(divider=True)
 
         if not owner_ids:

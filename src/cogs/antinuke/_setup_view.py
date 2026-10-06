@@ -116,7 +116,9 @@ class AntinukeSetupWizard(ui.View):
                         discord.SelectOption(
                             label=label,
                             value=key,
-                            default=is_all_selected,
+                            # Only mark "Select All" as selected when all are chosen
+                            # but DON'T set individual defaults when all selected (avoids chip spam)
+                            default=False,
                         )
                     )
                 else:
@@ -124,12 +126,19 @@ class AntinukeSetupWizard(ui.View):
                         discord.SelectOption(
                             label=label,
                             value=key,
-                            default=(key in self.selected_modules),
+                            # Show individual chips only when user has picked a partial subset
+                            default=(key in self.selected_modules and not is_all_selected),
                         )
                     )
 
+            # Placeholder clearly states the current state
+            if is_all_selected:
+                placeholder = "All 20 modules enabled — click to change"
+            else:
+                placeholder = f"{len(self.selected_modules)}/20 modules selected"
+
             select = ui.Select(
-                placeholder="Select modules to enable...",
+                placeholder=placeholder,
                 min_values=1,
                 max_values=len(options),
                 options=options,

@@ -252,10 +252,10 @@ class AntinukePanelCog(commands.Cog):
         container, view = build_antinuke_card(self.bot, ctx.guild, ctx.author.id)
         await send_container_response(ctx, container, view=view)
 
-    @antinuke.command(name="setup", description="Interactive step-by-step Antinuke setup wizard.")
+    @antinuke.command(name="setup", description="Interactive step-by-step Antinuke setup.")
     @commands.guild_only()
     async def antinuke_setup(self, ctx: CustomContext) -> None:
-        """Launch the slide-based Antinuke setup wizard."""
+        """Launch the slide-based Antinuke setup."""
         from src.cogs.antinuke._setup_view import AntinukeSetupWizard
         wizard = AntinukeSetupWizard(self.bot, ctx.guild, ctx.author)
         container = wizard.get_dashboard_container()

@@ -23,10 +23,10 @@ class AntinukeSetupWizard(ui.View):
     """
 
     SLIDES = [
-        ("status", "Step 1: Master Defense Switch", "Enable or arm the core Antinuke defense protocol across your server."),
+        ("status", "Step 1: Master Defense Switch", "Enable or activate real-time Antinuke protection across your server."),
         ("punishment", "Step 2: Punishment Action", "Choose the disciplinary measure taken against unauthorized attackers or compromised admins."),
         ("logs", "Step 3: Unified Security Logs", "Configure where security alerts and server audit streams are posted (strictly secured)."),
-        ("deploy", "Step 4: Review & Deploy", "Review your configured settings and arm real-time protection."),
+        ("deploy", "Step 4: Review & Deploy", "Review your configured settings and activate real-time protection."),
     ]
 
     def __init__(
@@ -77,13 +77,13 @@ class AntinukeSetupWizard(ui.View):
                 placeholder="Choose defense protocol status...",
                 options=[
                     discord.SelectOption(
-                        label="Armed & Active (Recommended)",
+                        label="Enabled & Active (Recommended)",
                         value="true",
-                        description="Activate master defense and arm all 20 protection modules",
+                        description="Activate master defense and enable all 20 protection modules",
                         default=self.enabled,
                     ),
                     discord.SelectOption(
-                        label="Disarmed (Configure Only)",
+                        label="Disabled (Configure Only)",
                         value="false",
                         description="Save configuration but keep master switch turned off",
                         default=not self.enabled,
@@ -205,7 +205,7 @@ class AntinukeSetupWizard(ui.View):
             self.add_item(btn_back)
 
             btn_deploy = ui.Button(
-                label="Arm Antinuke 🛡️",
+                label="Activate Antinuke 🛡️",
                 style=discord.ButtonStyle.success,
                 custom_id="wiz_btn_deploy",
                 row=0,
@@ -214,7 +214,7 @@ class AntinukeSetupWizard(ui.View):
             self.add_item(btn_deploy)
 
     def get_dashboard_container(self) -> KyroContainer:
-        """Render the sleek Components V2 Antinuke Setup Wizard container."""
+        """Render the sleek Components V2 Antinuke Setup container."""
         container = KyroContainer(accent_color=None)
         slide_key, slide_title, slide_desc = self.SLIDES[self.current_slide_idx]
         dot = self.bot.custom_emojis.get("heart_dot", "•")
@@ -223,14 +223,14 @@ class AntinukeSetupWizard(ui.View):
 
         container.add_section(
             content=(
-                "**Kyro Antinuke Setup Wizard**\n"
+                "**Kyro Antinuke Setup**\n"
                 f"> **{slide_title}**\n"
                 f"> *{slide_desc}*"
             )
         )
         container.add_separator(divider=True)
 
-        status_tag = f"{sw_on} `Armed`" if self.enabled else f"{sw_off} `Disarmed`"
+        status_tag = f"{sw_on} `Enabled`" if self.enabled else f"{sw_off} `Disabled`"
         punish_map = {"ban": "Ban Perpetrator", "kick": "Kick Perpetrator", "strip_roles": "Quarantine"}
         punish_tag = f"`{punish_map.get(self.punishment, self.punishment.capitalize())}`"
 

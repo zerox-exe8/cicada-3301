@@ -151,7 +151,7 @@ class AntinukeControlView(ui.View):
         from src.utils.containers import edit_container_response
         await edit_container_response(interaction, container, view=new_view)
 
-    @ui.button(label="Setup Wizard", style=discord.ButtonStyle.secondary, row=2)
+    @ui.button(label="Setup", style=discord.ButtonStyle.secondary, row=2)
     async def open_setup_wizard(self, interaction: discord.Interaction, button: ui.Button) -> None:
         """Launch the step-by-step setup wizard directly from the control card."""
         from src.cogs.antinuke._setup_view import AntinukeSetupWizard

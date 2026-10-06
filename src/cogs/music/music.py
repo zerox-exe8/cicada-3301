@@ -261,62 +261,6 @@ class Music(commands.Cog):
             await send_container_response(ctx, container)
 
     @commands.hybrid_command(
-        name="listen",
-        aliases=["voicecommand", "vc", "speech"],
-        description="Toggle AI Voice Recognition to control music with your mic (e.g. 'Kyro play <song>').",
-    )
-    @app_commands.describe(state="Enable or disable voice listening: on, off, or toggle")
-    async def listen(self, ctx: CustomContext, state: Optional[str] = "") -> None:
-        """Toggle AI Voice Recognition for hands-free mic commands."""
-        if not ctx.author.voice or not ctx.author.voice.channel:
-            container = KyroContainer(accent_color=None)
-            container.add_text("**You must be in a voice channel to use this command.**")
-            await send_container_response(ctx, container)
-            return
-
-        target_channel = ctx.author.voice.channel
-        player = self.controller.get_or_create_player(ctx.guild)
-        player.home_channel = ctx.channel
-
-        mode = state.lower().strip() if state else ("off" if player.voice_listening else "on")
-        if mode in ("on", "enable", "start", "true"):
-            try:
-                success, err_msg = await player.start_voice_listening(target_channel)
-            except Exception as e:
-                success = False
-                err_msg = str(e)
-
-            container = KyroContainer(accent_color=None)
-            if success:
-                container.add_section(
-                    content=(
-                        "**AI Voice Commander Activated**\n"
-                        "> Kyro is now actively listening to voice commands in your voice channel.\n\n"
-                        "**Supported Wake-Word Prefixes:**\n"
-                        "> • `Kyro play <song name>`\n"
-                        "> • `Kyro pause` • `Kyro resume`\n"
-                        "> • `Kyro skip` • `Kyro stop`\n"
-                        "> • `Kyro volume <0-100>`"
-                    )
-                )
-                container.add_separator(divider=True)
-                container.add_text("-# Speak clearly into your mic • Use ?listen off to stop")
-            else:
-                reason = f"\n> `{err_msg}`" if err_msg else ""
-                container.add_text(f"**Failed to activate AI Voice Commander.**{reason}")
-            await send_container_response(ctx, container)
-        else:
-            player.stop_voice_listening()
-            container = KyroContainer(accent_color=None)
-            container.add_section(
-                content=(
-                    "**AI Voice Commander Deactivated**\n"
-                    "> Kyro stopped listening for voice commands in your channel."
-                )
-            )
-            await send_container_response(ctx, container)
-
-    @commands.hybrid_command(
         name="play",
         aliases=["p"],
         description="Play high-fidelity music tracks directly in your voice channel.",

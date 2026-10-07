@@ -16,9 +16,9 @@ logger = logging.getLogger("Kyro.Moderation.Bots")
 
 
 class BotsPaginationView(discord.ui.View):
-    """Interactive pagination for bot accounts list."""
+    """Clean interactive pagination view for server bot accounts."""
 
-    def __init__(self, ctx: CustomContext, bots: list[discord.Member], per_page: int = 15) -> None:
+    def __init__(self, ctx: CustomContext, bots: list[discord.Member], per_page: int = 10) -> None:
         super().__init__(timeout=90)
         self.ctx = ctx
         self.bots = bots
@@ -31,15 +31,22 @@ class BotsPaginationView(discord.ui.View):
         self.clear_items()
         if self.max_page > 0:
             prev_btn = discord.ui.Button(
-                label="Previous",
+                label="◀",
                 style=discord.ButtonStyle.secondary,
                 disabled=self.page == 0,
             )
             prev_btn.callback = self._prev_callback
             self.add_item(prev_btn)
 
+            page_indicator = discord.ui.Button(
+                label=f"{self.page + 1} / {self.max_page + 1}",
+                style=discord.ButtonStyle.secondary,
+                disabled=True,
+            )
+            self.add_item(page_indicator)
+
             next_btn = discord.ui.Button(
-                label="Next",
+                label="▶",
                 style=discord.ButtonStyle.secondary,
                 disabled=self.page == self.max_page,
             )
@@ -71,21 +78,27 @@ class BotsPaginationView(discord.ui.View):
         end = start + self.per_page
         current_slice = self.bots[start:end]
 
+        e_reg = self.ctx.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "❥")
+
         lines = []
         for b in current_slice:
-            role_str = f"`@{b.top_role.name}`" if b.top_role != self.ctx.guild.default_role else "No Role"
-            lines.append(f"{b.name} (ID: `{b.id}`) — {role_str}")
+            role_str = f"@{b.top_role.name}" if b.top_role != self.ctx.guild.default_role else "Bot"
+            lines.append(f"{dot} `@{b.name}` **—** `「{role_str}」`\n  └ `「{b.id}」`")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"### Server Bot Accounts ({len(self.bots)})\n"
-                f"> Page `{self.page + 1}` of `{self.max_page + 1}`\n\n"
-                + "\n".join(lines)
-            )
+        container.add_text(
+            f"### {self.ctx.guild.name} — Bots\n"
+            f"-# Total {len(self.bots)} bots in this server"
         )
         container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {self.ctx.author.display_name}")
+        container.add_text("\n".join(lines))
+        # Divider line above footer
+        container.add_separator(divider=True)
+        container.add_text(f"-# Page {self.page + 1} of {self.max_page + 1} • Requested by {self.ctx.author.name}")
+        # Divider line above buttons
+        if self.max_page > 0:
+            container.add_separator(divider=True)
         return container
 
     async def on_timeout(self) -> None:
@@ -103,12 +116,12 @@ class Bots(commands.Cog, name="Moderation-Bots"):
 
     @commands.hybrid_command(
         name="bots",
-        aliases=["botlist"],
+        aliases=["botlist", "listbots"],
         description="Display all bot accounts integrated into this server.",
     )
     @commands.guild_only()
     async def bots(self, ctx: CustomContext) -> None:
-        """List all bot accounts in the server."""
+        """List all bot accounts in the server in hierarchy order."""
         if not ctx.guild:
             await ctx.send_warning("This command can only be used in a server.")
             return
@@ -120,7 +133,7 @@ class Bots(commands.Cog, name="Moderation-Bots"):
             await ctx.send_warning("No bot accounts found in this server.")
             return
 
-        view = BotsPaginationView(ctx, bot_members, per_page=15)
+        view = BotsPaginationView(ctx, bot_members, per_page=10)
         container = view.render_container()
         if view.max_page > 0:
             await send_container_response(ctx, container, view=view)

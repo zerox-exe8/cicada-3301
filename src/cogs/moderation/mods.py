@@ -1,17 +1,113 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response
+from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
 logger = logging.getLogger("Kyro.Moderation.Mods")
+
+
+class ModListPaginationView(discord.ui.View):
+    """Clean interactive pagination view for server staff and moderation team."""
+
+    def __init__(self, ctx: CustomContext, members: list[discord.Member], per_page: int = 10) -> None:
+        super().__init__(timeout=90)
+        self.ctx = ctx
+        self.members = members
+        self.per_page = per_page
+        self.page = 0
+        self.max_page = max(0, math.ceil(len(members) / per_page) - 1)
+        self._update_buttons()
+
+    def _update_buttons(self) -> None:
+        self.clear_items()
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(
+                label="◀",
+                style=discord.ButtonStyle.secondary,
+                disabled=self.page == 0,
+            )
+            prev_btn.callback = self._prev_callback
+            self.add_item(prev_btn)
+
+            page_indicator = discord.ui.Button(
+                label=f"{self.page + 1} / {self.max_page + 1}",
+                style=discord.ButtonStyle.secondary,
+                disabled=True,
+            )
+            self.add_item(page_indicator)
+
+            next_btn = discord.ui.Button(
+                label="▶",
+                style=discord.ButtonStyle.secondary,
+                disabled=self.page == self.max_page,
+            )
+            next_btn.callback = self._next_callback
+            self.add_item(next_btn)
+
+    async def _prev_callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("Only the command invoker can flip pages.", ephemeral=True)
+            return
+        if self.page > 0:
+            self.page -= 1
+            self._update_buttons()
+            container = self.render_container()
+            await edit_container_response(interaction, container, view=self)
+
+    async def _next_callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("Only the command invoker can flip pages.", ephemeral=True)
+            return
+        if self.page < self.max_page:
+            self.page += 1
+            self._update_buttons()
+            container = self.render_container()
+            await edit_container_response(interaction, container, view=self)
+
+    def render_container(self) -> KyroContainer:
+        start = self.page * self.per_page
+        end = start + self.per_page
+        current_slice = self.members[start:end]
+
+        e_reg = self.ctx.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "❥")
+
+        lines = []
+        for m in current_slice:
+            if m.id == self.ctx.guild.owner_id:
+                badge = "Owner"
+            else:
+                badge = f"@{m.top_role.name}" if m.top_role != self.ctx.guild.default_role else "Moderator"
+            lines.append(f"{dot} `@{m.name}` **—** `「{badge}」`\n  └ `「{m.id}」`")
+
+        container = KyroContainer(accent_color=None)
+        container.add_text(
+            f"### {self.ctx.guild.name} — Staff & Moderation Team\n"
+            f"-# Total {len(self.members)} staff members in this server"
+        )
+        container.add_separator(divider=True)
+        container.add_text("\n".join(lines))
+        # Divider line above footer
+        container.add_separator(divider=True)
+        container.add_text(f"-# Page {self.page + 1} of {self.max_page + 1} • Requested by {self.ctx.author.name}")
+        # Divider line above buttons
+        if self.max_page > 0:
+            container.add_separator(divider=True)
+        return container
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
 
 
 class Mods(commands.Cog, name="Moderation-Mods"):
@@ -23,12 +119,12 @@ class Mods(commands.Cog, name="Moderation-Mods"):
 
     @commands.hybrid_command(
         name="mods",
-        aliases=["listmods", "staff"],
+        aliases=["listmods", "staff", "modlist"],
         description="List all active staff and moderators possessing moderation privileges.",
     )
     @commands.guild_only()
     async def mods(self, ctx: CustomContext) -> None:
-        """List all moderators in this server."""
+        """List all moderators in this server in hierarchy order."""
         guild = ctx.guild
         if not guild:
             await ctx.send_warning("This command can only be used in a server.")
@@ -49,31 +145,18 @@ class Mods(commands.Cog, name="Moderation-Mods"):
             ):
                 mods_list.append(m)
 
-        mods_list.sort(key=lambda m: (m.id != guild.owner_id, m.top_role.position), reverse=True)
+        mods_list.sort(key=lambda m: (m.id == guild.owner_id, m.top_role.position), reverse=True)
 
         if not mods_list:
             await ctx.send_warning("No moderators or staff members found in this server.")
             return
 
-        lines = []
-        for m in mods_list[:20]:
-            top_role_str = f"`@{m.top_role.name}`" if m.top_role != guild.default_role else "No Role"
-            lines.append(f"{m.name} (ID: `{m.id}`) — {top_role_str}")
-
-        if len(mods_list) > 20:
-            lines.append(f"-# ...and {len(mods_list) - 20} more staff members")
-
-        container = KyroContainer(accent_color=discord.Color.blue().value)
-        container.add_section(
-            content=(
-                f"### {guild.name} — Staff & Moderation Team ({len(mods_list)})\n\n"
-                + "\n".join(lines)
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.name}")
-
-        await send_container_response(ctx, container)
+        view = ModListPaginationView(ctx, mods_list, per_page=10)
+        container = view.render_container()
+        if view.max_page > 0:
+            await send_container_response(ctx, container, view=view)
+        else:
+            await send_container_response(ctx, container)
 
 
 async def setup(bot: KyroBot) -> None:

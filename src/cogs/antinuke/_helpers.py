@@ -24,6 +24,42 @@ DANGEROUS_PERMISSIONS = {
 }
 
 
+async def resolve_audit_perpetrator(
+    guild: discord.Guild,
+    action: discord.AuditLogAction,
+    target_id: int | None = None,
+    max_age_seconds: float = 12.0,
+    retries: int = 2,
+    initial_delay: float = 0.35,
+) -> discord.Member | discord.User | None:
+    """
+    Resilient, latency-tolerant audit log resolver for antinuke triggers.
+    Queries up to 6 recent entries with retry backoff to survive Discord gateway lag.
+    """
+    for attempt in range(retries):
+        await asyncio.sleep(initial_delay if attempt == 0 else 0.5)
+        try:
+            now = discord.utils.utcnow()
+            async for entry in guild.audit_logs(action=action, limit=6):
+                elapsed = (now - entry.created_at).total_seconds()
+                if elapsed > max_age_seconds:
+                    continue
+
+                if target_id is not None:
+                    if entry.target and getattr(entry.target, "id", None) == target_id:
+                        return entry.user
+                else:
+                    return entry.user
+        except (discord.Forbidden, discord.HTTPException) as e:
+            logger.debug(f"Audit log query failed in guild {guild.id}: {e}")
+            break
+        except Exception as e:
+            logger.warning(f"Error resolving audit perpetrator in guild {guild.id}: {e}")
+            break
+
+    return None
+
+
 async def execute_punishment(
     bot: KyroBot,
     guild: discord.Guild,

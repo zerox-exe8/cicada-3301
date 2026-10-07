@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log
+from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log, resolve_audit_perpetrator
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -30,15 +30,9 @@ class AntiBotCog(commands.Cog):
         if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "bot"):
             return
 
-        await asyncio.sleep(0.4)
-        inviter: discord.Member | discord.User | None = None
-        try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.bot_add, limit=1):
-                if entry.target and entry.target.id == member.id:
-                    inviter = entry.user
-                    break
-        except Exception:
-            pass
+        inviter = await resolve_audit_perpetrator(
+            guild, discord.AuditLogAction.bot_add, target_id=member.id
+        )
 
         if not inviter:
             return

@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, restore_role, dispatch_antinuke_log
+from src.cogs.antinuke._helpers import (
+    execute_punishment,
+    restore_role,
+    dispatch_antinuke_log,
+    resolve_audit_perpetrator,
+)
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -24,20 +29,14 @@ class AntiRoleCog(commands.Cog):
     async def on_guild_role_delete(self, role: discord.Role) -> None:
         """Intercept unauthorized role deletion and auto-recreate."""
         guild = role.guild
-        if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "role"):
+        if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "role_delete"):
             return
 
         cached = self.bot.antinuke_mgr.get_cached_role(guild.id, role.id)
 
-        await asyncio.sleep(0.3)
-        perpetrator: discord.Member | discord.User | None = None
-        try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.role_delete, limit=1):
-                if entry.target and entry.target.id == role.id:
-                    perpetrator = entry.user
-                    break
-        except Exception:
-            pass
+        perpetrator = await resolve_audit_perpetrator(
+            guild, discord.AuditLogAction.role_delete, target_id=role.id
+        )
 
         if not perpetrator:
             return
@@ -69,18 +68,12 @@ class AntiRoleCog(commands.Cog):
     async def on_guild_role_create(self, role: discord.Role) -> None:
         """Catch mass role creation attacks."""
         guild = role.guild
-        if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "role"):
+        if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "role_create"):
             return
 
-        await asyncio.sleep(0.3)
-        perpetrator: discord.Member | discord.User | None = None
-        try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.role_create, limit=1):
-                if entry.target and entry.target.id == role.id:
-                    perpetrator = entry.user
-                    break
-        except Exception:
-            pass
+        perpetrator = await resolve_audit_perpetrator(
+            guild, discord.AuditLogAction.role_create, target_id=role.id
+        )
 
         if not perpetrator:
             return

@@ -653,7 +653,7 @@ class PostgresDatabase(BaseDatabase):
                 guild_id BIGINT PRIMARY KEY,
                 enabled BOOLEAN DEFAULT FALSE,
                 log_channel_id BIGINT,
-                punishment VARCHAR(20) DEFAULT 'ban',
+                punishment VARCHAR(20) DEFAULT 'strip_roles',
                 vanity_protection BOOLEAN DEFAULT TRUE,
                 everyone_protection BOOLEAN DEFAULT TRUE,
                 role_protection BOOLEAN DEFAULT TRUE,
@@ -667,9 +667,30 @@ class PostgresDatabase(BaseDatabase):
                 integration_protection BOOLEAN DEFAULT TRUE,
                 emoji_protection BOOLEAN DEFAULT TRUE,
                 guild_update_protection BOOLEAN DEFAULT TRUE,
+                channel_create_protection BOOLEAN DEFAULT TRUE,
+                channel_delete_protection BOOLEAN DEFAULT TRUE,
+                channel_update_protection BOOLEAN DEFAULT TRUE,
+                role_create_protection BOOLEAN DEFAULT TRUE,
+                role_delete_protection BOOLEAN DEFAULT TRUE,
+                role_update_protection BOOLEAN DEFAULT TRUE,
+                webhook_create_protection BOOLEAN DEFAULT TRUE,
+                webhook_delete_protection BOOLEAN DEFAULT TRUE,
+                member_role_protection BOOLEAN DEFAULT TRUE,
+                sticker_protection BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
+            # Migrations for existing antinuke_settings table
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS channel_create_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS channel_delete_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS channel_update_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS role_create_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS role_delete_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS role_update_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS webhook_create_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS webhook_delete_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS member_role_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS sticker_protection BOOLEAN DEFAULT TRUE;",
             # Antinuke Whitelist and Extra Owners table
             """
             CREATE TABLE IF NOT EXISTS antinuke_whitelist (

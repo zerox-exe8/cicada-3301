@@ -69,7 +69,7 @@ class AntinukeSetupWizard(ui.View):
 
         # Pre-populate state from existing settings if available
         existing_cfg = self.bot.antinuke_mgr.get_settings(guild.id)
-        self.punishment: str = existing_cfg.get("punishment", "ban")
+        self.punishment: str = existing_cfg.get("punishment", "strip_roles")
 
         # Always start fresh — no pre-selection, user picks explicitly
         self.selected_modules: set[str] = set()
@@ -363,6 +363,11 @@ class AntinukeSetupWizard(ui.View):
         for k in ALL_MODULE_KEYS:
             module_updates[f"{k}_protection"] = (k in self.selected_modules)
 
+        # Sync parent module flags
+        module_updates["channel_protection"] = any(k in self.selected_modules for k in ["channel_create", "channel_delete", "channel_update"])
+        module_updates["role_protection"] = any(k in self.selected_modules for k in ["role_create", "role_delete", "role_update"])
+        module_updates["webhook_protection"] = any(k in self.selected_modules for k in ["webhook_create", "webhook_delete"])
+
         # 3. Update master settings
         await self.bot.antinuke_mgr.update_settings(
             self.guild.id,
@@ -393,9 +398,15 @@ class AntinukeSetupWizard(ui.View):
             )
         )
         success_container.add_separator(divider=True)
+        punish_map = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}
+        punish_disp = punish_map.get(self.punishment, "Quarantine")
+        log_disp = target_log_channel.mention if target_log_channel else "`None`"
+
         summary_lines = [
-            f"> {dot} **Protection Modules:** {mod_disp}",
             f"> {dot} **Status:** {sw_on}",
+            f"> {dot} **Protection Modules:** {mod_disp}",
+            f"> {dot} **Punishment:** `{punish_disp}`",
+            f"> {dot} **Logs:** {log_disp}",
         ]
         success_container.add_text("\n".join(summary_lines))
         success_container.add_separator(divider=True)

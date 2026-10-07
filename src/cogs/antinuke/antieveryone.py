@@ -10,6 +10,7 @@ from src.cogs.antinuke._helpers import (
     execute_punishment,
     disarm_dangerous_permissions,
     dispatch_antinuke_log,
+    resolve_audit_perpetrator,
     DANGEROUS_PERMISSIONS,
 )
 
@@ -46,15 +47,9 @@ class AntiEveryoneCog(commands.Cog):
         if not escalated:
             return
 
-        await asyncio.sleep(0.3)
-        perpetrator: discord.Member | discord.User | None = None
-        try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.role_update, limit=1):
-                if entry.target and entry.target.id == after.id:
-                    perpetrator = entry.user
-                    break
-        except Exception:
-            pass
+        perpetrator = await resolve_audit_perpetrator(
+            guild, discord.AuditLogAction.role_update, target_id=after.id
+        )
 
         if not perpetrator:
             return

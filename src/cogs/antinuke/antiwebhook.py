@@ -27,10 +27,11 @@ class AntiWebhookCog(commands.Cog):
         if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "webhook"):
             return
 
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
         try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.webhook_create, limit=1):
-                if (discord.utils.utcnow() - entry.created_at).total_seconds() > 6.0:
+            now = discord.utils.utcnow()
+            async for entry in guild.audit_logs(action=discord.AuditLogAction.webhook_create, limit=6):
+                if (now - entry.created_at).total_seconds() > 10.0:
                     continue
 
                 perpetrator = entry.user

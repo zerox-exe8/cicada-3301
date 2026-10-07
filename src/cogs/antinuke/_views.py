@@ -103,10 +103,27 @@ class AntinukeControlView(ui.View):
             new_target = True if any_disabled else False
             for m in ALL_PROTECTION_KEYS:
                 updates[f"{m}_protection"] = new_target
+            updates["channel_protection"] = new_target
+            updates["role_protection"] = new_target
+            updates["webhook_protection"] = new_target
         else:
             for mod in selected_values:
                 curr_state = self.bot.antinuke_mgr.is_module_enabled(self.guild.id, mod)
                 updates[f"{mod}_protection"] = not curr_state
+
+            # Keep parent fallback flags synchronized
+            updates["channel_protection"] = any(
+                updates.get(f"{k}_protection", self.bot.antinuke_mgr.is_module_enabled(self.guild.id, k))
+                for k in ["channel_create", "channel_delete", "channel_update"]
+            )
+            updates["role_protection"] = any(
+                updates.get(f"{k}_protection", self.bot.antinuke_mgr.is_module_enabled(self.guild.id, k))
+                for k in ["role_create", "role_delete", "role_update"]
+            )
+            updates["webhook_protection"] = any(
+                updates.get(f"{k}_protection", self.bot.antinuke_mgr.is_module_enabled(self.guild.id, k))
+                for k in ["webhook_create", "webhook_delete"]
+            )
 
         await self.bot.antinuke_mgr.update_settings(self.guild.id, **updates)
 

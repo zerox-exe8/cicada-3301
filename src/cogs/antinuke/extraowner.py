@@ -49,6 +49,13 @@ class AntinukeExtraOwnerCog(commands.Cog):
         if ctx.invoked_subcommand is not None:
             return
 
+        is_owner = ctx.author.id == ctx.guild.owner_id
+        is_eo = self.bot.antinuke_mgr.is_extra_owner(ctx.guild.id, ctx.author.id)
+        is_admin = getattr(ctx.author.guild_permissions, "administrator", False) if hasattr(ctx.author, "guild_permissions") else False
+        if not (is_owner or is_eo or is_admin):
+            await ctx.send_error("You must have **Administrator** permission or be a **Server Owner / Extra Owner** to view this command.")
+            return
+
         container = self._build_usage_card(ctx)
         await send_container_response(ctx, container)
 
@@ -101,6 +108,13 @@ class AntinukeExtraOwnerCog(commands.Cog):
     @extraowner.command(name="list", aliases=["show"], description="List all registered Extra Owners.")
     async def extraowner_list(self, ctx: CustomContext) -> None:
         """Display list of all registered Extra Owners."""
+        is_owner = ctx.author.id == ctx.guild.owner_id
+        is_eo = self.bot.antinuke_mgr.is_extra_owner(ctx.guild.id, ctx.author.id)
+        is_admin = getattr(ctx.author.guild_permissions, "administrator", False) if hasattr(ctx.author, "guild_permissions") else False
+        if not (is_owner or is_eo or is_admin):
+            await ctx.send_error("You must have **Administrator** permission or be a **Server Owner / Extra Owner** to view Extra Owners.")
+            return
+
         owner_ids = self.bot.antinuke_mgr.get_extra_owners(ctx.guild.id)
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "•")

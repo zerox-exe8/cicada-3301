@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log
+from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log, resolve_audit_perpetrator
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -27,15 +27,9 @@ class AntiPruneCog(commands.Cog):
         if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "prune"):
             return
 
-        await asyncio.sleep(0.3)
-        perpetrator: discord.Member | discord.User | None = None
-        try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.member_prune, limit=1):
-                if (discord.utils.utcnow() - entry.created_at).total_seconds() < 5.0:
-                    perpetrator = entry.user
-                    break
-        except Exception:
-            pass
+        perpetrator = await resolve_audit_perpetrator(
+            guild, discord.AuditLogAction.member_prune, max_age_seconds=10.0
+        )
 
         if not perpetrator:
             return

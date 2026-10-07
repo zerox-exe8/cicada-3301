@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log
+from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log, resolve_audit_perpetrator
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -29,14 +29,9 @@ class AntiServerCog(commands.Cog):
         if before.name == after.name and before.icon == after.icon and before.verification_level == after.verification_level:
             return
 
-        await asyncio.sleep(0.3)
-        perpetrator: discord.Member | discord.User | None = None
-        try:
-            async for entry in after.audit_logs(action=discord.AuditLogAction.guild_update, limit=1):
-                perpetrator = entry.user
-                break
-        except Exception:
-            pass
+        perpetrator = await resolve_audit_perpetrator(
+            after, discord.AuditLogAction.guild_update, max_age_seconds=10.0
+        )
 
         if not perpetrator:
             return

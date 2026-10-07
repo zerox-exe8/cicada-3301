@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, restore_channel, dispatch_antinuke_log
+from src.cogs.antinuke._helpers import (
+    execute_punishment,
+    restore_channel,
+    dispatch_antinuke_log,
+    resolve_audit_perpetrator,
+)
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -24,20 +29,14 @@ class AntiChannelCog(commands.Cog):
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel) -> None:
         """Intercept unauthorized channel deletion and auto-recreate."""
         guild = channel.guild
-        if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "channel"):
+        if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "channel_delete"):
             return
 
         cached = self.bot.antinuke_mgr.get_cached_channel(guild.id, channel.id)
 
-        await asyncio.sleep(0.3)
-        perpetrator: discord.Member | discord.User | None = None
-        try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_delete, limit=1):
-                if entry.target and entry.target.id == channel.id:
-                    perpetrator = entry.user
-                    break
-        except Exception:
-            pass
+        perpetrator = await resolve_audit_perpetrator(
+            guild, discord.AuditLogAction.channel_delete, target_id=channel.id
+        )
 
         if not perpetrator:
             return
@@ -69,18 +68,12 @@ class AntiChannelCog(commands.Cog):
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel) -> None:
         """Catch mass channel creation attacks."""
         guild = channel.guild
-        if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "channel"):
+        if not self.bot.antinuke_mgr.is_module_enabled(guild.id, "channel_create"):
             return
 
-        await asyncio.sleep(0.3)
-        perpetrator: discord.Member | discord.User | None = None
-        try:
-            async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_create, limit=1):
-                if entry.target and entry.target.id == channel.id:
-                    perpetrator = entry.user
-                    break
-        except Exception:
-            pass
+        perpetrator = await resolve_audit_perpetrator(
+            guild, discord.AuditLogAction.channel_create, target_id=channel.id
+        )
 
         if not perpetrator:
             return

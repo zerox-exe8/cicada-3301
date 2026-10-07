@@ -14,21 +14,40 @@ if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
 
-MODULE_LABELS: dict[str, str] = {
-    "vanity": "Vanity URL",
-    "everyone": "Everyone Guard",
-    "role": "Roles",
-    "channel": "Channels",
-    "ban": "Bans",
-    "kick": "Kicks",
-    "bot": "Bot Adds",
-    "webhook": "Webhooks",
-    "prune": "Prunes",
-    "automod": "AutoMod",
-    "integration": "Integrations",
-    "emoji": "Emojis",
-    "guild_update": "Server Updates",
+ANTINUKE_MODULE_CHOICES: list[dict[str, Any]] = [
+    {"label": "All Antinuke Modules", "value": "all"},
+    {"label": "Anti Ban", "value": "ban"},
+    {"label": "Anti Kick", "value": "kick"},
+    {"label": "Anti Bot", "value": "bot"},
+    {"label": "Anti Channel", "value": "channel"},
+    {"label": "Anti Role", "value": "role"},
+    {"label": "Anti Webhook", "value": "webhook"},
+    {"label": "Anti Server Update", "value": "guild_update"},
+    {"label": "Anti Vanity", "value": "vanity"},
+    {"label": "Anti Prune", "value": "prune"},
+    {"label": "Anti AutoMod", "value": "automod"},
+    {"label": "Anti Everyone", "value": "everyone"},
+    {"label": "Anti Member Role", "value": "member_role"},
+    {"label": "Anti Sticker & Emoji", "value": "sticker"},
+    {"label": "Anti Integration", "value": "integration"},
+]
+
+MODULE_DISPLAY_MAP: dict[str, str] = {
+    opt["value"]: opt["label"]
+    for opt in ANTINUKE_MODULE_CHOICES
+    if opt["value"] != "all"
 }
+MODULE_DISPLAY_MAP.update({
+    "channel_create": "Channel Create",
+    "channel_delete": "Channel Delete",
+    "channel_update": "Channel Update",
+    "role_create": "Role Create",
+    "role_delete": "Role Delete",
+    "role_update": "Role Update",
+    "webhook_create": "Webhook Create",
+    "webhook_delete": "Webhook Delete",
+    "emoji": "Emoji Guard",
+})
 
 
 class AntinukeWhitelistCog(commands.Cog):
@@ -48,8 +67,8 @@ class AntinukeWhitelistCog(commands.Cog):
         container.add_section(content="**Whitelist Commands**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} `{prefix}whitelist add <@user / bot / role>`\n"
-            f"{dot} `{prefix}whitelist remove <@user / bot / role>`\n"
+            f"{dot} `{prefix}whitelist add <@user / role>`\n"
+            f"{dot} `{prefix}whitelist remove <@user / role>`\n"
             f"{dot} `{prefix}whitelist list/show`"
         )
         container.add_separator(divider=True)
@@ -59,13 +78,20 @@ class AntinukeWhitelistCog(commands.Cog):
     @commands.hybrid_group(
         name="whitelist",
         aliases=["wl"],
-        description="Manage users or bots immune to antinuke triggers.",
+        description="Manage users or roles immune to antinuke triggers.",
         invoke_without_command=True,
     )
     @commands.guild_only()
     async def whitelist(self, ctx: CustomContext) -> None:
         """Show Whitelist usage guide (same style as role command)."""
         if ctx.invoked_subcommand is not None:
+            return
+
+        is_owner = ctx.author.id == ctx.guild.owner_id
+        is_eo = self.bot.antinuke_mgr.is_extra_owner(ctx.guild.id, ctx.author.id)
+        is_admin = getattr(ctx.author.guild_permissions, "administrator", False) if hasattr(ctx.author, "guild_permissions") else False
+        if not (is_owner or is_eo or is_admin):
+            await ctx.send_error("You must have **Administrator** permission or be a **Server Owner / Extra Owner** to view this command.")
             return
 
         container = self._build_usage_card(ctx)
@@ -76,8 +102,9 @@ class AntinukeWhitelistCog(commands.Cog):
         ctx: CustomContext,
         target_label: str,
         custom_id_prefix: str,
+        selected_type: str | None = None,
     ) -> KyroContainer:
-        """Interactive whitelist setup card with two dropdowns (type + modules)."""
+        """Interactive whitelist setup card with two-stage dropdown selection."""
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "•")
 
@@ -89,42 +116,50 @@ class AntinukeWhitelistCog(commands.Cog):
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"{dot} Step 1 — pick **Full Whitelist**, or pick **Custom Modules** then choose modules below.")
+        if selected_type == "antinuke":
+            container.add_text(
+                f"{dot} **Antinuke** selected. Choose which modules to whitelist below (or pick **All Antinuke Modules**)."
+            )
+        else:
+            container.add_text(
+                f"{dot} Select **Antinuke** from the dropdown below to configure protection modules, or pick **Full Access**."
+            )
+
+        # Dropdown 1: Whitelist Type (Full Access above Antinuke, no emoji, no description)
+        type_options = [
+            {
+                "label": "Full Access",
+                "value": "full",
+            },
+            {
+                "label": "Antinuke",
+                "value": "antinuke",
+                "default": selected_type == "antinuke",
+            },
+        ]
+
         container.add_action_row([
             {
                 "type": 3,
                 "custom_id": f"{custom_id_prefix}:select_mode",
                 "placeholder": "Choose whitelist type...",
-                "options": [
-                    {
-                        "label": "Full Whitelist",
-                        "value": "full",
-                        "description": "Immune to every antinuke module",
-                    },
-                    {
-                        "label": "Custom Modules",
-                        "value": "custom",
-                        "description": "Immune only to modules picked below",
-                    },
-                ],
+                "options": type_options,
             }
         ])
-        container.add_action_row([
-            {
-                "type": 3,
-                "custom_id": f"{custom_id_prefix}:select_modules",
-                "placeholder": "Choose modules (multi-select)...",
-                "min_values": 1,
-                "max_values": len(PROTECTION_MODULES),
-                "options": [
-                    {
-                        "label": MODULE_LABELS.get(m, m.replace("_", " ").title()),
-                        "value": m,
-                    }
-                    for m in PROTECTION_MODULES
-                ],
-            }
-        ])
+
+        # Dropdown 2: Antinuke Modules (ONLY displayed once Antinuke is chosen)
+        if selected_type == "antinuke":
+            container.add_action_row([
+                {
+                    "type": 3,
+                    "custom_id": f"{custom_id_prefix}:select_modules",
+                    "placeholder": "Choose Antinuke modules (multi-select)...",
+                    "min_values": 1,
+                    "max_values": len(ANTINUKE_MODULE_CHOICES),
+                    "options": ANTINUKE_MODULE_CHOICES,
+                }
+            ])
+
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         return container
@@ -154,8 +189,9 @@ class AntinukeWhitelistCog(commands.Cog):
         is_role: bool,
         target_label: str,
     ) -> None:
-        """Two-dropdown interactive flow: whitelist type + module multi-select."""
-        custom_id_prefix = f"wl_setup:{ctx.author.id}:{ctx.guild.id if ctx.guild else 0}:{ctx.message.id if ctx.message else 0}"
+        """Two-stage interactive flow: whitelist type -> module multi-select."""
+        msg_token = ctx.message.id if ctx.message else int(discord.utils.utcnow().timestamp() * 1000) % 10000000
+        custom_id_prefix = f"wl_setup:{ctx.author.id}:{ctx.guild.id if ctx.guild else 0}:{msg_token}"
         await send_container_response(
             ctx, self._build_setup_container(ctx, target_label, custom_id_prefix)
         )
@@ -178,51 +214,75 @@ class AntinukeWhitelistCog(commands.Cog):
                 action = (data.get("custom_id", "").split(":")[-1])
                 values: list[str] = data.get("values", [])
 
-                if action == "select_mode" and values and values[0] == "full":
-                    if is_role:
-                        await self.bot.antinuke_mgr.add_role_whitelist(
-                            ctx.guild.id, target.id, ctx.author.id, is_full=True, scope=""
+                if action == "select_mode" and values:
+                    mode = values[0]
+                    if mode == "full":
+                        if is_role:
+                            await self.bot.antinuke_mgr.add_role_whitelist(
+                                ctx.guild.id, target.id, ctx.author.id, is_full=True, scope=""
+                            )
+                        else:
+                            await self.bot.antinuke_mgr.add_whitelist(
+                                ctx.guild.id, target.id, ctx.author.id, is_full=True, scope=""
+                            )
+                        await edit_container_response(
+                            interaction,
+                            self._build_applied_container(ctx, target_label, "`[Full Access]`"),
                         )
-                    else:
-                        await self.bot.antinuke_mgr.add_whitelist(
-                            ctx.guild.id, target.id, ctx.author.id, is_full=True, scope=""
+                        break
+                    elif mode == "antinuke":
+                        # Antinuke mode picked: refresh container to display Dropdown 2 (modules)
+                        await edit_container_response(
+                            interaction,
+                            self._build_setup_container(
+                                ctx, target_label, custom_id_prefix, selected_type="antinuke"
+                            ),
                         )
-                    await edit_container_response(
-                        interaction,
-                        self._build_applied_container(ctx, target_label, "`[Full Whitelist]`"),
-                    )
-                    break
+
                 elif action == "select_modules" and values:
-                    picked = [v for v in values if v in PROTECTION_MODULES]
-                    if not picked:
-                        continue
-                    scope_str = ",".join(picked)
-                    if is_role:
-                        await self.bot.antinuke_mgr.add_role_whitelist(
-                            ctx.guild.id, target.id, ctx.author.id, is_full=False, scope=scope_str
+                    if "all" in values:
+                        # User selected "All Antinuke Modules"
+                        if is_role:
+                            await self.bot.antinuke_mgr.add_role_whitelist(
+                                ctx.guild.id, target.id, ctx.author.id, is_full=True, scope=""
+                            )
+                        else:
+                            await self.bot.antinuke_mgr.add_whitelist(
+                                ctx.guild.id, target.id, ctx.author.id, is_full=True, scope=""
+                            )
+                        await edit_container_response(
+                            interaction,
+                            self._build_applied_container(ctx, target_label, "`[All Antinuke Modules]`"),
                         )
+                        break
                     else:
-                        await self.bot.antinuke_mgr.add_whitelist(
-                            ctx.guild.id, target.id, ctx.author.id, is_full=False, scope=scope_str
+                        valid_keys = [opt["value"] for opt in ANTINUKE_MODULE_CHOICES if opt["value"] != "all"]
+                        picked = [v for v in values if v in valid_keys or v in PROTECTION_MODULES]
+                        if not picked:
+                            continue
+                        scope_str = ",".join(picked)
+                        if is_role:
+                            await self.bot.antinuke_mgr.add_role_whitelist(
+                                ctx.guild.id, target.id, ctx.author.id, is_full=False, scope=scope_str
+                            )
+                        else:
+                            await self.bot.antinuke_mgr.add_whitelist(
+                                ctx.guild.id, target.id, ctx.author.id, is_full=False, scope=scope_str
+                            )
+                        display_names = [MODULE_DISPLAY_MAP.get(p, p.replace("_", " ").title()) for p in picked]
+                        formatted_scope = ", ".join(display_names)
+                        await edit_container_response(
+                            interaction,
+                            self._build_applied_container(ctx, target_label, f"`[Scoped: {formatted_scope}]`"),
                         )
-                    await edit_container_response(
-                        interaction,
-                        self._build_applied_container(ctx, target_label, f"`[Scoped: {scope_str}]`"),
-                    )
-                    break
-                else:
-                    # "Custom Modules" picked — ack with same card so user can now pick modules.
-                    await edit_container_response(
-                        interaction,
-                        self._build_setup_container(ctx, target_label, custom_id_prefix),
-                    )
+                        break
 
             except asyncio.TimeoutError:
                 break
 
-    @whitelist.command(name="add", description="Add a user, bot or role to the antinuke whitelist.")
+    @whitelist.command(name="add", description="Add a user or role to the antinuke whitelist.")
     @app_commands.describe(
-        target="User, bot, role or their ID to whitelist",
+        target="User, role or their ID to whitelist",
         scope="Do not type here — pick type and modules from the dropdowns.",
     )
     async def whitelist_add(
@@ -231,7 +291,7 @@ class AntinukeWhitelistCog(commands.Cog):
         target: Union[discord.Member, discord.User, discord.Role],
         scope: Optional[str] = None,
     ) -> None:
-        """Add user/bot/role to whitelist."""
+        """Add user/role to whitelist."""
         is_owner = ctx.author.id == ctx.guild.owner_id
         is_eo = self.bot.antinuke_mgr.is_extra_owner(ctx.guild.id, ctx.author.id)
         if not (is_owner or is_eo):
@@ -250,17 +310,53 @@ class AntinukeWhitelistCog(commands.Cog):
 
         scope_text = (scope or "").strip()
         if scope_text:
-            # Typed scopes are disabled — everything goes through the dropdowns.
-            await ctx.send_error("Type karke scope mat likho — `scope` khaali chhod ke dobara chalao, dropdown se select karo.")
+            if scope_text.lower() in ("all", "full", "*"):
+                if is_role:
+                    await self.bot.antinuke_mgr.add_role_whitelist(
+                        ctx.guild.id, target.id, ctx.author.id, is_full=True, scope=""
+                    )
+                else:
+                    await self.bot.antinuke_mgr.add_whitelist(
+                        ctx.guild.id, target.id, ctx.author.id, is_full=True, scope=""
+                    )
+                await send_container_response(
+                    ctx, self._build_applied_container(ctx, target_label, "`[Full Access]`")
+                )
+                return
+
+            # Scoped modules provided via CLI
+            raw_modules = [s.strip().lower() for s in scope_text.split(",") if s.strip()]
+            valid_modules = [m for m in raw_modules if m in PROTECTION_MODULES]
+            if not valid_modules:
+                valid_list = ", ".join(f"`{m}`" for m in PROTECTION_MODULES[:8])
+                await ctx.send_error(
+                    f"No valid modules recognized in `{scope_text}`.\n"
+                    f"> Available modules: {valid_list}...\n"
+                    f"> Or use `full` to grant immunity to all modules."
+                )
+                return
+
+            clean_scope_str = ",".join(valid_modules)
+            if is_role:
+                await self.bot.antinuke_mgr.add_role_whitelist(
+                    ctx.guild.id, target.id, ctx.author.id, is_full=False, scope=clean_scope_str
+                )
+            else:
+                await self.bot.antinuke_mgr.add_whitelist(
+                    ctx.guild.id, target.id, ctx.author.id, is_full=False, scope=clean_scope_str
+                )
+            await send_container_response(
+                ctx, self._build_applied_container(ctx, target_label, f"`[Scoped: {clean_scope_str}]`")
+            )
             return
 
-        # Everything goes through the interactive two-dropdown setup.
+        # No scope provided: launch the interactive two-dropdown setup
         await self._run_interactive_setup(ctx, target, is_role, target_label)
 
-    @whitelist.command(name="remove", description="Remove a user, bot or role from the antinuke whitelist.")
-    @app_commands.describe(target="User, bot or role to remove from whitelist")
+    @whitelist.command(name="remove", description="Remove a user or role from the antinuke whitelist.")
+    @app_commands.describe(target="User or role to remove from whitelist")
     async def whitelist_remove(self, ctx: CustomContext, target: Union[discord.Member, discord.User, discord.Role]) -> None:
-        """Remove user/bot/role from whitelist."""
+        """Remove user/role from whitelist."""
         is_owner = ctx.author.id == ctx.guild.owner_id
         is_eo = self.bot.antinuke_mgr.is_extra_owner(ctx.guild.id, ctx.author.id)
         if not (is_owner or is_eo):
@@ -298,9 +394,16 @@ class AntinukeWhitelistCog(commands.Cog):
         container.add_text(f"{dot} **Target:** **{target.name}** `「{target.id}」` has been removed.")
         await send_container_response(ctx, container)
 
-    @whitelist.command(name="list", aliases=["show"], description="List all whitelisted users, bots and roles.")
+    @whitelist.command(name="list", aliases=["show"], description="List all whitelisted users and roles.")
     async def whitelist_list(self, ctx: CustomContext) -> None:
-        """Display all whitelisted members, bots and roles."""
+        """Display all whitelisted members and roles."""
+        is_owner = ctx.author.id == ctx.guild.owner_id
+        is_eo = self.bot.antinuke_mgr.is_extra_owner(ctx.guild.id, ctx.author.id)
+        is_admin = getattr(ctx.author.guild_permissions, "administrator", False) if hasattr(ctx.author, "guild_permissions") else False
+        if not (is_owner or is_eo or is_admin):
+            await ctx.send_error("You must have **Administrator** permission or be a **Server Owner / Extra Owner** to view the whitelist.")
+            return
+
         wl_dict = self.bot.antinuke_mgr.get_whitelist(ctx.guild.id)
         role_wl_dict = self.bot.antinuke_mgr.get_role_whitelist(ctx.guild.id)
         e_reg = self.bot.custom_emojis
@@ -320,9 +423,9 @@ class AntinukeWhitelistCog(commands.Cog):
             u_name = f"**{u.name}**" if u else f"<@{uid}>"
 
             if data.get("is_full"):
-                lines.append(f"{dot} {u_name} `「{uid}」` **—** `[Full Whitelist]`")
+                lines.append(f"{dot} {u_name} `「{uid}」` **—** `[Full Access]`")
             else:
-                scopes = ", ".join(data.get("scope", set()))
+                scopes = ", ".join(MODULE_DISPLAY_MAP.get(s, s.replace("_", " ").title()) for s in sorted(data.get("scope", set())))
                 lines.append(f"{dot} {u_name} `「{uid}」` **—** `[Scoped: {scopes}]`")
 
         role_lines = []
@@ -330,9 +433,9 @@ class AntinukeWhitelistCog(commands.Cog):
             role = ctx.guild.get_role(rid) if ctx.guild else None
             r_name = role.mention if role else f"<@&{rid}>"
             if data.get("is_full"):
-                role_lines.append(f"{dot} {r_name} `「{rid}」` **—** `[Full Whitelist]`")
+                role_lines.append(f"{dot} {r_name} `「{rid}」` **—** `[Full Access]`")
             else:
-                scopes = ", ".join(data.get("scope", set()))
+                scopes = ", ".join(MODULE_DISPLAY_MAP.get(s, s.replace("_", " ").title()) for s in sorted(data.get("scope", set())))
                 role_lines.append(f"{dot} {r_name} `「{rid}」` **—** `[Scoped: {scopes}]`")
 
         if not lines and not role_lines:

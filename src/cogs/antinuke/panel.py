@@ -271,30 +271,52 @@ class AntinukePanelCog(commands.Cog):
         if cfg.get("enabled", False):
             dot = self.bot.custom_emojis.get("heart_dot", "•")
             sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+            raw_punish = cfg.get("punishment", "strip_roles")
+            punish_map = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}
+            punish_str = punish_map.get(raw_punish, "Quarantine")
+            log_ch = self.bot.antinuke_mgr.get_log_channel(guild)
+            log_str = log_ch.mention if log_ch else "`None`"
+
             c = KyroContainer(accent_color=None)
             c.add_section(content="**Kyro Antinuke**\n> Antinuke is already active on this server.")
             c.add_separator(divider=True)
-            c.add_text(f"> {dot} **Status:** {sw_on}")
+            c.add_text(
+                f"> {dot} **Status:** {sw_on}\n"
+                f"> {dot} **Protection Modules:** `All Modules Active`\n"
+                f"> {dot} **Punishment:** `{punish_str}`\n"
+                f"> {dot} **Logs:** {log_str}"
+            )
             c.add_separator(divider=True)
             c.add_text("-# Use `,antinuke disable` to turn it off.")
             await send_container_response(ctx, c)
             return
 
-        # Enable antinuke and auto-create logs channel
+        # Enable antinuke, set punishment to quarantine and auto-create logs channel
         log_channel, _ = await ensure_unified_log_channel(self.bot, guild, ctx.author)
-        if log_channel is None:
-            await self.bot.antinuke_mgr.update_settings(guild.id, enabled=True)
+        await self.bot.antinuke_mgr.update_settings(
+            guild.id,
+            enabled=True,
+            punishment="strip_roles",
+            log_channel_id=log_channel.id if log_channel else None,
+        )
         self.bot.antinuke_mgr.snapshot_guild_state(guild)
 
-        # Show clean success embed — no control panel buttons
+        # Show clean success embed — with status, protection modules, quarantine punishment and logs channel
         dot = self.bot.custom_emojis.get("heart_dot", "•")
         sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+        log_str = log_channel.mention if log_channel else "`None`"
+
         container = KyroContainer(accent_color=None)
         container.add_section(
             content="**Kyro Antinuke**\n> Antinuke is now active and protecting your server."
         )
         container.add_separator(divider=True)
-        container.add_text(f"> {dot} **Status:** {sw_on}")
+        container.add_text(
+            f"> {dot} **Status:** {sw_on}\n"
+            f"> {dot} **Protection Modules:** `All Modules Active`\n"
+            f"> {dot} **Punishment:** `Quarantine`\n"
+            f"> {dot} **Logs:** {log_str}"
+        )
         container.add_separator(divider=True)
         container.add_text(f"-# Enabled by {ctx.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
         await send_container_response(ctx, container)
@@ -305,9 +327,9 @@ class AntinukePanelCog(commands.Cog):
         guild = ctx.guild
         await self.bot.antinuke_mgr.update_settings(guild.id, enabled=False)
 
-        # Auto-delete the kyro_logs channel that was created during enable
+        # Auto-delete the kyro_logs channel only if it is the dedicated kyro_logs channel
         log_channel = self.bot.antinuke_mgr.get_log_channel(guild)
-        if log_channel is not None:
+        if log_channel is not None and log_channel.name.lower() in ("kyro_logs", "kyro-logs"):
             try:
                 await log_channel.delete(reason="Kyro Antinuke disabled — auto-removing kyro_logs channel")
             except (discord.Forbidden, discord.HTTPException) as e:

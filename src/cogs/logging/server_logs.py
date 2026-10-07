@@ -6,8 +6,10 @@ import time
 from typing import TYPE_CHECKING
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -438,6 +440,145 @@ class ServerLogsCog(commands.Cog):
                 state_parts.append("Server Deafened")
             state_str = ", ".join(state_parts) or "Unmuted/Undeafened"
             await self._send(guild, "voice", "Voice State Changed", [f"**User:** {user_str}", f"**State:** `{state_str}`"])
+
+    # ─────────────── COMMANDS ───────────────
+
+    def _build_logs_overview_card(self, guild: discord.Guild, author_name: str) -> KyroContainer:
+        """Construct the Components V2 card showing currently configured log channels."""
+        settings = self.bot.log_mgr.get_guild_settings(guild.id)
+        dot = getattr(self.bot, "custom_emojis", {}).get("heart_dot", "•")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Server Logs Configuration**\n"
+                "> Audit logs tracking events across messages, members, roles, and voice."
+            )
+        )
+        container.add_separator(divider=True)
+
+        categories = [
+            ("All (Unified)", settings.get("all")),
+            ("Moderation", settings.get("mod")),
+            ("Message", settings.get("message")),
+            ("Member", settings.get("member")),
+            ("Server", settings.get("server")),
+            ("Voice", settings.get("voice")),
+        ]
+
+        lines = []
+        for name, ch_id in categories:
+            if ch_id:
+                ch = guild.get_channel(ch_id)
+                ch_str = ch.mention if ch else f"`#{ch_id}`"
+            else:
+                ch_str = "`Not Set`"
+            lines.append(f"> {dot} **{name}:** {ch_str}")
+
+        container.add_text("\n".join(lines))
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {author_name}")
+        return container
+
+    @commands.hybrid_group(
+        name="logs",
+        aliases=["log", "serverlogs"],
+        description="View and configure server audit logging channels.",
+        invoke_without_command=True,
+    )
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True)
+    async def logs(self, ctx: CustomContext) -> None:
+        """Display the current logging configuration."""
+        card = self._build_logs_overview_card(ctx.guild, ctx.author.display_name)
+        await send_container_response(ctx, card)
+
+    @logs.command(name="show", aliases=["view", "config", "status"], description="Display all configured logging channels.")
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True)
+    async def logs_show(self, ctx: CustomContext) -> None:
+        """Display all configured logging channels."""
+        card = self._build_logs_overview_card(ctx.guild, ctx.author.display_name)
+        await send_container_response(ctx, card)
+
+    @logs.command(name="channel", aliases=["set"], description="Bind a channel for a specific log category.")
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True)
+    @app_commands.describe(
+        category="Logging category to set",
+        channel="Target channel for logs",
+    )
+    @app_commands.choices(
+        category=[
+            app_commands.Choice(name="All (Unified)", value="all"),
+            app_commands.Choice(name="Mod", value="mod"),
+            app_commands.Choice(name="Message", value="message"),
+            app_commands.Choice(name="Member", value="member"),
+            app_commands.Choice(name="Server", value="server"),
+            app_commands.Choice(name="Voice", value="voice"),
+        ]
+    )
+    async def logs_channel(
+        self,
+        ctx: CustomContext,
+        category: str,
+        channel: discord.TextChannel,
+    ) -> None:
+        """Set a target channel for a logging category."""
+        clean_cat = category.lower()
+        if clean_cat not in ["all", "mod", "message", "member", "server", "voice"]:
+            await ctx.send_error("Invalid category. Choose from: `all`, `mod`, `message`, `member`, `server`, `voice`.")
+            return
+
+        await self.bot.log_mgr.set_log_channel(ctx.guild.id, clean_cat, channel.id)
+
+        dot = getattr(self.bot, "custom_emojis", {}).get("heart_dot", "•")
+        container = KyroContainer(accent_color=None)
+        container.add_section(content="**Server Logs Updated**")
+        container.add_separator(divider=True)
+        container.add_text(
+            f"> {dot} **Category:** `{clean_cat.capitalize()}`\n"
+            f"> {dot} **Channel:** {channel.mention}"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Configured by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
+
+    @logs.command(name="reset", description="Clear logging channel configurations.")
+    @commands.guild_only()
+    @commands.has_permissions(manage_guild=True)
+    @app_commands.describe(category="Category to reset (leave blank to reset all)")
+    @app_commands.choices(
+        category=[
+            app_commands.Choice(name="All Categories", value="all_logs"),
+            app_commands.Choice(name="Unified (all)", value="all"),
+            app_commands.Choice(name="Mod", value="mod"),
+            app_commands.Choice(name="Message", value="message"),
+            app_commands.Choice(name="Member", value="member"),
+            app_commands.Choice(name="Server", value="server"),
+            app_commands.Choice(name="Voice", value="voice"),
+        ]
+    )
+    async def logs_reset(
+        self,
+        ctx: CustomContext,
+        category: str | None = None,
+    ) -> None:
+        """Reset a specific log channel or all log channels."""
+        target_cat = category.lower() if category else "all_logs"
+        await self.bot.log_mgr.reset_logs(ctx.guild.id, target_cat)
+
+        dot = getattr(self.bot, "custom_emojis", {}).get("heart_dot", "•")
+        container = KyroContainer(accent_color=None)
+        container.add_section(content="**Server Logs Reset**")
+        container.add_separator(divider=True)
+        if target_cat == "all_logs":
+            container.add_text(f"> {dot} All logging channel bindings have been cleared.")
+        else:
+            container.add_text(f"> {dot} **Category:** `{target_cat.capitalize()}` has been reset to `Not Set`.")
+        container.add_separator(divider=True)
+        container.add_text(f"-# Reset by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
 
 
 async def setup(bot: KyroBot) -> None:

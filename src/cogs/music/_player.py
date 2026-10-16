@@ -81,10 +81,36 @@ class GuildPlayer:
         """Connect or move to the specified voice channel using Wavelink."""
         vc = self.guild.voice_client
         if vc and isinstance(vc, wavelink.Player):
-            if vc.channel.id != channel.id:
+            if vc.channel and vc.channel.id != channel.id:
                 await vc.move_to(channel)
             self.voice_client = vc
             return
+
+        # If connected to a non-wavelink player (e.g. leftover discord.VoiceClient), disconnect it first
+        if vc and not isinstance(vc, wavelink.Player):
+            try:
+                await vc.disconnect(force=True)
+            except Exception:
+                pass
+
+        # Ensure Wavelink node is connected before connecting player
+        try:
+            wavelink.Pool.get_node()
+        except Exception:
+            from src.core.config import Config
+            try:
+                node = wavelink.Node(
+                    uri=Config.LAVALINK_URI,
+                    password=Config.LAVALINK_PASSWORD,
+                    inactive_player_timeout=300,
+                )
+                await wavelink.Pool.connect(nodes=[node], client=self.bot)
+                for _ in range(10):
+                    if node.status == wavelink.NodeStatus.CONNECTED:
+                        break
+                    await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.error(f"On-demand Lavalink node connect error: {e}")
 
         # Connect as Wavelink Player
         try:
@@ -95,11 +121,15 @@ class GuildPlayer:
 
     # ── Playback Engine ──
 
-    async def play_track(self, track: Track) -> None:
+    async def play_track(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:
         """Stream a track via the dedicated Lavalink node with 0% stutter."""
         if not self.voice_client or not self.voice_client.connected:
-            logger.warning(f"Guild {self.guild.id}: Cannot play, voice client not connected.")
-            return
+            vc = self.guild.voice_client
+            if vc and isinstance(vc, wavelink.Player) and vc.connected:
+                self.voice_client = vc
+            else:
+                logger.warning(f"Guild {self.guild.id}: Cannot play, voice client not connected.")
+                return
 
         # Ensure high-fidelity stream URL is extracted (JioSaavn 320kbps or YouTube fallback)
         if not track.stream_url:
@@ -128,7 +158,7 @@ class GuildPlayer:
             # Try next in queue if available
             if self.queue:
                 next_t = self.queue.pop(0)
-                await self.play_track(next_t)
+                await self.play_track(next_t, message_to_edit=message_to_edit)
             return
 
         playable = playables[0]
@@ -144,7 +174,7 @@ class GuildPlayer:
         await self.voice_client.set_volume(int(self.volume * 100))
 
         # Send sleek Now Playing card with buttons
-        await self.send_now_playing_card(track)
+        await self.send_now_playing_card(track, message_to_edit=message_to_edit)
 
     # ── Controls ──
 
@@ -247,15 +277,23 @@ class GuildPlayer:
         )
         return container
 
-    async def send_now_playing_card(self, track: Track) -> None:
-        """Post the interactive Now Playing card in home channel."""
+    async def send_now_playing_card(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:
+        """Post or edit the interactive Now Playing card in home channel."""
         if not self.home_channel:
             return
 
         container = self.build_now_playing_container(track)
         view = MusicControlView(self.bot, player=self)
 
-        if self.controller_message:
+        if message_to_edit and isinstance(message_to_edit, discord.Message):
+            try:
+                await edit_container_response(message_to_edit, container, view=view)
+                self.controller_message = message_to_edit
+                return
+            except Exception:
+                pass
+
+        if self.controller_message and self.controller_message != message_to_edit:
             try:
                 await self.controller_message.delete()
             except Exception:

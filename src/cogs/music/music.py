@@ -48,8 +48,10 @@ class Music(commands.Cog):
         # Register persistent view for button interactions
         self.bot.add_view(MusicControlView(bot, None))
 
-    async def cog_load(self) -> None:
-        """Connect to the dedicated NexCloud Lavalink node."""
+    async def _connect_lavalink(self) -> None:
+        """Wait for bot login and connect to Lavalink node."""
+        if not self.bot.is_ready():
+            await self.bot.wait_until_ready()
         import wavelink
         from src.core.config import Config
         try:
@@ -62,6 +64,10 @@ class Music(commands.Cog):
             logger.info(f"Connected to Lavalink Node at {Config.LAVALINK_URI}")
         except Exception as e:
             logger.error(f"Failed to connect to Lavalink node: {e}")
+
+    async def cog_load(self) -> None:
+        """Schedule Lavalink connection upon bot readiness."""
+        asyncio.create_task(self._connect_lavalink())
 
     async def cog_unload(self) -> None:
         """Close Lavalink node pool on reload/shutdown."""

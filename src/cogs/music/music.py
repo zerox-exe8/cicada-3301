@@ -50,8 +50,8 @@ class Music(commands.Cog):
 
     async def _connect_lavalink(self) -> None:
         """Wait for bot login and connect to Lavalink node."""
-        if not self.bot.is_ready():
-            await self.bot.wait_until_ready()
+        while not self.bot.is_ready():
+            await asyncio.sleep(1)
         import wavelink
         from src.core.config import Config
         try:

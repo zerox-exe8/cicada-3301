@@ -26,6 +26,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Kyro.Music.Player")
 
 
+def shorten_artist(artist: str, max_len: int = 30) -> str:
+    """Safely truncate artist string for embeds."""
+    if not artist:
+        return "Unknown"
+    return artist if len(artist) <= max_len else artist[:max_len - 3] + "..."
+
+
 class GuildPlayer:
     """
     High-Performance Lavalink Guild Player for Kyro Bot.

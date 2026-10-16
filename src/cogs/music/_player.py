@@ -144,23 +144,9 @@ class GuildPlayer:
             if resolved and resolved.stream_url:
                 track = resolved
 
-        target_url = track.stream_url or track.url
-        playables = []
+        playable = await self._resolve_playable(track)
 
-        try:
-            if target_url:
-                playables = await wavelink.Playable.search(target_url)
-        except Exception as e:
-            logger.debug(f"Direct stream search error: {e}")
-
-        # Fallback to query title search if direct stream search failed
-        if not playables and track.title:
-            try:
-                playables = await wavelink.Playable.search(f"{track.title} {track.author}")
-            except Exception as e:
-                logger.debug(f"Title search error: {e}")
-
-        if not playables:
+        if not playable:
             logger.error(f"Guild {self.guild.id}: Lavalink could not resolve playable for '{track.title}'")
             # Try next in queue if available
             if self.queue:
@@ -168,7 +154,6 @@ class GuildPlayer:
                 await self.play_track(next_t, message_to_edit=message_to_edit)
             return
 
-        playable = playables[0]
         self.current = track
         self.autoplay_history.add(track.title.lower())
 
@@ -178,6 +163,59 @@ class GuildPlayer:
 
         # Send sleek Now Playing card with buttons
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
+
+    async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
+        """
+        Resolve the best Lavalink Playable for a track.
+
+        Strategy:
+        - If the track has a direct stream_url (JioSaavn CDN .mp4 / SoundCloud progressive .mp3),
+          load it as a raw HTTP source via Lavalink's loadtracks — no fuzzy search, exact audio.
+        - If the track has a YouTube/SoundCloud/Spotify URL, search via Lavalink natively.
+        - Title search is the last resort fallback only.
+        """
+        # ── Path 1: Direct stream URL (JioSaavn 320kbps / SoundCloud progressive) ──
+        # Load the raw CDN URL directly via Lavalink HTTP source manager.
+        # This guarantees Lavalink plays the EXACT audio we resolved — no title mismatch.
+        if track.stream_url:
+            try:
+                node = wavelink.Pool.get_node()
+                results = await node.fetch_tracks(track.stream_url)
+                if results:
+                    playable = results[0] if isinstance(results, list) else results.tracks[0]
+                    return playable
+                logger.debug(f"Lavalink HTTP load returned empty for stream_url, trying search fallback.")
+            except Exception as e:
+                logger.debug(f"Lavalink HTTP source load error for '{track.title}': {e}")
+
+        # ── Path 2: Platform URL (YouTube / SoundCloud / Spotify link) ──
+        # Lavalink has native source managers for these — let it resolve directly.
+        platform_url = track.url
+        _is_platform_url = platform_url and any(
+            d in platform_url
+            for d in ("youtube.com/", "youtu.be/", "soundcloud.com/", "spotify.com/", "music.youtube.com/")
+        )
+        if _is_platform_url:
+            try:
+                playables = await wavelink.Playable.search(platform_url)
+                if playables:
+                    return playables[0]
+            except Exception as e:
+                logger.debug(f"Platform URL search error for '{track.title}': {e}")
+
+        # ── Path 3: Title + Artist search (last resort) ──
+        # Only used if both stream_url and platform URL resolution failed.
+        search_q = f"{track.title} {track.author}".strip() if track.title else ""
+        if search_q:
+            try:
+                playables = await wavelink.Playable.search(search_q)
+                if playables:
+                    logger.debug(f"Title search fallback used for '{track.title}' — may not be exact.")
+                    return playables[0]
+            except Exception as e:
+                logger.debug(f"Title search error for '{track.title}': {e}")
+
+        return None
 
     # ── Controls ──
 

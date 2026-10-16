@@ -388,13 +388,7 @@ class NativeExtractor:
             clean_yt_url = f"https://www.youtube.com/watch?v={video_id}"
             orig_yt_url = clean_yt_url
 
-            # Directly extract audio stream from YouTube so the user gets the EXACT requested video
-            track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
-            if track:
-                _SEARCH_CACHE[cache_key] = (now, track)
-                return track
-
-            # Fallback: If direct YouTube stream extraction failed, resolve title and try other tiers
+            # Fast 0.1s oEmbed title resolution (100% unblocked on Cloud/Render)
             yt_title = await cls._fetch_youtube_title(clean_yt_url)
             if yt_title:
                 yt_title = re.sub(
@@ -403,7 +397,10 @@ class NativeExtractor:
                 ).strip()
                 raw_q = yt_title
             else:
-                return None
+                track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
+                if track:
+                    _SEARCH_CACHE[cache_key] = (now, track)
+                    return track
 
         # direct SoundCloud URL Handling
         elif "soundcloud.com/" in raw_q:

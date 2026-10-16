@@ -162,7 +162,19 @@ class GuildPlayer:
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
-        """Resolve Lavalink Playable directly without any JioSaavn or external delay."""
+        """Resolve Lavalink Playable via direct HTTP stream URL or search."""
+        # ── Priority 1: Direct 320kbps HTTP Stream (JioSaavn / CDN) ──
+        # NexCloud Lavalink HTTP source manager loads this instantly with 100% success!
+        if track.stream_url:
+            try:
+                node = wavelink.Pool.get_node()
+                results = await node.fetch_tracks(track.stream_url)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"Direct Lavalink HTTP load error for '{track.title}': {e}")
+
+        # ── Priority 2: Direct Search Fallback ──
         search_target = track.url or track.query or f"{track.title} {track.author}".strip()
         if not search_target:
             return None

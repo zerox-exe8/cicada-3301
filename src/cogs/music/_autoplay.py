@@ -1,70 +1,117 @@
 from __future__ import annotations
 
+import asyncio
 import html
+import json
 import logging
 import random
 import re
+import urllib.parse
 from typing import List, Optional, Set
 
+import aiohttp
+import yt_dlp
+
 from src.cogs.music._models import Track
-from src.cogs.music._extractor import NativeExtractor, clean_track_title
+from src.cogs.music._extractor import (
+    NativeExtractor,
+    clean_track_title,
+    YOUTUBE_URL_REGEX,
+)
 
 logger = logging.getLogger("Kyro.Music.Autoplay")
 
 ARTIST_CLUSTERS = {
     # Bollywood / Hindi Romantic & Soulful
-    "arijit singh": ["Atif Aslam", "Jubin Nautiyal", "Mohit Chauhan", "KK", "Armaan Malik", "Pritam", "Sachin-Jigar", "Shreya Ghoshal"],
-    "atif aslam": ["Arijit Singh", "Jubin Nautiyal", "Mustafa Zahid", "Rahat Fateh Ali Khan", "Ali Zafar", "Mohit Chauhan"],
-    "jubin nautiyal": ["Arijit Singh", "Atif Aslam", "Akhil Sachdeva", "Tulsi Kumar", "Payal Dev", "Stebin Ben"],
-    "kk": ["Shaan", "Mohit Chauhan", "Sonu Nigam", "Lucky Ali", "Pritam", "Arijit Singh"],
+    "arijit singh": ["Atif Aslam", "Jubin Nautiyal", "Mohit Chauhan", "KK", "Armaan Malik", "Pritam", "Sachin-Jigar", "Shreya Ghoshal", "Vishal Mishra"],
+    "atif aslam": ["Arijit Singh", "Jubin Nautiyal", "Mustafa Zahid", "Rahat Fateh Ali Khan", "Ali Zafar", "Mohit Chauhan", "Pritam"],
+    "jubin nautiyal": ["Arijit Singh", "Atif Aslam", "Akhil Sachdeva", "Tulsi Kumar", "Payal Dev", "Stebin Ben", "Vishal Mishra"],
+    "kk": ["Shaan", "Mohit Chauhan", "Sonu Nigam", "Lucky Ali", "Pritam", "Arijit Singh", "Papon"],
+    "sonu nigam": ["KK", "Shaan", "Udit Narayan", "Kumar Sanu", "Abhijeet", "Alka Yagnik", "Shreya Ghoshal"],
+    "shreya ghoshal": ["Sunidhi Chauhan", "Arijit Singh", "Alka Yagnik", "Monali Thakur", "Pritam", "Shankar-Ehsaan-Loy"],
+    "pritam": ["Arijit Singh", "KK", "Mohit Chauhan", "Atif Aslam", "Shaan", "Sachin-Jigar"],
+    "vishal mishra": ["Arijit Singh", "Jubin Nautiyal", "B Praak", "Akhil Sachdeva", "Sachet Tandon"],
     
     # Punjabi / Drill / Desi Hip-Hop
     "sidhu moose wala": ["Karan Aujla", "AP Dhillon", "Shubh", "Diljit Dosanjh", "Amrit Maan", "Gurinder Gill", "DIVINE"],
-    "karan aujla": ["Sidhu Moose Wala", "AP Dhillon", "Shubh", "Diljit Dosanjh", "Ikky", "Badshah"],
+    "karan aujla": ["Sidhu Moose Wala", "AP Dhillon", "Shubh", "Diljit Dosanjh", "Ikky", "Badshah", "Raftaar"],
     "ap dhillon": ["Gurinder Gill", "Shubh", "Diljit Dosanjh", "Karan Aujla", "Sidhu Moose Wala", "Talwiinder"],
-    "diljit dosanjh": ["Karan Aujla", "AP Dhillon", "Sidhu Moose Wala", "Garry Sandhu", "Amrinder Gill"],
-    "shubh": ["AP Dhillon", "Karan Aujla", "Sidhu Moose Wala", "Talwiinder", "DIVINE"],
+    "diljit dosanjh": ["Karan Aujla", "AP Dhillon", "Sidhu Moose Wala", "Garry Sandhu", "Amrinder Gill", "Honey Singh"],
+    "shubh": ["AP Dhillon", "Karan Aujla", "Sidhu Moose Wala", "Talwiinder", "DIVINE", "Wazir Patar"],
+    "honey singh": ["Badshah", "Raftaar", "Guru Randhawa", "Diljit Dosanjh", "Alfaaz", "Lil Golu"],
+    "badshah": ["Honey Singh", "Raftaar", "Guru Randhawa", "DIVINE", "Ikka", "Karan Aujla"],
 
-    # Western Pop
+    # Western Pop & Chart Toppers
+    "the weeknd": ["Bruno Mars", "Post Malone", "Daft Punk", "Drake", "Travis Scott", "Dua Lipa"],
+    "imagine dragons": ["Coldplay", "OneRepublic", "Twenty One Pilots", "Fall Out Boy", "Maroon 5"],
+    "coldplay": ["Imagine Dragons", "OneRepublic", "The Lumineers", "The Script", "Maroon 5"],
+    "bruno mars": ["The Weeknd", "Michael Jackson", "Ed Sheeran", "Mark Ronson", "Justin Bieber"],
+    "ed sheeran": ["Shawn Mendes", "Charlie Puth", "Justin Bieber", "Sam Smith", "Lewis Capaldi"],
+    "justin bieber": ["Shawn Mendes", "ZAYN", "Charlie Puth", "The Weeknd", "Post Malone"],
+    "dua lipa": ["Bebe Rexha", "Ava Max", "Anne-Marie", "Katy Perry", "Rita Ora", "Taylor Swift"],
     "sabrina carpenter": ["Olivia Rodrigo", "Taylor Swift", "Billie Eilish", "Dua Lipa", "Ariana Grande", "Tate McRae"],
     "billie eilish": ["Finneas", "Lana Del Rey", "Olivia Rodrigo", "Lorde", "Melanie Martinez"],
     "taylor swift": ["Sabrina Carpenter", "Gracie Abrams", "Phoebe Bridgers", "Lana Del Rey", "Olivia Rodrigo"],
     "olivia rodrigo": ["Sabrina Carpenter", "Billie Eilish", "Conan Gray", "Tate McRae"],
 
     # Hip-Hop / Global Rap
-    "eminem": ["50 Cent", "Dr. Dre", "Kendrick Lamar", "Snoop Dogg", "J. Cole"],
+    "eminem": ["50 Cent", "Dr. Dre", "Kendrick Lamar", "Snoop Dogg", "J. Cole", "NF"],
     "kendrick lamar": ["J. Cole", "Drake", "Baby Keem", "Travis Scott", "A$AP Rocky"],
     "travis scott": ["Don Toliver", "Metro Boomin", "Future", "Playboi Carti", "21 Savage"],
+    "drake": ["Travis Scott", "Future", "21 Savage", "The Weeknd", "Lil Baby"],
 
     # K-Pop
-    "bts": ["TXT", "SEVENTEEN", "Stray Kids", "ENHYPEN", "Jungkook"],
-    "newjeans": ["LE SSERAFIM", "IVE", "ILLIT", "aespa", "BLACKPINK"],
+    "bts": ["TXT", "SEVENTEEN", "Stray Kids", "ENHYPEN", "Jungkook", "V", "Jimin"],
+    "newjeans": ["LE SSERAFIM", "IVE", "ILLIT", "aespa", "BLACKPINK", "TWICE"],
 
     # Anime / J-Pop
     "yoasobi": ["Ado", "LiSA", "Eve", "Kenshi Yonezu", "ZUTOMAYO"],
     "ado": ["YOASOBI", "Eve", "ZUTOMAYO", "Vaundy", "Kenshi Yonezu"],
 
     # EDM
-    "alan walker": ["Marshmello", "The Chainsmokers", "Martin Garrix", "Avicii", "Kygo"],
+    "alan walker": ["Marshmello", "The Chainsmokers", "Martin Garrix", "Avicii", "Kygo", "K-391"],
     "marshmello": ["Alan Walker", "The Chainsmokers", "Martin Garrix", "DJ Snake"],
 
     # Phonk
-    "phonk": ["Brazilian Phonk", "Kordhell", "DVRST", "Hensonn", "SXID", "NCTS"],
+    "phonk": ["Brazilian Phonk", "Kordhell", "DVRST", "Hensonn", "SXID", "NCTS", "Montagem"],
 }
 
 
 def extract_primary_artist(raw_artist: str) -> str:
-    """Extract clean primary artist name from multi-artist strings."""
+    """Extract clean primary artist name from multi-artist strings, prioritizing known singers."""
     if not raw_artist:
         return ""
     clean = html.unescape(raw_artist).strip()
+    lowered = clean.lower()
+
+    # Prioritize prominent singer from ARTIST_CLUSTERS over lyricist/producer
+    for known in ARTIST_CLUSTERS:
+        if known in lowered:
+            parts = re.split(r"[,/|]|\s+(?:feat\.?|ft\.?|and|&)\s+", clean, flags=re.IGNORECASE)
+            for p in parts:
+                if known in p.lower():
+                    return p.strip()
+
     parts = re.split(r"[,/|]|\s+(?:feat\.?|ft\.?|and|&)\s+", clean, flags=re.IGNORECASE)
     parts = [p.strip() for p in parts if p.strip()]
     return parts[0] if parts else clean
 
 
+def normalize_history_title(raw_title: str) -> str:
+    """Normalize song title for history deduplication by removing movie tags, version noise and brackets."""
+    t = clean_track_title(raw_title).lower()
+    t = re.sub(r'["\'\(\)\[\]]', "", t)
+    t = re.sub(
+        r"\b(?:from\s+.+?|ost|audio|video|lyrics?|full\s+song|new\s+version|remix|lofi|slowed|reverb)\b",
+        "",
+        t,
+        flags=re.IGNORECASE,
+    ).strip()
+    return re.sub(r"\s+", " ", t)
+
+
 class NativeSmartAutoplay:
-    """Autonomous Music Recommendation Engine for Native Player."""
+    """Autonomous Multi-Engine Continuous Radio Player (JioSaavn + YouTube Mix)."""
 
     @classmethod
     async def get_next_track(
@@ -73,43 +120,145 @@ class NativeSmartAutoplay:
         played_history: Set[str],
         consecutive_same_artist: int = 0,
     ) -> Optional[Track]:
-        """Produce next recommended track using artist clustering and session memory."""
+        """
+        Produce next recommended track using multi-candidate pool from JioSaavn and YouTube Radio Mix.
+        Guarantees non-stop continuous playback without dying or repeating same tracks.
+        """
         if not current_track:
             return None
 
+        # Bound history size to prevent unbounded memory growth during 24/7 sessions
+        if len(played_history) > 250:
+            # Clear oldest half of history
+            to_remove = list(played_history)[:120]
+            for item in to_remove:
+                played_history.discard(item)
+
         clean_title = clean_track_title(current_track.title)
+        norm_curr_title = normalize_history_title(current_track.title)
         primary_artist = extract_primary_artist(current_track.author)
         artist_key = primary_artist.lower()
 
-        # determine Related Artists from Cluster Graph
+        # Find related artists in graph
         related_artists: List[str] = []
         for known_key, cluster in ARTIST_CLUSTERS.items():
             if known_key in artist_key or artist_key in known_key or known_key in clean_title.lower():
                 related_artists = list(cluster)
                 break
 
-        # build Candidate Queries
-        candidates_queries: List[str] = []
+        # Build candidate search queries
+        queries: List[str] = []
         if consecutive_same_artist >= 2 and related_artists:
             pick_artist = random.choice(related_artists)
-            candidates_queries.append(f"{pick_artist} top songs")
-            candidates_queries.append(f"{pick_artist} hit song")
+            queries.append(f"{pick_artist} top songs")
+            queries.append(f"{pick_artist} hits")
         else:
-            candidates_queries.append(f"{primary_artist} songs")
-            candidates_queries.append(f"{clean_title} radio")
+            if primary_artist and primary_artist.lower() not in ("official artist", "unknown", "youtube"):
+                queries.append(f"{primary_artist} songs")
+            queries.append(f"{clean_title} songs")
             if related_artists:
-                candidates_queries.append(f"{random.choice(related_artists)} song")
+                queries.append(f"{random.choice(related_artists)} songs")
 
-        # extract and check against session history
-        for query in candidates_queries:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*",
+        }
+
+        # Strategy 1: YouTube Official Radio Mix (list=RD{vid}) - Best-in-class genre & vibe matching
+        m = YOUTUBE_URL_REGEX.search(current_track.url or "")
+        vid = m.group(1) if m else None
+
+        def _fetch_radio_mix():
+            opts = {
+                "quiet": True,
+                "extract_flat": True,
+                "skip_download": True,
+                "socket_timeout": 8,
+                "extractor_args": {"youtube": {"player_client": ["mweb", "android", "web"]}},
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                target_vid = vid
+                if not target_vid:
+                    # Resolve seed video ID from track title & artist
+                    seed_q = f"ytsearch1:{clean_title} {primary_artist}".strip()
+                    try:
+                        s_info = ydl.extract_info(seed_q, download=False)
+                        s_entries = (s_info.get("entries") or []) if s_info else []
+                        if s_entries and s_entries[0].get("id"):
+                            target_vid = s_entries[0]["id"]
+                    except Exception:
+                        pass
+
+                if target_vid:
+                    mix_url = f"https://www.youtube.com/watch?v={target_vid}&list=RD{target_vid}"
+                    mix_opts = dict(opts)
+                    mix_opts["playlist_items"] = "1-20"
+                    try:
+                        with yt_dlp.YoutubeDL(mix_opts) as mix_ydl:
+                            return mix_ydl.extract_info(mix_url, download=False)
+                    except Exception:
+                        pass
+
+                fallback_q = f"ytsearch15:{primary_artist} songs" if primary_artist else f"ytsearch15:{clean_title} songs"
+                try:
+                    return ydl.extract_info(fallback_q, download=False)
+                except Exception:
+                    return None
+
+        try:
+            info = await asyncio.to_thread(_fetch_radio_mix)
+            entries = (info.get("entries") or []) if info else []
+            for e in entries:
+                if not e:
+                    continue
+                e_title = e.get("title") or ""
+                cand_norm = normalize_history_title(e_title)
+                if not cand_norm or cand_norm in played_history or cand_norm == norm_curr_title:
+                    continue
+
+                e_id = e.get("id") or e.get("url")
+                v_url = e_id if str(e_id).startswith("http") else f"https://www.youtube.com/watch?v={e_id}"
+                e_clean = clean_track_title(e_title)
+
+                # Bridge to JioSaavn 320kbps HD audio if available
+                trk = await NativeExtractor._extract_jiosaavn(e_clean, "⚡ Smart Autoplay Radio", True)
+                if not trk or not trk.stream_url:
+                    # Fallback to direct YouTube stream extraction
+                    trk = await asyncio.to_thread(
+                        NativeExtractor._extract_youtube_fallback, v_url, "⚡ Smart Autoplay Radio", True
+                    )
+
+                if trk and trk.stream_url:
+                    played_history.add(cand_norm)
+                    return trk
+        except Exception as e:
+            logger.debug(f"YouTube radio mix notice: {e}")
+
+        # Strategy 2: JioSaavn Multi-Candidate Search Fallback
+        for q in queries:
             try:
-                candidate = await NativeExtractor.extract(query, requester="⚡ Smart Autoplay Radio", is_autoplay=True)
-                if candidate:
-                    cand_title = clean_track_title(candidate.title).lower()
-                    if cand_title not in played_history and candidate.title != current_track.title:
-                        played_history.add(cand_title)
-                        return candidate
+                encoded_q = urllib.parse.quote(q)
+                search_url = (
+                    f"https://www.jiosaavn.com/api.php?"
+                    f"__call=search.getResults&_format=json&p=1&n=20&q={encoded_q}"
+                    f"&_marker=0&api_version=4&ctx=web6dot0"
+                )
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp:
+                        if resp.status == 200:
+                            text = await resp.text()
+                            data = json.loads(text)
+                            results = data.get("results", [])
+                            for song in results:
+                                s_title = song.get("title") or song.get("song") or ""
+                                cand_norm = normalize_history_title(s_title)
+                                if not cand_norm or cand_norm in played_history or cand_norm == norm_curr_title:
+                                    continue
+                                trk = NativeExtractor._build_saavn_track(song, "⚡ Smart Autoplay Radio", True, q)
+                                if trk and trk.stream_url:
+                                    played_history.add(cand_norm)
+                                    return trk
             except Exception as e:
-                logger.debug(f"Autoplay candidate notice for '{query}': {e}")
+                logger.debug(f"JioSaavn autoplay search notice for '{q}': {e}")
 
         return None

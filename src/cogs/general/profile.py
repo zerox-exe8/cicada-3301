@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Optional
+import aiohttp
 import discord
 from discord.ext import commands
 
@@ -124,45 +125,18 @@ class Profile(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to resolve live audio status in profile: {e}", exc_info=True)
 
-        avatar_url = target.display_avatar.url if target.display_avatar else None
-
-        # Build Clean Components V2 Card
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"### {target.name}\n"
-                f"> **Standing** • `{standing}`\n"
-                f"> **Access** • `{access_str}`\n"
-                f"> **Tier** • `{tier_str}`"
-            ),
-            accessory={"type": 11, "media": {"url": avatar_url}} if avatar_url else None,
-        )
-
-        container.add_separator(divider=True)
-
-        if live_audio_title:
-            link_str = f"[{live_audio_title}]({live_audio_url})" if live_audio_url else f"`{live_audio_title}`"
-            author_str = f" by `{live_audio_author}`" if live_audio_author else ""
-            audio_lines = (
-                f"> **Playlists** • {pl_display}\n"
-                f"> **Live Audio** • {link_str}{author_str}\n"
-                f"> **Channel** • `{live_audio_vc}` • `320kbps Studio Master`\n\n"
-            )
-        else:
-            audio_lines = (
-                f"> **Playlists** • {pl_display}\n"
-                f"> **Live Audio** • `Idle (Not Listening)`\n\n"
-            )
-
-        container.add_text(
-            audio_lines + "-# Powered by Kyro Studio"
-        )
-
-        await send_container_response(ctx, container)
-
         # Render Dynamic Real-Time Passport Card via Canvas
+        card_io = None
         try:
-            av_bytes = await download_image_bytes(str(target.display_avatar.url), self.bot.session) if self.bot.session and target.display_avatar else None
+            av_bytes = None
+            if target.display_avatar:
+                avatar_target_url = str(target.display_avatar.url)
+                if self.bot.session and not self.bot.session.closed:
+                    av_bytes = await download_image_bytes(avatar_target_url, self.bot.session)
+                else:
+                    async with aiohttp.ClientSession() as temp_session:
+                        av_bytes = await download_image_bytes(avatar_target_url, temp_session)
+
             card_io = render_profile_card(
                 avatar_bytes=av_bytes,
                 username=target.name,
@@ -173,11 +147,55 @@ class Profile(commands.Cog):
                 is_owner=is_owner_user,
                 is_dev=is_dev_user,
             )
-            if card_io:
-                file = discord.File(card_io, filename="kyro_passport.png")
-                await ctx.send(file=file)
         except Exception as e:
-            logger.debug(f"Notice generating profile canvas: {e}")
+            logger.error(f"Notice generating profile canvas: {e}", exc_info=True)
+
+        accent_color = 0x9333EA if is_owner_user else (0x3B82F6 if is_dev_user else 0x6366F1)
+
+        if card_io:
+            file = discord.File(card_io, filename="kyro_passport.png")
+            embed = discord.Embed(color=accent_color)
+            if live_audio_title:
+                link_str = f"[{live_audio_title}]({live_audio_url})" if live_audio_url else f"`{live_audio_title}`"
+                author_str = f" by `{live_audio_author}`" if live_audio_author else ""
+                embed.description = f"🎧 **Live Audio** • {link_str}{author_str} • `{live_audio_vc}`"
+            embed.set_image(url="attachment://kyro_passport.png")
+            await ctx.send(embed=embed, file=file)
+        else:
+            # Fallback to Components V2 container if canvas rendering is unavailable
+            avatar_url = target.display_avatar.url if target.display_avatar else None
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    f"### {target.name}\n"
+                    f"> **Standing** • `{standing}`\n"
+                    f"> **Access** • `{access_str}`\n"
+                    f"> **Tier** • `{tier_str}`"
+                ),
+                accessory={"type": 11, "media": {"url": avatar_url}} if avatar_url else None,
+            )
+
+            container.add_separator(divider=True)
+
+            if live_audio_title:
+                link_str = f"[{live_audio_title}]({live_audio_url})" if live_audio_url else f"`{live_audio_title}`"
+                author_str = f" by `{live_audio_author}`" if live_audio_author else ""
+                audio_lines = (
+                    f"> **Playlists** • {pl_display}\n"
+                    f"> **Live Audio** • {link_str}{author_str}\n"
+                    f"> **Channel** • `{live_audio_vc}` • `320kbps Studio Master`\n\n"
+                )
+            else:
+                audio_lines = (
+                    f"> **Playlists** • {pl_display}\n"
+                    f"> **Live Audio** • `Idle (Not Listening)`\n\n"
+                )
+
+            container.add_text(
+                audio_lines + "-# Powered by Kyro Studio"
+            )
+
+            await send_container_response(ctx, container)
 
 
 async def setup(bot: KyroBot) -> None:

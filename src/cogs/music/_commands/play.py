@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from src.cogs.music._extractor import NativeExtractor, is_playlist_url
+from src.cogs.music._models import Track
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
 if TYPE_CHECKING:
@@ -110,6 +111,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     break
 
         if not first_track:
+            clean_q = f"{first_item.title} {first_item.author}".strip()
+            first_track = await asyncio.to_thread(
+                NativeExtractor._extract_youtube_fallback, clean_q, ctx.author.display_name, False
+            )
+
+        if not first_track:
             err_container = KyroContainer(accent_color=None)
             err_container.add_text(f"**Could not resolve any playable tracks from playlist:** `{pl_result.title}`")
             if search_msg and isinstance(search_msg, discord.Message):
@@ -201,10 +208,28 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     search_container.add_text(f"**Searching track:** `{query}`...")
     search_msg = await send_container_response(ctx, search_container)
 
+    # Determine source type for analytics
+    _q = query.strip()
+    if any(sp in _q for sp in ("spotify.com/", "spotify.link/", "spotify:track:")):
+        _source = "spotify_url"
+    elif "youtube.com/" in _q or "youtu.be/" in _q or "music.youtube.com/" in _q:
+        _source = "youtube_url"
+    else:
+        _source = "search"
+
     # extract track in background
     track = await NativeExtractor.extract(query, requester=ctx.author.display_name)
     if track:
         track.requester_id = ctx.author.id
+        # Record analytics with proper source label
+        if hasattr(cog, "analytics") and cog.analytics:
+            await cog.analytics.record_play(
+                user_id=ctx.author.id,
+                guild_id=ctx.guild.id if ctx.guild else None,
+                track_title=track.title,
+                artist=track.author,
+                source=_source,
+            )
 
     if not track:
         err_container = KyroContainer(accent_color=None)

@@ -179,15 +179,19 @@ async def execute_stay(cog: Music, ctx: commands.Context) -> None:
     player.is_247 = not player.is_247
 
     # Persist in database
-    await cog.bot.db.execute(
-        """
-        INSERT INTO guild_music_247 (guild_id, is_247)
-        VALUES (?, ?)
-        ON CONFLICT(guild_id) DO UPDATE SET is_247 = EXCLUDED.is_247;
-        """,
-        ctx.guild.id,
-        player.is_247,
-    )
+    if hasattr(cog.bot, "db") and cog.bot.db and getattr(cog.bot.db, "pool", None):
+        try:
+            await cog.bot.db.execute(
+                """
+                INSERT INTO guild_music_247 (guild_id, is_247)
+                VALUES ($1, $2)
+                ON CONFLICT(guild_id) DO UPDATE SET is_247 = EXCLUDED.is_247;
+                """,
+                ctx.guild.id,
+                player.is_247,
+            )
+        except Exception:
+            pass
 
     state_str = "ENABLED" if player.is_247 else "DISABLED"
     container = KyroContainer(accent_color=None)

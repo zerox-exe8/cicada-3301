@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Any
 
 import discord
 from discord import app_commands
@@ -12,6 +12,7 @@ from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 from src.cogs.music._controller import MusicController
 from src.cogs.music._views import MusicControlView
+from src.cogs.music._analytics import MusicAnalytics
 from src.cogs.music._commands.play import execute_play
 from src.cogs.music._commands.pause import execute_pause, execute_resume
 from src.cogs.music._commands.skip import execute_skip
@@ -43,6 +44,7 @@ class Music(commands.Cog):
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
         self.controller = MusicController(bot)
+        self.analytics = MusicAnalytics(bot)
         # Register persistent view for button interactions
         self.bot.add_view(MusicControlView(bot, None))
 

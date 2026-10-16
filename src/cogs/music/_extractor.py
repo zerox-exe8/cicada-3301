@@ -14,6 +14,7 @@ import base64
 import html
 import json
 import logging
+import os
 import re
 import time
 import unicodedata
@@ -51,7 +52,7 @@ YDL_OPTIONS = {
     "ignoreerrors": True,
     "extractor_args": {
         "youtube": {
-            "player_client": ["android", "ios"],
+            "player_client": ["mweb", "android", "web", "ios"],
         }
     },
 }
@@ -146,9 +147,9 @@ def score_candidate(
     duration: int = 0,
 ) -> float:
     """
-    Score candidate song match to strictly prioritize the original official version.
-    Unless the user explicitly requested an alternate version (e.g. 'lofi', 'remix', 'guitar'),
-    candidates with modifier tags in title or artist are heavily penalized.
+    Score candidate song match to prioritize the original official version.
+    Uses fuzzy token matching to handle transliteration variants (e.g. kesariya/kesariyaa).
+    Penalties are calibrated to avoid discarding legitimate official songs.
     """
     c_title = (title or "").lower()
     c_author = (subtitle_or_author or "").lower()
@@ -164,7 +165,17 @@ def score_candidate(
     q_tokens = [w for w in re.findall(r"\w+", q_lower) if len(w) > 1]
     title_tokens = [w for w in re.findall(r"\w+", c_title) if len(w) > 1]
 
-    matched = sum(1 for tok in q_tokens if tok in title_tokens or tok in c_author)
+    def _fuzzy_match(tok: str, tokens: list) -> bool:
+        """Check for exact or near-transliteration match (±2 chars, substring)."""
+        if tok in tokens:
+            return True
+        # Handles "kesariya" vs "kesariyaa", "arijit" vs "arijite" etc.
+        return any(
+            (tok in t or t in tok) and abs(len(tok) - len(t)) <= 2
+            for t in tokens
+        )
+
+    matched = sum(1 for tok in q_tokens if _fuzzy_match(tok, title_tokens) or tok in c_author)
     if q_tokens:
         score += (matched / len(q_tokens)) * 60.0
 
@@ -173,10 +184,10 @@ def score_candidate(
         w for w in q_tokens
         if w not in {"8d", "3d", "audio", "song", "music", "video", "official", "use", "headphones", "sound"}
     }
-    title_matched = sum(1 for tok in substantive_q_tokens if tok in title_tokens)
+    title_matched = sum(1 for tok in substantive_q_tokens if _fuzzy_match(tok, title_tokens))
     if substantive_q_tokens and not title_matched:
-        # Candidate title does not contain any of the user's song keywords (e.g. artist collision)
-        score -= 80.0
+        # Reduced from -80: fuzzy matching already handles most transliteration cases
+        score -= 30.0
 
     clean_c_title = re.sub(r"\(.*?\)|\[.*?\]", "", c_title).strip()
     clean_title_matches = bool(clean_c_title and (q_lower == clean_c_title or clean_c_title in q_lower or q_lower.startswith(clean_c_title)))
@@ -200,7 +211,9 @@ def score_candidate(
             if clean_title_matches and kw in {"remix", "remixed", "dance mix"}:
                 score -= 20.0
             else:
-                score -= 120.0
+                # Reduced from -120: many official song titles legitimately contain words
+                # like "guitar", "theme", "status" — -120 was discarding them incorrectly
+                score -= 60.0
 
     if views > 10_000_000:
         score += 40.0
@@ -216,6 +229,7 @@ def score_candidate(
         score -= 100.0
 
     return score
+
 
 
 # In-memory search cache with 10-minute TTL for instant repeat queries
@@ -374,16 +388,21 @@ class NativeExtractor:
             clean_yt_url = f"https://www.youtube.com/watch?v={video_id}"
             orig_yt_url = clean_yt_url
 
-            # Fetch exact video title & artist via fast oEmbed / HTML protocol (100-200ms)
+            # Directly extract audio stream from YouTube so the user gets the EXACT requested video
+            track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
+            if track:
+                _SEARCH_CACHE[cache_key] = (now, track)
+                return track
+
+            # Fallback: If direct YouTube stream extraction failed, resolve title and try other tiers
             yt_title = await cls._fetch_youtube_title(clean_yt_url)
             if yt_title:
+                yt_title = re.sub(
+                    r"\s*\((?:from\s+[\"']?.{2,40}[\"']?|ost|soundtrack|original\s+soundtrack)\)\s*$",
+                    "", yt_title, flags=re.IGNORECASE
+                ).strip()
                 raw_q = yt_title
             else:
-                # Direct stream fallback if title couldn't be fetched
-                track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
-                if track:
-                    _SEARCH_CACHE[cache_key] = (now, track)
-                    return track
                 return None
 
         # direct SoundCloud URL Handling
@@ -392,6 +411,7 @@ class NativeExtractor:
             if track:
                 _SEARCH_CACHE[cache_key] = (now, track)
                 return track
+            return None
 
         # spotify URL Handling (Extract '{Title} {Artist}' metadata to bridge to 320kbps HD audio)
         is_spotify = any(sp in raw_q for sp in ("spotify.com/", "spotify.link/", "spotify:track:"))
@@ -554,7 +574,13 @@ class NativeExtractor:
                         if songs2:
                             scored2 = []
                             for s in songs2:
-                                sc2 = score_candidate(s.get("title") or "", s.get("description") or "", query)
+                                # Fetch duration from both top-level and more_info (varies by API response)
+                                s_dur = int(
+                                    s.get("duration")
+                                    or s.get("more_info", {}).get("duration")
+                                    or 0
+                                )
+                                sc2 = score_candidate(s.get("title") or "", s.get("description") or "", query, duration=s_dur)
                                 scored2.append((sc2, s))
 
                             scored2.sort(key=lambda x: x[0], reverse=True)
@@ -680,8 +706,12 @@ class NativeExtractor:
         except Exception:
             pass
 
-        cls._SC_CLIENT_ID = cls._SC_CLIENT_ID or "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
-        cls._SC_CID_EXPIRE = now + 3600.0
+        # If scrape failed AND current ID has expired, force-expire so next call retries
+        # instead of reusing a potentially dead ID for another hour
+        if not cls._SC_CLIENT_ID or now >= cls._SC_CID_EXPIRE:
+            # Known fallback IDs — at least one is usually still active
+            cls._SC_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
+            cls._SC_CID_EXPIRE = now + 900.0  # Retry refresh in 15 min, not 1 hour
         return cls._SC_CLIENT_ID
 
     @classmethod
@@ -744,46 +774,65 @@ class NativeExtractor:
                             # Fallback to top scored candidate so valid songs are never dropped to Not Found
                             item = scored[0][1]
 
-                    if not item:
+                if not item:
+                    return None
+                title = clean_track_title(item.get("title") or query)
+                author = item.get("user", {}).get("username") or "SoundCloud Artist"
+                duration = int((item.get("duration") or 0) / 1000)
+                thumbnail = item.get("artwork_url") or item.get("user", {}).get("avatar_url") or "https://cdn.discordapp.com/embed/avatars/0.png"
+                thumbnail = thumbnail.replace("-large", "-t500x500")
+                permalink = item.get("permalink_url") or "https://soundcloud.com"
+
+                media = item.get("media", {}).get("transcodings", [])
+                stream_endpoint = None
+                for t in media:
+                    fmt = t.get("format", {})
+                    if fmt.get("protocol") == "progressive":
+                        stream_endpoint = t.get("url")
+                        break
+                    elif fmt.get("protocol") == "hls" and not stream_endpoint:
+                        stream_endpoint = t.get("url")
+
+                if not stream_endpoint:
+                    # SoundCloud transcoding blocked (e.g. SoundCloud GO+ / geoblocked major label).
+                    # Seamlessly resolve audio via YouTube fallback using actual track title & artist
+                    fb_query = f"{title} {author}".strip() if author else title
+                    fallback_track = await asyncio.to_thread(
+                        cls._extract_youtube_fallback, fb_query, requester, is_autoplay
+                    )
+                    if fallback_track:
+                        fallback_track.url = permalink
+                        if thumbnail:
+                            fallback_track.thumbnail = thumbnail
+                        return fallback_track
+                    return None
+
+                async with session.get(f"{stream_endpoint}?client_id={cid}", headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as s_resp:
+                    if s_resp.status != 200:
                         return None
-                    title = clean_track_title(item.get("title") or query)
-                    author = item.get("user", {}).get("username") or "SoundCloud Artist"
-                    duration = int((item.get("duration") or 0) / 1000)
-                    thumbnail = item.get("artwork_url") or item.get("user", {}).get("avatar_url") or "https://cdn.discordapp.com/embed/avatars/0.png"
-                    thumbnail = thumbnail.replace("-large", "-t500x500")
-                    permalink = item.get("permalink_url") or "https://soundcloud.com"
-
-                    media = item.get("media", {}).get("transcodings", [])
-                    stream_endpoint = None
-                    for t in media:
-                        fmt = t.get("format", {})
-                        if fmt.get("protocol") == "progressive":
-                            stream_endpoint = t.get("url")
-                            break
-                        elif fmt.get("protocol") == "hls" and not stream_endpoint:
-                            stream_endpoint = t.get("url")
-
-                    if not stream_endpoint:
-                        return None
-
-                    async with session.get(f"{stream_endpoint}?client_id={cid}", headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as s_resp:
-                        if s_resp.status != 200:
-                            return None
-                        s_data = await s_resp.json()
-                        final_stream_url = s_data.get("url")
-                        if not final_stream_url:
-                            return None
-
-                        return Track(
-                            title=title,
-                            author=author,
-                            url=permalink,
-                            stream_url=final_stream_url,
-                            duration=duration,
-                            thumbnail=thumbnail,
-                            requester=requester,
-                            is_autoplay=is_autoplay,
+                    s_data = await s_resp.json()
+                    final_stream_url = s_data.get("url")
+                    if not final_stream_url:
+                        # Fallback to YouTube if stream URL extraction fails
+                        fb_query = f"{title} {author}".strip() if author else title
+                        fallback_track = await asyncio.to_thread(
+                            cls._extract_youtube_fallback, fb_query, requester, is_autoplay
                         )
+                        if fallback_track:
+                            fallback_track.url = permalink
+                            return fallback_track
+                        return None
+
+                    return Track(
+                        title=title,
+                        author=author,
+                        url=permalink,
+                        stream_url=final_stream_url,
+                        duration=duration,
+                        thumbnail=thumbnail,
+                        requester=requester,
+                        is_autoplay=is_autoplay,
+                    )
         except Exception as e:
             logger.debug(f"SoundCloud extract notice for '{query}': {e}")
 
@@ -903,29 +952,86 @@ class NativeExtractor:
                 pass
         return None
 
-    @staticmethod
-    async def _fetch_spotify_title(spotify_url: str) -> Optional[str]:
+    _SPOTIFY_TOKEN: Optional[str] = None
+    _SPOTIFY_TOKEN_EXPIRES: float = 0.0
+
+    @classmethod
+    async def _get_spotify_token(cls, session: aiohttp.ClientSession) -> Optional[str]:
+        """Obtain or refresh an official Spotify Web API OAuth token using Client Credentials."""
+        cid = os.getenv("SPOTIFY_CLIENT_ID", "").strip()
+        secret = os.getenv("SPOTIFY_CLIENT_SECRET", "").strip()
+        if not cid or not secret:
+            return None
+
+        now = time.time()
+        if cls._SPOTIFY_TOKEN and now < cls._SPOTIFY_TOKEN_EXPIRES - 60:
+            return cls._SPOTIFY_TOKEN
+
+        auth_str = f"{cid}:{secret}"
+        b64_auth = base64.b64encode(auth_str.encode()).decode()
+        headers = {
+            "Authorization": f"Basic {b64_auth}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        data = {"grant_type": "client_credentials"}
+        try:
+            async with session.post(
+                "https://accounts.spotify.com/api/token",
+                headers=headers,
+                data=data,
+                timeout=aiohttp.ClientTimeout(total=6),
+            ) as resp:
+                if resp.status == 200:
+                    payload = await resp.json()
+                    cls._SPOTIFY_TOKEN = payload.get("access_token")
+                    cls._SPOTIFY_TOKEN_EXPIRES = now + float(payload.get("expires_in", 3600))
+                    return cls._SPOTIFY_TOKEN
+        except Exception as e:
+            logger.debug(f"Spotify token request error: {e}")
+        return None
+
+    @classmethod
+    async def _fetch_spotify_title(cls, spotify_url: str) -> Optional[str]:
         """
         Extract track title and artist name from Spotify track URL.
-        Uses Discordbot scraper headers for full '{Title} {Artist}' metadata,
-        with oEmbed fallback.
+        Uses official Spotify Web API if SPOTIFY_CLIENT_ID & SECRET configured in .env,
+        with HTML scraper and oEmbed fallback.
         """
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
+        # Follow short spotify.link redirects to canonical open.spotify.com URL
+        if "spotify.link/" in spotify_url:
+            try:
+                async with aiohttp.ClientSession() as s_link:
+                    async with s_link.get(spotify_url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=6)) as r_link:
+                        spotify_url = str(r_link.url)
+            except Exception:
+                pass
+
+        track_m = re.search(r"spotify\.com/(?:intl-[a-zA-Z\-]+/)?track/([a-zA-Z0-9]+)", spotify_url)
+
         try:
             async with aiohttp.ClientSession() as session:
-                # Follow short spotify.link redirects to canonical open.spotify.com URL
-                if "spotify.link/" in spotify_url:
-                    try:
-                        async with session.get(spotify_url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=4)) as r_link:
-                            spotify_url = str(r_link.url)
-                    except Exception:
-                        pass
+                # Tier 0: Official Spotify Web API (Ultra-fast, 100% accurate)
+                if track_m:
+                    sp_token = await cls._get_spotify_token(session)
+                    if sp_token:
+                        sp_api_url = f"https://api.spotify.com/v1/tracks/{track_m.group(1)}"
+                        sp_headers = {"Authorization": f"Bearer {sp_token}"}
+                        async with session.get(sp_api_url, headers=sp_headers, timeout=aiohttp.ClientTimeout(total=5)) as sp_resp:
+                            if sp_resp.status == 200:
+                                sp_data = await sp_resp.json()
+                                t_name = sp_data.get("name") or ""
+                                artists = ", ".join(a.get("name", "") for a in sp_data.get("artists", []) if a.get("name"))
+                                if t_name and artists:
+                                    return normalize_unicode_text(f"{t_name} {artists}")
+                                elif t_name:
+                                    return normalize_unicode_text(t_name)
 
-                # primary: Scrape Spotify HTML using Discordbot UA for full Title + Artist
+                # Primary Fallback: Scrape Spotify HTML using Discordbot UA for full Title + Artist
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                }
                 async with session.get(
                     spotify_url,
                     headers=headers,
@@ -963,7 +1069,7 @@ class NativeExtractor:
                             elif song_title and "spotify" not in song_title.lower():
                                 return normalize_unicode_text(song_title)
 
-                # fallback: Spotify oEmbed API
+                # Secondary Fallback: Spotify oEmbed API
                 oembed_url = f"https://open.spotify.com/oembed?url={spotify_url}"
                 async with session.get(oembed_url, timeout=aiohttp.ClientTimeout(total=4)) as o_resp:
                     if o_resp.status == 200:
@@ -1090,6 +1196,51 @@ class NativeExtractor:
         }
         try:
             async with aiohttp.ClientSession() as session:
+                # Tier 0: Official Spotify Web API (Fastest, 100% accurate, no scraping blocks)
+                sp_token = await cls._get_spotify_token(session)
+                if sp_token:
+                    sp_api_url = f"https://api.spotify.com/v1/{entity_type}s/{entity_id}"
+                    sp_headers = {"Authorization": f"Bearer {sp_token}"}
+                    async with session.get(sp_api_url, headers=sp_headers, timeout=aiohttp.ClientTimeout(total=8)) as sp_resp:
+                        if sp_resp.status == 200:
+                            sp_data = await sp_resp.json()
+                            pl_title = sp_data.get("name") or "Spotify Playlist"
+                            pl_author = sp_data.get("owner", {}).get("display_name") if entity_type == "playlist" else ", ".join(a.get("name", "") for a in sp_data.get("artists", []))
+                            images = sp_data.get("images") or []
+                            thumbnail = images[0].get("url") if images else None
+
+                            raw_items = (sp_data.get("tracks", {}).get("items") or []) if entity_type == "playlist" else (sp_data.get("tracks", {}).get("items") or [])
+                            tracks: List[PlaylistTrackItem] = []
+                            for it in raw_items:
+                                trk = it.get("track") if entity_type == "playlist" else it
+                                if not trk or not trk.get("name"):
+                                    continue
+                                t_title = trk.get("name", "").strip()
+                                t_author = ", ".join(a.get("name", "") for a in trk.get("artists", []) if a.get("name"))
+                                dur_ms = int(trk.get("duration_ms") or 0)
+                                dur_sec = max(0, dur_ms // 1000)
+                                t_id = trk.get("id")
+                                t_url = f"https://open.spotify.com/track/{t_id}" if t_id else None
+                                q_str = f"{t_title} {t_author}".strip() if t_author else t_title
+                                tracks.append(PlaylistTrackItem(
+                                    title=t_title,
+                                    author=t_author or "Spotify Artist",
+                                    query=q_str,
+                                    duration=dur_sec,
+                                    url=t_url,
+                                ))
+
+                            if tracks:
+                                return PlaylistResult(
+                                    title=clean_track_title(pl_title),
+                                    author=pl_author or "Spotify",
+                                    url=url,
+                                    tracks=tracks,
+                                    thumbnail=thumbnail,
+                                    requester=requester,
+                                )
+
+                # Primary Fallback: Spotify Embed scraper
                 async with session.get(embed_url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                     if resp.status != 200:
                         return None
@@ -1170,6 +1321,11 @@ class NativeExtractor:
             "ignoreerrors": True,
             "socket_timeout": 12,
             "source_address": "0.0.0.0",
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["mweb", "android", "web", "ios"],
+                }
+            },
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -1183,6 +1339,9 @@ class NativeExtractor:
                 if not entries:
                     return None
 
+                # Titles that indicate unavailable/deleted/private videos
+                _SKIP_TITLES = {"[deleted video]", "[private video]", "[unavailable]"}
+
                 tracks: List[PlaylistTrackItem] = []
                 for e in entries:
                     if not e:
@@ -1193,6 +1352,11 @@ class NativeExtractor:
                     v_dur = int(e.get("duration") or 0)
 
                     if not v_id:
+                        continue
+
+                    # Skip deleted/private/unavailable videos — they cause consecutive failures
+                    if v_title.strip().lower() in _SKIP_TITLES:
+                        logger.debug(f"Skipping unavailable YouTube playlist entry: {v_title!r}")
                         continue
 
                     if str(v_id).startswith("http"):

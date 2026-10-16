@@ -6,6 +6,7 @@ quick Play / Shuffle Play buttons, live paginated track browsing, and safe delet
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -109,6 +110,13 @@ async def execute_saved_playlist_playback(
         # Fallback to secondary search
         alt_q = f"{first_row.get('title', '')} {first_row.get('author', '')}".strip()
         first_track = await NativeExtractor.extract(alt_q, requester=user.display_name)
+
+    if not first_track:
+        # Tier 3: YouTube fallback
+        clean_q = f"{first_row.get('title', '')} {first_row.get('author', '')}".strip()
+        first_track = await asyncio.to_thread(
+            NativeExtractor._extract_youtube_fallback, clean_q, user.display_name, False
+        )
 
     if not first_track:
         c = KyroContainer()

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, List, Optional, Set
 import discord
 
 from src.cogs.music._models import Track
-from src.cogs.music._autoplay import NativeSmartAutoplay, clean_track_title
+from src.cogs.music._autoplay import NativeSmartAutoplay, clean_track_title, normalize_history_title
 from src.cogs.music._extractor import NativeExtractor
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 
@@ -414,7 +414,7 @@ class GuildPlayer:
         # Restore 24/7 preference from database if available
         if hasattr(self.bot, "db") and self.bot.db:
             try:
-                row = await self.bot.db.fetchrow(
+                row = await self.bot.db.fetch_one(
                     "SELECT is_247 FROM guild_music_247 WHERE guild_id = $1",
                     self.guild.id,
                 )
@@ -524,6 +524,13 @@ class GuildPlayer:
         if not track.stream_url:
             lookup_query = track.query or f"{track.title} {track.author}".strip()
             resolved = await NativeExtractor.extract(lookup_query, requester=track.requester)
+            if not resolved or not resolved.stream_url:
+                # Secondary fallback: try clean title + author directly on YouTube fallback
+                clean_q = f"{clean_track_title(track.title)} {track.author}".strip()
+                resolved = await asyncio.to_thread(
+                    NativeExtractor._extract_youtube_fallback, clean_q, track.requester, False
+                )
+
             if resolved and resolved.stream_url:
                 track.stream_url = resolved.stream_url
                 track.duration = resolved.duration or track.duration
@@ -539,8 +546,8 @@ class GuildPlayer:
                     return
 
         self.current = track
-        clean_t = clean_track_title(track.title).lower()
-        self.played_history.add(clean_t)
+        norm_t = normalize_history_title(track.title)
+        self.played_history.add(norm_t)
 
         # Anti-fatigue artist tracking
         art_clean = (track.author or "").lower().strip()
@@ -624,6 +631,21 @@ class GuildPlayer:
                 return
 
             elapsed = (time.time() - self._track_started_at) if self._track_started_at > 0 else 10.0
+            if elapsed < 2.0 and self.current and not getattr(self.current, "_stream_retried", False):
+                # Fast failure detected (e.g. CDN 403 Forbidden or broken pipe).
+                # Seamlessly recover audio using YouTube stream fallback!
+                self.current._stream_retried = True
+                fb_q = f"{clean_track_title(self.current.title)} {self.current.author}".strip()
+                logger.info(f"Stream fast-failed for '{self.current.title}'. Attempting YouTube stream recovery: {fb_q}")
+                recovered = await asyncio.to_thread(
+                    NativeExtractor._extract_youtube_fallback, fb_q, self.current.requester, False
+                )
+                if recovered and recovered.stream_url and recovered.stream_url != self.current.stream_url:
+                    self.current.stream_url = recovered.stream_url
+                    self.consecutive_failures = 0
+                    await self.play_track(self.current)
+                    return
+
             if elapsed < 2.0:
                 self.consecutive_failures += 1
             else:
@@ -739,6 +761,12 @@ class GuildPlayer:
             if not candidate.stream_url:
                 lookup_query = candidate.query or f"{candidate.title} {candidate.author}".strip()
                 resolved = await NativeExtractor.extract(lookup_query, requester=candidate.requester)
+                if not resolved or not resolved.stream_url:
+                    clean_q = f"{clean_track_title(candidate.title)} {candidate.author}".strip()
+                    resolved = await asyncio.to_thread(
+                        NativeExtractor._extract_youtube_fallback, clean_q, candidate.requester, False
+                    )
+
                 if resolved and resolved.stream_url:
                     candidate.stream_url = resolved.stream_url
                     candidate.duration = resolved.duration or candidate.duration

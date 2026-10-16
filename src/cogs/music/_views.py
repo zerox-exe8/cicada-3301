@@ -52,6 +52,29 @@ class MusicControlView(discord.ui.View):
             return music_cog.controller.get_player(interaction.guild_id)
         return None
 
+    def _check_voice(self, interaction: discord.Interaction, player: Optional[GuildPlayer]) -> Optional[str]:
+        """Verify that user is connected to the same voice channel as Kyro."""
+        if not player or not player.is_connected or not player.voice_client or not player.voice_client.channel:
+            return "Player is not connected to a voice channel."
+
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            return "Could not verify your voice state."
+
+        # Allow server administrators or users with manage_guild to manage player regardless
+        if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
+            return None
+
+        user_vc = member.voice.channel if (member.voice and member.voice.channel) else None
+        if not user_vc:
+            return "You must be connected to a voice channel to use music controls."
+
+        bot_vc = player.voice_client.channel
+        if user_vc.id != bot_vc.id:
+            return f"You must be in the same voice channel as Kyro ({bot_vc.mention}) to use music controls."
+
+        return None
+
     @discord.ui.button(
         label="Pause",
         style=discord.ButtonStyle.secondary,
@@ -59,9 +82,10 @@ class MusicControlView(discord.ui.View):
     )
     async def btn_pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
-        if not player or not player.is_connected:
+        err = self._check_voice(interaction, player)
+        if err:
             c = KyroContainer()
-            c.add_section(content="**Voice Error**\n> Player is not connected to a voice channel.")
+            c.add_section(content=f"**Voice Error**\n> {err}")
             await send_container_response(interaction, c, ephemeral=True)
             return
 
@@ -83,9 +107,10 @@ class MusicControlView(discord.ui.View):
     )
     async def btn_skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
-        if not player or not player.is_connected:
+        err = self._check_voice(interaction, player)
+        if err:
             c = KyroContainer()
-            c.add_section(content="**Voice Error**\n> Player is not connected.")
+            c.add_section(content=f"**Voice Error**\n> {err}")
             await send_container_response(interaction, c, ephemeral=True)
             return
 
@@ -100,9 +125,10 @@ class MusicControlView(discord.ui.View):
     )
     async def btn_vol_down(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
-        if not player:
+        err = self._check_voice(interaction, player)
+        if err:
             c = KyroContainer()
-            c.add_section(content="**Player Notice**\n> Player not active.")
+            c.add_section(content=f"**Voice Error**\n> {err}")
             await send_container_response(interaction, c, ephemeral=True)
             return
 
@@ -119,9 +145,10 @@ class MusicControlView(discord.ui.View):
     )
     async def btn_vol_up(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
-        if not player:
+        err = self._check_voice(interaction, player)
+        if err:
             c = KyroContainer()
-            c.add_section(content="**Player Notice**\n> Player not active.")
+            c.add_section(content=f"**Voice Error**\n> {err}")
             await send_container_response(interaction, c, ephemeral=True)
             return
 
@@ -138,9 +165,10 @@ class MusicControlView(discord.ui.View):
     )
     async def btn_stop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
-        if not player:
+        err = self._check_voice(interaction, player)
+        if err:
             c = KyroContainer()
-            c.add_section(content="**Player Notice**\n> Player not active.")
+            c.add_section(content=f"**Voice Error**\n> {err}")
             await send_container_response(interaction, c, ephemeral=True)
             return
 
@@ -160,6 +188,12 @@ class MusicControlView(discord.ui.View):
         if not player or not player.current:
             c = KyroContainer()
             c.add_section(content="**Favorites Notice**\n> No track is currently playing to add to Favorites.")
+            await send_container_response(interaction, c, ephemeral=True)
+            return
+
+        if not getattr(self.bot, "db", None) or not getattr(self.bot.db, "pool", None):
+            c = KyroContainer()
+            c.add_section(content="**Database Notice**\n> Database service is currently offline. Please try again later.")
             await send_container_response(interaction, c, ephemeral=True)
             return
 
@@ -223,9 +257,10 @@ class MusicControlView(discord.ui.View):
     )
     async def btn_loop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
-        if not player:
+        err = self._check_voice(interaction, player)
+        if err:
             c = KyroContainer()
-            c.add_section(content="**Player Notice**\n> Player not active.")
+            c.add_section(content=f"**Voice Error**\n> {err}")
             await send_container_response(interaction, c, ephemeral=True)
             return
 
@@ -245,9 +280,10 @@ class MusicControlView(discord.ui.View):
     )
     async def btn_autoplay(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         player = self._get_player(interaction)
-        if not player:
+        err = self._check_voice(interaction, player)
+        if err:
             c = KyroContainer()
-            c.add_section(content="**Player Notice**\n> Player not active.")
+            c.add_section(content=f"**Voice Error**\n> {err}")
             await send_container_response(interaction, c, ephemeral=True)
             return
 

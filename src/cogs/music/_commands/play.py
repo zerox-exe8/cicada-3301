@@ -220,6 +220,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     # extract track in background
     track = await NativeExtractor.extract(query, requester=ctx.author.display_name)
     if track:
+        track.query = query
         track.requester_id = ctx.author.id
         # Record analytics with proper source label
         if hasattr(cog, "analytics") and cog.analytics:

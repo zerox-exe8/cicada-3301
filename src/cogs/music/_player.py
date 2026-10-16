@@ -173,10 +173,23 @@ class GuildPlayer:
           load it as a raw HTTP source via Lavalink's loadtracks — no fuzzy search, exact audio.
         - If the track has a YouTube/SoundCloud/Spotify URL, search via Lavalink natively.
         - Title search is the last resort fallback only.
-        """
-        # ── Path 1: Direct stream URL (JioSaavn 320kbps / SoundCloud progressive) ──
-        # Load the raw CDN URL directly via Lavalink HTTP source manager.
-        # This guarantees Lavalink plays the EXACT audio we resolved — no title mismatch.
+        # ── Path 1: User's Direct Platform URL (YouTube / Spotify / SoundCloud) ──
+        # Agar user ne direct video ya song ka URL paste kiya hai, toh Lavalink ko
+        # wahi EXACT URL do taaki 100% original gaana hi play ho, koi doosra search result nahi.
+        target_url = track.url or track.query or ""
+        _is_platform_url = any(
+            d in target_url
+            for d in ("youtube.com/", "youtu.be/", "soundcloud.com/", "spotify.com/", "music.youtube.com/")
+        )
+        if _is_platform_url:
+            try:
+                playables = await wavelink.Playable.search(target_url)
+                if playables:
+                    return playables[0]
+            except Exception as e:
+                logger.debug(f"Direct platform URL load error for '{target_url}': {e}")
+
+        # ── Path 2: Direct HTTP stream URL (JioSaavn 320kbps / Raw Audio Stream) ──
         if track.stream_url:
             try:
                 node = wavelink.Pool.get_node()
@@ -184,36 +197,18 @@ class GuildPlayer:
                 if results:
                     playable = results[0] if isinstance(results, list) else results.tracks[0]
                     return playable
-                logger.debug(f"Lavalink HTTP load returned empty for stream_url, trying search fallback.")
             except Exception as e:
-                logger.debug(f"Lavalink HTTP source load error for '{track.title}': {e}")
+                logger.debug(f"Lavalink HTTP stream error for '{track.title}': {e}")
 
-        # ── Path 2: Platform URL (YouTube / SoundCloud / Spotify link) ──
-        # Lavalink has native source managers for these — let it resolve directly.
-        platform_url = track.url
-        _is_platform_url = platform_url and any(
-            d in platform_url
-            for d in ("youtube.com/", "youtu.be/", "soundcloud.com/", "spotify.com/", "music.youtube.com/")
-        )
-        if _is_platform_url:
+        # ── Path 3: Search Query Fallback ──
+        search_target = track.query or f"{track.title} {track.author}".strip()
+        if search_target:
             try:
-                playables = await wavelink.Playable.search(platform_url)
+                playables = await wavelink.Playable.search(search_target)
                 if playables:
                     return playables[0]
             except Exception as e:
-                logger.debug(f"Platform URL search error for '{track.title}': {e}")
-
-        # ── Path 3: Title + Artist search (last resort) ──
-        # Only used if both stream_url and platform URL resolution failed.
-        search_q = f"{track.title} {track.author}".strip() if track.title else ""
-        if search_q:
-            try:
-                playables = await wavelink.Playable.search(search_q)
-                if playables:
-                    logger.debug(f"Title search fallback used for '{track.title}' — may not be exact.")
-                    return playables[0]
-            except Exception as e:
-                logger.debug(f"Title search error for '{track.title}': {e}")
+                logger.debug(f"Search fallback error for '{search_target}': {e}")
 
         return None
 

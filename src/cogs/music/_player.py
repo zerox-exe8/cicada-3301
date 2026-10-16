@@ -169,10 +169,6 @@ class GuildPlayer:
             return
 
         playable = playables[0]
-        # Attach Kyro track metadata
-        playable.title = track.title
-        playable.author = track.author
-
         self.current = track
         self.autoplay_history.add(track.title.lower())
 

@@ -144,21 +144,30 @@ class Profile(commands.Cog):
                 standing=standing,
                 tier=tier_str,
                 playlists_count=len(pl_rows) if 'pl_rows' in locals() and pl_rows else 0,
+                live_audio=live_audio_title,
+                live_vc=live_audio_vc,
                 is_owner=is_owner_user,
                 is_dev=is_dev_user,
             )
         except Exception as e:
             logger.error(f"Notice generating profile canvas: {e}", exc_info=True)
 
-        accent_color = 0x9333EA if is_owner_user else (0x3B82F6 if is_dev_user else 0x6366F1)
+        if is_owner_user:
+            accent_color = 0xA855F7
+        elif is_dev_user:
+            accent_color = 0x3B82F6
+        elif "Dispatcher" in standing or "No-Prefix" in standing:
+            accent_color = 0x10B981
+        else:
+            accent_color = 0x6366F1
 
         if card_io:
             file = discord.File(card_io, filename="kyro_passport.png")
             embed = discord.Embed(color=accent_color)
-            if live_audio_title:
-                link_str = f"[{live_audio_title}]({live_audio_url})" if live_audio_url else f"`{live_audio_title}`"
-                author_str = f" by `{live_audio_author}`" if live_audio_author else ""
-                embed.description = f"🎧 **Live Audio** • {link_str}{author_str} • `{live_audio_vc}`"
+            embed.set_author(
+                name=f"{target.display_name} • Passport",
+                icon_url=str(target.display_avatar.url) if target.display_avatar else None,
+            )
             embed.set_image(url="attachment://kyro_passport.png")
             await ctx.send(embed=embed, file=file)
         else:

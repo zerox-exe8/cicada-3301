@@ -138,13 +138,10 @@ class GuildPlayer:
                 logger.warning(f"Guild {self.guild.id}: Cannot play, voice client not connected.")
                 return
 
-        # Ensure high-fidelity stream URL is extracted (JioSaavn 320kbps or YouTube fallback)
-        if not track.stream_url:
-            resolved = await NativeExtractor.extract(track.query or track.title)
-            if resolved and resolved.stream_url:
-                track = resolved
-
-        playable = await self._resolve_playable(track)
+        # Direct playable if already resolved, otherwise resolve via Lavalink
+        playable = getattr(track, "_playable", None)
+        if not playable:
+            playable = await self._resolve_playable(track)
 
         if not playable:
             logger.error(f"Guild {self.guild.id}: Lavalink could not resolve playable for '{track.title}'")
@@ -165,46 +162,16 @@ class GuildPlayer:
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
-        """
-        Resolve the best Lavalink Playable for a track.
-        """
-        # ── Path 1: User's Direct Platform URL (YouTube / Spotify / SoundCloud) ──
-        # Agar user ne direct video ya song ka URL paste kiya hai, toh Lavalink ko
-        # wahi EXACT URL do taaki 100% original gaana hi play ho, koi doosra search result nahi.
-        target_url = track.url or track.query or ""
-        _is_platform_url = any(
-            d in target_url
-            for d in ("youtube.com/", "youtu.be/", "soundcloud.com/", "spotify.com/", "music.youtube.com/")
-        )
-        if _is_platform_url:
-            try:
-                playables = await wavelink.Playable.search(target_url)
-                if playables:
-                    return playables[0]
-            except Exception as e:
-                logger.debug(f"Direct platform URL load error for '{target_url}': {e}")
-
-        # ── Path 2: Direct HTTP stream URL (JioSaavn 320kbps / Raw Audio Stream) ──
-        if track.stream_url:
-            try:
-                node = wavelink.Pool.get_node()
-                results = await node.fetch_tracks(track.stream_url)
-                if results:
-                    playable = results[0] if isinstance(results, list) else results.tracks[0]
-                    return playable
-            except Exception as e:
-                logger.debug(f"Lavalink HTTP stream error for '{track.title}': {e}")
-
-        # ── Path 3: Search Query Fallback ──
-        search_target = track.query or f"{track.title} {track.author}".strip()
-        if search_target:
-            try:
-                playables = await wavelink.Playable.search(search_target)
-                if playables:
-                    return playables[0]
-            except Exception as e:
-                logger.debug(f"Search fallback error for '{search_target}': {e}")
-
+        """Resolve Lavalink Playable directly without any JioSaavn or external delay."""
+        search_target = track.url or track.query or f"{track.title} {track.author}".strip()
+        if not search_target:
+            return None
+        try:
+            results = await wavelink.Playable.search(search_target)
+            if results:
+                return results[0] if isinstance(results, list) else results.tracks[0]
+        except Exception as e:
+            logger.debug(f"Direct Lavalink resolve error for '{search_target}': {e}")
         return None
 
     # ── Controls ──

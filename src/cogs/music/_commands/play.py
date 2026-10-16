@@ -76,163 +76,20 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await send_container_response(ctx, container)
             return
 
-    # Check if query is an external Playlist or Album URL
-    if is_playlist_url(query):
-        search_container = KyroContainer(accent_color=None)
-        search_container.add_text(f"**Loading Playlist:** `{query}`...")
-        search_msg = await send_container_response(ctx, search_container)
+    import wavelink
 
-        pl_result = await NativeExtractor.extract_playlist(query, requester=ctx.author.display_name)
-        if not pl_result or not pl_result.tracks:
-            err_container = KyroContainer(accent_color=None)
-            err_container.add_text(f"**Failed to load playlist or playlist is empty:** `{query}`")
-            if search_msg and isinstance(search_msg, discord.Message):
-                try:
-                    await edit_container_response(search_msg, err_container)
-                    return
-                except Exception:
-                    pass
-            await send_container_response(ctx, err_container)
-            return
-
-        # resolve first track immediately for instant playback with 0 lag
-        first_item = pl_result.tracks[0]
-        first_track = await NativeExtractor.extract(first_item.query, requester=ctx.author.display_name)
-        if not first_track and first_item.title:
-            fallback_q = f"{first_item.title} {first_item.author}".strip()
-            first_track = await NativeExtractor.extract(fallback_q, requester=ctx.author.display_name)
-
-        if not first_track:
-            for item in pl_result.tracks[1:4]:
-                first_track = await NativeExtractor.extract(item.query, requester=ctx.author.display_name)
-                if not first_track and item.title:
-                    first_track = await NativeExtractor.extract(f"{item.title} {item.author}".strip(), requester=ctx.author.display_name)
-                if first_track:
-                    break
-
-        if not first_track:
-            clean_q = f"{first_item.title} {first_item.author}".strip()
-            first_track = await asyncio.to_thread(
-                NativeExtractor._extract_youtube_fallback, clean_q, ctx.author.display_name, False
-            )
-
-        if not first_track:
-            err_container = KyroContainer(accent_color=None)
-            err_container.add_text(f"**Could not resolve any playable tracks from playlist:** `{pl_result.title}`")
-            if search_msg and isinstance(search_msg, discord.Message):
-                try:
-                    await edit_container_response(search_msg, err_container)
-                    return
-                except Exception:
-                    pass
-            await send_container_response(ctx, err_container)
-            return
-
-        first_track.requester_id = ctx.author.id
-
-        # append ALL remaining tracks from playlist to queue immediately so the entire queue is visible
-        was_idle = not player.is_playing and not player.is_paused
-        insert_start_idx = len(player.queue)
-
-        for item in pl_result.tracks[1:]:
-            t = Track(
-                title=item.title,
-                author=item.author,
-                url=item.url or item.query,
-                stream_url="",
-                duration=item.duration,
-                thumbnail=pl_result.thumbnail,
-                requester=ctx.author.display_name,
-                requester_id=ctx.author.id,
-                query=item.query,
-            )
-            player.queue.append(t)
-
-        # start playback if idle, or append first_track to queue
-        if was_idle:
-            await player.play_track(first_track, message_to_edit=search_msg)
-        else:
-            # Insert first_track at front of this newly enqueued batch
-            player.queue.insert(insert_start_idx, first_track)
-
-        # build preview of upcoming tracks for the playlist announcement card
-        if was_idle:
-            upcoming_items = player.queue[:6]
-        else:
-            upcoming_items = player.queue[insert_start_idx:insert_start_idx + 6]
-
-        upcoming_lines = []
-        for i, it in enumerate(upcoming_items, start=1):
-            dur_text = it.formatted_duration
-            upcoming_lines.append(f"`{i:02d}.` [{it.title}]({it.url}) `[{dur_text}]` — `{it.author}`")
-
-        upcoming_preview = "\n".join(upcoming_lines) if upcoming_lines else "No upcoming tracks."
-        remaining_count = pl_result.track_count - (1 if was_idle else 0) - len(upcoming_lines)
-
-        # send rich playlist announcement card showing all upcoming songs
-        pl_card = KyroContainer(accent_color=None)
-        pl_card.add_section(
-            content=(
-                f"**Queued Playlist: [{pl_result.title}]({pl_result.url})**\n"
-                f"> **Curator / Author:** `{pl_result.author}`\n"
-                f"> **Total Tracks:** `{pl_result.track_count} songs`\n"
-                f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
-                f"> **Requested By:** `{ctx.author.display_name}`"
-            ) if was_idle else (
-                f"**Queued Playlist: [{pl_result.title}]({pl_result.url})**\n"
-                f"> **Curator / Author:** `{pl_result.author}`\n"
-                f"> **Total Tracks Added:** `{pl_result.track_count} songs`\n"
-                f"> **Requested By:** `{ctx.author.display_name}`"
-            ),
-            accessory={"type": 11, "media": {"url": pl_result.thumbnail}} if pl_result.thumbnail else None,
-        )
-        pl_card.add_separator(divider=True)
-        pl_card.add_text(
-            f"**Upcoming Songs:**\n{upcoming_preview}\n"
-            + (f"-# ...and {remaining_count} more songs. Use `?queue` to view all pages.\n" if remaining_count > 0 else "")
-            + "-# Powered by Kyro Studio"
-        )
-
-        if not was_idle and search_msg and isinstance(search_msg, discord.Message):
-            try:
-                await edit_container_response(search_msg, pl_card)
-            except Exception:
-                await send_container_response(ctx, pl_card)
-        else:
-            await send_container_response(ctx, pl_card)
-
-        return
-
-    # send Searching Track card first
+    # Send Searching Track card
     search_container = KyroContainer(accent_color=None)
-    search_container.add_text(f"**Searching track:** `{query}`...")
+    search_container.add_text(f"**Searching:** `{query}`...")
     search_msg = await send_container_response(ctx, search_container)
 
-    # Determine source type for analytics
-    _q = query.strip()
-    if any(sp in _q for sp in ("spotify.com/", "spotify.link/", "spotify:track:")):
-        _source = "spotify_url"
-    elif "youtube.com/" in _q or "youtu.be/" in _q or "music.youtube.com/" in _q:
-        _source = "youtube_url"
-    else:
-        _source = "search"
+    try:
+        results = await wavelink.Playable.search(query)
+    except Exception as e:
+        logger.error(f"Wavelink search error for '{query}': {e}")
+        results = None
 
-    # extract track in background
-    track = await NativeExtractor.extract(query, requester=ctx.author.display_name)
-    if track:
-        track.query = query
-        track.requester_id = ctx.author.id
-        # Record analytics with proper source label
-        if hasattr(cog, "analytics") and cog.analytics:
-            await cog.analytics.record_play(
-                user_id=ctx.author.id,
-                guild_id=ctx.guild.id if ctx.guild else None,
-                track_title=track.title,
-                artist=track.author,
-                source=_source,
-            )
-
-    if not track:
+    if not results:
         err_container = KyroContainer(accent_color=None)
         err_container.add_text(f"**No results found for:** `{query}`")
         if search_msg and isinstance(search_msg, discord.Message):
@@ -244,11 +101,106 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         await send_container_response(ctx, err_container)
         return
 
-    # if nothing is currently playing, start playback
+    # ── Handle Playlist ──
+    if isinstance(results, wavelink.Playlist):
+        pl: wavelink.Playlist = results
+        if not pl.tracks:
+            err_container = KyroContainer(accent_color=None)
+            err_container.add_text(f"**Playlist is empty:** `{pl.name}`")
+            if search_msg and isinstance(search_msg, discord.Message):
+                try:
+                    await edit_container_response(search_msg, err_container)
+                    return
+                except Exception:
+                    pass
+            await send_container_response(ctx, err_container)
+            return
+
+        was_idle = not player.is_playing and not player.is_paused
+        first_playable = pl.tracks[0]
+        first_track = Track(
+            title=first_playable.title or "Unknown Track",
+            author=first_playable.author or "Unknown Artist",
+            url=first_playable.uri or query,
+            stream_url="",
+            duration=int((first_playable.length or 0) / 1000),
+            thumbnail=first_playable.artwork,
+            requester=ctx.author.display_name,
+            requester_id=ctx.author.id,
+            query=query,
+        )
+        first_track._playable = first_playable
+
+        for p in pl.tracks[1:]:
+            t = Track(
+                title=p.title or "Unknown Track",
+                author=p.author or "Unknown Artist",
+                url=p.uri or query,
+                stream_url="",
+                duration=int((p.length or 0) / 1000),
+                thumbnail=p.artwork,
+                requester=ctx.author.display_name,
+                requester_id=ctx.author.id,
+                query=query,
+            )
+            t._playable = p
+            player.queue.append(t)
+
+        if was_idle:
+            await player.play_track(first_track, message_to_edit=search_msg)
+        else:
+            player.queue.insert(0, first_track)
+
+        pl_card = KyroContainer(accent_color=None)
+        pl_card.add_section(
+            content=(
+                f"**Queued Playlist: [{pl.name}]({query})**\n"
+                f"> **Total Tracks:** `{len(pl.tracks)} songs`\n"
+                f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
+                f"> **Requested By:** `{ctx.author.display_name}`"
+            ) if was_idle else (
+                f"**Queued Playlist: [{pl.name}]({query})**\n"
+                f"> **Total Tracks Added:** `{len(pl.tracks)} songs`\n"
+                f"> **Requested By:** `{ctx.author.display_name}`"
+            )
+        )
+        await send_container_response(ctx, pl_card)
+        return
+
+    # ── Handle Single Track ──
+    top_playable: wavelink.Playable = results[0]
+    track = Track(
+        title=top_playable.title or "Unknown Track",
+        author=top_playable.author or "Unknown Artist",
+        url=top_playable.uri or query,
+        stream_url="",
+        duration=int((top_playable.length or 0) / 1000),
+        thumbnail=top_playable.artwork,
+        requester=ctx.author.display_name,
+        requester_id=ctx.author.id,
+        query=query,
+    )
+    track._playable = top_playable
+
+    # Record analytics if available
+    if hasattr(cog, "analytics") and cog.analytics:
+        _q = query.strip()
+        _src = "spotify_url" if "spotify" in _q else ("youtube_url" if "youtu" in _q else "search")
+        try:
+            await cog.analytics.record_play(
+                user_id=ctx.author.id,
+                guild_id=ctx.guild.id if ctx.guild else None,
+                track_title=track.title,
+                artist=track.author,
+                source=_src,
+            )
+        except Exception:
+            pass
+
+    # Play immediately if idle, else enqueue
     if not player.is_playing and not player.is_paused:
         await player.play_track(track, message_to_edit=search_msg)
     else:
-        # Add to queue
         player.queue.append(track)
         pos = len(player.queue)
         queue_container = KyroContainer(accent_color=None)
@@ -262,4 +214,10 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             ),
             accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
         )
+        if search_msg and isinstance(search_msg, discord.Message):
+            try:
+                await edit_container_response(search_msg, queue_container)
+                return
+            except Exception:
+                pass
         await send_container_response(ctx, queue_container)

@@ -220,45 +220,54 @@ class NativeSmartAutoplay:
                 v_url = e_id if str(e_id).startswith("http") else f"https://www.youtube.com/watch?v={e_id}"
                 e_clean = clean_track_title(e_title)
 
-                # Bridge to JioSaavn 320kbps HD audio if available
-                trk = await NativeExtractor._extract_jiosaavn(e_clean, "⚡ Smart Autoplay Radio", True)
-                if not trk or not trk.stream_url:
-                    # Fallback to direct YouTube stream extraction
-                    trk = await asyncio.to_thread(
-                        NativeExtractor._extract_youtube_fallback, v_url, "⚡ Smart Autoplay Radio", True
-                    )
-
-                if trk and trk.stream_url:
-                    played_history.add(cand_norm)
-                    return trk
+                import wavelink
+                try:
+                    res = await wavelink.Playable.search(v_url or e_clean)
+                    if res:
+                        top = res[0]
+                        trk = Track(
+                            title=top.title or e_clean,
+                            author=top.author or "Artist",
+                            url=top.uri or v_url,
+                            stream_url="",
+                            duration=int((top.length or 0) / 1000),
+                            thumbnail=top.artwork,
+                            requester="⚡ Smart Autoplay Radio",
+                            is_autoplay=True,
+                            query=e_clean,
+                        )
+                        trk._playable = top
+                        played_history.add(cand_norm)
+                        return trk
+                except Exception as e:
+                    logger.debug(f"Autoplay wavelink search notice: {e}")
         except Exception as e:
             logger.debug(f"YouTube radio mix notice: {e}")
 
-        # Strategy 2: JioSaavn Multi-Candidate Search Fallback
+        # Strategy 2: Wavelink Multi-Query Recommendations Fallback
+        import wavelink
         for q in queries:
             try:
-                encoded_q = urllib.parse.quote(q)
-                search_url = (
-                    f"https://www.jiosaavn.com/api.php?"
-                    f"__call=search.getResults&_format=json&p=1&n=20&q={encoded_q}"
-                    f"&_marker=0&api_version=4&ctx=web6dot0"
-                )
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp:
-                        if resp.status == 200:
-                            text = await resp.text()
-                            data = json.loads(text)
-                            results = data.get("results", [])
-                            for song in results:
-                                s_title = song.get("title") or song.get("song") or ""
-                                cand_norm = normalize_history_title(s_title)
-                                if not cand_norm or cand_norm in played_history or cand_norm == norm_curr_title:
-                                    continue
-                                trk = NativeExtractor._build_saavn_track(song, "⚡ Smart Autoplay Radio", True, q)
-                                if trk and trk.stream_url:
-                                    played_history.add(cand_norm)
-                                    return trk
+                res = await wavelink.Playable.search(q)
+                if res:
+                    for top in res[:5]:
+                        top_norm = normalize_history_title(top.title or "")
+                        if top_norm and top_norm not in played_history and top_norm != norm_curr_title:
+                            trk = Track(
+                                title=top.title or q,
+                                author=top.author or "Artist",
+                                url=top.uri or "",
+                                stream_url="",
+                                duration=int((top.length or 0) / 1000),
+                                thumbnail=top.artwork,
+                                requester="⚡ Smart Autoplay Radio",
+                                is_autoplay=True,
+                                query=q,
+                            )
+                            trk._playable = top
+                            played_history.add(top_norm)
+                            return trk
             except Exception as e:
-                logger.debug(f"JioSaavn autoplay search notice for '{q}': {e}")
+                logger.debug(f"Wavelink autoplay query notice for '{q}': {e}")
 
         return None

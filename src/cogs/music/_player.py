@@ -167,12 +167,7 @@ class GuildPlayer:
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
         """
         Resolve the best Lavalink Playable for a track.
-
-        Strategy:
-        - If the track has a direct stream_url (JioSaavn CDN .mp4 / SoundCloud progressive .mp3),
-          load it as a raw HTTP source via Lavalink's loadtracks — no fuzzy search, exact audio.
-        - If the track has a YouTube/SoundCloud/Spotify URL, search via Lavalink natively.
-        - Title search is the last resort fallback only.
+        """
         # ── Path 1: User's Direct Platform URL (YouTube / Spotify / SoundCloud) ──
         # Agar user ne direct video ya song ka URL paste kiya hai, toh Lavalink ko
         # wahi EXACT URL do taaki 100% original gaana hi play ho, koi doosra search result nahi.

@@ -48,6 +48,39 @@ class Music(commands.Cog):
         # Register persistent view for button interactions
         self.bot.add_view(MusicControlView(bot, None))
 
+    async def cog_load(self) -> None:
+        """Connect to the dedicated NexCloud Lavalink node."""
+        import wavelink
+        from src.core.config import Config
+        try:
+            node = wavelink.Node(
+                uri=Config.LAVALINK_URI,
+                password=Config.LAVALINK_PASSWORD,
+                inactive_player_timeout=300,
+            )
+            await wavelink.Pool.connect(nodes=[node], client=self.bot)
+            logger.info(f"Connected to Lavalink Node at {Config.LAVALINK_URI}")
+        except Exception as e:
+            logger.error(f"Failed to connect to Lavalink node: {e}")
+
+    async def cog_unload(self) -> None:
+        """Close Lavalink node pool on reload/shutdown."""
+        import wavelink
+        try:
+            await wavelink.Pool.close()
+        except Exception:
+            pass
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_end(self, payload: Any) -> None:
+        """Handle track completion: loop modes, queue popping, and smart autoplay."""
+        player_obj = getattr(payload, "player", None)
+        if not player_obj or not player_obj.guild:
+            return
+        player = self.controller.get_player(player_obj.guild.id)
+        if player and hasattr(player, "on_track_end"):
+            await player.on_track_end()
+
     @commands.Cog.listener()
     async def on_voice_state_update(
         self,

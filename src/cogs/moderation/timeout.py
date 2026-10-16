@@ -46,7 +46,7 @@ class TimeoutCog(commands.Cog):
         allowed, err_msg = check_hierarchy(self.bot, ctx, member)
         if not allowed:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Hierarchy Error**\n> {err_msg}")
+            container.add_section(content=f"**Cannot Moderate Member**\n> {err_msg}")
             await send_container_response(ctx, container)
             return
 
@@ -110,7 +110,7 @@ class TimeoutCog(commands.Cog):
         allowed, err_msg = check_hierarchy(self.bot, ctx, member)
         if not allowed:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Hierarchy Error**\n> {err_msg}")
+            container.add_section(content=f"**Cannot Moderate Member**\n> {err_msg}")
             await send_container_response(ctx, container)
             return
 

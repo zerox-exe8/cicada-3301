@@ -47,7 +47,7 @@ class AntiKickCog(commands.Cog):
             "Anti-Kick",
             perpetrator,
             punish_res,
-            "Perpetrator Punished",
+            "Action Punished",
             extra=f"Target: **{member.name}** `「{member.id}」`",
         )
 

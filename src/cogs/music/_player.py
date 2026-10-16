@@ -1,39 +1,24 @@
 """
-Kyro Discord Bot - Native Discord Guild Audio Player
-Pure Python Discord VoiceClient controller with Zero-Stutter RAM pre-buffering,
-loop modes, Smart Autoplay AI, and Components V2 Cyber Container UI.
+Kyro Discord Bot - Lavalink Guild Audio Player
+Streamlined, zero-lag, zero-stutter audio streaming powered by NexCloud Lavalink v4.
+Offloads all heavy audio processing, buffering, and encoding from Render/PC to the Lavalink node.
+Maintains full compatibility with Kyro Components V2 interactive cards and commands.
 """
 
 from __future__ import annotations
 
 import asyncio
-import html
 import logging
-import os
-import queue
-import re
-import shutil
-import stat
-import subprocess
-import threading
-import time
+import random
 from typing import TYPE_CHECKING, List, Optional, Set
-
 import discord
+import wavelink
 
 from src.cogs.music._models import Track
-from src.cogs.music._autoplay import NativeSmartAutoplay, clean_track_title, normalize_history_title
+from src.cogs.music._autoplay import NativeSmartAutoplay
 from src.cogs.music._extractor import NativeExtractor
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
-
-try:
-    import audioop
-except ImportError:
-    try:
-        import audioop_lts as audioop
-    except ImportError:
-        audioop = None
-
+from src.cogs.music._views import MusicControlView
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -41,913 +26,285 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Kyro.Music.Player")
 
 
-def resolve_ffmpeg_executable() -> str:
-    """Robust multi-platform resolver for FFmpeg binary across Windows, Linux, Render, and Docker."""
-    # system PATH
-    exe = shutil.which("ffmpeg")
-    if exe and os.path.isfile(exe) and os.access(exe, os.X_OK):
-        return exe
-
-    # 2. static_ffmpeg
-    try:
-        import static_ffmpeg
-        static_ffmpeg.add_paths()
-        exe = shutil.which("ffmpeg")
-        if exe and os.path.isfile(exe) and os.access(exe, os.X_OK):
-            return exe
-    except Exception:
-        pass
-
-    # candidate Linux/Render paths
-    home = os.path.expanduser("~")
-    candidates = [
-        "/usr/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-        os.path.join(home, ".local", "bin", "ffmpeg"),
-        os.path.join(home, ".static_ffmpeg", "bin", "linux", "ffmpeg"),
-    ]
-    for p in candidates:
-        if os.path.isfile(p) and os.access(p, os.X_OK):
-            return p
-
-    # 4. imageio_ffmpeg
-    try:
-        import imageio_ffmpeg
-        exe = imageio_ffmpeg.get_ffmpeg_exe()
-        if exe and os.path.isfile(exe):
-            try:
-                st = os.stat(exe)
-                os.chmod(exe, st.st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-            except Exception:
-                pass
-            return exe
-    except Exception:
-        pass
-
-    return "ffmpeg"
-
-
-class DirectFFmpegStream(discord.AudioSource):
-    """
-    High-Performance, Jitter-Buffered FFmpeg Audio Source for Discord Voice.
-    Features:
-    - Pre-buffered RAM cache before playback starts (eliminates initial and jitter silence dropouts).
-    - 5-second resilient frame ring buffer (~250 frames) for silky-smooth 48kHz audio.
-    - Optimized 38.4KB chunk reads from FFmpeg OS pipe to minimize syscall latency.
-    - Browser User-Agent preventing CDN bandwidth throttling.
-    - Zero radio crackle, zero 50Hz audio slicing, and no premature packet rushing.
-    """
-    FRAME_SIZE = 3840  # 20ms of 48000Hz 16-bit stereo PCM
-    BUFFER_SIZE = 250  # ~5 seconds of pre-buffered RAM audio frames
-
-    def __init__(self, stream_url: str, executable: str, volume: float = 1.0) -> None:
-        self.stream_url = stream_url
-        self.executable = executable
-        self._volume = max(0.0, min(volume, 2.0))
-        self._process: Optional[subprocess.Popen] = None
-        self._queue: queue.Queue[Optional[bytes]] = queue.Queue(maxsize=self.BUFFER_SIZE)
-        self._stopped = threading.Event()
-        self._reader_thread: Optional[threading.Thread] = None
-        self._prebuffered = False
-        self._start_process()
-
-    @property
-    def volume(self) -> float:
-        return self._volume
-
-    @volume.setter
-    def volume(self, val: float) -> None:
-        self._volume = max(0.0, min(val, 2.0))
-
-    def _start_process(self) -> None:
-        cmd = [
-            self.executable,
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "5",
-            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "-nostdin",
-            "-i", self.stream_url,
-            "-vn",
-            "-af", "aresample=48000",
-            "-f", "s16le",
-            "-ar", "48000",
-            "-ac", "2",
-            "-loglevel", "warning",
-            "pipe:1",
-        ]
-        self._process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=1024 * 1024,
-        )
-        self._reader_thread = threading.Thread(
-            target=self._reader_loop,
-            daemon=True,
-            name="FFmpeg-Audio-Reader",
-        )
-        self._reader_thread.start()
-
-    async def wait_buffered(self, min_frames: int = 35, timeout: float = 3.5) -> None:
-        """Asynchronously pre-buffer frames before handing over to Discord voice client."""
-        start = time.time()
-        while time.time() - start < timeout and not self._stopped.is_set():
-            if self._queue.qsize() >= min_frames:
-                self._prebuffered = True
-                return
-            if self._process and self._process.poll() is not None:
-                break
-            await asyncio.sleep(0.02)
-        self._prebuffered = True
-
-    def _reader_loop(self) -> None:
-        """Continuously pull raw PCM bytes from FFmpeg pipe and enqueue exact frames."""
-        buf = bytearray()
-        stdout = self._process.stdout if self._process else None
-        if not stdout:
-            self._queue.put(None)
-            return
-
-        # Read in larger 38.4KB blocks (10 frames) to minimize pipe overhead
-        read_chunk_size = self.FRAME_SIZE * 10
-
-        while not self._stopped.is_set():
-            try:
-                chunk = stdout.read(read_chunk_size)
-                if not chunk:
-                    # True EOF from FFmpeg
-                    break
-                buf.extend(chunk)
-                while len(buf) >= self.FRAME_SIZE and not self._stopped.is_set():
-                    frame = bytes(buf[:self.FRAME_SIZE])
-                    del buf[:self.FRAME_SIZE]
-                    while not self._stopped.is_set():
-                        try:
-                            self._queue.put(frame, timeout=0.05)
-                            break
-                        except queue.Full:
-                            continue
-            except Exception as e:
-                logger.debug(f"FFmpeg reader pipe notice: {e}")
-                break
-
-        if self._process:
-            self._process.poll()
-            if self._process.returncode not in (0, None):
-                logger.warning(f"FFmpeg reader process exited with code {self._process.returncode}")
-
-        # Flush remaining bytes padded to frame size
-        if len(buf) > 0 and not self._stopped.is_set():
-            padded = bytes(buf).ljust(self.FRAME_SIZE, b"\x00")
-            try:
-                self._queue.put(padded, timeout=0.5)
-            except Exception:
-                pass
-
-        # Sentinel indicating end of stream
-        try:
-            self._queue.put(None, timeout=0.5)
-        except Exception:
-            pass
-
-    def read(self) -> bytes:
-        if self._stopped.is_set():
-            return b""
-
-        # In case wait_buffered wasn't awaited beforehand, do a quick sync fill
-        if not self._prebuffered:
-            deadline = time.time() + 1.5
-            while not self._stopped.is_set() and time.time() < deadline:
-                if self._queue.qsize() >= 30:
-                    break
-                if self._process and self._process.poll() is not None:
-                    break
-                time.sleep(0.01)
-            self._prebuffered = True
-
-        try:
-            # Wait up to 35ms for the next frame rather than instantly dumping silence
-            frame = self._queue.get(timeout=0.035)
-        except queue.Empty:
-            # If process is still running but network had a severe hiccup (>35ms),
-            # send a single silent frame so Discord's voice timer loop does not crash
-            if self._process and self._process.poll() is None:
-                return b"\x00" * self.FRAME_SIZE
-            return b""
-
-        if frame is None:
-            # Sentinel reached: End of song
-            return b""
-
-        if self._volume != 1.0 and audioop:
-            try:
-                frame = audioop.mul(frame, 2, self._volume)
-            except Exception:
-                pass
-
-        return frame
-
-    def cleanup(self) -> None:
-        self._stopped.set()
-        if self._process:
-            try:
-                self._process.kill()
-            except Exception:
-                pass
-            self._process = None
-        # Drain queue
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-            except Exception:
-                break
-
-
-
-def shorten_artist(raw_artist: str, max_chars: int = 32) -> str:
-    """Shorten multi-artist strings."""
-    if not raw_artist:
-        return "Official Artist"
-    clean = html.unescape(raw_artist).strip()
-    parts = re.split(r"[,/|]|\s+(?:feat\.?|ft\.?|and|&)\s+", clean, flags=re.IGNORECASE)
-    if parts and parts[0].strip():
-        first_artist = parts[0].strip()
-        if len(first_artist) <= max_chars:
-            return first_artist
-        return first_artist[: max_chars - 3] + "..."
-    if len(clean) > max_chars:
-        return clean[: max_chars - 3] + "..."
-    return clean
-
-
-def render_progress_bar(elapsed_sec: float, total_sec: float, length: int = 12) -> str:
-    """Render high-contrast dynamic studio progress bar."""
-    if total_sec <= 0:
-        return "`Live Stream` 🔴"
-    clamped = max(0.0, min(elapsed_sec, total_sec))
-    progress = clamped / total_sec
-    fill_count = int(progress * length)
-    fill_count = max(0, min(fill_count, length))
-    bar = "━" * fill_count + "🔘" + "─" * (length - fill_count)
-    cur_m, cur_s = divmod(int(clamped), 60)
-    tot_m, tot_s = divmod(int(total_sec), 60)
-    return f"`{cur_m:02d}:{cur_s:02d}` {bar} `{tot_m:02d}:{tot_s:02d}`"
-
-
 class GuildPlayer:
-    """Guild audio player using native Discord.py VoiceClient & Zero-Stutter Dual-Buffer RAM Pipeline."""
+    """
+    High-Performance Lavalink Guild Player for Kyro Bot.
+    Replaces local FFmpeg subprocesses with dedicated Lavalink node streaming.
+    """
 
     def __init__(self, bot: KyroBot, guild: discord.Guild) -> None:
         self.bot = bot
         self.guild = guild
-        self.voice_client: Optional[discord.VoiceClient] = None
-        self.home_channel: Optional[discord.abc.Messageable] = None
-        self.now_playing_message: Optional[discord.Message] = None
+        self.voice_client: Optional[wavelink.Player] = None
 
+        # Playback state
         self.queue: List[Track] = []
         self.current: Optional[Track] = None
+        self.volume: float = 1.0  # Normalized (1.0 = 100%)
         self.loop_mode: str = "off"  # "off", "track", "queue"
-        self.volume: float = 1.0     # 100%
-        self.smart_autoplay: bool = False
-        self.is_247: bool = False
-        
-        self.played_history: Set[str] = set()
-        self.consecutive_same_artist: int = 0
-        self.last_artist: str = ""
-        self.consecutive_failures: int = 0
-        self._track_started_at: float = 0.0
+        self.smart_autoplay: bool = True
+        self.autoplay_history: Set[str] = set()
 
-        # Zero-Stutter Dual-Buffer RAM Pipeline
-        self._current_stream: Optional[DirectFFmpegStream] = None
-        self._next_stream: Optional[DirectFFmpegStream] = None
-        self._next_track: Optional[Track] = None
-        self._prebuffer_task: Optional[asyncio.Task] = None
-
-        # Live Real-Time Dynamic Progress Controller
-        self._progress_task: Optional[asyncio.Task] = None
-        self._last_controller_edit: float = 0.0
-        self._track_paused_duration: float = 0.0
-        self._pause_timestamp: float = 0.0
-
-        self._current_gen: int = 0
-        self._lock = asyncio.Lock()
-
-        # Voice Channel Inactivity & Auto-Pause/Resume State
-        self._empty_vc_task: Optional[asyncio.Task] = None
-        self._was_paused_for_empty_vc: bool = False
+        # UI & Communication
+        self.home_channel: Optional[discord.TextChannel | discord.Thread] = None
+        self.controller_message: Optional[discord.Message] = None
         self._disconnect_announced: bool = False
+        self._empty_vc_task: Optional[asyncio.Task] = None
 
-    @property
-    def elapsed_time(self) -> float:
-        """Calculate exact playback elapsed seconds taking pauses into account."""
-        if self._track_started_at <= 0:
-            return 0.0
-        if self.is_paused:
-            return max(0.0, self._pause_timestamp - self._track_started_at - self._track_paused_duration)
-        return max(0.0, time.time() - self._track_started_at - self._track_paused_duration)
-
-    @property
-    def is_playing(self) -> bool:
-        return bool(self.voice_client and self.voice_client.is_playing())
-
-    @property
-    def is_paused(self) -> bool:
-        return bool(self.voice_client and self.voice_client.is_paused())
+    # ── State Properties ──
 
     @property
     def is_connected(self) -> bool:
-        return bool(self.voice_client and self.voice_client.is_connected())
+        """Check if connected to a valid Discord voice channel."""
+        vc = self.guild.voice_client
+        return vc is not None and getattr(vc, "connected", False)
 
     @property
-    def voice_channel(self) -> Optional[discord.VoiceChannel]:
-        if self.voice_client and self.voice_client.channel:
-            return self.voice_client.channel
-        return None
-
-    def set_loop_mode(self, mode: str) -> str:
-        """Set loop mode: 'off', 'track' (single song), 'queue' (all songs)."""
-        m = mode.lower().strip()
-        if m in ("track", "song", "1"):
-            self.loop_mode = "track"
-        elif m in ("queue", "all"):
-            self.loop_mode = "queue"
-        else:
-            self.loop_mode = "off"
-        # Reschedule prebuffer when loop changes
-        self._schedule_prebuffer()
-        return self.loop_mode
-
-    def set_volume(self, vol_pct: int) -> int:
-        """Set player volume (0 to 200%) dynamically in real time."""
-        clamped = max(0, min(200, vol_pct))
-        self.volume = clamped / 100.0
-        if self.voice_client and self.voice_client.source:
-            if hasattr(self.voice_client.source, "volume"):
-                self.voice_client.source.volume = self.volume
-        if self._next_stream and hasattr(self._next_stream, "volume"):
-            self._next_stream.volume = self.volume
-        return clamped
-
-    def cancel_empty_vc_timer(self, auto_resume: bool = True) -> bool:
-        """Cancel pending empty-channel disconnect timer and optionally auto-resume playback."""
-        timer_was_active = False
-        if self._empty_vc_task and not self._empty_vc_task.done():
-            self._empty_vc_task.cancel()
-            self._empty_vc_task = None
-            timer_was_active = True
-
-        if auto_resume and self._was_paused_for_empty_vc:
-            self._was_paused_for_empty_vc = False
-            if self.is_paused:
-                self.resume()
-                logger.info(f"Auto-resumed playback in guild {self.guild.id} because listener rejoined VC.")
-                return True
-
-        self._was_paused_for_empty_vc = False
-        return timer_was_active
-
-    async def connect_voice(self, channel: discord.VoiceChannel) -> None:
-        """Connect or move to voice channel safely with VoiceRecv support and resilient fallback."""
-        self.cancel_empty_vc_timer(auto_resume=False)
-
-        # Restore 24/7 preference from database if available
-        if hasattr(self.bot, "db") and self.bot.db:
-            try:
-                row = await self.bot.db.fetch_one(
-                    "SELECT is_247 FROM guild_music_247 WHERE guild_id = $1",
-                    self.guild.id,
-                )
-                if row and row.get("is_247") is not None:
-                    self.is_247 = bool(row["is_247"])
-            except Exception as e:
-                logger.debug(f"Could not load 24/7 setting from DB: {e}")
-
+    def is_playing(self) -> bool:
+        """Check if actively playing audio."""
         vc = self.guild.voice_client
-        if vc:
-            if vc.is_connected():
-                self.voice_client = vc
-                if self.voice_client.channel != channel:
-                    await self.voice_client.move_to(channel)
-                return
-            else:
-                # Purge stale/disconnected voice client from discord.py internal state
-                try:
-                    await vc.disconnect(force=True)
-                except Exception:
-                    pass
-                self.voice_client = None
+        if vc and isinstance(vc, wavelink.Player):
+            return vc.playing and not vc.paused
+        return False
 
-        # Ensure no ghost voice client remains in discord.py state key
-        try:
-            key_id, _ = channel._get_voice_client_key()
-            existing_vc = channel._state._get_voice_client(key_id)
-            if existing_vc:
-                try:
-                    await existing_vc.disconnect(force=True)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+    @property
+    def is_paused(self) -> bool:
+        """Check if playback is currently paused."""
+        vc = self.guild.voice_client
+        if vc and isinstance(vc, wavelink.Player):
+            return vc.paused
+        return False
 
-        cls = discord.VoiceClient
-        try:
-            import discord.ext.voice_recv as voice_recv
-            cls = voice_recv.VoiceRecvClient
-        except Exception:
-            pass
+    # ── Voice Connection ──
 
-        try:
-            self.voice_client = await channel.connect(cls=cls, self_deaf=True, timeout=15.0, reconnect=True)
-        except Exception as conn_err:
-            if cls is not discord.VoiceClient:
-                logger.warning(f"VoiceRecvClient connection failed ({conn_err}), falling back to standard VoiceClient...")
-                if self.guild.voice_client:
-                    try:
-                        await self.guild.voice_client.disconnect(force=True)
-                    except Exception:
-                        pass
-                self.voice_client = await channel.connect(cls=discord.VoiceClient, self_deaf=True, timeout=15.0, reconnect=True)
-            else:
-                raise conn_err
-
-
-
-    async def play_track(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:
-        """Stream track through RAM-buffered audio source with 0 cuts."""
-        if not self.voice_client or not self.voice_client.is_connected():
-            vc = self.guild.voice_client
-            if vc and vc.is_connected():
-                self.voice_client = vc
-            else:
-                return
-
-        # Ensure Opus is loaded across Linux, Render, and Windows
-        if not discord.opus.is_loaded():
-            from pathlib import Path
-            import os, sys
-            base_d = Path(__file__).resolve().parent.parent.parent.parent
-            if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
-                try:
-                    os.add_dll_directory(str(base_d))
-                except Exception:
-                    pass
-
-            possible_opus_paths = [
-                str(base_d / "opus.dll"),
-                str(base_d / "libopus.so.0"),
-                str(base_d / "libopus.so"),
-                "/usr/lib/x86_64-linux-gnu/libopus.so.0",
-                "/usr/lib/x86_64-linux-gnu/libopus.so",
-                "/usr/lib/libopus.so.0",
-                "/usr/lib64/libopus.so.0",
-                "/usr/local/lib/libopus.so.0",
-                "opus.dll",
-                "libopus.so.0",
-                "libopus.so",
-                "libopus-0.dll",
-            ]
-            import ctypes.util
-            opus_lib = ctypes.util.find_library("opus")
-            if opus_lib:
-                possible_opus_paths.insert(0, opus_lib)
-
-            for target in possible_opus_paths:
-                try:
-                    discord.opus.load_opus(target)
-                    if discord.opus.is_loaded():
-                        break
-                except Exception:
-                    pass
-
-        # Resolve deferred stream URL on-demand (e.g. for external playlist queue items)
-        if not track.stream_url:
-            lookup_query = track.query or f"{track.title} {track.author}".strip()
-            resolved = await NativeExtractor.extract(lookup_query, requester=track.requester)
-            if not resolved or not resolved.stream_url:
-                # Secondary fallback: try clean title + author directly on YouTube fallback
-                clean_q = f"{clean_track_title(track.title)} {track.author}".strip()
-                resolved = await asyncio.to_thread(
-                    NativeExtractor._extract_youtube_fallback, clean_q, track.requester, False
-                )
-
-            if resolved and resolved.stream_url:
-                track.stream_url = resolved.stream_url
-                track.duration = resolved.duration or track.duration
-                if resolved.thumbnail:
-                    track.thumbnail = resolved.thumbnail
-            else:
-                logger.warning(f"Could not resolve stream for track: {track.title}")
-                if self.queue:
-                    next_t = self.queue.pop(0)
-                    await self.play_track(next_t, message_to_edit=message_to_edit)
-                    return
-                else:
-                    return
-
-        self.current = track
-        norm_t = normalize_history_title(track.title)
-        self.played_history.add(norm_t)
-
-        # Anti-fatigue artist tracking
-        art_clean = (track.author or "").lower().strip()
-        if art_clean and art_clean == self.last_artist:
-            self.consecutive_same_artist += 1
-        else:
-            self.consecutive_same_artist = 1
-            self.last_artist = art_clean
-
-        # Zero-Stutter Gapless Dual-Buffer Transition Check
-        audio_source = None
-        if (
-            self._next_stream
-            and self._next_track
-            and (self._next_track == track or getattr(self._next_track, "url", None) == track.url)
-            and not self._next_stream._stopped.is_set()
-        ):
-            audio_source = self._next_stream
-            self._next_stream = None
-            self._next_track = None
-            logger.info(f"Zero-Stutter Gapless Engine: INSTANT 0ms playback transition for '{track.title}' from RAM buffer!")
-        else:
-            ffmpeg_exe = resolve_ffmpeg_executable()
-            logger.info(f"Resolved FFmpeg executable for stream: {ffmpeg_exe}")
-            try:
-                audio_source = DirectFFmpegStream(
-                    stream_url=track.stream_url,
-                    executable=ffmpeg_exe,
-                    volume=self.volume,
-                )
-            except Exception as e:
-                logger.error(f"FFmpeg audio stream creation error: {e}", exc_info=True)
-                if self.home_channel:
-                    c = KyroContainer(accent_color=15548997)
-                    c.add_section(content=f"**Audio Stream Error**\n> `{e}`")
-                    await send_container_response(self.home_channel, c)
-                return
-
-        # Pre-buffer healthy RAM audio cache before starting playback (eliminates initial stutter)
-        await audio_source.wait_buffered(min_frames=35, timeout=3.5)
-
-        self._current_stream = audio_source
-        self._current_gen += 1
-        current_gen = self._current_gen
-        self._track_started_at = time.time()
-        self._track_paused_duration = 0.0
-        self._pause_timestamp = 0.0
-
-        if self.voice_client.is_playing() or self.voice_client.is_paused():
-            self.voice_client.stop()
-
-        def _after_callback(error, gen=current_gen):
-            if gen != self._current_gen:
-                return  # Stale callback from previously stopped track
-            if error:
-                logger.error(f"Voice playback error in guild {self.guild.id}: {error}", exc_info=True)
-                if self.home_channel:
-                    c = KyroContainer(accent_color=15548997)
-                    c.add_section(content=f"**Voice Playback Notice**\n> `{error}`")
-                    asyncio.run_coroutine_threadsafe(
-                        send_container_response(self.home_channel, c),
-                        self.bot.loop,
-                    )
-            asyncio.run_coroutine_threadsafe(self._handle_track_finish(gen), self.bot.loop)
-
-        self.voice_client.play(audio_source, after=_after_callback)
-        await self.send_now_playing_card(track, message_to_edit=message_to_edit)
-
-        # Immediately kick off background pre-buffering into RAM for the upcoming track
-        self._schedule_prebuffer()
-        self._start_progress_loop()
-
-    async def _handle_track_finish(self, gen: int) -> None:
-        """Fired automatically when a track finishes naturally."""
-        await asyncio.sleep(0.1)
-        if gen != self._current_gen:
+    async def connect_voice(self, channel: discord.VoiceChannel | discord.StageChannel) -> None:
+        """Connect or move to the specified voice channel using Wavelink."""
+        vc = self.guild.voice_client
+        if vc and isinstance(vc, wavelink.Player):
+            if vc.channel.id != channel.id:
+                await vc.move_to(channel)
+            self.voice_client = vc
             return
 
-        async with self._lock:
-            if gen != self._current_gen:
-                return
+        # Connect as Wavelink Player
+        try:
+            self.voice_client = await channel.connect(cls=wavelink.Player)
+        except Exception as e:
+            logger.error(f"Guild {self.guild.id}: Wavelink connect error: {e}")
+            raise
 
-            elapsed = (time.time() - self._track_started_at) if self._track_started_at > 0 else 10.0
-            if elapsed < 2.0 and self.current and not getattr(self.current, "_stream_retried", False):
-                # Fast failure detected (e.g. CDN 403 Forbidden or broken pipe).
-                # Seamlessly recover audio using YouTube stream fallback!
-                self.current._stream_retried = True
-                fb_q = f"{clean_track_title(self.current.title)} {self.current.author}".strip()
-                logger.info(f"Stream fast-failed for '{self.current.title}'. Attempting YouTube stream recovery: {fb_q}")
-                recovered = await asyncio.to_thread(
-                    NativeExtractor._extract_youtube_fallback, fb_q, self.current.requester, False
-                )
-                if recovered and recovered.stream_url and recovered.stream_url != self.current.stream_url:
-                    self.current.stream_url = recovered.stream_url
-                    self.consecutive_failures = 0
-                    await self.play_track(self.current)
-                    return
+    # ── Playback Engine ──
 
-            if elapsed < 2.0:
-                self.consecutive_failures += 1
-            else:
-                self.consecutive_failures = 0
+    async def play_track(self, track: Track) -> None:
+        """Stream a track via the dedicated Lavalink node with 0% stutter."""
+        if not self.voice_client or not self.voice_client.connected:
+            logger.warning(f"Guild {self.guild.id}: Cannot play, voice client not connected.")
+            return
 
-            if self.consecutive_failures >= 3:
-                logger.warning(f"Aborting playback in guild {self.guild.id}: 3 consecutive fast failures.")
-                self.current = None
-                self.consecutive_failures = 0
-                if self._progress_task and not self._progress_task.done():
-                    self._progress_task.cancel()
-                if self.home_channel:
-                    try:
-                        c = KyroContainer(accent_color=None)
-                        c.add_section(
-                            content=(
-                                "**Playback Paused**\n"
-                                "> Multiple audio streams failed to play consecutively.\n"
-                                "> Playback has been paused to protect your queue."
-                            )
-                        )
-                        c.add_separator(divider=True)
-                        c.add_text("-# Kyro Music Engine")
-                        await send_container_response(self.home_channel, c)
-                    except Exception:
-                        pass
-                return
+        # Ensure high-fidelity stream URL is extracted (JioSaavn 320kbps or YouTube fallback)
+        if not track.stream_url:
+            resolved = await NativeExtractor.extract(track.query or track.title)
+            if resolved and resolved.stream_url:
+                track = resolved
 
-            # loop Track
-            if self.loop_mode == "track" and self.current:
-                await self.play_track(self.current)
-                return
+        target_url = track.stream_url or track.url
+        playables = []
 
-            # loop Queue (push finished track to end)
-            if self.loop_mode == "queue" and self.current:
-                self.queue.append(self.current)
+        try:
+            if target_url:
+                playables = await wavelink.Playable.search(target_url)
+        except Exception as e:
+            logger.debug(f"Direct stream search error: {e}")
 
-            # next Track in Queue
+        # Fallback to query title search if direct stream search failed
+        if not playables and track.title:
+            try:
+                playables = await wavelink.Playable.search(f"{track.title} {track.author}")
+            except Exception as e:
+                logger.debug(f"Title search error: {e}")
+
+        if not playables:
+            logger.error(f"Guild {self.guild.id}: Lavalink could not resolve playable for '{track.title}'")
+            # Try next in queue if available
             if self.queue:
-                next_track = self.queue.pop(0)
-                await self.play_track(next_track)
-                return
+                next_t = self.queue.pop(0)
+                await self.play_track(next_t)
+            return
 
-            # smart Autoplay Radio
-            if self.smart_autoplay and self.current:
-                next_track = await NativeSmartAutoplay.get_next_track(
-                    current_track=self.current,
-                    played_history=self.played_history,
-                    consecutive_same_artist=self.consecutive_same_artist,
-                )
-                if next_track:
-                    await self.play_track(next_track)
-                    return
+        playable = playables[0]
+        # Attach Kyro track metadata
+        playable.title = track.title
+        playable.author = track.author
 
-            # queue Ended Notification
-            self.current = None
-            if self._progress_task and not self._progress_task.done():
-                self._progress_task.cancel()
+        self.current = track
+        self.autoplay_history.add(track.title.lower())
 
-            if self.home_channel:
-                try:
-                    container = KyroContainer(accent_color=None)
-                    container.add_section(
-                        content=(
-                            "**Queue Concluded**\n"
-                            "> All queued songs have finished playing. The player is now idle."
-                        )
-                    )
-                    container.add_separator(divider=True)
-                    container.add_text(
-                        "Use `?play <song>` or `?playlist play <name>` to play more tracks.\n"
-                        "Use `?autoplay on` for non-stop continuous playback.\n\n"
-                        "-# Kyro Music Engine"
-                    )
-                    await send_container_response(self.home_channel, container)
-                except Exception as e:
-                    logger.debug(f"Queue ended notice: {e}")
+        # Start playback on Lavalink node
+        await self.voice_client.play(playable)
+        await self.voice_client.set_volume(int(self.volume * 100))
+
+        # Send sleek Now Playing card with buttons
+        await self.send_now_playing_card(track)
+
+    # ── Controls ──
+
+    def pause(self) -> None:
+        """Pause playback."""
+        if self.voice_client and self.voice_client.playing:
+            asyncio.create_task(self.voice_client.pause(True))
+
+    def resume(self) -> None:
+        """Resume playback."""
+        if self.voice_client and self.voice_client.paused:
+            asyncio.create_task(self.voice_client.pause(False))
 
     async def skip(self) -> None:
-        """Skip current track and trigger instant gapless transition."""
-        if self.voice_client and (self.voice_client.is_playing() or self.voice_client.is_paused()):
-            self.voice_client.stop()
-
-    def _schedule_prebuffer(self) -> None:
-        """Asynchronously pre-resolve and pre-buffer upcoming track into RAM ahead of time."""
-        if self._prebuffer_task and not self._prebuffer_task.done():
-            self._prebuffer_task.cancel()
-        self._prebuffer_task = asyncio.create_task(self._prebuffer_worker())
-
-    async def _prebuffer_worker(self) -> None:
-        """Background worker that decodes upcoming track into a standby RAM buffer."""
-        try:
-            # Allow current track 4 seconds of uninterrupted network bandwidth to stabilize its buffer
-            await asyncio.sleep(4.0)
-
-            candidate: Optional[Track] = None
-            if self.loop_mode == "track" and self.current:
-                candidate = self.current
-            elif self.queue:
-                candidate = self.queue[0]
-            elif self.loop_mode == "queue" and self.current:
-                candidate = self.current
-            elif self.smart_autoplay and self.current:
-                candidate = await NativeSmartAutoplay.get_next_track(
-                    current_track=self.current,
-                    played_history=self.played_history,
-                    consecutive_same_artist=self.consecutive_same_artist,
-                )
-
-            if not candidate:
-                return
-
-            if not candidate.stream_url:
-                lookup_query = candidate.query or f"{candidate.title} {candidate.author}".strip()
-                resolved = await NativeExtractor.extract(lookup_query, requester=candidate.requester)
-                if not resolved or not resolved.stream_url:
-                    clean_q = f"{clean_track_title(candidate.title)} {candidate.author}".strip()
-                    resolved = await asyncio.to_thread(
-                        NativeExtractor._extract_youtube_fallback, clean_q, candidate.requester, False
-                    )
-
-                if resolved and resolved.stream_url:
-                    candidate.stream_url = resolved.stream_url
-                    candidate.duration = resolved.duration or candidate.duration
-                    if resolved.thumbnail:
-                        candidate.thumbnail = resolved.thumbnail
-
-            if not candidate.stream_url:
-                return
-
-            if self._next_track == candidate and self._next_stream and not self._next_stream._stopped.is_set():
-                return
-
-            if self._next_stream:
-                try:
-                    self._next_stream.cleanup()
-                except Exception:
-                    pass
-                self._next_stream = None
-
-            ffmpeg_exe = resolve_ffmpeg_executable()
-            standby_stream = DirectFFmpegStream(
-                stream_url=candidate.stream_url,
-                executable=ffmpeg_exe,
-                volume=self.volume,
-            )
-            self._next_stream = standby_stream
-            self._next_track = candidate
-            logger.info(f"Zero-Stutter Gapless Engine: Pre-buffered next track '{candidate.title}' in RAM.")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.debug(f"Pre-buffer worker notice: {e}")
-
-    def pause(self) -> bool:
-        """Pause current playback."""
-        if self.voice_client and self.voice_client.is_playing():
-            self.voice_client.pause()
-            self._pause_timestamp = time.time()
-            return True
-        return False
-
-    def resume(self) -> bool:
-        """Resume paused playback."""
-        if self.voice_client and self.voice_client.is_paused():
-            self.voice_client.resume()
-            if self._pause_timestamp > 0:
-                self._track_paused_duration += (time.time() - self._pause_timestamp)
-                self._pause_timestamp = 0.0
-            return True
-        return False
+        """Skip currently playing track."""
+        if self.voice_client:
+            await self.voice_client.skip(force=True)
 
     async def stop(self) -> None:
-        """Clear queue and disconnect cleanly."""
-        self.cancel_empty_vc_timer(auto_resume=False)
-        self._current_gen += 1
-        if self._prebuffer_task and not self._prebuffer_task.done():
-            self._prebuffer_task.cancel()
-        if self._progress_task and not self._progress_task.done():
-            self._progress_task.cancel()
-
-        if self._next_stream:
-            try:
-                self._next_stream.cleanup()
-            except Exception:
-                pass
-            self._next_stream = None
-            self._next_track = None
-
-        if self._current_stream:
-            try:
-                self._current_stream.cleanup()
-            except Exception:
-                pass
-            self._current_stream = None
-
+        """Stop playback and disconnect."""
         self.queue.clear()
         self.current = None
+
         if self.voice_client:
-            if self.voice_client.is_playing() or self.voice_client.is_paused():
-                self.voice_client.stop()
             try:
-                await self.voice_client.disconnect(force=True)
+                await self.voice_client.disconnect()
             except Exception:
                 pass
             self.voice_client = None
 
-    def build_now_playing_container(self, track: Track, elapsed: Optional[float] = None) -> KyroContainer:
-        """Build signature Now Playing card with live dynamic progress bar & studio metrics."""
-        e_reg = self.bot.custom_emojis
-        music_icon = e_reg.get("Music_Playing", e_reg.get("music_playing", e_reg.get("music_music", "")))
-        play_prefix = f"{music_icon} " if music_icon else ""
+        if self.controller_message:
+            try:
+                await self.controller_message.delete()
+            except Exception:
+                pass
+            self.controller_message = None
 
-        short_artist_name = shorten_artist(track.author)
-        channel_mention = f"<#{self.voice_client.channel.id}>" if (self.voice_client and self.voice_client.channel) else "#Hangout"
+    def set_volume(self, volume_percent: int) -> None:
+        """Adjust volume (0 - 150%)."""
+        clamped = max(0, min(150, volume_percent))
+        self.volume = clamped / 100.0
+        if self.voice_client:
+            asyncio.create_task(self.voice_client.set_volume(clamped))
+
+    # ── Track End & Autoplay Transition ──
+
+    async def on_track_end(self) -> None:
+        """Invoked when Lavalink finishes playing a track."""
+        if self.loop_mode == "track" and self.current:
+            await self.play_track(self.current)
+            return
+        elif self.loop_mode == "queue" and self.current:
+            self.queue.append(self.current)
+
+        if self.queue:
+            next_track = self.queue.pop(0)
+            await self.play_track(next_track)
+        elif self.smart_autoplay and self.current:
+            # Smart Autoplay AI recommendation
+            rec = await NativeSmartAutoplay.get_next_recommendation(
+                self.current, self.autoplay_history, self.bot.db
+            )
+            if rec:
+                rec.requester = "Kyro Autoplay"
+                await self.play_track(rec)
+            else:
+                self.current = None
+                self.schedule_empty_vc_timer()
+        else:
+            self.current = None
+            self.schedule_empty_vc_timer()
+
+    # ── Components V2 Controller Card ──
+
+    def build_now_playing_container(self, track: Track) -> KyroContainer:
+        """Construct the Components V2 Now Playing card."""
+        e_reg = getattr(self.bot, "custom_emojis", {})
+        dot = e_reg.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"{play_prefix}**Now Playing**\n"
-                f"> **Track** • [{track.title}]({track.url})\n"
-                f"> **Artist** • `{short_artist_name}`\n"
-                f"> **Length** • `{track.formatted_duration}` • `320kbps HD`"
-            ),
-            accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
+                f"### {track.title}\n"
+                f"> **Artist:** `{track.author or 'Unknown'}`\n"
+                f"> **Duration:** `{track.formatted_duration}` • **Source:** `Lavalink 320kbps`\n"
+                f"> **Requested by:** {track.requester}"
+            )
         )
+
+        if track.thumbnail:
+            container.add_thumbnail(track.thumbnail)
 
         container.add_separator(divider=True)
 
+        ap_status = "ON" if self.smart_autoplay else "OFF"
+        q_len = len(self.queue)
+        vol_pct = int(self.volume * 100)
         container.add_text(
-            f"> **Channel** • {channel_mention}\n"
-            f"> **Requester** • `{track.requester}`\n\n"
-            f"-# Kyro Music Engine • Studio Audio"
+            f"-# Volume: `{vol_pct}%` • Loop: `{self.loop_mode.upper()}` • Autoplay: `{ap_status}` • Queue: `{q_len}`"
         )
-
         return container
 
-    async def update_controller_message(self, force: bool = False) -> None:
-        """Edit the Now Playing controller card in-place without cluttering channel."""
-        if not self.now_playing_message or not self.current:
-            return
-
-        now = time.time()
-        # Rate-limit automatic dynamic progress updates to avoid Discord 429
-        if not force and (now - self._last_controller_edit) < 4.5:
-            return
-
-        try:
-            from src.cogs.music._views import MusicControlView
-            container = self.build_now_playing_container(self.current)
-            view = MusicControlView(self.bot, self, self.guild.id)
-            await edit_container_response(self.now_playing_message, container, view=view)
-            self._last_controller_edit = now
-        except discord.NotFound:
-            self.now_playing_message = None
-        except Exception as e:
-            logger.debug(f"Controller message edit notice: {e}")
-
-    def _start_progress_loop(self) -> None:
-        """Disabled: Progress timeline bar removed from Now Playing embed."""
-        if self._progress_task and not self._progress_task.done():
-            self._progress_task.cancel()
-        self._progress_task = None
-
-    async def _progress_updater(self) -> None:
-        """Periodically update the live progress bar in-place every 5 seconds."""
-        try:
-            while self.is_playing or self.is_paused:
-                await asyncio.sleep(5.0)
-                if not self.is_paused and self.current and self.now_playing_message:
-                    await self.update_controller_message(force=False)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.debug(f"Progress updater notice: {e}")
-
-    async def send_now_playing_card(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:
-        """Send Now Playing Card directly or edit searching message to prevent duplicate embeds."""
+    async def send_now_playing_card(self, track: Track) -> None:
+        """Post the interactive Now Playing card in home channel."""
         if not self.home_channel:
             return
 
-        from src.cogs.music._views import MusicControlView
-
         container = self.build_now_playing_container(track)
-        view = MusicControlView(self.bot, self, self.guild.id)
+        view = MusicControlView(self.bot, player=self)
 
-        # If we have an existing search message to edit into Now Playing
-        if message_to_edit and isinstance(message_to_edit, discord.Message):
+        if self.controller_message:
             try:
-                await edit_container_response(message_to_edit, container, view=view)
-                self.now_playing_message = message_to_edit
-                self._start_progress_loop()
-                return
+                await self.controller_message.delete()
             except Exception:
                 pass
+            self.controller_message = None
 
         try:
-            self.now_playing_message = await send_container_response(
-                self.home_channel,
-                container,
-                view=view,
+            self.controller_message = await send_container_response(
+                self.home_channel, container, view=view
             )
-            self._start_progress_loop()
         except Exception as e:
-            logger.debug(f"Now playing card send notice: {e}")
+            logger.debug(f"Failed to send now playing card: {e}")
+
+    async def update_controller_message(self, force: bool = False) -> None:
+        """Refresh active controller card."""
+        if not self.controller_message or not self.current:
+            return
+
+        container = self.build_now_playing_container(self.current)
+        view = MusicControlView(self.bot, player=self)
+        try:
+            await edit_container_response(self.controller_message, container, view=view)
+        except Exception as e:
+            logger.debug(f"Failed to edit controller message: {e}")
+
+    # ── Inactivity Timers ──
+
+    def cancel_empty_vc_timer(self, auto_resume: bool = False) -> None:
+        """Cancel idle disconnect timer."""
+        if self._empty_vc_task and not self._empty_vc_task.done():
+            self._empty_vc_task.cancel()
+            self._empty_vc_task = None
+
+    def schedule_empty_vc_timer(self) -> None:
+        """Schedule disconnect after 3 minutes of idle queue."""
+        self.cancel_empty_vc_timer()
+        self._empty_vc_task = asyncio.create_task(self._empty_vc_timeout(180))
+
+    async def _empty_vc_timeout(self, seconds: int) -> None:
+        try:
+            await asyncio.sleep(seconds)
+            if not self.is_playing and not self.queue:
+                if self.home_channel and not self._disconnect_announced:
+                    c = KyroContainer(accent_color=None)
+                    c.add_text("-# Left voice channel due to inactivity.")
+                    try:
+                        await send_container_response(self.home_channel, c)
+                    except Exception:
+                        pass
+                await self.stop()
+        except asyncio.CancelledError:
+            pass

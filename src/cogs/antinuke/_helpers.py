@@ -24,23 +24,29 @@ DANGEROUS_PERMISSIONS = {
 }
 
 
+import datetime
+
+_processed_audit_entry_ids: dict[int, float] = {}
+
+
 async def resolve_audit_perpetrator(
     guild: discord.Guild,
     action: discord.AuditLogAction,
     target_id: int | None = None,
-    max_age_seconds: float = 12.0,
-    retries: int = 2,
-    initial_delay: float = 0.35,
+    max_age_seconds: float = 14.0,
+    retries: int = 3,
+    initial_delay: float = 0.25,
 ) -> discord.Member | discord.User | None:
     """
     Resilient, latency-tolerant audit log resolver for antinuke triggers.
-    Queries up to 6 recent entries with retry backoff to survive Discord gateway lag.
+    Queries up to 8 recent entries with progressive retry backoff (0.25s, 0.5s, 0.85s) to survive Discord gateway lag.
     """
+    delays = [initial_delay, 0.5, 0.85]
     for attempt in range(retries):
-        await asyncio.sleep(initial_delay if attempt == 0 else 0.5)
+        await asyncio.sleep(delays[attempt] if attempt < len(delays) else 0.5)
         try:
             now = discord.utils.utcnow()
-            async for entry in guild.audit_logs(action=action, limit=6):
+            async for entry in guild.audit_logs(action=action, limit=8):
                 elapsed = (now - entry.created_at).total_seconds()
                 if elapsed > max_age_seconds:
                     continue
@@ -70,7 +76,8 @@ async def execute_punishment(
     """
     Executes configured punishment on the unauthorized perpetrator.
     Step 1: Instantly strip all roles (neutralizes permissions in <50ms).
-    Step 2: Ban or Kick according to guild configuration.
+    Step 2: Auto-Quarantine: Apply maximum Discord communication timeout (28 days).
+    Step 3: Ban or Kick according to guild configuration.
     """
     if offender.id == guild.owner_id:
         return "Owner Immune"
@@ -84,27 +91,38 @@ async def execute_punishment(
     member: discord.Member | None = guild.get_member(offender.id)
 
     # 1. Neutralize permissions by stripping roles if member is in guild
+    stripped_count = 0
     if member and member.roles:
         try:
             # Keep @everyone role, strip all manageable custom roles
             strip_targets = [r for r in member.roles if not r.is_default() and r < guild.me.top_role]
             if strip_targets:
                 await member.remove_roles(*strip_targets, reason="Kyro Antinuke: Instant Permission Neutralization")
-                logger.info(f"Guild {guild.id}: Stripped {len(strip_targets)} role(s) from perpetrator {offender.id}")
+                stripped_count = len(strip_targets)
+                logger.info(f"Guild {guild.id}: Stripped {stripped_count} role(s) from perpetrator {offender.id}")
         except (discord.Forbidden, discord.HTTPException) as e:
             logger.warning(f"Guild {guild.id}: Could not strip roles from perpetrator {offender.id}: {e}")
 
-    # 2. Execute Ban / Kick / Strip
+    # 2. Auto-Quarantine: Apply maximum timeout (28 days) so offender is completely silenced
+    if member and guild.me.guild_permissions.moderate_members:
+        try:
+            timeout_duration = discord.utils.utcnow() + datetime.timedelta(days=28)
+            await member.timeout(timeout_duration, reason=audit_reason)
+            logger.info(f"Guild {guild.id}: Applied 28-day auto-quarantine timeout to perpetrator {offender.id}")
+        except Exception as e:
+            logger.debug(f"Guild {guild.id}: Could not apply quarantine timeout to {offender.id}: {e}")
+
+    # 3. Execute Ban / Kick / Quarantine
     if punishment == "ban":
         try:
             await guild.ban(offender, reason=audit_reason, delete_message_seconds=0)
             return "Banned"
         except discord.Forbidden:
             logger.warning(f"Guild {guild.id}: Missing permissions to ban offender {offender.id}")
-            return "Failed (Hierarchy / Permissions)"
+            return "Quarantined (Role Too High to Ban)"
         except Exception as e:
             logger.error(f"Guild {guild.id}: Error banning offender {offender.id}: {e}")
-            return f"Failed ({e})"
+            return f"Quarantined ({e})"
 
     elif punishment == "kick":
         if member:
@@ -112,13 +130,13 @@ async def execute_punishment(
                 await member.kick(reason=audit_reason)
                 return "Kicked"
             except discord.Forbidden:
-                return "Failed (Hierarchy / Permissions)"
+                return "Quarantined (Role Too High to Kick)"
             except Exception as e:
-                return f"Failed ({e})"
+                return f"Quarantined ({e})"
         else:
-            return "Offender not in guild"
+            return "User not in server"
 
-    return "Quarantined"
+    return "Quarantined (Roles Removed + Timed Out)"
 
 
 async def restore_channel(guild: discord.Guild, cached_data: dict[str, Any]) -> discord.abc.GuildChannel | None:
@@ -244,9 +262,9 @@ async def dispatch_antinuke_log(
     container.add_separator(divider=True)
 
     items = [
-        f"> {dot} **Perpetrator:** **{offender}** `「{offender.id}」`",
+        f"> {dot} **User:** **{offender}** `「{offender.id}」`",
         f"> {dot} **Punishment:** `{punishment_result}`",
-        f"> {dot} **Mitigation:** `{recovery_status}`",
+        f"> {dot} **Action Taken:** `{recovery_status}`",
     ]
 
     if extra:
@@ -255,6 +273,20 @@ async def dispatch_antinuke_log(
     container.add_text("\n".join(items))
     container.add_separator(divider=True)
     container.add_text(f"-# Timestamp: <t:{int(discord.utils.utcnow().timestamp())}:f>")
+
+    # Record incident in database and in-memory history cache
+    try:
+        await bot.antinuke_mgr.record_incident(
+            guild_id=guild.id,
+            action=action,
+            perpetrator_id=offender.id,
+            perpetrator_tag=str(offender),
+            punishment=punishment_result,
+            mitigation=recovery_status,
+            details=extra or "",
+        )
+    except Exception as e:
+        logger.debug(f"Notice recording incident: {e}")
 
     # Send to log channel
     if log_channel:
@@ -265,7 +297,7 @@ async def dispatch_antinuke_log(
             logger.warning(f"Guild {guild.id}: Could not send antinuke log to channel {log_channel.id}: {e}")
 
     # Critical DM Alert to Server Owner
-    critical_actions = ["Vanity Hijack", "Everyone Disarm", "Mass Ban Attack", "Mass Channel Delete", "Mass Role Delete"]
+    critical_actions = ["Vanity Hijack", "Everyone Protection", "Mass Ban Attack", "Mass Channel Delete", "Mass Role Delete", "Mass Bot Raid"]
     if any(c in action for c in critical_actions):
         try:
             owner = guild.owner or await guild.fetch_member(guild.owner_id)
@@ -273,7 +305,7 @@ async def dispatch_antinuke_log(
                 from src.utils.containers import send_container_response
                 dm_container = KyroContainer(accent_color=None)
                 dm_container.add_section(
-                    content=f"**{badge_str}Critical Security Incident in {guild.name}**"
+                    content=f"**{badge_str}Security Alert in {guild.name}**\n> Unauthorized attack detected and handled."
                 )
                 dm_container.add_separator(divider=True)
                 dm_container.add_text("\n".join(items))
@@ -282,3 +314,40 @@ async def dispatch_antinuke_log(
                 await send_container_response(owner, dm_container)
         except Exception as e:
             logger.debug(f"Notice sending owner DM alert: {e}")
+
+    # ------------------ AUTO-LOCKDOWN ON COORDINATED MASS RAID ------------------
+    # If 3 or more rapid violations occur within 15 seconds, auto-lockdown the entire guild
+    if bot.antinuke_mgr.check_rapid_raid(guild.id, threshold=3, window_seconds=15.0):
+        if not bot.antinuke_mgr.is_locked_down(guild.id):
+            try:
+                locked_count = await bot.antinuke_mgr.emergency_lockdown(
+                    guild, reason="Kyro Antinuke: Auto-Lockdown (Raid Detected)"
+                )
+                logger.warning(f"Guild {guild.id}: Auto-Lockdown engaged ({locked_count} channels secured)")
+
+                lockdown_card = KyroContainer(accent_color=None)
+                lockdown_card.add_section(
+                    content=f"**{badge_str}Kyro Lockdown**\n> Raid detected. All channels have been locked down for safety."
+                )
+                lockdown_card.add_separator(divider=True)
+                lockdown_card.add_text(
+                    f"> {dot} **Status:** `Locked Down`\n"
+                    f"> {dot} **Locked Channels:** `{locked_count} Channels`\n"
+                    f"> {dot} **Chat & Messages:** `Closed`\n"
+                    f"> {dot} **Voice Speaking:** `Muted`\n"
+                    f"> {dot} **How to open:** Use `,lockdown off` to open all channels back."
+                )
+                lockdown_card.add_separator(divider=True)
+                lockdown_card.add_text(f"-# Kyro Server Lockdown • <t:{int(discord.utils.utcnow().timestamp())}:f>")
+
+                if log_channel:
+                    from src.utils.containers import send_container_response
+                    await send_container_response(log_channel, lockdown_card)
+
+                owner = guild.owner or await guild.fetch_member(guild.owner_id)
+                if owner:
+                    from src.utils.containers import send_container_response
+                    await send_container_response(owner, lockdown_card)
+            except Exception as e:
+                logger.error(f"Guild {guild.id}: Error during automated emergency lockdown: {e}")
+

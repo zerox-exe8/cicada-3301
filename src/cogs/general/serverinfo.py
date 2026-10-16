@@ -312,7 +312,7 @@ class ServerInfoView(discord.ui.View):
 
             container.add_section(
                 content=(
-                    f"### {guild.name} — Roles & Hierarchy\n"
+                    f"### {guild.name} — Roles & Permissions\n"
                     f"> **Assets:** {links_str}\n\n"
                     f"**Role Analytics**\n"
                     f"{dot} Total Roles: `{total_roles}`\n"
@@ -324,7 +324,7 @@ class ServerInfoView(discord.ui.View):
                     f"**Server Expressions**\n"
                     f"{dot} Total Emojis: `{total_emojis}` ({static_emojis} Static, {animated_emojis} Animated)\n"
                     f"{dot} Custom Stickers: `{total_stickers}`\n\n"
-                    f"**Top Hierarchy**\n"
+                    f"**Top Roles**\n"
                     f"{roles_block}{more_str}"
                 )
             )

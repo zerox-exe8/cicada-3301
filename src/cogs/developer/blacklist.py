@@ -105,7 +105,7 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
         # security Guard: Prevent blacklisting Bot Owner or Developers
         if await self.bot.perm_mgr.is_developer(resolved_id):
             container = KyroContainer(accent_color=None)
-            container.add_text("**Security Violation:** Root administrators and developers cannot be blacklisted.")
+            container.add_text("**Cannot Blacklist:** Developers and bot owners cannot be blacklisted.")
             await send_container_response(ctx, container)
             return
 
@@ -140,11 +140,10 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Entity Blacklisted**\n"
+                f"**{target_type.capitalize()} Blacklisted**\n"
                 f"> **Target:** `{target_name}` `「{resolved_id}」`\n"
-                f"> **Scope:** `Global {target_type.capitalize()} Restriction`\n"
                 f"> **Reason:** `{actual_reason}`\n"
-                f"> **Enforced By:** `{ctx.author.name}`"
+                f"> **Moderator:** `{ctx.author.name}`"
             )
         )
         await send_container_response(ctx, container)
@@ -192,9 +191,9 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Entity Unblacklisted**\n"
+                f"**Blacklist Removed**\n"
                 f"> **Target:** `{target_name}` `「{resolved_id}」`\n"
-                f"> **Standing:** `Restoration Approved • Access Restored`"
+                f"> **Status:** `Access Restored`"
             )
         )
         await send_container_response(ctx, container)

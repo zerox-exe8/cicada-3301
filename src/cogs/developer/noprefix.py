@@ -157,9 +157,9 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**No-Prefix Revoked**\n"
+                f"**No-Prefix Removed**\n"
                 f"> **User:** `{target_name}` `「{target_id}」`\n"
-                f"> **Standing:** `Standard Prefix Enforced`"
+                f"> **Status:** `Prefix Required`"
             )
         )
         await send_container_response(ctx, container)

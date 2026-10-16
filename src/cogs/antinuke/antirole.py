@@ -52,7 +52,7 @@ class AntiRoleCog(commands.Cog):
         if cached:
             recreated = await restore_role(guild, cached)
 
-        recovery_msg = f"Auto-Recreated @{recreated.name}" if recreated else "Recreation Failed"
+        recovery_msg = f"Restored @{recreated.name}" if recreated else "Restore Failed"
 
         await dispatch_antinuke_log(
             self.bot,

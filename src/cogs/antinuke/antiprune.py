@@ -47,7 +47,7 @@ class AntiPruneCog(commands.Cog):
             "Anti-Prune",
             perpetrator,
             punish_res,
-            "Perpetrator Neutralized",
+            "Prune Stopped",
             extra="Unauthorized prune attack detected",
         )
 

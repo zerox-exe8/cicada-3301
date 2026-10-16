@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from typing import TYPE_CHECKING
 import logging
 import discord
@@ -203,17 +204,157 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
     status_switch = sw_on if is_enabled else sw_off
     punish_tag = f"`{punishment}`"
     log_tag = log_ch.mention if log_ch else "`None`"
+    is_locked = bot.antinuke_mgr.is_locked_down(guild.id)
+    lockdown_tag = "`Active (Restricted)`" if is_locked else "`Normal`"
 
     bottom_lines = [
         f"> **Status:** {status_switch} **—** **Punishment:** {punish_tag}",
         f"> **Log Channel:** {log_tag}",
-        f"> **Extra Owners:** `{eo_count}`",
+        f"> **Lockdown Mode:** {lockdown_tag} **—** **Extra Owners:** `{eo_count}`",
     ]
     container.add_text("\n".join(bottom_lines))
     container.add_separator(divider=True)
 
     view = AntinukeControlView(bot, guild, author_id)
     return container, view
+
+
+def build_antinuke_status_card(
+    bot: KyroBot,
+    guild: discord.Guild,
+    author: discord.Member | discord.User | None = None,
+) -> KyroContainer:
+    """Build a comprehensive, clean status summary card showing Status, Modules, Punishment, Lockdown, and Logs."""
+    cfg = bot.antinuke_mgr.get_settings(guild.id)
+    is_enabled = cfg.get("enabled", False)
+    dot = bot.custom_emojis.get("heart_dot", "•")
+    sw_on = bot.custom_emojis.get("icon_switch_on", "[ON]")
+    sw_off = bot.custom_emojis.get("icon_switch_off", "[OFF]")
+    status_sw = sw_on if is_enabled else sw_off
+
+    raw_punish = cfg.get("punishment", "strip_roles")
+    punish_map = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}
+    punish_str = punish_map.get(raw_punish, "Quarantine")
+
+    log_ch = bot.antinuke_mgr.get_log_channel(guild)
+    if not log_ch:
+        try:
+            log_ch = bot.log_mgr.get_log_channel(guild, "all")
+        except Exception:
+            pass
+    log_str = log_ch.mention if log_ch else "`None`"
+
+    is_locked = bot.antinuke_mgr.is_locked_down(guild.id)
+    lockdown_tag = "`Active (Restricted)`" if is_locked else "`Normal`"
+
+    all_keys = [
+        "ban", "kick", "bot", "prune", "channel_create", "channel_delete", "channel_update",
+        "role_create", "role_delete", "role_update", "everyone", "member_role", "vanity",
+        "webhook_create", "webhook_delete", "guild_update", "automod", "emoji", "sticker", "integration"
+    ]
+    if is_enabled:
+        active_count = sum(1 for k in all_keys if bot.antinuke_mgr.is_module_enabled(guild.id, k))
+        total_count = len(all_keys)
+        if active_count == total_count:
+            mod_str = f"`All Modules Active ({active_count}/{total_count})`"
+        elif active_count == 0:
+            mod_str = "`No Modules Active`"
+        else:
+            mod_str = f"`{active_count}/{total_count} Modules Active`"
+    else:
+        mod_str = "`Disabled`"
+
+    c = KyroContainer(accent_color=None)
+    title_sub = (
+        "> Antinuke is already active on this server."
+        if is_enabled
+        else "> Antinuke is currently disabled on this server."
+    )
+    c.add_section(content=f"**Kyro Antinuke**\n{title_sub}")
+    c.add_separator(divider=True)
+    c.add_text(
+        f"> {dot} **Status:** {status_sw}\n"
+        f"> {dot} **Protection Modules:** {mod_str}\n"
+        f"> {dot} **Punishment:** `{punish_str}`\n"
+        f"> {dot} **Lockdown:** {lockdown_tag}\n"
+        f"> {dot} **Logs:** {log_str}"
+    )
+    c.add_separator(divider=True)
+    footer = (
+        "-# Use `,antinuke disable` to turn it off or `,antinuke setup` to reconfigure."
+        if is_enabled
+        else "-# Use `,antinuke enable` or `,antinuke setup` to turn it on."
+    )
+    c.add_text(footer)
+    return c
+
+
+def build_lockdown_card(
+    bot: KyroBot,
+    guild: discord.Guild,
+    author: discord.Member | discord.User,
+    affected_channels: int,
+) -> KyroContainer:
+    """Build antinuke-styled server lockdown status card."""
+    dot = bot.custom_emojis.get("heart_dot", "•")
+    sw_on = bot.custom_emojis.get("icon_switch_on", "[ON]")
+
+    container = KyroContainer(accent_color=None)
+    container.add_section(
+        content=(
+            "**Kyro Lockdown**\n"
+            "> *All public channels have been locked down.*"
+        )
+    )
+    container.add_separator(divider=True)
+    container.add_text(
+        f"> {dot} **Status:** {sw_on}\n"
+        f"> {dot} **Locked Channels:** `{affected_channels} Channels`\n"
+        f"> {dot} **Chat & Messages:** `Closed`\n"
+        f"> {dot} **Voice Speaking:** `Muted`\n"
+        f"> {dot} **Raid Protection:** `Active`"
+    )
+    container.add_separator(divider=True)
+    container.add_text(
+        f"> **How to open:** Use `,lockdown off` to open all channels back."
+    )
+    container.add_separator(divider=True)
+    container.add_text(f"-# Executed by {author.display_name} • Kyro Server Lockdown • <t:{int(discord.utils.utcnow().timestamp())}:f>")
+    return container
+
+
+def build_lockdown_lift_card(
+    bot: KyroBot,
+    guild: discord.Guild,
+    author: discord.Member | discord.User,
+    restored_channels: int,
+) -> KyroContainer:
+    """Build antinuke-styled server lockdown lift card."""
+    dot = bot.custom_emojis.get("heart_dot", "•")
+    sw_off = bot.custom_emojis.get("icon_switch_off", "[OFF]")
+
+    container = KyroContainer(accent_color=None)
+    container.add_section(
+        content=(
+            "**Kyro Lockdown**\n"
+            "> *Lockdown has been lifted. Server is open now.*"
+        )
+    )
+    container.add_separator(divider=True)
+    container.add_text(
+        f"> {dot} **Status:** {sw_off}\n"
+        f"> {dot} **Unlocked Channels:** `{restored_channels} Channels`\n"
+        f"> {dot} **Chat & Messages:** `Open`\n"
+        f"> {dot} **Voice Speaking:** `Open`\n"
+        f"> {dot} **Raid Protection:** `Standby`"
+    )
+    container.add_separator(divider=True)
+    container.add_text(
+        f"> **Notice:** All channels are back to normal."
+    )
+    container.add_separator(divider=True)
+    container.add_text(f"-# Lifted by {author.display_name} • Kyro Server Lockdown • <t:{int(discord.utils.utcnow().timestamp())}:f>")
+    return container
 
 
 class AntinukePanelCog(commands.Cog):
@@ -224,12 +365,15 @@ class AntinukePanelCog(commands.Cog):
         self.bot = bot
 
     async def cog_check(self, ctx: CustomContext) -> bool:
-        """Only Guild Owner or registered Extra Owners can configure Antinuke."""
+        """Only Guild Owner, registered Extra Owners, or Administrators (for lockdown) can run Antinuke commands."""
         if not ctx.guild:
             return False
         if ctx.author.id == ctx.guild.owner_id:
             return True
         if self.bot.antinuke_mgr.is_extra_owner(ctx.guild.id, ctx.author.id):
+            return True
+        cmd_name = ctx.command.name if ctx.command else ""
+        if cmd_name in ("lockdown", "standalone_lockdown") and ctx.author.guild_permissions.administrator:
             return True
         raise commands.CheckFailure("Only the **Server Owner** or authorized **Extra Owners** can configure Antinuke.")
 
@@ -241,21 +385,28 @@ class AntinukePanelCog(commands.Cog):
     )
     @commands.guild_only()
     async def antinuke(self, ctx: CustomContext) -> None:
-        """Launch the Antinuke setup, or show a notice if already enabled."""
+        """Launch the Antinuke setup, or show current configuration if already enabled."""
         cfg = self.bot.antinuke_mgr.get_settings(ctx.guild.id)
         if cfg.get("enabled", False):
-            # Already enabled — show a small clean notice
-            dot = self.bot.custom_emojis.get("heart_dot", "•")
-            sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
-            c = KyroContainer(accent_color=None)
-            c.add_section(content="**Kyro Antinuke**\n> Antinuke is already active on this server.")
-            c.add_separator(divider=True)
-            c.add_text(f"> {dot} **Status:** {sw_on}")
-            c.add_separator(divider=True)
-            c.add_text(f"-# Use `,antinuke disable` to turn it off.")
+            # Already enabled — show clean notice with Status, Modules, Punishment, and Logs
+            c = build_antinuke_status_card(self.bot, ctx.guild, ctx.author)
             await send_container_response(ctx, c)
             return
 
+        from src.cogs.antinuke._setup_view import AntinukeSetupWizard
+        wizard = AntinukeSetupWizard(self.bot, ctx.guild, ctx.author)
+        container = wizard.get_dashboard_container()
+        await send_container_response(ctx, container, view=wizard)
+
+    @antinuke.command(name="show", aliases=["config", "settings", "status", "info"], description="Show current Antinuke configuration, modules, punishment, and logs.")
+    async def antinuke_show(self, ctx: CustomContext) -> None:
+        """Display the complete antinuke status, modules, punishment and log channel."""
+        c = build_antinuke_status_card(self.bot, ctx.guild, ctx.author)
+        await send_container_response(ctx, c)
+
+    @antinuke.command(name="setup", description="Launch the step-by-step Antinuke setup wizard.")
+    async def antinuke_setup(self, ctx: CustomContext) -> None:
+        """Launch the Antinuke setup wizard explicitly."""
         from src.cogs.antinuke._setup_view import AntinukeSetupWizard
         wizard = AntinukeSetupWizard(self.bot, ctx.guild, ctx.author)
         container = wizard.get_dashboard_container()
@@ -267,27 +418,9 @@ class AntinukePanelCog(commands.Cog):
         guild = ctx.guild
         cfg = self.bot.antinuke_mgr.get_settings(guild.id)
 
-        # If already enabled, show a small notice — don't re-run setup
+        # If already enabled, show the comprehensive status card — don't re-run setup
         if cfg.get("enabled", False):
-            dot = self.bot.custom_emojis.get("heart_dot", "•")
-            sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
-            raw_punish = cfg.get("punishment", "strip_roles")
-            punish_map = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}
-            punish_str = punish_map.get(raw_punish, "Quarantine")
-            log_ch = self.bot.antinuke_mgr.get_log_channel(guild)
-            log_str = log_ch.mention if log_ch else "`None`"
-
-            c = KyroContainer(accent_color=None)
-            c.add_section(content="**Kyro Antinuke**\n> Antinuke is already active on this server.")
-            c.add_separator(divider=True)
-            c.add_text(
-                f"> {dot} **Status:** {sw_on}\n"
-                f"> {dot} **Protection Modules:** `All Modules Active`\n"
-                f"> {dot} **Punishment:** `{punish_str}`\n"
-                f"> {dot} **Logs:** {log_str}"
-            )
-            c.add_separator(divider=True)
-            c.add_text("-# Use `,antinuke disable` to turn it off.")
+            c = build_antinuke_status_card(self.bot, guild, ctx.author)
             await send_container_response(ctx, c)
             return
 
@@ -306,6 +439,15 @@ class AntinukePanelCog(commands.Cog):
         sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
         log_str = log_channel.mention if log_channel else "`None`"
 
+        all_keys = [
+            "ban", "kick", "bot", "prune", "channel_create", "channel_delete", "channel_update",
+            "role_create", "role_delete", "role_update", "everyone", "member_role", "vanity",
+            "webhook_create", "webhook_delete", "guild_update", "automod", "emoji", "sticker", "integration"
+        ]
+        active_count = sum(1 for k in all_keys if self.bot.antinuke_mgr.is_module_enabled(guild.id, k))
+        total_count = len(all_keys)
+        mod_disp = f"`All Modules Active ({active_count}/{total_count})`" if active_count == total_count else f"`{active_count}/{total_count} Modules Active`"
+
         container = KyroContainer(accent_color=None)
         container.add_section(
             content="**Kyro Antinuke**\n> Antinuke is now active and protecting your server."
@@ -313,7 +455,7 @@ class AntinukePanelCog(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(
             f"> {dot} **Status:** {sw_on}\n"
-            f"> {dot} **Protection Modules:** `All Modules Active`\n"
+            f"> {dot} **Protection Modules:** {mod_disp}\n"
             f"> {dot} **Punishment:** `Quarantine`\n"
             f"> {dot} **Logs:** {log_str}"
         )
@@ -337,6 +479,9 @@ class AntinukePanelCog(commands.Cog):
 
         dot = self.bot.custom_emojis.get("heart_dot", "•")
         sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
+        raw_punish = self.bot.antinuke_mgr.get_settings(guild.id).get("punishment", "strip_roles")
+        punish_map = {"ban": "Ban", "kick": "Kick", "strip_roles": "Quarantine"}
+        punish_str = punish_map.get(raw_punish, "Quarantine")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
@@ -346,7 +491,12 @@ class AntinukePanelCog(commands.Cog):
             )
         )
         container.add_separator(divider=True)
-        container.add_text(f"> {dot} **Status:** {sw_off}")
+        container.add_text(
+            f"> {dot} **Status:** {sw_off}\n"
+            f"> {dot} **Protection Modules:** `Disabled`\n"
+            f"> {dot} **Punishment:** `{punish_str}`\n"
+            f"> {dot} **Logs:** `None`"
+        )
         container.add_separator(divider=True)
         container.add_text(f"-# Disabled by {ctx.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
         await send_container_response(ctx, container)
@@ -392,6 +542,67 @@ class AntinukePanelCog(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(f"{dot} **Target Channel:** {channel.mention}")
         await send_container_response(ctx, container)
+
+    # ------------------ SERVER LOCKDOWN COMMAND ------------------
+
+    @antinuke.command(name="lockdown", description="Freeze or unfreeze public messaging across all channels.")
+    @app_commands.describe(action="'on' to freeze, 'off' to restore permissions")
+    async def antinuke_lockdown(self, ctx: CustomContext, action: str = "") -> None:
+        """Lockdown sub-command under antinuke."""
+        await self._handle_lockdown(ctx, action)
+
+    @commands.command(name="lockdown", description="Freeze or unfreeze public messaging across all channels.")
+    async def standalone_lockdown(self, ctx: CustomContext, action: str = "") -> None:
+        """
+        Server lockdown command.
+        Usage:
+          ,lockdown on   -> Locks all channels
+          ,lockdown off  -> Unlocks all channels
+          ,lockdown      -> Toggles lockdown on / off
+        """
+        await self._handle_lockdown(ctx, action)
+
+    async def _handle_lockdown(self, ctx: CustomContext, action: str = "") -> None:
+        guild = ctx.guild
+        clean = action.strip().lower()
+
+        # Unlock branch
+        if clean in ("off", "lift", "disable", "stop", "unlock", "end"):
+            if not self.bot.antinuke_mgr.is_locked_down(guild.id):
+                await ctx.send_warning("This server is **not currently in lockdown**.")
+                return
+            restored = await self.bot.antinuke_mgr.emergency_unlock(
+                guild, reason=f"Lockdown lifted by {ctx.author}"
+            )
+            card = build_lockdown_lift_card(self.bot, guild, ctx.author, restored)
+            await send_container_response(ctx, card)
+            return
+
+        # Lock branch
+        if clean in ("on", "enable", "start", "freeze"):
+            if self.bot.antinuke_mgr.is_locked_down(guild.id):
+                await ctx.send_warning("This server is **already in lockdown**. Use `,lockdown off` to restore.")
+                return
+            affected = await self.bot.antinuke_mgr.emergency_lockdown(
+                guild, reason=f"Lockdown ordered by {ctx.author}"
+            )
+            card = build_lockdown_card(self.bot, guild, ctx.author, affected)
+            await send_container_response(ctx, card)
+            return
+
+        # Smart toggle if no explicit argument was passed
+        if self.bot.antinuke_mgr.is_locked_down(guild.id):
+            restored = await self.bot.antinuke_mgr.emergency_unlock(
+                guild, reason=f"Lockdown lifted by {ctx.author}"
+            )
+            card = build_lockdown_lift_card(self.bot, guild, ctx.author, restored)
+            await send_container_response(ctx, card)
+        else:
+            affected = await self.bot.antinuke_mgr.emergency_lockdown(
+                guild, reason=f"Lockdown ordered by {ctx.author}"
+            )
+            card = build_lockdown_card(self.bot, guild, ctx.author, affected)
+            await send_container_response(ctx, card)
 
 
 async def setup(bot: KyroBot) -> None:

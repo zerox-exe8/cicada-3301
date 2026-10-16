@@ -57,6 +57,12 @@ class AntinukeManager:
         self._role_cache: dict[int, dict[int, dict[str, Any]]] = {}
         # Vanity code cache: guild_id -> vanity_str
         self._vanity_cache: dict[int, str | None] = {}
+        # Emergency lockdown state: guild_id -> bool
+        self._lockdown_state: dict[int, bool] = {}
+        # Original @everyone channel overwrites during lockdown: guild_id -> {channel_id: discord.PermissionOverwrite}
+        self._lockdown_overwrites: dict[int, dict[int, discord.PermissionOverwrite]] = {}
+        # Recent incident history cache: guild_id -> list[dict[str, Any]]
+        self._incident_cache: dict[int, list[dict[str, Any]]] = {}
 
     async def load_cache(self) -> None:
         """Load all guild antinuke configurations and whitelists into memory."""
@@ -127,6 +133,20 @@ class AntinukeManager:
                 "is_full": bool(row.get("is_full", True)),
                 "scope": scope_set,
             }
+
+        # 4. Load recent incident logs
+        try:
+            recent_logs = await self.db.fetch_all(
+                "SELECT * FROM antinuke_incident_logs ORDER BY created_at DESC LIMIT 200;"
+            )
+            for row in recent_logs:
+                g_id = int(row["guild_id"])
+                if g_id not in self._incident_cache:
+                    self._incident_cache[g_id] = []
+                if len(self._incident_cache[g_id]) < 15:
+                    self._incident_cache[g_id].append(dict(row))
+        except Exception as e:
+            logger.debug(f"Notice preloading antinuke incident logs: {e}")
 
         logger.info(
             f"Loaded antinuke configs for {len(self._settings)} guild(s), {len(wl_rows)} whitelisted entity/entities "
@@ -516,3 +536,167 @@ class AntinukeManager:
     def update_cached_vanity(self, guild_id: int, vanity_code: str | None) -> None:
         """Update cached legitimate vanity code."""
         self._vanity_cache[guild_id] = vanity_code
+
+    # ------------------ EMERGENCY LOCKDOWN METHODS ------------------
+
+    def is_locked_down(self, guild_id: int) -> bool:
+        """Check if guild is currently in emergency lockdown."""
+        return self._lockdown_state.get(guild_id, False)
+
+    async def emergency_lockdown(
+        self, guild: discord.Guild, reason: str = "Kyro Antinuke: Emergency Lockdown Protocol"
+    ) -> int:
+        """
+        Instant guild-wide lockdown.
+        Disables message sending, thread creation, reactions, and speaking for @everyone across all channels.
+        Caches original overwrites to allow a lossless restoration upon unlock.
+        Returns count of affected channels.
+        """
+        if guild.id not in self._lockdown_overwrites:
+            self._lockdown_overwrites[guild.id] = {}
+
+        affected = 0
+        everyone_role = guild.default_role
+
+        for ch in guild.channels:
+            if not ch.permissions_for(guild.me).manage_roles:
+                continue
+
+            current_ow = ch.overwrites_for(everyone_role)
+            # Save original overwrite if not already cached
+            if ch.id not in self._lockdown_overwrites[guild.id]:
+                self._lockdown_overwrites[guild.id][ch.id] = discord.PermissionOverwrite(
+                    **{k: getattr(current_ow, k) for k in discord.PermissionOverwrite.VALID_NAMES}
+                )
+
+            # Apply lockdown restrictions
+            try:
+                new_ow = discord.PermissionOverwrite(
+                    **{k: getattr(current_ow, k) for k in discord.PermissionOverwrite.VALID_NAMES}
+                )
+                new_ow.send_messages = False
+                new_ow.send_messages_in_threads = False
+                new_ow.create_public_threads = False
+                new_ow.create_private_threads = False
+                new_ow.add_reactions = False
+                new_ow.speak = False
+
+                await ch.set_permissions(everyone_role, overwrite=new_ow, reason=reason)
+                affected += 1
+            except Exception as e:
+                logger.debug(f"Lockdown failed for channel {ch.id}: {e}")
+
+        self._lockdown_state[guild.id] = True
+        return affected
+
+    async def emergency_unlock(
+        self, guild: discord.Guild, reason: str = "Kyro Antinuke: Emergency Lockdown Lifted"
+    ) -> int:
+        """
+        Lift emergency lockdown by restoring original channel permissions for @everyone.
+        Returns count of restored channels.
+        """
+        everyone_role = guild.default_role
+        cached_ows = self._lockdown_overwrites.pop(guild.id, {})
+        restored = 0
+
+        for ch in guild.channels:
+            if not ch.permissions_for(guild.me).manage_roles:
+                continue
+
+            orig_ow = cached_ows.get(ch.id)
+            try:
+                if orig_ow:
+                    await ch.set_permissions(everyone_role, overwrite=orig_ow, reason=reason)
+                else:
+                    current_ow = ch.overwrites_for(everyone_role)
+                    new_ow = discord.PermissionOverwrite(
+                        **{k: getattr(current_ow, k) for k in discord.PermissionOverwrite.VALID_NAMES}
+                    )
+                    new_ow.send_messages = None
+                    new_ow.send_messages_in_threads = None
+                    new_ow.create_public_threads = None
+                    new_ow.create_private_threads = None
+                    new_ow.add_reactions = None
+                    new_ow.speak = None
+                    await ch.set_permissions(everyone_role, overwrite=new_ow, reason=reason)
+                restored += 1
+            except Exception as e:
+                logger.debug(f"Unlock failed for channel {ch.id}: {e}")
+
+        self._lockdown_state[guild.id] = False
+        return restored
+
+    # ------------------ ATTACK INCIDENT HISTORY METHODS ------------------
+
+    async def record_incident(
+        self,
+        guild_id: int,
+        action: str,
+        perpetrator_id: int,
+        perpetrator_tag: str,
+        punishment: str,
+        mitigation: str,
+        details: str = "",
+    ) -> None:
+        """Store an antinuke security incident in DB and memory cache."""
+        item = {
+            "guild_id": guild_id,
+            "action": action,
+            "perpetrator_id": perpetrator_id,
+            "perpetrator_tag": perpetrator_tag,
+            "punishment": punishment,
+            "mitigation": mitigation,
+            "details": details,
+            "created_at": discord.utils.utcnow(),
+        }
+
+        if guild_id not in self._incident_cache:
+            self._incident_cache[guild_id] = []
+        self._incident_cache[guild_id].insert(0, item)
+        if len(self._incident_cache[guild_id]) > 25:
+            self._incident_cache[guild_id].pop()
+
+        try:
+            await self.db.execute(
+                """
+                INSERT INTO antinuke_incident_logs (guild_id, action, perpetrator_id, perpetrator_tag, punishment, mitigation, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                guild_id,
+                action,
+                perpetrator_id,
+                perpetrator_tag,
+                punishment,
+                mitigation,
+                details,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to record antinuke incident in DB: {e}")
+
+    async def get_incident_history(self, guild_id: int, limit: int = 10) -> list[dict[str, Any]]:
+        """Retrieve recent security attack incidents."""
+        if guild_id in self._incident_cache and len(self._incident_cache[guild_id]) >= limit:
+            return self._incident_cache[guild_id][:limit]
+
+        try:
+            rows = await self.db.fetch_all(
+                "SELECT * FROM antinuke_incident_logs WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?;",
+                guild_id,
+                limit,
+            )
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.warning(f"Failed to fetch antinuke incident history: {e}")
+            return self._incident_cache.get(guild_id, [])[:limit]
+
+    def check_rapid_raid(self, guild_id: int, threshold: int = 3, window_seconds: float = 12.0) -> bool:
+        """Check if multiple rapid security violations are happening across the guild simultaneously."""
+        now = time.monotonic()
+        key = f"raid:{guild_id}"
+        history = self._action_history.get(key, [])
+        valid_history = [ts for ts in history if now - ts <= window_seconds]
+        valid_history.append(now)
+        self._action_history[key] = valid_history
+        return len(valid_history) >= threshold
+

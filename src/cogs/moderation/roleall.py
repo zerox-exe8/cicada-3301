@@ -110,7 +110,7 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
         valid, err = self._validate_role_hierarchy(ctx, target_role)
         if not valid:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Hierarchy Error**\n> {err}")
+            container.add_section(content=f"**Role Too High**\n> {err}")
             container.add_separator(divider=True)
             container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())
@@ -166,7 +166,7 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
         valid, err = self._validate_role_hierarchy(ctx, target_role)
         if not valid:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Hierarchy Error**\n> {err}")
+            container.add_section(content=f"**Role Too High**\n> {err}")
             container.add_separator(divider=True)
             container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container, allowed_mentions=discord.AllowedMentions.none())

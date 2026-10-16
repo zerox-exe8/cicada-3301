@@ -716,6 +716,21 @@ class PostgresDatabase(BaseDatabase):
                 PRIMARY KEY (guild_id, role_id)
             );
             """,
+            # Antinuke Incident & Attack History table
+            """
+            CREATE TABLE IF NOT EXISTS antinuke_incident_logs (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                action VARCHAR(100) NOT NULL,
+                perpetrator_id BIGINT NOT NULL,
+                perpetrator_tag VARCHAR(100) NOT NULL,
+                punishment VARCHAR(50) NOT NULL,
+                mitigation TEXT NOT NULL,
+                details TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_antinuke_incident_logs_guild ON antinuke_incident_logs(guild_id, created_at DESC);",
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

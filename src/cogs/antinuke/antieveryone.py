@@ -69,7 +69,7 @@ class AntiEveryoneCog(commands.Cog):
             f"Escalated [{', '.join(escalated)}] on @{after.name}",
         )
 
-        recovery_msg = f"Disarmed permissions: {', '.join(escalated)}" if disarmed else "Disarm Failed"
+        recovery_msg = f"Removed permissions: {', '.join(escalated)}" if disarmed else "Removal Failed"
 
         await dispatch_antinuke_log(
             self.bot,

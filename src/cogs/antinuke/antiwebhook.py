@@ -65,7 +65,7 @@ class AntiWebhookCog(commands.Cog):
                     self.bot, guild, perpetrator, "Anti-Webhook", f"Created rogue webhook in #{channel.name}"
                 )
 
-                mitigation = "Rogue Webhook Eliminated" if killed else "Webhook Neutralized"
+                mitigation = "Webhook Deleted" if killed else "Webhook Blocked"
 
                 await dispatch_antinuke_log(
                     self.bot,

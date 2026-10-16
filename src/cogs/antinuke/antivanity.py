@@ -65,7 +65,7 @@ class AntiVanityCog(commands.Cog):
             perpetrator,
             punish_res,
             recovery_msg,
-            extra=f"Original: `{before.vanity_url_code}` • Tampered: `{after.vanity_url_code}`",
+            extra=f"Original: `{before.vanity_url_code}` • Changed to: `{after.vanity_url_code}`",
         )
 
 

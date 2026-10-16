@@ -85,12 +85,12 @@ class AntinukeExtraOwnerCog(commands.Cog):
         container.add_text(f"{dot} **User:** **{user.name}** `「{user.id}」`")
         await send_container_response(ctx, container)
 
-    @extraowner.command(name="remove", description="Revoke Extra Owner status from a user (Server Owner only).")
-    @app_commands.describe(user="User to revoke Extra Owner from")
+    @extraowner.command(name="remove", description="Remove Extra Owner status from a user (Server Owner only).")
+    @app_commands.describe(user="User to remove Extra Owner from")
     async def extraowner_remove(self, ctx: CustomContext, user: discord.User) -> None:
-        """Revoke Extra Owner status."""
+        """Remove Extra Owner status."""
         if ctx.author.id != ctx.guild.owner_id:
-            await ctx.send_error("Only the **Server Owner** can revoke Extra Owners.")
+            await ctx.send_error("Only the **Server Owner** can remove Extra Owners.")
             return
 
         if not self.bot.antinuke_mgr.is_extra_owner(ctx.guild.id, user.id):
@@ -100,9 +100,9 @@ class AntinukeExtraOwnerCog(commands.Cog):
         await self.bot.antinuke_mgr.remove_extra_owner(ctx.guild.id, user.id)
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Extra Owner Revoked**")
+        container.add_section(content="**Extra Owner Removed**")
         container.add_separator(divider=True)
-        container.add_text(f"• **User:** **{user.name}** `「{user.id}」` has been demoted.")
+        container.add_text(f"• **User:** **{user.name}** `「{user.id}」` has been removed.")
         await send_container_response(ctx, container)
 
     @extraowner.command(name="list", aliases=["show"], description="List all registered Extra Owners.")

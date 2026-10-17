@@ -120,6 +120,19 @@ class EmojiRegistry:
                             logger.info("Auto-uploaded discord_giveaway to application emojis.")
                         except Exception as e:
                             logger.debug(f"Could not auto-upload discord_giveaway emoji: {e}")
+
+                # Auto-sync s_giveaway emoji from assets/emoji
+                if "s_giveaway" not in self._emojis and len(self._emojis) < 50:
+                    sg_path = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji" / "S_Giveaway.png"
+                    if sg_path.exists():
+                        try:
+                            with open(sg_path, "rb") as f:
+                                data = f.read()
+                            new_e = await self.bot.create_application_emoji(name="s_giveaway", image=data)
+                            self._emojis["s_giveaway"] = new_e
+                            logger.info("Auto-uploaded s_giveaway to application emojis.")
+                        except Exception as e:
+                            logger.debug(f"Could not auto-upload s_giveaway emoji: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 
@@ -259,8 +272,9 @@ class EmojiRegistry:
                 "room_icon_mute": ["volume_down", "icons_micmute"],
                 # System Features
                 "media": ["icon_media", "icons_image", "icons_file"],
-                "giveaway": ["discord_giveaway", "s_giveaway", "icons_gift"],
-                "discord_giveaway": ["giveaway", "s_giveaway", "icons_gift"],
+                "giveaway": ["s_giveaway", "discord_giveaway", "icons_gift"],
+                "discord_giveaway": ["s_giveaway", "giveaway", "icons_gift"],
+                "s_giveaway": ["discord_giveaway", "giveaway", "icons_gift"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)
@@ -321,8 +335,9 @@ class EmojiRegistry:
                 "room_icon_mute": ["volume_down", "icons_micmute"],
                 # System Features
                 "media": ["icon_media", "icons_image", "icons_file"],
-                "giveaway": ["discord_giveaway", "s_giveaway", "icons_gift"],
-                "discord_giveaway": ["giveaway", "s_giveaway", "icons_gift"],
+                "giveaway": ["s_giveaway", "discord_giveaway", "icons_gift"],
+                "discord_giveaway": ["s_giveaway", "giveaway", "icons_gift"],
+                "s_giveaway": ["discord_giveaway", "giveaway", "icons_gift"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)

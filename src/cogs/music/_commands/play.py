@@ -83,10 +83,81 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     search_container.add_text(f"**Searching:** `{query}`...")
     search_msg = await send_container_response(ctx, search_container)
 
-    # ── Step 1: Direct Lavalink Search (Instant official YouTube, Spotify, SoundCloud & Queries) ──
+    # ── Step 0: Check if Playlist URL (Spotify, YouTube, SoundCloud) ──
+    if is_playlist_url(query):
+        pl = await NativeExtractor.extract_playlist(query, requester=ctx.author.display_name)
+        if pl and pl.tracks:
+            was_idle = not player.is_playing and not player.is_paused
+            first_item = pl.tracks[0]
+            first_track = Track(
+                title=first_item.title,
+                author=first_item.author,
+                url=first_item.url or query,
+                stream_url="",
+                duration=first_item.duration,
+                thumbnail=pl.thumbnail,
+                requester=ctx.author.display_name,
+                requester_id=ctx.author.id,
+                query=first_item.query or f"{first_item.title} {first_item.author}",
+            )
+            for it in pl.tracks[1:]:
+                t = Track(
+                    title=it.title,
+                    author=it.author,
+                    url=it.url or query,
+                    stream_url="",
+                    duration=it.duration,
+                    thumbnail=pl.thumbnail,
+                    requester=ctx.author.display_name,
+                    requester_id=ctx.author.id,
+                    query=it.query or f"{it.title} {it.author}",
+                )
+                player.queue.append(t)
+            if was_idle:
+                await player.play_track(first_track, message_to_edit=search_msg)
+            else:
+                player.queue.insert(0, first_track)
+            pl_card = KyroContainer(accent_color=None)
+            pl_card.add_section(
+                content=(
+                    f"**Queued Playlist: [{pl.title}]({query})**\n"
+                    f"> **Total Tracks:** `{len(pl.tracks)} songs`\n"
+                    f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
+                    f"> **Requested By:** `{ctx.author.display_name}`"
+                ) if was_idle else (
+                    f"**Queued Playlist: [{pl.title}]({query})**\n"
+                    f"> **Total Tracks Added:** `{len(pl.tracks)} songs`\n"
+                    f"> **Requested By:** `{ctx.author.display_name}`"
+                )
+            )
+            await send_container_response(ctx, pl_card)
+            return
+        elif "spotify.com" in query:
+            err_c = KyroContainer(accent_color=None)
+            err_c.add_section(
+                content=(
+                    "**Spotify Playlist Unavailable / Private**\n"
+                    "> Kyro could not load this Spotify playlist.\n"
+                    "> If this is a personal playlist, please open **Spotify** -> click **3 dots (`...`)** -> **Make Public** so Kyro can load the songs!"
+                )
+            )
+            if search_msg:
+                try:
+                    await edit_container_response(search_msg, err_c)
+                    return
+                except Exception:
+                    pass
+            await send_container_response(ctx, err_c)
+            return
+
+    # ── Step 1: Direct Lavalink Search (Instant official YouTube Music, SoundCloud & Queries) ──
     track: Optional[Track] = None
+    lookup_target = query.strip()
+    if not lookup_target.startswith("http://") and not lookup_target.startswith("https://"):
+        lookup_target = f"ytmsearch:{lookup_target}"
+
     try:
-        results = await wavelink.Playable.search(query)
+        results = await wavelink.Playable.search(lookup_target)
         if isinstance(results, wavelink.Playlist) and results.tracks:
             pl = results
             was_idle = not player.is_playing and not player.is_paused

@@ -1191,6 +1191,49 @@ class NativeExtractor:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
+        # Tier 0: spotifyscraper (Universal public scraper - 0% rate limits, no Premium requirement)
+        try:
+            from spotify_scraper import SpotifyClient
+            def _scrape_sync():
+                with SpotifyClient() as client:
+                    if entity_type == "album":
+                        alb = client.get_album(url)
+                        items = alb.tracks
+                        t_name = alb.name
+                        t_author = ", ".join(a.name for a in alb.artists)
+                    else:
+                        pl = client.get_playlist(url)
+                        items = [it.track for it in pl.tracks]
+                        t_name = pl.name
+                        t_author = "Spotify"
+                    res_tracks = []
+                    for t in items:
+                        t_title = t.name
+                        t_art = ", ".join(a.name for a in t.artists) if hasattr(t, "artists") else ""
+                        q_str = f"{t_title} {t_art}".strip() if t_art else t_title
+                        res_tracks.append(PlaylistTrackItem(
+                            title=t_title,
+                            author=t_art or "Spotify Artist",
+                            query=q_str,
+                            duration=int(getattr(t, "duration_ms", 0) // 1000) if hasattr(t, "duration_ms") else 180,
+                            url=getattr(t, "url", None),
+                        ))
+                    return t_name, t_author, res_tracks
+
+            res = await asyncio.to_thread(_scrape_sync)
+            if res and res[2]:
+                pl_title, pl_author, tracks = res
+                return PlaylistResult(
+                    title=clean_track_title(pl_title),
+                    author=pl_author,
+                    url=url,
+                    tracks=tracks,
+                    thumbnail=None,
+                    requester=requester,
+                )
+        except Exception as e:
+            logger.debug(f"spotifyscraper extraction notice: {e}")
+
         try:
             async with aiohttp.ClientSession() as session:
                 # Tier 0: Official Spotify Web API (Fastest, 100% accurate, no scraping blocks)

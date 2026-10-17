@@ -172,7 +172,8 @@ class GuildPlayer:
         search_target = track.url or track.query or f"{track.title} {track.author}".strip()
         if search_target:
             try:
-                results = await wavelink.Playable.search(search_target)
+                lookup = search_target if search_target.startswith("http") else f"ytmsearch:{search_target}"
+                results = await wavelink.Playable.search(lookup)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:

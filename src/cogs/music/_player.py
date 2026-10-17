@@ -180,8 +180,12 @@ class GuildPlayer:
         """Return True only if url is a raw audio stream Lavalink can play via HTTP."""
         if not url or not url.startswith("http"):
             return False
-        # JioSaavn / Spotify / YouTube page URLs are NOT direct streams
-        return not any(domain in url for domain in self._NON_STREAM_DOMAINS)
+        # Only JioSaavn Akamai MP4/AAC CDN direct streams are 100% playable via Lavalink HTTP.
+        # SoundCloud HLS (.m3u8), Spotify web, YouTube links return 403 on raw HTTP.
+        u_low = url.lower()
+        if any(dom in u_low for dom in ("saavncdn.com", "jiosaavn.com")) and ".mp4" in u_low:
+            return True
+        return False
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
         """Resolve Lavalink Playable via direct playable, YouTube URL, or YouTube search."""
@@ -230,17 +234,26 @@ class GuildPlayer:
         search_target = f"{track.title} {track.author}".strip() or track.query or track.title
         if search_target:
             try:
-                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic)
+                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube)
                 if results:
-                    logger.debug(f"YouTube search fallback resolved '{track.title}' successfully")
+                    logger.debug(f"YouTube search resolved '{track.title}' successfully")
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"YouTube search fallback error for '{search_target}': {e}")
+                logger.debug(f"YouTube search error for '{search_target}': {e}")
+
+        # ── Priority 3.5: Fallback search with original query ──
+        if track.query and track.query != search_target:
+            try:
+                results = await wavelink.Playable.search(track.query, source=wavelink.TrackSource.YouTube)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"YouTube query search error for '{track.query}': {e}")
 
         # ── Priority 4: Plain title search fallback ──
         if track.title:
             try:
-                results = await wavelink.Playable.search(track.title, source=wavelink.TrackSource.YouTubeMusic)
+                results = await wavelink.Playable.search(track.title, source=wavelink.TrackSource.YouTube)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
@@ -293,6 +306,15 @@ class GuildPlayer:
     async def on_track_end(self, reason: Optional[str] = None) -> None:
         """Invoked when Lavalink finishes playing a track."""
         if reason and str(reason).lower() in ("replaced", "cleanup"):
+            return
+
+        if reason and str(reason).lower() in ("loadfailed", "load_failed"):
+            logger.warning(f"Guild {self.guild.id}: Lavalink reported track loadFailed.")
+            if self.queue:
+                next_track = self.queue.pop(0)
+                await self.play_track(next_track)
+            else:
+                self.current = None
             return
 
         now = time.time()

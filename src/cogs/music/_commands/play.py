@@ -163,8 +163,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         except Exception as e:
             logger.debug(f"Spotify track title fetch error: {e}")
 
-    is_yt = any(yt in lookup_target.lower() for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/"))
-    is_direct_url = (lookup_target.startswith("http://") or lookup_target.startswith("https://")) and not is_yt
+    is_direct_url = lookup_target.startswith(("http://", "https://"))
 
     if is_direct_url:
         try:
@@ -234,8 +233,9 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 track._playable = top_p
         except Exception as e:
             logger.debug(f"Direct Wavelink search notice: {e}")
-    else:
-        # Plain text query: Try NativeExtractor (unblocked 320kbps CDN) first to avoid datacenter YouTube block
+
+    if not track:
+        # Plain text query or unhandled URL: Try NativeExtractor (unblocked 320kbps CDN) first
         try:
             track = await NativeExtractor.extract(lookup_target, requester=ctx.author.display_name)
         except Exception as e:

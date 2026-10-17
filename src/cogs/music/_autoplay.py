@@ -220,15 +220,6 @@ class NativeSmartAutoplay:
                 v_url = e_id if str(e_id).startswith("http") else f"https://www.youtube.com/watch?v={e_id}"
                 e_clean = clean_track_title(e_title)
 
-                # Prioritize unblocked NativeExtractor CDN stream
-                try:
-                    cand_trk = await NativeExtractor.extract(e_clean, requester="⚡ Smart Autoplay Radio", is_autoplay=True)
-                    if cand_trk and getattr(cand_trk, "stream_url", None):
-                        played_history.add(cand_norm)
-                        return cand_trk
-                except Exception as e:
-                    logger.debug(f"Autoplay NativeExtractor notice: {e}")
-
                 import wavelink
                 try:
                     target = v_url or e_clean
@@ -257,19 +248,9 @@ class NativeSmartAutoplay:
         except Exception as e:
             logger.debug(f"YouTube radio mix notice: {e}")
 
-        # Strategy 2: Multi-Query Recommendations (NativeExtractor first, then Wavelink fallback)
+        # Strategy 2: Wavelink Multi-Query Recommendations Fallback
         import wavelink
         for q in queries:
-            try:
-                cand_trk = await NativeExtractor.extract(q, requester="⚡ Smart Autoplay Radio", is_autoplay=True)
-                if cand_trk and getattr(cand_trk, "stream_url", None):
-                    top_norm = normalize_history_title(cand_trk.title or "")
-                    if top_norm and top_norm not in played_history and top_norm != norm_curr_title:
-                        played_history.add(top_norm)
-                        return cand_trk
-            except Exception as e:
-                logger.debug(f"Autoplay NativeExtractor query notice: {e}")
-
             try:
                 res = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTubeMusic)
                 if res:

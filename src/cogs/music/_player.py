@@ -186,6 +186,16 @@ class GuildPlayer:
         if playable:
             return playable
 
+        # ── Priority 1.5: Direct Stream URL (JioSaavn 320kbps CDN stream) ──
+        stream_url = getattr(track, "stream_url", None)
+        if stream_url and self._is_direct_stream_url(stream_url):
+            try:
+                results = await wavelink.Playable.search(stream_url)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"Direct stream URL resolve error for '{stream_url}': {e}")
+
         # ── Priority 2: Direct YouTube URL → Lavalink handles directly ──
         url = track.url or ""
         is_yt = "youtu" in url
@@ -216,17 +226,6 @@ class GuildPlayer:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
                 logger.debug(f"Title fallback error for '{track.title}': {e}")
-
-        # ── Priority 5: SoundCloud Fallback if YouTube blocks/fails ──
-        fallback_query = search_target or track.title or track.query
-        if fallback_query:
-            try:
-                results = await wavelink.Playable.search(fallback_query, source=wavelink.TrackSource.SoundCloud)
-                if results:
-                    logger.info(f"SoundCloud fallback successfully resolved '{track.title}'")
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"SoundCloud fallback notice for '{fallback_query}': {e}")
 
         return None
 

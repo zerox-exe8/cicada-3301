@@ -121,7 +121,7 @@ class GuildPlayer:
 
         # Connect as Wavelink Player
         try:
-            self.voice_client = await channel.connect(cls=wavelink.Player)
+            self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True)
         except Exception as e:
             logger.error(f"Guild {self.guild.id}: Wavelink connect error: {e}")
             raise
@@ -154,9 +154,9 @@ class GuildPlayer:
         self.current = track
         self.autoplay_history.add(track.title.lower())
 
-        # Start playback on Lavalink node
-        await self.voice_client.play(playable)
-        await self.voice_client.set_volume(int(self.volume * 100))
+        # Start playback on Lavalink node with volume
+        vol_int = int(self.volume * 100)
+        await self.voice_client.play(playable, volume=vol_int)
 
         # Send sleek Now Playing card with buttons
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
@@ -226,12 +226,13 @@ class GuildPlayer:
                 pass
             self.controller_message = None
 
-    def set_volume(self, volume_percent: int) -> None:
+    def set_volume(self, volume_percent: int) -> int:
         """Adjust volume (0 - 150%)."""
         clamped = max(0, min(150, volume_percent))
         self.volume = clamped / 100.0
         if self.voice_client:
             asyncio.create_task(self.voice_client.set_volume(clamped))
+        return clamped
 
     # ── Track End & Autoplay Transition ──
 

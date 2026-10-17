@@ -78,6 +78,28 @@ class Music(commands.Cog):
             pass
 
     @commands.Cog.listener()
+    async def on_wavelink_track_start(self, payload: Any) -> None:
+        """Invoked when Lavalink successfully begins streaming audio to Discord VC."""
+        track = getattr(payload, "track", None)
+        title = getattr(track, "title", "Unknown")
+        logger.info(f"Lavalink started streaming: '{title}'")
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_exception(self, payload: Any) -> None:
+        """Invoked when Lavalink encounters an exception during audio playback."""
+        track = getattr(payload, "track", None)
+        title = getattr(track, "title", "Unknown")
+        exception = getattr(payload, "exception", None)
+        logger.error(f"Lavalink Track Exception for '{title}': {exception}")
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_stuck(self, payload: Any) -> None:
+        """Invoked when Lavalink player is stuck."""
+        track = getattr(payload, "track", None)
+        title = getattr(track, "title", "Unknown")
+        logger.warning(f"Lavalink Track Stuck for '{title}'")
+
+    @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: Any) -> None:
         """Handle track completion: loop modes, queue popping, and smart autoplay."""
         player_obj = getattr(payload, "player", None)

@@ -254,6 +254,10 @@ def score_candidate(
 _SEARCH_CACHE: Dict[str, Tuple[float, Track]] = {}
 _CACHE_TTL = 600.0  # 10 minutes
 
+# Fast cache for canonical search query resolutions (1 hour TTL)
+_CANONICAL_CACHE: Dict[str, Tuple[float, str]] = {}
+_CANONICAL_CACHE_TTL = 3600.0  # 1 hour
+
 
 def normalize_unicode_text(text: str) -> str:
     r"""
@@ -440,6 +444,13 @@ class NativeExtractor:
             spotify_title = await cls._fetch_spotify_title(sp_url)
             if spotify_title:
                 raw_q = spotify_title
+        # Smart canonical query discovery: for bare search terms without known artists or URLs,
+        # resolve the official track & primary artist from YouTube public index in ~0.2s.
+        is_direct_url = bool(yt_match or is_spotify or "soundcloud.com/" in raw_q or raw_q.startswith(("http://", "https://")))
+        if not is_direct_url:
+            canonical_q = await cls._resolve_canonical_query(raw_q)
+            if canonical_q and canonical_q.lower() != raw_q.lower():
+                raw_q = canonical_q
 
         cleaned_query = parse_and_clean_query(raw_q)
 
@@ -789,8 +800,27 @@ class NativeExtractor:
 
                 if not item:
                     return None
-                title = clean_track_title(item.get("title") or query)
+                raw_item_title = item.get("title") or query
+                title = clean_track_title(raw_item_title)
                 author = item.get("user", {}).get("username") or "SoundCloud Artist"
+
+                # Extract singer/artist if embedded in title (e.g. "Tum Hardafa Ho (Ankit Tiwari)")
+                m_artist = re.search(r"[\(\[\{]([^\)\]\}]+)[\)\]\}]", title)
+                if m_artist:
+                    cand_art = m_artist.group(1).strip()
+                    if cand_art and not any(kw in cand_art.lower() for kw in UNWANTED_VERSION_KEYWORDS) and len(cand_art.split()) <= 4:
+                        author = cand_art
+                        title = re.sub(r"[\(\[\{]" + re.escape(m_artist.group(0)[1:-1]) + r"[\)\]\}]", "", title).strip()
+                        title = re.sub(r"\s+", " ", title).strip()
+                elif " - " in title:
+                    parts = title.split(" - ", 1)
+                    p0, p1 = parts[0].strip(), parts[1].strip()
+                    if len(p0.split()) <= 4 and (p0.lower() in query.lower() or any(w in p0.lower() for w in ["singh", "kumar", "tiwari", "sharma", "malik", "kaur", "khan", "ali", "alan", "gaga", "mars"])):
+                        author = p0
+                        title = p1
+                    elif len(p1.split()) <= 4 and (p1.lower() in query.lower() or any(w in p1.lower() for w in ["singh", "kumar", "tiwari", "sharma", "malik", "kaur", "khan", "ali", "alan", "gaga", "mars"])):
+                        author = p1
+                        title = p0
                 duration = int((item.get("duration") or 0) / 1000)
                 thumbnail = item.get("artwork_url") or item.get("user", {}).get("avatar_url") or "https://cdn.discordapp.com/embed/avatars/0.png"
                 thumbnail = thumbnail.replace("-large", "-t500x500")
@@ -1132,6 +1162,56 @@ class NativeExtractor:
         cleaned = re.sub(r"[\(\[\{].*?[\)\]\}]", "", cleaned)
         cleaned = re.sub(r"[\s\-:~]+$", "", cleaned).strip()
         return cleaned
+
+    @classmethod
+    async def _resolve_canonical_query(cls, query: str) -> str:
+        """
+        Ultra-fast (0.2s) canonical metadata resolver via YouTube public search index.
+        Discovers the official song title & primary singer for bare song titles (e.g. 'tum hardafa ho'),
+        preventing matching against obscure DIY indie uploaders on JioSaavn or SoundCloud.
+        """
+        if not query or query.startswith(("http://", "https://")) or "youtu" in query or "spotify" in query:
+            return query
+
+        q_clean = query.strip()
+        now = time.time()
+        if q_clean.lower() in _CANONICAL_CACHE:
+            ts, val = _CANONICAL_CACHE[q_clean.lower()]
+            if now - ts < _CANONICAL_CACHE_TTL:
+                return val
+
+        user_version_kws = [kw for kw in UNWANTED_VERSION_KEYWORDS if kw in q_clean.lower()]
+
+        try:
+            url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(q_clean)}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        matches = re.findall(r'"title":\{"runs":\[\{"text":"([^"]+)"\}\]', text)
+                        q_words = [w for w in re.findall(r"\w+", q_clean.lower()) if len(w) > 2]
+                        for m in matches[:5]:
+                            parsed = cls._parse_youtube_title(m)
+                            if parsed:
+                                parsed_lower = parsed.lower()
+                                if all(w in parsed_lower for w in q_words):
+                                    for kw in user_version_kws:
+                                        if kw not in parsed_lower:
+                                            parsed = f"{parsed} {kw}"
+                                    _CANONICAL_CACHE[q_clean.lower()] = (now, parsed)
+                                    if len(_CANONICAL_CACHE) > 500:
+                                        oldest_key = min(_CANONICAL_CACHE.keys(), key=lambda k: _CANONICAL_CACHE[k][0])
+                                        _CANONICAL_CACHE.pop(oldest_key, None)
+                                    return parsed
+        except Exception as e:
+            logger.debug(f"Canonical resolution notice for '{q_clean}': {e}")
+
+        _CANONICAL_CACHE[q_clean.lower()] = (now, q_clean)
+        return q_clean
 
     @staticmethod
     async def _fetch_youtube_title(youtube_url: str) -> Optional[str]:

@@ -81,6 +81,32 @@ class EmojiRegistry:
                                 logger.info(f"Auto-uploaded {sw_name} to application emojis.")
                             except Exception as e:
                                 logger.debug(f"Could not auto-upload {sw_name}: {e}")
+
+                # Auto-sync media emoji from assets/emoji
+                if "media" not in self._emojis and len(self._emojis) < 50:
+                    media_path = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji" / "media.png"
+                    if media_path.exists():
+                        try:
+                            with open(media_path, "rb") as f:
+                                data = f.read()
+                            new_e = await self.bot.create_application_emoji(name="media", image=data)
+                            self._emojis["media"] = new_e
+                            logger.info("Auto-uploaded media to application emojis.")
+                        except Exception as e:
+                            logger.debug(f"Could not auto-upload media emoji: {e}")
+
+                # Auto-sync giveaway emoji from assets/emoji
+                if "giveaway" not in self._emojis and len(self._emojis) < 50:
+                    gw_path = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji" / "GiveAway.png"
+                    if gw_path.exists():
+                        try:
+                            with open(gw_path, "rb") as f:
+                                data = f.read()
+                            new_e = await self.bot.create_application_emoji(name="giveaway", image=data)
+                            self._emojis["giveaway"] = new_e
+                            logger.info("Auto-uploaded giveaway to application emojis.")
+                        except Exception as e:
+                            logger.debug(f"Could not auto-upload giveaway emoji: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 
@@ -217,8 +243,10 @@ class EmojiRegistry:
                 "icon_switch_on": ["switch_on"],
                 "icon_switch_off": ["switch_off"],
                 "volume_up": ["volume_down"],
-                "volume_down": ["room_icon_mute", "volume_up"],
                 "room_icon_mute": ["volume_down", "icons_micmute"],
+                # System Features
+                "media": ["icon_media", "icons_image", "icons_file"],
+                "giveaway": ["s_giveaway", "icons_gift"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)
@@ -276,9 +304,10 @@ class EmojiRegistry:
                 "icons_stop_button": ["icon_delete", "icon_x", "icons_wrong"],
                 "icons_loop": ["ub_refresh_icon", "icons_update"],
                 "icons_shuffle": ["icons_magicwand", "icons_splash"],
-                "volume_up": ["volume_down"],
-                "volume_down": ["room_icon_mute", "volume_up"],
                 "room_icon_mute": ["volume_down", "icons_micmute"],
+                # System Features
+                "media": ["icon_media", "icons_image", "icons_file"],
+                "giveaway": ["s_giveaway", "icons_gift"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)

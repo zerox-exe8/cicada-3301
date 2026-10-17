@@ -731,6 +731,41 @@ class PostgresDatabase(BaseDatabase):
             );
             """,
             "CREATE INDEX IF NOT EXISTS idx_antinuke_incident_logs_guild ON antinuke_incident_logs(guild_id, created_at DESC);",
+            # Guild Media-Only Channels table
+            """
+            CREATE TABLE IF NOT EXISTS guild_media_channels (
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                added_by BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, channel_id)
+            );
+            """,
+            # Giveaways Management tables
+            """
+            CREATE TABLE IF NOT EXISTS giveaways (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL UNIQUE,
+                host_id BIGINT NOT NULL,
+                prize VARCHAR(255) NOT NULL,
+                winner_count INT DEFAULT 1,
+                ends_at TIMESTAMP NOT NULL,
+                required_role_id BIGINT,
+                is_ended BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS giveaway_participants (
+                giveaway_id INT NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL,
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (giveaway_id, user_id)
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_giveaways_active ON giveaways(guild_id, is_ended, ends_at);",
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

@@ -27,6 +27,8 @@ from src.managers.temp_voice_manager import TempVoiceManager
 from src.managers.translator_manager import TranslatorManager
 from src.managers.sticky_manager import StickyManager
 from src.managers.antinuke_manager import AntinukeManager
+from src.managers.media_manager import MediaManager
+from src.managers.giveaway_manager import GiveawayManager
 from src.utils.emojis import EmojiRegistry
 
 logger = logging.getLogger("Kyro.Core")
@@ -98,6 +100,8 @@ class KyroBot(commands.Bot):
         self.translator_mgr: TranslatorManager = TranslatorManager(self.db)
         self.sticky_mgr: StickyManager = StickyManager(self.db)
         self.antinuke_mgr: AntinukeManager = AntinukeManager(self.db)
+        self.media_mgr: MediaManager = MediaManager(self.db)
+        self.giveaway_mgr: GiveawayManager = GiveawayManager(self.db)
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
         self.no_prefix_users: set[int] = set()
         self.custom_status: str | None = None
@@ -181,6 +185,8 @@ class KyroBot(commands.Bot):
         await self.translator_mgr.load_cache()
         await self.sticky_mgr.load_cache()
         await self.antinuke_mgr.load_cache()
+        await self.media_mgr.load_cache()
+        await self.giveaway_mgr.load_cache()
         await self.custom_emojis.load()
 
         # Load No-Prefix authorized users into memory

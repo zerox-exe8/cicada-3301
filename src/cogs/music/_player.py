@@ -162,9 +162,23 @@ class GuildPlayer:
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
-        """Resolve Lavalink Playable via direct HTTP stream URL or search."""
-        # ── Priority 1: Direct 320kbps HTTP Stream (JioSaavn / CDN) ──
-        # NexCloud Lavalink HTTP source manager loads this instantly with 100% success!
+        """Resolve Lavalink Playable via direct playable, Wavelink search, or stream URL."""
+        # ── Priority 1: Attached Playable ──
+        playable = getattr(track, "_playable", None)
+        if playable:
+            return playable
+
+        # ── Priority 2: Direct Wavelink Resolution (YouTube, Spotify, SoundCloud) ──
+        search_target = track.url or track.query or f"{track.title} {track.author}".strip()
+        if search_target:
+            try:
+                results = await wavelink.Playable.search(search_target)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"Direct Lavalink resolve error for '{search_target}': {e}")
+
+        # ── Priority 3: Direct 320kbps HTTP Stream Fallback ──
         if track.stream_url:
             try:
                 node = wavelink.Pool.get_node()
@@ -174,16 +188,6 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"Direct Lavalink HTTP load error for '{track.title}': {e}")
 
-        # ── Priority 2: Direct Search Fallback ──
-        search_target = track.url or track.query or f"{track.title} {track.author}".strip()
-        if not search_target:
-            return None
-        try:
-            results = await wavelink.Playable.search(search_target)
-            if results:
-                return results[0] if isinstance(results, list) else results.tracks[0]
-        except Exception as e:
-            logger.debug(f"Direct Lavalink resolve error for '{search_target}': {e}")
         return None
 
     # ── Controls ──

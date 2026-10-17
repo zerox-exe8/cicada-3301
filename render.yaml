@@ -15,6 +15,6 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: LAVALINK_URI
-        value: http://fi15.bot-hosting.net:26267
+        sync: false
       - key: LAVALINK_PASSWORD
-        value: NfJXUsGSO4tVI1LDl7v3XPYZ
+        sync: false

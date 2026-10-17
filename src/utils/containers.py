@@ -508,9 +508,10 @@ async def edit_container_response(
     view: discord.ui.View | None = None,
     file: discord.File | None = None,
     files: list[discord.File] | None = None,
+    content: str | None = None,
 ) -> None:
     """Edit an existing Components V2 Container message safely with fallbacks, including files."""
-    payload = build_container_payload(container, view=view, is_edit=True)
+    payload = build_container_payload(container, view=view, is_edit=True, content=content)
     payload.pop("flags", None)
     file_list = [file] if file is not None else (files or [])
 

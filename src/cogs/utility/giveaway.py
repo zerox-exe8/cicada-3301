@@ -50,28 +50,6 @@ def parse_giveaway_duration(duration_str: str) -> Optional[datetime.timedelta]:
     return datetime.timedelta(seconds=total_seconds)
 
 
-def get_giveaway_thumbnail(
-    bot: KyroBot,
-    guild: Optional[discord.Guild] = None,
-    host_id: Optional[int] = None,
-) -> Optional[str]:
-    """Retrieve optimal thumbnail asset for giveaway card (prefers s_giveaway, then discord_giveaway/giveaway)."""
-    gw_obj = (
-        bot.custom_emojis.get_emoji_obj("s_giveaway")
-        or bot.custom_emojis.get_emoji_obj("discord_giveaway")
-        or bot.custom_emojis.get_emoji_obj("giveaway")
-    )
-    if gw_obj and hasattr(gw_obj, "url") and gw_obj.url:
-        return str(gw_obj.url)
-    if guild and host_id:
-        member = guild.get_member(host_id)
-        if member and member.display_avatar:
-            return member.display_avatar.url
-    if guild and guild.icon:
-        return guild.icon.url
-    return "https://cdn.discordapp.com/emojis/1049282218008399872.png"
-
-
 def build_giveaway_container(
     prize: str,
     host_id: int,
@@ -82,7 +60,6 @@ def build_giveaway_container(
     is_ended: bool = False,
     winners: Optional[list[int]] = None,
     gw_emoji: str = "🎉",
-    thumbnail_url: Optional[str] = None,
     dot: str = "•",
 ) -> KyroContainer:
     """Build rich and engaging Components V2 container card for active or ended giveaways."""
@@ -93,48 +70,43 @@ def build_giveaway_container(
 
     if not is_ended:
         container = KyroContainer(accent_color=None)
-        container.add_section(content=f"### {gw_emoji} New Giveaway {gw_emoji}")
-        if thumbnail_url:
-            container.add_thumbnail(thumbnail_url)
-
+        container.add_section(content=f"# **{title_prize}**")
         container.add_separator(divider=True)
 
         req_text = f"\n{dot} **Required Role:** <@&{required_role_id}>" if required_role_id else ""
         winner_label = "Winner" if winner_count == 1 else "Winners"
         container.add_text(
-            f"{dot} **Prize:** **{title_prize}**\n"
             f"{dot} **Hosted By:** <@{host_id}>\n"
             f"{dot} **{winner_label}:** `{winner_count}`\n"
             f"{dot} **Entries:** `{entries_count}`{req_text}"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Ends: <t:{ts}:R>")
+        container.add_separator(divider=True)
         return container
 
     # Ended giveaway
     container = KyroContainer(accent_color=None)
-    container.add_section(content=f"### {gw_emoji} Giveaway Ended {gw_emoji}")
-    if thumbnail_url:
-        container.add_thumbnail(thumbnail_url)
-
+    container.add_section(content=f"# **{title_prize}**")
     container.add_separator(divider=True)
 
     if winners:
         winner_str = ", ".join(f"<@{w}>" for w in winners)
         winner_label = "Winner" if len(winners) == 1 else "Winners"
+        celebration = f"\n\n{dot} **{winner_label}:** {winner_str}\n> 🎉 Congratulations! Contact <@{host_id}> to claim your prize."
     else:
         winner_str = "*No one entered*"
-        winner_label = "Winner" if winner_count == 1 else "Winners"
+        celebration = f"\n\n{dot} **Winners:** {winner_str}\n> No winner could be drawn."
 
     req_text = f"\n{dot} **Required Role:** <@&{required_role_id}>" if required_role_id else ""
     container.add_text(
-        f"{dot} **Prize:** **{title_prize}**\n"
-        f"{dot} **{winner_label}:** {winner_str}\n"
         f"{dot} **Hosted By:** <@{host_id}>\n"
-        f"{dot} **Total Entries:** `{entries_count}`{req_text}"
+        f"{dot} **Total Participants:** `{entries_count}`{req_text}"
+        f"{celebration}"
     )
     container.add_separator(divider=True)
     container.add_text(f"-# Ended: <t:{ts}:R>")
+    container.add_separator(divider=True)
     return container
 
 
@@ -144,13 +116,17 @@ class PersistentGiveawayView(discord.ui.View):
     def __init__(self, bot: KyroBot) -> None:
         super().__init__(timeout=None)
         self.bot = bot
-        gw_emoji_obj = self.bot.custom_emojis.get_emoji_obj("discord_giveaway") or self.bot.custom_emojis.get_emoji_obj("giveaway")
+        gw_emoji_obj = (
+            self.bot.custom_emojis.get_emoji_obj("s_giveaway")
+            or self.bot.custom_emojis.get_emoji_obj("discord_giveaway")
+            or self.bot.custom_emojis.get_emoji_obj("giveaway")
+        )
         if gw_emoji_obj:
             self.enter_giveaway.emoji = gw_emoji_obj
 
     @discord.ui.button(
         label="Enter",
-        style=discord.ButtonStyle.primary,
+        style=discord.ButtonStyle.secondary,
         custom_id="kyro:giveaway:enter",
     )
     async def enter_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -216,11 +192,15 @@ class PersistentGiveawayView(discord.ui.View):
 
         # Update message card
         try:
-            gw_emoji_obj = self.bot.custom_emojis.get_emoji_obj("discord_giveaway") or self.bot.custom_emojis.get_emoji_obj("giveaway")
+            gw_emoji_obj = (
+                self.bot.custom_emojis.get_emoji_obj("s_giveaway")
+                or self.bot.custom_emojis.get_emoji_obj("discord_giveaway")
+                or self.bot.custom_emojis.get_emoji_obj("giveaway")
+            )
             if gw_emoji_obj:
                 button.emoji = gw_emoji_obj
             button.label = "Enter"
-            thumb_url = get_giveaway_thumbnail(self.bot, interaction.guild, host_id=gw.get("host_id"))
+            button.style = discord.ButtonStyle.secondary
             updated_card = build_giveaway_container(
                 prize=gw["prize"],
                 host_id=gw["host_id"],
@@ -229,10 +209,14 @@ class PersistentGiveawayView(discord.ui.View):
                 entries_count=count,
                 required_role_id=gw.get("required_role_id"),
                 gw_emoji=gw_emoji,
-                thumbnail_url=thumb_url,
                 dot=dot,
             )
-            await edit_container_response(interaction.message, updated_card, view=self)
+            await edit_container_response(
+                interaction.message,
+                updated_card,
+                view=self,
+                content=f"### {gw_emoji} New Giveaway {gw_emoji}",
+            )
         except Exception as e:
             logger.debug(f"Notice updating giveaway button counter on message {msg_id}: {e}")
 
@@ -242,7 +226,11 @@ class ConcludedGiveawayView(discord.ui.View):
 
     def __init__(self, bot: KyroBot, count: int = 0) -> None:
         super().__init__(timeout=None)
-        gw_emoji_obj = bot.custom_emojis.get_emoji_obj("discord_giveaway") or bot.custom_emojis.get_emoji_obj("giveaway")
+        gw_emoji_obj = (
+            bot.custom_emojis.get_emoji_obj("s_giveaway")
+            or bot.custom_emojis.get_emoji_obj("discord_giveaway")
+            or bot.custom_emojis.get_emoji_obj("giveaway")
+        )
         self.add_item(
             discord.ui.Button(
                 label="Giveaway Ended",
@@ -332,9 +320,6 @@ class Giveaways(commands.Cog):
         winners = res.get("winners", [])
         total_entries = res.get("total_entries", 0)
 
-        guild = channel.guild if hasattr(channel, "guild") else None
-        thumb_url = get_giveaway_thumbnail(self.bot, guild, host_id=res.get("host_id"))
-
         # Build concluded card & disabled view
         concluded_card = build_giveaway_container(
             prize=res["prize"],
@@ -346,14 +331,18 @@ class Giveaways(commands.Cog):
             is_ended=True,
             winners=winners,
             gw_emoji=gw_emoji,
-            thumbnail_url=thumb_url,
             dot=dot,
         )
         ended_view = ConcludedGiveawayView(self.bot, count=total_entries)
 
         if msg:
             try:
-                await edit_container_response(msg, concluded_card, view=ended_view)
+                await edit_container_response(
+                    msg,
+                    concluded_card,
+                    view=ended_view,
+                    content=f"### {gw_emoji} Giveaway Ended {gw_emoji}",
+                )
             except Exception as e:
                 logger.debug(f"Failed to edit giveaway message {message_id}: {e}")
 
@@ -499,7 +488,6 @@ class Giveaways(commands.Cog):
 
         ends_at = datetime.datetime.now(datetime.timezone.utc) + delta
         gw_emoji = self.bot.custom_emojis.get("discord_giveaway", self.bot.custom_emojis.get("giveaway", "🎉"))
-        thumb_url = get_giveaway_thumbnail(self.bot, ctx.guild, host_id=ctx.author.id)
 
         # Build initial Components V2 Card
         card = build_giveaway_container(
@@ -510,13 +498,17 @@ class Giveaways(commands.Cog):
             entries_count=0,
             required_role_id=req_role.id if req_role else None,
             gw_emoji=gw_emoji,
-            thumbnail_url=thumb_url,
             dot=dot,
         )
 
         view = PersistentGiveawayView(self.bot)
-        # Send into target channel
-        giveaway_msg = await send_container_response(ctx.channel, card, view=view)
+        # Send into target channel with header text above embed
+        giveaway_msg = await send_container_response(
+            ctx.channel,
+            card,
+            view=view,
+            content=f"### {gw_emoji} New Giveaway {gw_emoji}",
+        )
 
         # Store in database and memory cache
         await self.bot.giveaway_mgr.create_giveaway(
@@ -681,8 +673,6 @@ class Giveaways(commands.Cog):
 
         data, new_winners = reroll_res
         gw_emoji = self.bot.custom_emojis.get("discord_giveaway", self.bot.custom_emojis.get("giveaway", "🎉"))
-        thumb_url = get_giveaway_thumbnail(self.bot, ctx.guild, host_id=data.get("host_id"))
-
         if not new_winners:
             container = KyroContainer(accent_color=None)
             container.add_section(content="**No Participants**")
@@ -698,20 +688,22 @@ class Giveaways(commands.Cog):
         winner_mentions = ", ".join(f"<@{w}>" for w in new_winners)
         winner_label = "Winner" if len(new_winners) == 1 else "Winners"
         win_container = KyroContainer(accent_color=None)
-        win_container.add_section(content=f"### {gw_emoji} New Winner Drawn {gw_emoji}")
-        if thumb_url:
-            win_container.add_thumbnail(thumb_url)
+        win_container.add_section(content=f"# **{data['prize'].title() if data['prize'].islower() else data['prize']}**")
         win_container.add_separator(divider=True)
         win_container.add_text(
             f"{dot} **New {winner_label}:** {winner_mentions}\n"
-            f"{dot} **Prize:** **{data['prize']}**\n"
             f"{dot} **Rerolled By:** {ctx.author.mention}\n\n"
-            f"> Congratulations! Contact the host to claim your prize."
+            f"> 🎉 Congratulations! Contact the host to claim your prize."
         )
         win_container.add_separator(divider=True)
         win_container.add_text("-# Rerolled by Kyro")
+        win_container.add_separator(divider=True)
 
-        await send_container_response(ctx, win_container, content=winner_mentions)
+        await send_container_response(
+            ctx,
+            win_container,
+            content=f"### {gw_emoji} New Winner Drawn {gw_emoji}",
+        )
 
     @giveaway.command(
         name="list",

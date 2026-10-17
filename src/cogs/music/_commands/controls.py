@@ -42,7 +42,7 @@ async def execute_volume(cog: Music, ctx: commands.Context, volume: int) -> None
     await send_container_response(ctx, container)
 
 
-async def execute_loop(cog: Music, ctx: commands.Context, mode: str = "off") -> None:
+async def execute_loop(cog: Music, ctx: commands.Context, mode: Optional[str] = None) -> None:
     allowed, err = check_voice_channel(ctx)
     if not allowed:
         container = KyroContainer(accent_color=None)

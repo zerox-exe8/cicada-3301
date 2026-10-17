@@ -50,7 +50,7 @@ class GuildPlayer:
         self.current: Optional[Track] = None
         self.volume: float = 1.0  # Normalized (1.0 = 100%)
         self.loop_mode: str = "off"  # "off", "track", "queue"
-        self.smart_autoplay: bool = True
+        self.smart_autoplay: bool = False
         self.autoplay_history: Set[str] = set()
 
         # UI & Communication
@@ -125,6 +125,8 @@ class GuildPlayer:
         # Connect as Wavelink Player
         try:
             self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True)
+            if self.voice_client:
+                self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
         except Exception as e:
             logger.error(f"Guild {self.guild.id}: Wavelink connect error: {e}")
             raise
@@ -301,6 +303,26 @@ class GuildPlayer:
             asyncio.create_task(self.voice_client.set_volume(clamped))
         return clamped
 
+    def set_loop_mode(self, mode: Optional[str] = None) -> str:
+        """
+        Cycle loop mode or set specific mode ('off', 'track', 'queue').
+        Accepts: 'off', 'track', 'queue', 'song', 'all', 'toggle', or None.
+        """
+        modes = ["off", "track", "queue"]
+        m_str = (mode or "").strip().lower()
+
+        if m_str in ("track", "song", "single", "1"):
+            self.loop_mode = "track"
+        elif m_str in ("queue", "all", "q"):
+            self.loop_mode = "queue"
+        elif m_str in ("off", "none", "disable", "stop", "0"):
+            self.loop_mode = "off"
+        else:
+            cur_idx = modes.index(self.loop_mode) if self.loop_mode in modes else 0
+            self.loop_mode = modes[(cur_idx + 1) % len(modes)]
+
+        return self.loop_mode
+
     # ── Track End & Autoplay Transition ──
 
     async def on_track_end(self, reason: Optional[str] = None) -> None:
@@ -344,34 +366,47 @@ class GuildPlayer:
                         await self.play_track(rec)
                     else:
                         self.current = None
+                        await self.send_queue_ended_card()
                         self.schedule_empty_vc_timer()
                 except Exception as e:
                     logger.error(f"Guild {self.guild.id}: Smart autoplay error: {e}", exc_info=True)
                     self.current = None
+                    await self.send_queue_ended_card()
                     self.schedule_empty_vc_timer()
             else:
                 self.current = None
+                await self.send_queue_ended_card()
                 self.schedule_empty_vc_timer()
 
     # ── Components V2 Controller Card ──
 
     def build_now_playing_container(self, track: Track) -> KyroContainer:
         """Construct the Components V2 Now Playing card."""
-        e_reg = getattr(self.bot, "custom_emojis", {})
-        dot = e_reg.get("heart_dot", "•")
+        e_reg = getattr(self.bot, "custom_emojis", None)
+        dot = e_reg.get("heart_dot", "•") if e_reg else "•"
 
         container = KyroContainer(accent_color=None)
+        title_display = f"[{track.title}]({track.url})" if track.url else track.title
         container.add_section(
             content=(
-                f"### {track.title}\n"
-                f"> **Artist:** `{track.author or 'Unknown'}`\n"
-                f"> **Duration:** `{track.formatted_duration}` • **Source:** `Lavalink 320kbps`\n"
-                f"> **Requested by:** {track.requester}"
+                f"### {title_display}\n"
+                f"{dot} **Artist:** `{track.author or 'Unknown Artist'}`\n"
+                f"{dot} **Duration:** `{track.formatted_duration}` • **Source:** `Lavalink 320kbps`\n"
+                f"{dot} **Requested by:** {track.requester}"
             )
         )
 
-        if track.thumbnail:
-            container.add_thumbnail(track.thumbnail)
+        # Resolve thumbnail (fallback to YouTube thumbnail if missing)
+        thumb = track.thumbnail
+        if not thumb and track.url and ("youtube.com" in track.url or "youtu.be" in track.url):
+            import re
+            m = re.search(r"(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})", track.url)
+            if m:
+                thumb = f"https://i.ytimg.com/vi/{m.group(1)}/hqdefault.jpg"
+                track.thumbnail = thumb
+
+        if thumb:
+            container.add_thumbnail(thumb)
 
         container.add_separator(divider=True)
 
@@ -390,11 +425,14 @@ class GuildPlayer:
 
         container = self.build_now_playing_container(track)
         view = MusicControlView(self.bot, player=self)
+        e_reg = getattr(self.bot, "custom_emojis", None)
+        music_emoji = e_reg.get("music", "🎵") if e_reg else "🎵"
+        header_text = f"### {music_emoji} Now Playing {music_emoji}"
 
         target = message_to_edit or self.controller_message
         if target and isinstance(target, discord.Message):
             try:
-                await edit_container_response(target, container, view=view)
+                await edit_container_response(target, container, view=view, content=header_text)
                 self.controller_message = target
                 return
             except Exception as e:
@@ -402,7 +440,7 @@ class GuildPlayer:
 
         try:
             msg = await send_container_response(
-                self.home_channel, container, view=view
+                self.home_channel, container, view=view, content=header_text
             )
             if isinstance(msg, discord.Message):
                 self.controller_message = msg
@@ -416,10 +454,55 @@ class GuildPlayer:
 
         container = self.build_now_playing_container(self.current)
         view = MusicControlView(self.bot, player=self)
+        e_reg = getattr(self.bot, "custom_emojis", None)
+        music_emoji = e_reg.get("music", "🎵") if e_reg else "🎵"
+        header_text = f"### {music_emoji} Now Playing {music_emoji}"
         try:
-            await edit_container_response(self.controller_message, container, view=view)
+            await edit_container_response(self.controller_message, container, view=view, content=header_text)
         except Exception as e:
             logger.debug(f"Failed to edit controller message: {e}")
+
+    async def send_queue_ended_card(self) -> None:
+        """Post or edit the Queue Ended card in home channel."""
+        if not self.home_channel:
+            return
+
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        music_emoji = self.bot.custom_emojis.get("music", "🎵")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                f"# **Queue Concluded**\n"
+                f"{dot} All queued songs have finished playing.\n"
+                f"> Add more tracks using `?play <song>` or enable autoplay with `?autoplay on`!"
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text("-# Disconnecting in 3 minutes if no new songs are added.")
+        container.add_separator(divider=True)
+
+        if self.controller_message and isinstance(self.controller_message, discord.Message):
+            try:
+                await edit_container_response(
+                    self.controller_message,
+                    container,
+                    view=None,
+                    content=f"### {music_emoji} Queue Ended {music_emoji}",
+                )
+                self.controller_message = None
+                return
+            except Exception:
+                pass
+
+        try:
+            await send_container_response(
+                self.home_channel,
+                container,
+                content=f"### {music_emoji} Queue Ended {music_emoji}",
+            )
+        except Exception:
+            pass
 
     # ── Inactivity Timers ──
 

@@ -264,12 +264,10 @@ class MusicControlView(discord.ui.View):
             await send_container_response(interaction, c, ephemeral=True)
             return
 
-        modes = ["off", "track", "queue"]
-        cur_mode = getattr(player, "loop_mode", "off")
-        next_idx = (modes.index(cur_mode) + 1) % len(modes) if cur_mode in modes else 0
-        player.loop_mode = modes[next_idx]
+        new_mode = player.set_loop_mode()
+        await player.update_controller_message(force=True)
         c = KyroContainer()
-        c.add_section(content=f"**Loop Mode**\n> Loop mode set to **{player.loop_mode.upper()}**.")
+        c.add_section(content=f"**Loop Mode**\n> Loop mode set to **{new_mode.upper()}**.")
         await send_container_response(interaction, c, ephemeral=True)
 
     @discord.ui.button(
@@ -289,6 +287,7 @@ class MusicControlView(discord.ui.View):
 
         player.smart_autoplay = not player.smart_autoplay
         state = "Enabled" if player.smart_autoplay else "Disabled"
+        await player.update_controller_message(force=True)
         c = KyroContainer()
         c.add_section(content=f"**Smart Autoplay**\n> Smart Autoplay **{state}**.")
         await send_container_response(interaction, c, ephemeral=True)

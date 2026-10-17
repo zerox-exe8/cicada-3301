@@ -20,4 +20,8 @@ async def execute_nowplaying(cog: Music, ctx: commands.Context) -> None:
 
     container = player.build_now_playing_container(player.current)
     view = MusicControlView(cog.bot, player, ctx.guild.id)
-    await send_container_response(ctx, container, view=view)
+    e_reg = getattr(cog.bot, "custom_emojis", None)
+    music_emoji = e_reg.get("music", "🎵") if e_reg else "🎵"
+    await send_container_response(
+        ctx, container, view=view, content=f"### {music_emoji} Now Playing {music_emoji}"
+    )

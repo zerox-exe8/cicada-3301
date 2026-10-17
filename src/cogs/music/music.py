@@ -372,7 +372,7 @@ class Music(commands.Cog):
         description="Toggle loop mode between off, track, and entire queue.",
     )
     @app_commands.describe(mode="Loop mode: off, track, or queue")
-    async def loop(self, ctx: CustomContext, mode: str = "track") -> None:
+    async def loop(self, ctx: CustomContext, mode: Optional[str] = None) -> None:
         """Toggle loop mode."""
         await execute_loop(self, ctx, mode)
 

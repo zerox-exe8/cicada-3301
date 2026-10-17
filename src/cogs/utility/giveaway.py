@@ -61,6 +61,7 @@ def build_giveaway_container(
     winners: Optional[list[int]] = None,
     gw_emoji: str = "🎉",
     dot: str = "•",
+    win_emoji: str = "🎉",
 ) -> KyroContainer:
     """Build rich and engaging Components V2 container card for active or ended giveaways."""
     if ends_at.tzinfo is None:
@@ -93,7 +94,10 @@ def build_giveaway_container(
     if winners:
         winner_str = ", ".join(f"<@{w}>" for w in winners)
         winner_label = "Winner" if len(winners) == 1 else "Winners"
-        celebration = f"\n\n{dot} **{winner_label}:** {winner_str}\n> 🎉 Congratulations! Contact <@{host_id}> to claim your prize."
+        if len(winners) == 1 and host_id in winners:
+            celebration = f"\n\n{dot} **{winner_label}:** {winner_str}\n> {win_emoji} Congratulations! You won your own giveaway!"
+        else:
+            celebration = f"\n\n{dot} **{winner_label}:** {winner_str}\n> {win_emoji} Congratulations! Contact <@{host_id}> to claim your prize."
     else:
         winner_str = "*No one entered*"
         celebration = f"\n\n{dot} **Winners:** {winner_str}\n> No winner could be drawn."
@@ -125,7 +129,7 @@ class PersistentGiveawayView(discord.ui.View):
             self.enter_giveaway.emoji = gw_emoji_obj
 
     @discord.ui.button(
-        label="Enter",
+        label="Enter Giveaway",
         style=discord.ButtonStyle.secondary,
         custom_id="kyro:giveaway:enter",
     )
@@ -199,7 +203,7 @@ class PersistentGiveawayView(discord.ui.View):
             )
             if gw_emoji_obj:
                 button.emoji = gw_emoji_obj
-            button.label = "Enter"
+            button.label = "Enter Giveaway"
             button.style = discord.ButtonStyle.secondary
             updated_card = build_giveaway_container(
                 prize=gw["prize"],
@@ -317,6 +321,7 @@ class Giveaways(commands.Cog):
 
         dot = self.bot.custom_emojis.get("heart_dot", "•")
         gw_emoji = self.bot.custom_emojis.get("discord_giveaway", self.bot.custom_emojis.get("giveaway", "🎉"))
+        win_emoji = self.bot.custom_emojis.get("gpp_winner", self.bot.custom_emojis.get("winner", "🎉"))
         winners = res.get("winners", [])
         total_entries = res.get("total_entries", 0)
 
@@ -332,6 +337,7 @@ class Giveaways(commands.Cog):
             winners=winners,
             gw_emoji=gw_emoji,
             dot=dot,
+            win_emoji=win_emoji,
         )
         ended_view = ConcludedGiveawayView(self.bot, count=total_entries)
 
@@ -345,34 +351,6 @@ class Giveaways(commands.Cog):
                 )
             except Exception as e:
                 logger.debug(f"Failed to edit giveaway message {message_id}: {e}")
-
-        # Single winner notification: Reply directly to the giveaway message (no duplicate embed!)
-        if winners:
-            winner_mentions = ", ".join(f"<@{w}>" for w in winners)
-            congrats_text = (
-                f"{gw_emoji} Congratulations {winner_mentions}! You won **{res['prize']}**!\n"
-                f"-# Contact <@{res['host_id']}> to claim your prize."
-            )
-            try:
-                if msg:
-                    await msg.reply(congrats_text, mention_author=True)
-                else:
-                    await channel.send(congrats_text)
-            except Exception as e:
-                logger.debug(f"Failed to reply with winner announcement: {e}")
-                try:
-                    await channel.send(congrats_text)
-                except Exception:
-                    pass
-        else:
-            no_win_text = f"{dot} The giveaway for **{res['prize']}** has ended with no entries."
-            try:
-                if msg:
-                    await msg.reply(no_win_text)
-                else:
-                    await channel.send(no_win_text)
-            except Exception:
-                pass
 
         return res
 
@@ -509,6 +487,13 @@ class Giveaways(commands.Cog):
             view=view,
             content=f"### {gw_emoji} New Giveaway {gw_emoji}",
         )
+
+        # Auto-delete invoking command message if text-based
+        if ctx.message and not ctx.interaction:
+            try:
+                await ctx.message.delete()
+            except Exception:
+                pass
 
         # Store in database and memory cache
         await self.bot.giveaway_mgr.create_giveaway(
@@ -673,6 +658,7 @@ class Giveaways(commands.Cog):
 
         data, new_winners = reroll_res
         gw_emoji = self.bot.custom_emojis.get("discord_giveaway", self.bot.custom_emojis.get("giveaway", "🎉"))
+        win_emoji = self.bot.custom_emojis.get("gpp_winner", self.bot.custom_emojis.get("winner", "🎉"))
         if not new_winners:
             container = KyroContainer(accent_color=None)
             container.add_section(content="**No Participants**")
@@ -693,7 +679,7 @@ class Giveaways(commands.Cog):
         win_container.add_text(
             f"{dot} **New {winner_label}:** {winner_mentions}\n"
             f"{dot} **Rerolled By:** {ctx.author.mention}\n\n"
-            f"> 🎉 Congratulations! Contact the host to claim your prize."
+            f"> {win_emoji} Congratulations! Contact the host to claim your prize."
         )
         win_container.add_separator(divider=True)
         win_container.add_text("-# Rerolled by Kyro")
@@ -715,36 +701,58 @@ class Giveaways(commands.Cog):
         """List active server giveaways."""
         active_list = self.bot.giveaway_mgr.get_active_giveaways_for_guild(ctx.guild.id)
         dot = self.bot.custom_emojis.get("heart_dot", "•")
+        gw_emoji = self.bot.custom_emojis.get("discord_giveaway", self.bot.custom_emojis.get("giveaway", "🎉"))
+        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
+
         container = KyroContainer(accent_color=None)
 
         if not active_list:
-            container.add_section(content="**Active Giveaways**")
+            container.add_section(content="# **No Active Giveaways**")
             container.add_separator(divider=True)
-            container.add_text(f"{dot} No giveaways are currently running in this server.")
+            container.add_text(
+                f"{dot} No giveaways are currently running in **{ctx.guild.name}**.\n"
+                f"> Use `{prefix}gstart <time> <prize>` to start a new giveaway!"
+            )
             container.add_separator(divider=True)
-            container.add_text(f"-# Requested by {ctx.author.display_name}")
-            await send_container_response(ctx, container)
+            container.add_text(f"-# {ctx.guild.name} • 0 active giveaways")
+            container.add_separator(divider=True)
+            await send_container_response(
+                ctx,
+                container,
+                content=f"### {gw_emoji} Active Giveaways {gw_emoji}",
+            )
             return
 
-        lines = []
+        container.add_section(content=f"# **Active Giveaways ({len(active_list)})**")
+        container.add_separator(divider=True)
+
+        blocks = []
         for idx, g in enumerate(active_list, start=1):
             end_t = g["ends_at"]
             if end_t.tzinfo is None:
                 end_t = end_t.replace(tzinfo=datetime.timezone.utc)
             ts = int(end_t.timestamp())
             msg_link = f"https://discord.com/channels/{ctx.guild.id}/{g['channel_id']}/{g['message_id']}"
-            lines.append(
-                f"{dot} **[{g['prize']}]({msg_link})**\n"
-                f"  `•` Channel: <#{g['channel_id']}> | Winners: `{g['winner_count']}` | Ends: <t:{ts}:R>"
+            prize_title = g["prize"].title() if g["prize"].islower() else g["prize"]
+            winner_label = "Winner" if g["winner_count"] == 1 else "Winners"
+            blocks.append(
+                f"**{idx}. [{prize_title}]({msg_link})**\n"
+                f"{dot} **Channel:** <#{g['channel_id']}>\n"
+                f"{dot} **{winner_label}:** `{g['winner_count']}`\n"
+                f"{dot} **Hosted By:** <@{g['host_id']}>\n"
+                f"{dot} **Ends:** <t:{ts}:R>"
             )
 
-        container.add_section(content=f"**Active Giveaways: {len(active_list)}**")
+        container.add_text("\n\n".join(blocks))
         container.add_separator(divider=True)
-        container.add_text("\n".join(lines))
+        container.add_text(f"-# {ctx.guild.name} • {len(active_list)} active giveaway{'s' if len(active_list) != 1 else ''}")
         container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
 
-        await send_container_response(ctx, container)
+        await send_container_response(
+            ctx,
+            container,
+            content=f"### {gw_emoji} Active Giveaways {gw_emoji}",
+        )
 
     # ─── CONVENIENCE PREFIX SHORTCUTS ────────────────────────────────────────
 

@@ -133,6 +133,20 @@ class EmojiRegistry:
                             logger.info("Auto-uploaded s_giveaway to application emojis.")
                         except Exception as e:
                             logger.debug(f"Could not auto-upload s_giveaway emoji: {e}")
+
+                # Auto-sync gpp_winner emoji from assets/emoji
+                if "gpp_winner" not in self._emojis and len(self._emojis) < 50:
+                    win_path = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji" / "GPp_Winner.png"
+                    if win_path.exists():
+                        try:
+                            with open(win_path, "rb") as f:
+                                data = f.read()
+                            new_e = await self.bot.create_application_emoji(name="gpp_winner", image=data)
+                            self._emojis["gpp_winner"] = new_e
+                            self._emojis["gpp_winner.png"] = new_e
+                            logger.info("Auto-uploaded gpp_winner to application emojis.")
+                        except Exception as e:
+                            logger.debug(f"Could not auto-upload gpp_winner emoji: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 
@@ -275,6 +289,8 @@ class EmojiRegistry:
                 "giveaway": ["s_giveaway", "discord_giveaway", "icons_gift"],
                 "discord_giveaway": ["s_giveaway", "giveaway", "icons_gift"],
                 "s_giveaway": ["discord_giveaway", "giveaway", "icons_gift"],
+                "gpp_winner": ["winner", "s_giveaway", "discord_giveaway", "icons_gift"],
+                "winner": ["gpp_winner", "s_giveaway", "discord_giveaway", "icons_gift"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)
@@ -331,13 +347,17 @@ class EmojiRegistry:
                 "queue": ["icons_list", "icon_playlist", "icons_todolist"],
                 "icons_stop_button": ["icon_delete", "icon_x", "icons_wrong"],
                 "icons_loop": ["ub_refresh_icon", "icons_update"],
+                "loop": ["icons_loop", "ub_refresh_icon"],
                 "icons_shuffle": ["icons_magicwand", "icons_splash"],
+                "volume_up": ["volume_down"],
                 "room_icon_mute": ["volume_down", "icons_micmute"],
                 # System Features
                 "media": ["icon_media", "icons_image", "icons_file"],
                 "giveaway": ["s_giveaway", "discord_giveaway", "icons_gift"],
                 "discord_giveaway": ["s_giveaway", "giveaway", "icons_gift"],
                 "s_giveaway": ["discord_giveaway", "giveaway", "icons_gift"],
+                "gpp_winner": ["winner", "s_giveaway", "discord_giveaway", "icons_gift"],
+                "winner": ["gpp_winner", "s_giveaway", "discord_giveaway", "icons_gift"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)

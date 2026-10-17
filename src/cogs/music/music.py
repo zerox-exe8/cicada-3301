@@ -80,8 +80,15 @@ class Music(commands.Cog):
     @commands.Cog.listener()
     async def on_wavelink_track_start(self, payload: Any) -> None:
         """Invoked when Lavalink successfully begins streaming audio to Discord VC."""
-        track = getattr(payload, "track", None)
-        title = getattr(track, "title", "Unknown")
+        player_obj = getattr(payload, "player", None)
+        title = None
+        if player_obj and player_obj.guild:
+            player = self.controller.get_player(player_obj.guild.id)
+            if player and player.current:
+                title = player.current.title
+        if not title or title.lower() in ("unknown", "unknown title"):
+            track = getattr(payload, "track", None)
+            title = getattr(track, "title", "Unknown")
         logger.info(f"Lavalink started streaming: '{title}'")
 
     @commands.Cog.listener()
@@ -91,6 +98,12 @@ class Music(commands.Cog):
         title = getattr(track, "title", "Unknown")
         exception = getattr(payload, "exception", None)
         logger.error(f"Lavalink Track Exception for '{title}': {exception}")
+        # Auto-recover: advance player so voice channel doesn't stay stuck
+        player_obj = getattr(payload, "player", None)
+        if player_obj and player_obj.guild:
+            player = self.controller.get_player(player_obj.guild.id)
+            if player and hasattr(player, "on_track_end"):
+                await player.on_track_end()
 
     @commands.Cog.listener()
     async def on_wavelink_track_stuck(self, payload: Any) -> None:

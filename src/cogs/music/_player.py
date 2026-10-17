@@ -196,6 +196,21 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"Direct stream URL resolve error for '{stream_url}': {e}")
 
+        # ── Priority 1.8: If no stream_url, resolve via NativeExtractor CDN first ──
+        if not stream_url:
+            try:
+                from src.cogs.music._extractor import NativeExtractor
+                target_q = track.query or f"{track.title} {track.author}".strip() or track.url
+                if target_q:
+                    ext = await NativeExtractor.extract(target_q, requester=track.requester)
+                    if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
+                        track.stream_url = ext.stream_url
+                        results = await wavelink.Playable.search(ext.stream_url)
+                        if results:
+                            return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"NativeExtractor resolve fallback error: {e}")
+
         # ── Priority 2: Direct YouTube URL → Lavalink handles directly ──
         url = track.url or ""
         is_yt = "youtu" in url

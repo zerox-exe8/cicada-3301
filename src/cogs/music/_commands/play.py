@@ -163,7 +163,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         except Exception as e:
             logger.debug(f"Spotify track title fetch error: {e}")
 
-    is_direct_url = lookup_target.startswith("http://") or lookup_target.startswith("https://")
+    is_yt = any(yt in lookup_target.lower() for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/"))
+    is_direct_url = (lookup_target.startswith("http://") or lookup_target.startswith("https://")) and not is_yt
 
     if is_direct_url:
         try:

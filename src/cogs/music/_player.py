@@ -211,7 +211,7 @@ class GuildPlayer:
         search_target = f"{track.title} {track.author}".strip() or track.query or track.title
         if search_target:
             try:
-                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube)
+                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic)
                 if results:
                     logger.debug(f"YouTube search fallback resolved '{track.title}' successfully")
                     return results[0] if isinstance(results, list) else results.tracks[0]
@@ -221,7 +221,7 @@ class GuildPlayer:
         # ── Priority 4: Plain title search fallback ──
         if track.title:
             try:
-                results = await wavelink.Playable.search(track.title, source=wavelink.TrackSource.YouTube)
+                results = await wavelink.Playable.search(track.title, source=wavelink.TrackSource.YouTubeMusic)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:

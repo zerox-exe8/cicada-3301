@@ -410,13 +410,7 @@ class GuildPlayer:
         try:
             await asyncio.sleep(seconds)
             if not self.is_playing and not self.queue:
-                if self.home_channel and not self._disconnect_announced:
-                    c = KyroContainer(accent_color=None)
-                    c.add_text("-# Left voice channel due to inactivity.")
-                    try:
-                        await send_container_response(self.home_channel, c)
-                    except Exception:
-                        pass
+                logger.info(f"Guild {self.guild.id}: Idle timeout reached, disconnecting silently.")
                 await self.stop()
         except asyncio.CancelledError:
             pass

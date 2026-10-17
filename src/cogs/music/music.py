@@ -202,38 +202,12 @@ class Music(commands.Cog):
                     # Check 24/7 mode
                     if getattr(player, "is_247", False):
                         logger.info(f"Voice channel #{before.channel.name} empty, but 24/7 active. Paused and staying connected.")
-                        if player.home_channel:
-                            try:
-                                container = KyroContainer(accent_color=None)
-                                container.add_section(
-                                    content=(
-                                        "**Voice Channel Empty (24/7 Mode Active)**\n"
-                                        f"> All listeners left {before.channel.mention}. Playback has been paused.\n"
-                                        "> Kyro will remain connected in voice (24/7 Mode Enabled)."
-                                    )
-                                )
-                                await send_container_response(player.home_channel, container)
-                            except Exception:
-                                pass
                         return
 
-                    # 24/7 is OFF: start 2-minute countdown timer
+                    # 24/7 is OFF: start 2-minute countdown timer silently (no spam in chat)
                     logger.info(f"Voice channel #{before.channel.name} empty. Starting 2-minute disconnect countdown.")
                     player.cancel_empty_vc_timer(auto_resume=False)
                     player._was_paused_for_empty_vc = True
-                    if player.home_channel:
-                        try:
-                            container = KyroContainer(accent_color=None)
-                            container.add_section(
-                                content=(
-                                    "**Voice Channel Empty**\n"
-                                    f"> All listeners left {before.channel.mention}. Playback has been paused.\n"
-                                    "> Kyro will disconnect in **2 minutes** if no one rejoins."
-                                )
-                            )
-                            await send_container_response(player.home_channel, container)
-                        except Exception:
-                            pass
 
                     player._empty_vc_task = asyncio.create_task(
                         self._empty_vc_timeout_worker(player, before.channel, timeout=120)
@@ -242,7 +216,7 @@ class Music(commands.Cog):
     async def _empty_vc_timeout_worker(
         self, player: Any, channel: discord.VoiceChannel, timeout: int = 120
     ) -> None:
-        """Disconnects player after specified inactivity timeout if channel remains empty."""
+        """Disconnects player silently after specified inactivity timeout if channel remains empty."""
         try:
             await asyncio.sleep(timeout)
             if not player.voice_client or player.voice_client.channel != channel:
@@ -255,22 +229,8 @@ class Music(commands.Cog):
             if getattr(player, "is_247", False):
                 return
 
-            logger.info(f"Empty VC timer expired for #{channel.name} in guild {player.guild.id}. Disconnecting.")
+            logger.info(f"Empty VC timer expired for #{channel.name} in guild {player.guild.id}. Disconnecting silently.")
             player._disconnect_announced = True
-
-            if player.home_channel:
-                try:
-                    container = KyroContainer(accent_color=None)
-                    container.add_section(
-                        content=(
-                            "**Voice Channel Inactivity Disconnect**\n"
-                            f"> Disconnected from {channel.mention} due to **2 minutes** of inactivity."
-                        )
-                    )
-                    await send_container_response(player.home_channel, container)
-                except Exception:
-                    pass
-
             await player.stop()
         except asyncio.CancelledError:
             pass

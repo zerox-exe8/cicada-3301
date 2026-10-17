@@ -217,6 +217,17 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"Title fallback error for '{track.title}': {e}")
 
+        # ── Priority 5: SoundCloud Fallback if YouTube blocks/fails ──
+        fallback_query = search_target or track.title or track.query
+        if fallback_query:
+            try:
+                results = await wavelink.Playable.search(fallback_query, source=wavelink.TrackSource.SoundCloud)
+                if results:
+                    logger.info(f"SoundCloud fallback successfully resolved '{track.title}'")
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"SoundCloud fallback notice for '{fallback_query}': {e}")
+
         return None
 
     # ── Controls ──

@@ -169,6 +169,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             results = await wavelink.Playable.search(lookup_target)
         else:
             results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube)
+            if not results:
+                results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.SoundCloud)
         if isinstance(results, wavelink.Playlist) and results.tracks:
             pl = results
             was_idle = not player.is_playing and not player.is_paused

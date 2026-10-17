@@ -83,16 +83,22 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     search_container.add_text(f"**Searching:** `{query}`...")
     search_msg = await send_container_response(ctx, search_container)
 
-    # ── Step 0: Check if Playlist URL (Spotify, YouTube, SoundCloud) ──
-    if is_playlist_url(query):
-        pl = await NativeExtractor.extract_playlist(query, requester=ctx.author.display_name)
+    # ── Step 0: Check if Playlist URL (Spotify, SoundCloud) ──
+    # Note: YouTube playlists are routed directly to Lavalink in Step 1 to bypass datacenter IP blocks
+    clean_q = query.strip()
+    if clean_q.startswith("<") and clean_q.endswith(">"):
+        clean_q = clean_q[1:-1].strip()
+
+    is_yt_query = any(yt in clean_q.lower() for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/"))
+    if is_playlist_url(clean_q) and not is_yt_query:
+        pl = await NativeExtractor.extract_playlist(clean_q, requester=ctx.author.display_name)
         if pl and pl.tracks:
             was_idle = not player.is_playing and not player.is_paused
             first_item = pl.tracks[0]
             first_track = Track(
                 title=first_item.title,
                 author=first_item.author,
-                url=first_item.url or query,
+                url=first_item.url or clean_q,
                 stream_url="",
                 duration=first_item.duration,
                 thumbnail=pl.thumbnail,
@@ -104,7 +110,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 t = Track(
                     title=it.title,
                     author=it.author,
-                    url=it.url or query,
+                    url=it.url or clean_q,
                     stream_url="",
                     duration=it.duration,
                     thumbnail=pl.thumbnail,
@@ -116,23 +122,23 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             if was_idle:
                 await player.play_track(first_track, message_to_edit=search_msg)
             else:
-                player.queue.insert(0, first_track)
+                player.queue.append(first_track)
             pl_card = KyroContainer(accent_color=None)
             pl_card.add_section(
                 content=(
-                    f"**Queued Playlist: [{pl.title}]({query})**\n"
+                    f"**Queued Playlist: [{pl.title}]({clean_q})**\n"
                     f"> **Total Tracks:** `{len(pl.tracks)} songs`\n"
                     f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
                     f"> **Requested By:** `{ctx.author.display_name}`"
                 ) if was_idle else (
-                    f"**Queued Playlist: [{pl.title}]({query})**\n"
+                    f"**Queued Playlist: [{pl.title}]({clean_q})**\n"
                     f"> **Total Tracks Added:** `{len(pl.tracks)} songs`\n"
                     f"> **Requested By:** `{ctx.author.display_name}`"
                 )
             )
             await send_container_response(ctx, pl_card)
             return
-        elif "spotify.com" in query:
+        elif "spotify.com" in clean_q:
             err_c = KyroContainer(accent_color=None)
             err_c.add_section(
                 content=(
@@ -152,7 +158,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     # ── Step 1: Direct Lavalink Search (Instant official YouTube, Direct URLs & Spotify Tracks) ──
     track: Optional[Track] = None
-    lookup_target = query.strip()
+    lookup_target = clean_q
 
     # If single Spotify track URL, resolve metadata title first
     if any(sp in lookup_target for sp in ("spotify.com/track/", "spotify.link/", "spotify:track:")):
@@ -201,7 +207,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 if was_idle:
                     await player.play_track(first_track, message_to_edit=search_msg)
                 else:
-                    player.queue.insert(0, first_track)
+                    player.queue.append(first_track)
                 pl_card = KyroContainer(accent_color=None)
                 pl_card.add_section(
                     content=(
@@ -278,7 +284,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     if was_idle:
                         await player.play_track(first_track, message_to_edit=search_msg)
                     else:
-                        player.queue.insert(0, first_track)
+                        player.queue.append(first_track)
                     pl_card = KyroContainer(accent_color=None)
                     pl_card.add_section(
                         content=(

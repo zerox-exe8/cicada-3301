@@ -277,12 +277,8 @@ class GuildPlayer:
                 pass
             self.voice_client = None
 
-        if self.controller_message:
-            try:
-                await self.controller_message.delete()
-            except Exception:
-                pass
-            self.controller_message = None
+        # Clear reference without deleting card from chat
+        self.controller_message = None
 
     def set_volume(self, volume_percent: int) -> int:
         """Adjust volume (0 - 150%)."""
@@ -373,25 +369,21 @@ class GuildPlayer:
         container = self.build_now_playing_container(track)
         view = MusicControlView(self.bot, player=self)
 
-        if message_to_edit and isinstance(message_to_edit, discord.Message):
+        target = message_to_edit or self.controller_message
+        if target and isinstance(target, discord.Message):
             try:
-                await edit_container_response(message_to_edit, container, view=view)
-                self.controller_message = message_to_edit
+                await edit_container_response(target, container, view=view)
+                self.controller_message = target
                 return
-            except Exception:
-                pass
-
-        if self.controller_message and self.controller_message != message_to_edit:
-            try:
-                await self.controller_message.delete()
-            except Exception:
-                pass
-            self.controller_message = None
+            except Exception as e:
+                logger.debug(f"Failed to edit existing controller message: {e}")
 
         try:
-            self.controller_message = await send_container_response(
+            msg = await send_container_response(
                 self.home_channel, container, view=view
             )
+            if isinstance(msg, discord.Message):
+                self.controller_message = msg
         except Exception as e:
             logger.debug(f"Failed to send now playing card: {e}")
 

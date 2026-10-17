@@ -38,6 +38,9 @@ class GiveawayManager:
                 for r in rows:
                     mid = int(r["message_id"])
                     gid = int(r["id"])
+                    end_t = r["ends_at"]
+                    if end_t.tzinfo is None:
+                        end_t = end_t.replace(tzinfo=datetime.timezone.utc)
                     data = {
                         "id": gid,
                         "guild_id": int(r["guild_id"]),
@@ -46,7 +49,7 @@ class GiveawayManager:
                         "host_id": int(r["host_id"]),
                         "prize": str(r["prize"]),
                         "winner_count": int(r.get("winner_count", 1)),
-                        "ends_at": r["ends_at"],
+                        "ends_at": end_t,
                         "required_role_id": int(r["required_role_id"]) if r.get("required_role_id") else None,
                         "is_ended": False,
                     }
@@ -96,6 +99,14 @@ class GiveawayManager:
         required_role_id: Optional[int] = None,
     ) -> int:
         """Register a new giveaway in the database and activate it in memory."""
+        # Convert ends_at for Postgres TIMESTAMP column (naive UTC) and memory cache (aware UTC)
+        if ends_at.tzinfo is not None:
+            db_ends_at = ends_at.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            mem_ends_at = ends_at.astimezone(datetime.timezone.utc)
+        else:
+            db_ends_at = ends_at
+            mem_ends_at = ends_at.replace(tzinfo=datetime.timezone.utc)
+
         row = await self.db.fetch_one(
             """
             INSERT INTO giveaways (guild_id, channel_id, message_id, host_id, prize, winner_count, ends_at, required_role_id)
@@ -108,7 +119,7 @@ class GiveawayManager:
             host_id,
             prize,
             winner_count,
-            ends_at,
+            db_ends_at,
             required_role_id,
         )
         giveaway_id = int(row["id"])
@@ -121,7 +132,7 @@ class GiveawayManager:
             "host_id": host_id,
             "prize": prize,
             "winner_count": winner_count,
-            "ends_at": ends_at,
+            "ends_at": mem_ends_at,
             "required_role_id": required_role_id,
             "is_ended": False,
         }
@@ -202,7 +213,7 @@ class GiveawayManager:
                 "host_id": int(gw_row["host_id"]),
                 "prize": str(gw_row["prize"]),
                 "winner_count": int(gw_row.get("winner_count", 1)),
-                "ends_at": gw_row["ends_at"],
+                "ends_at": gw_row["ends_at"].replace(tzinfo=datetime.timezone.utc) if gw_row["ends_at"].tzinfo is None else gw_row["ends_at"],
                 "required_role_id": int(gw_row["required_role_id"]) if gw_row.get("required_role_id") else None,
                 "is_ended": bool(gw_row.get("is_ended", False)),
             }

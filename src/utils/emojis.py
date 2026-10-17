@@ -107,6 +107,19 @@ class EmojiRegistry:
                             logger.info("Auto-uploaded giveaway to application emojis.")
                         except Exception as e:
                             logger.debug(f"Could not auto-upload giveaway emoji: {e}")
+
+                # Auto-sync discord_giveaway emoji from assets/emoji
+                if "discord_giveaway" not in self._emojis and len(self._emojis) < 50:
+                    dg_path = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji" / "discord_giveaway.png"
+                    if dg_path.exists():
+                        try:
+                            with open(dg_path, "rb") as f:
+                                data = f.read()
+                            new_e = await self.bot.create_application_emoji(name="discord_giveaway", image=data)
+                            self._emojis["discord_giveaway"] = new_e
+                            logger.info("Auto-uploaded discord_giveaway to application emojis.")
+                        except Exception as e:
+                            logger.debug(f"Could not auto-upload discord_giveaway emoji: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 
@@ -246,7 +259,8 @@ class EmojiRegistry:
                 "room_icon_mute": ["volume_down", "icons_micmute"],
                 # System Features
                 "media": ["icon_media", "icons_image", "icons_file"],
-                "giveaway": ["s_giveaway", "icons_gift"],
+                "giveaway": ["discord_giveaway", "s_giveaway", "icons_gift"],
+                "discord_giveaway": ["giveaway", "s_giveaway", "icons_gift"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)
@@ -307,7 +321,8 @@ class EmojiRegistry:
                 "room_icon_mute": ["volume_down", "icons_micmute"],
                 # System Features
                 "media": ["icon_media", "icons_image", "icons_file"],
-                "giveaway": ["s_giveaway", "icons_gift"],
+                "giveaway": ["discord_giveaway", "s_giveaway", "icons_gift"],
+                "discord_giveaway": ["giveaway", "s_giveaway", "icons_gift"],
             }
             for alias in alias_map.get(name_clean, []):
                 emoji = self._emojis.get(alias)

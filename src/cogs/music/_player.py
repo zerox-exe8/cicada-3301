@@ -303,13 +303,18 @@ class GuildPlayer:
             await self.play_track(next_track)
         elif self.smart_autoplay and self.current:
             # Smart Autoplay AI recommendation
-            rec = await NativeSmartAutoplay.get_next_recommendation(
-                self.current, self.autoplay_history, self.bot.db
-            )
-            if rec:
-                rec.requester = "Kyro Autoplay"
-                await self.play_track(rec)
-            else:
+            try:
+                rec = await NativeSmartAutoplay.get_next_recommendation(
+                    self.current, self.autoplay_history, self.bot.db
+                )
+                if rec:
+                    rec.requester = "⚡ Smart Autoplay"
+                    await self.play_track(rec)
+                else:
+                    self.current = None
+                    self.schedule_empty_vc_timer()
+            except Exception as e:
+                logger.error(f"Guild {self.guild.id}: Smart autoplay error: {e}", exc_info=True)
                 self.current = None
                 self.schedule_empty_vc_timer()
         else:

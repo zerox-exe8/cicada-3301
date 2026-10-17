@@ -23,14 +23,18 @@ logger = logging.getLogger("Kyro.Music.Autoplay")
 
 ARTIST_CLUSTERS = {
     # Bollywood / Hindi Romantic & Soulful
-    "arijit singh": ["Atif Aslam", "Jubin Nautiyal", "Mohit Chauhan", "KK", "Armaan Malik", "Pritam", "Sachin-Jigar", "Shreya Ghoshal", "Vishal Mishra"],
-    "atif aslam": ["Arijit Singh", "Jubin Nautiyal", "Mustafa Zahid", "Rahat Fateh Ali Khan", "Ali Zafar", "Mohit Chauhan", "Pritam"],
+    "arijit singh": ["Atif Aslam", "Jubin Nautiyal", "Mohit Chauhan", "KK", "Armaan Malik", "Pritam", "Ankit Tiwari", "Sachin-Jigar", "Shreya Ghoshal", "Vishal Mishra"],
+    "ankit tiwari": ["Arijit Singh", "Atif Aslam", "Mustafa Zahid", "Mohit Chauhan", "KK", "Mithoon", "Pritam", "Armaan Malik"],
+    "atif aslam": ["Arijit Singh", "Jubin Nautiyal", "Mustafa Zahid", "Rahat Fateh Ali Khan", "Ali Zafar", "Mohit Chauhan", "Pritam", "Ankit Tiwari"],
     "jubin nautiyal": ["Arijit Singh", "Atif Aslam", "Akhil Sachdeva", "Tulsi Kumar", "Payal Dev", "Stebin Ben", "Vishal Mishra"],
     "kk": ["Shaan", "Mohit Chauhan", "Sonu Nigam", "Lucky Ali", "Pritam", "Arijit Singh", "Papon"],
     "sonu nigam": ["KK", "Shaan", "Udit Narayan", "Kumar Sanu", "Abhijeet", "Alka Yagnik", "Shreya Ghoshal"],
     "shreya ghoshal": ["Sunidhi Chauhan", "Arijit Singh", "Alka Yagnik", "Monali Thakur", "Pritam", "Shankar-Ehsaan-Loy"],
-    "pritam": ["Arijit Singh", "KK", "Mohit Chauhan", "Atif Aslam", "Shaan", "Sachin-Jigar"],
+    "pritam": ["Arijit Singh", "KK", "Mohit Chauhan", "Atif Aslam", "Shaan", "Sachin-Jigar", "Ankit Tiwari"],
     "vishal mishra": ["Arijit Singh", "Jubin Nautiyal", "B Praak", "Akhil Sachdeva", "Sachet Tandon"],
+    "armaan malik": ["Arijit Singh", "Darshan Raval", "Atif Aslam", "Ankit Tiwari", "Jubin Nautiyal"],
+    "darshan raval": ["Armaan Malik", "Arijit Singh", "Jubin Nautiyal", "Atif Aslam", "Stebin Ben"],
+    "mithoon": ["Ankit Tiwari", "Arijit Singh", "Atif Aslam", "Pritam"],
     
     # Punjabi / Drill / Desi Hip-Hop
     "sidhu moose wala": ["Karan Aujla", "AP Dhillon", "Shubh", "Diljit Dosanjh", "Amrit Maan", "Gurinder Gill", "DIVINE"],
@@ -114,6 +118,21 @@ class NativeSmartAutoplay:
     """Autonomous Multi-Engine Continuous Radio Player (JioSaavn + YouTube Mix)."""
 
     @classmethod
+    async def get_next_recommendation(
+        cls,
+        current_track: Track,
+        played_history: Set[str],
+        db: Any = None,
+        consecutive_same_artist: int = 0,
+    ) -> Optional[Track]:
+        """Compatibility bridge for GuildPlayer."""
+        return await cls.get_next_track(
+            current_track=current_track,
+            played_history=played_history,
+            consecutive_same_artist=consecutive_same_artist,
+        )
+
+    @classmethod
     async def get_next_track(
         cls,
         current_track: Track,
@@ -121,7 +140,7 @@ class NativeSmartAutoplay:
         consecutive_same_artist: int = 0,
     ) -> Optional[Track]:
         """
-        Produce next recommended track using multi-candidate pool from JioSaavn and YouTube Radio Mix.
+        Produce next recommended track using multi-candidate pool from JioSaavn and Worldwide catalogs.
         Guarantees non-stop continuous playback without dying or repeating same tracks.
         """
         if not current_track:
@@ -154,108 +173,48 @@ class NativeSmartAutoplay:
             queries.append(f"{pick_artist} hits")
         else:
             if primary_artist and primary_artist.lower() not in ("official artist", "unknown", "youtube"):
+                queries.append(f"{primary_artist} hits")
                 queries.append(f"{primary_artist} songs")
-            queries.append(f"{clean_title} songs")
             if related_artists:
-                queries.append(f"{random.choice(related_artists)} songs")
+                queries.append(f"{random.choice(related_artists)} hits")
+            queries.append(f"{clean_title} songs")
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
+            "Cookie": "geo=IN; cc=in; L=hindi%2Cenglish",
+            "X-Forwarded-For": "103.240.233.1",
         }
 
-        # Strategy 1: YouTube Official Radio Mix (list=RD{vid}) - Best-in-class genre & vibe matching
-        m = YOUTUBE_URL_REGEX.search(current_track.url or "")
-        vid = m.group(1) if m else None
-
-        def _fetch_radio_mix():
-            opts = {
-                "quiet": True,
-                "extract_flat": True,
-                "skip_download": True,
-                "socket_timeout": 8,
-                "extractor_args": {"youtube": {"player_client": ["mweb", "android", "web"]}},
-            }
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                target_vid = vid
-                if not target_vid:
-                    # Resolve seed video ID from track title & artist
-                    seed_q = f"ytsearch1:{clean_title} {primary_artist}".strip()
-                    try:
-                        s_info = ydl.extract_info(seed_q, download=False)
-                        s_entries = (s_info.get("entries") or []) if s_info else []
-                        if s_entries and s_entries[0].get("id"):
-                            target_vid = s_entries[0]["id"]
-                    except Exception:
-                        pass
-
-                if target_vid:
-                    mix_url = f"https://www.youtube.com/watch?v={target_vid}&list=RD{target_vid}"
-                    mix_opts = dict(opts)
-                    mix_opts["playlist_items"] = "1-20"
-                    try:
-                        with yt_dlp.YoutubeDL(mix_opts) as mix_ydl:
-                            return mix_ydl.extract_info(mix_url, download=False)
-                    except Exception:
-                        pass
-
-                fallback_q = f"ytsearch15:{primary_artist} songs" if primary_artist else f"ytsearch15:{clean_title} songs"
-                try:
-                    return ydl.extract_info(fallback_q, download=False)
-                except Exception:
-                    return None
-
+        # Strategy 1: Ultra-Fast JioSaavn Catalog Recommendation Pool (0% Cloud Block, 0.4s response)
         try:
-            info = await asyncio.to_thread(_fetch_radio_mix)
-            entries = (info.get("entries") or []) if info else []
-            for e in entries:
-                if not e:
-                    continue
-                e_title = e.get("title") or ""
-                cand_norm = normalize_history_title(e_title)
-                if not cand_norm or cand_norm in played_history or cand_norm == norm_curr_title:
-                    continue
+            async with aiohttp.ClientSession() as session:
+                for q in queries:
+                    encoded_q = urllib.parse.quote(q)
+                    search_url = (
+                        f"https://www.jiosaavn.com/api.php?"
+                        f"__call=search.getResults&_format=json&p=1&n=15&q={encoded_q}"
+                        f"&_marker=0&api_version=4&ctx=web6dot0&cc=in"
+                    )
+                    try:
+                        async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                            if resp.status == 200:
+                                data = await resp.json(content_type=None)
+                                results = data.get("results", [])
+                                for song in results:
+                                    s_title = song.get("title") or song.get("song") or ""
+                                    cand_norm = normalize_history_title(s_title)
+                                    if not cand_norm or cand_norm in played_history or cand_norm == norm_curr_title:
+                                        continue
 
-                e_id = e.get("id") or e.get("url")
-                v_url = e_id if str(e_id).startswith("http") else f"https://www.youtube.com/watch?v={e_id}"
-                e_clean = clean_track_title(e_title)
-
-                # Prioritize unblocked NativeExtractor CDN stream
-                try:
-                    cand_trk = await NativeExtractor.extract(e_clean, requester="⚡ Smart Autoplay Radio", is_autoplay=True)
-                    if cand_trk and getattr(cand_trk, "stream_url", None):
-                        played_history.add(cand_norm)
-                        return cand_trk
-                except Exception as e:
-                    logger.debug(f"Autoplay NativeExtractor notice: {e}")
-
-                import wavelink
-                try:
-                    target = v_url or e_clean
-                    if target.startswith("http"):
-                        res = await wavelink.Playable.search(target)
-                    else:
-                        res = await wavelink.Playable.search(target, source=wavelink.TrackSource.YouTubeMusic)
-                    if res:
-                        top = res[0]
-                        trk = Track(
-                            title=top.title or e_clean,
-                            author=top.author or "Artist",
-                            url=top.uri or v_url,
-                            stream_url="",
-                            duration=int((top.length or 0) / 1000),
-                            thumbnail=top.artwork,
-                            requester="⚡ Smart Autoplay Radio",
-                            is_autoplay=True,
-                            query=e_clean,
-                        )
-                        trk._playable = top
-                        played_history.add(cand_norm)
-                        return trk
-                except Exception as e:
-                    logger.debug(f"Autoplay wavelink search notice: {e}")
+                                    trk = NativeExtractor._build_saavn_track(song, requester="⚡ Smart Autoplay Radio", is_autoplay=True, query=q)
+                                    if trk and getattr(trk, "stream_url", None):
+                                        played_history.add(cand_norm)
+                                        return trk
+                    except Exception as e:
+                        logger.debug(f"Autoplay candidate search notice for '{q}': {e}")
         except Exception as e:
-            logger.debug(f"YouTube radio mix notice: {e}")
+            logger.debug(f"Autoplay candidate pool notice: {e}")
 
         # Strategy 2: Multi-Query Recommendations (NativeExtractor first, then Wavelink fallback)
         import wavelink

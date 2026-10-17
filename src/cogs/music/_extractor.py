@@ -74,7 +74,7 @@ CONVERSATIONAL_SUFFIX_PATTERN = re.compile(
 )
 
 METADATA_NOISE_PATTERN = re.compile(
-    r"\b(?:official\s+video|official\s+audio|lyric\s+video|full\s+song|hd\s+video|4k|1080p|320kbps|video\s+song|audio\s+song)\b",
+    r"\b(?:official\s+(?:music\s+)?video|official\s+audio|lyric(?:al)?(?:\s+video)?|full\s+(?:video|song)|video\s+song|audio\s+song|hd\s+video|4k|1080p|320kbps|gaana\s+originals?|promo\s+video|visualizer)\b",
     re.IGNORECASE,
 )
 
@@ -196,6 +196,22 @@ def score_candidate(
     if clean_title_matches:
         score += 45.0
 
+    # Penalize if query had explicit artist/author tokens not in candidate title that don't match candidate author
+    extra_tokens = [tok for tok in substantive_q_tokens if not _fuzzy_match(tok, title_tokens)]
+    if len(extra_tokens) >= 2:
+        author_tokens = re.findall(r"\w{3,}", c_author.lower())
+        author_matched = sum(1 for tok in extra_tokens if _fuzzy_match(tok, author_tokens))
+        if author_matched == 0:
+            score -= 85.0
+
+    # Ensure candidate core title has at least one substantive token present in query (prevents unrelated songs by same artist)
+    core_words = [w for w in re.findall(r"\w{3,}", clean_c_title) if w not in {"from", "ost", "song", "audio", "video"}]
+    query_substantive = [w for w in re.findall(r"\w{3,}", q_lower) if w not in {"from", "ost", "song", "audio", "video", "official"}]
+    if core_words and query_substantive:
+        overlap = [w for w in core_words if any(_fuzzy_match(w, [qw]) for qw in query_substantive)]
+        if not overlap:
+            score -= 100.0
+
     # Boost official artist topic tracks and original audio
     if " - topic" in c_author or "topic" in c_author:
         score += 40.0
@@ -265,6 +281,10 @@ def clean_track_title(raw_title: str) -> str:
     clean = normalize_unicode_text(clean)
     clean = AUDIO_FORMAT_PREFIX_PATTERN.sub("", clean).strip()
     clean = AUDIO_FORMAT_TAGS.sub("", clean).strip()
+    clean = re.sub(r"\.mp3$", "", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"[\(\[\{][a-zA-Z0-9\-_]+\.(?:in|com|net|org|co|pk|cc)[\)\]\}]", "", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"[-–]\s*\d+\s*kbps.*$", "", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"\b\d+\s*kbps\b", "", clean, flags=re.IGNORECASE)
     clean = re.sub(
         r"[\(\[\{]\s*(?:official\s+video|official\s+audio|lyrics?|full\s+song|hd|4k|1080p|audio|video|prod\..*?|dir\..*?|use\s+headphones?)[\)\]\}]",
         "",
@@ -393,11 +413,8 @@ class NativeExtractor:
             # Fast 0.1s oEmbed title resolution (100% unblocked on Cloud/Render)
             yt_title = await cls._fetch_youtube_title(clean_yt_url)
             if yt_title:
-                yt_title = re.sub(
-                    r"\s*\((?:from\s+[\"']?.{2,40}[\"']?|ost|soundtrack|original\s+soundtrack)\)\s*$",
-                    "", yt_title, flags=re.IGNORECASE
-                ).strip()
-                raw_q = yt_title
+                yt_query = cls._parse_youtube_title(yt_title)
+                raw_q = yt_query or yt_title
             else:
                 track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
                 if track:
@@ -641,6 +658,12 @@ class NativeExtractor:
                     short_title_words = set(re.findall(r"\w{3,}", short_track.title.lower()))
                     query_substantive = set(re.findall(r"\w{3,}", query.lower())) - {"audio", "music", "song", "video", "official"}
                     if short_title_words & query_substantive:
+                        # Validate that dropped tokens (likely artist/singer) are not completely violated
+                        dropped_tokens = [w.lower() for w in clean_tokens[3:] if len(w) >= 3]
+                        if len(dropped_tokens) >= 2:
+                            author_tokens = re.findall(r"\w{3,}", short_track.author.lower())
+                            if not any(d in a or a in d for d in dropped_tokens for a in author_tokens):
+                                return None
                         return short_track
 
         # Step 5: If previous strict passes produced no track, but a candidate exists, use it only if relevant
@@ -1070,6 +1093,45 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"Spotify metadata fetch error: {e}")
         return None
+
+    @staticmethod
+    def _parse_youtube_title(raw_title: str) -> str:
+        """
+        Intelligently parse YouTube video titles (especially Indian label titles)
+        formatted like:
+        'Tum Se Hi - Lyrical Video | Ankit Tiwari | Alia Bhatt | Adity Roy Kapur | Sanjay Dutt | Sadak 2'
+        Extracts the clean song name and the primary singer/artist into an optimal search query.
+        """
+        if not raw_title:
+            return ""
+        clean = normalize_unicode_text(html.unescape(raw_title)).strip()
+        chunks = [c.strip() for c in re.split(r"[|•]", clean) if c.strip()]
+        if len(chunks) > 1:
+            c0 = METADATA_NOISE_PATTERN.sub("", chunks[0])
+            c0 = re.sub(r"[\(\[\{].*?[\)\]\}]", "", c0)
+            c0 = re.sub(r"[\s\-:~]+$", "", c0).strip()
+
+            chosen_artist = ""
+            for c in chunks[1:]:
+                c_clean = METADATA_NOISE_PATTERN.sub("", c).strip()
+                c_clean = re.sub(r"[\(\[\{].*?[\)\]\}]", "", c_clean).strip()
+                low = c_clean.lower()
+                if not c_clean or any(tag in low for tag in [
+                    "official", "video", "audio", "lyric", "gaana", "sony", "t-series",
+                    "times music", "zeemusic", "tips", "speed records", "record", "records"
+                ]):
+                    continue
+                chosen_artist = c_clean
+                break
+
+            if chosen_artist:
+                return f"{c0} {chosen_artist}".strip()
+            return c0.strip()
+
+        cleaned = METADATA_NOISE_PATTERN.sub("", clean)
+        cleaned = re.sub(r"[\(\[\{].*?[\)\]\}]", "", cleaned)
+        cleaned = re.sub(r"[\s\-:~]+$", "", cleaned).strip()
+        return cleaned
 
     @staticmethod
     async def _fetch_youtube_title(youtube_url: str) -> Optional[str]:

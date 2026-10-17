@@ -135,7 +135,9 @@ UNWANTED_VERSION_KEYWORDS = [
     "cover", "reprise", "female version", "male version", "karaoke", "reply",
     "status", "ringtone", "dholki", "8d", "tribute", "parody",
     "originally performed", "originally by", "backing track", "backing",
-    "amateur", "re-recorded", "tribute to", "bgm", "theme music"
+    "amateur", "re-recorded", "tribute to", "bgm", "theme music",
+    "rework", "re-work", "private school", "remake", "rendition", "adaptation",
+    "sound tower", "cover version"
 ]
 
 
@@ -507,121 +509,112 @@ class NativeExtractor:
         requester: str,
         is_autoplay: bool,
     ) -> Optional[Track]:
-        """Fetch and decrypt 320kbps stream URL from JioSaavn 2-tier search cascade."""
+        """Fetch and decrypt 320kbps stream URL from JioSaavn official catalog cascade."""
         if not query:
             return None
 
         encoded_q = urllib.parse.quote(query)
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+            "X-Forwarded-For": "103.240.233.1",
+            "CF-Connecting-IP": "103.240.233.1",
+            "Client-IP": "103.240.233.1",
+            "Cookie": "geo=IN; cc=in; L=hindi%2Cenglish",
         }
-
-        fallback_song = None
-
-        # Step 1: Query search.getResults with top 10 candidates
-        search_url = (
-            f"https://www.jiosaavn.com/api.php?"
-            f"__call=search.getResults&_format=json&p=1&n=10&q={encoded_q}"
-            f"&_marker=0&api_version=4&ctx=web6dot0"
-        )
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp:
-                    if resp.status == 200:
-                        text = await resp.text()
-                        data = json.loads(text)
-                        results = data.get("results", [])
+                # ── Step 1: Autocomplete Popularity Index (Always Official Releases First!) ──
+                auto_url = (
+                    f"https://www.jiosaavn.com/api.php?"
+                    f"__call=autocomplete.get&_format=json&_marker=0&cc=in&includeMetaTags=1&query={encoded_q}"
+                )
+                async with session.get(auto_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp1:
+                    if resp1.status == 200:
+                        data1 = await resp1.json(content_type=None)
+                        songs1 = data1.get("songs", {}).get("data", [])
+                        if songs1:
+                            scored1 = []
+                            for s in songs1:
+                                s_dur = int(s.get("duration") or s.get("more_info", {}).get("duration") or 0)
+                                sc = score_candidate(s.get("title") or "", s.get("description") or "", query, duration=s_dur)
+                                scored1.append((sc, s))
+
+                            scored1.sort(key=lambda x: x[0], reverse=True)
+                            has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
+
+                            for sc, cand in scored1:
+                                if sc < 0 and not has_user_keyword:
+                                    continue
+                                pid = cand.get("id")
+                                if not pid:
+                                    continue
+                                det_url = (
+                                    f"https://www.jiosaavn.com/api.php?"
+                                    f"__call=song.getDetails&cc=in&_marker=0%3F_marker%3D0&_format=json&pids={pid}"
+                                )
+                                async with session.get(det_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as det_resp:
+                                    if det_resp.status == 200:
+                                        det_data = await det_resp.json(content_type=None)
+                                        sinfo = det_data.get(pid, {})
+                                        enc_url = sinfo.get("encrypted_media_url")
+                                        if enc_url:
+                                            has_320 = str(sinfo.get("320kbps", "")).lower() == "true"
+                                            dec_stream = cls._decrypt_saavn_url(enc_url, has_320kbps=has_320)
+                                            if dec_stream:
+                                                title = clean_track_title(sinfo.get("song") or cand.get("title") or query)
+                                                author = sinfo.get("primary_artists") or cand.get("description") or "Official Artist"
+                                                raw_image = sinfo.get("image") or cand.get("image") or ""
+                                                thumbnail = (
+                                                    raw_image.replace("150x150", "500x500").replace("50x50", "500x500")
+                                                    if raw_image
+                                                    else "https://cdn.discordapp.com/embed/avatars/0.png"
+                                                )
+                                                duration = int(sinfo.get("duration") or 0)
+                                                webpage = sinfo.get("perma_url") or cand.get("url") or "https://www.jiosaavn.com"
+
+                                                return Track(
+                                                    title=title,
+                                                    author=author,
+                                                    url=webpage,
+                                                    stream_url=dec_stream,
+                                                    duration=duration,
+                                                    thumbnail=thumbnail,
+                                                    requester=requester,
+                                                    is_autoplay=is_autoplay,
+                                                )
+
+                # ── Step 2: Detailed Catalog Search (15 candidates with Indian geo) ──
+                search_url = (
+                    f"https://www.jiosaavn.com/api.php?"
+                    f"__call=search.getResults&_format=json&p=1&n=15&q={encoded_q}"
+                    f"&_marker=0&api_version=4&ctx=web6dot0&cc=in"
+                )
+                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as s_resp:
+                    if s_resp.status == 200:
+                        s_data = await s_resp.json(content_type=None)
+                        results = s_data.get("results", [])
                         if results:
-                            scored = []
+                            scored_res = []
                             for song in results:
                                 s_title = song.get("title") or song.get("song") or ""
                                 s_sub = song.get("subtitle") or ""
                                 m_info = song.get("more_info", {})
                                 dur = int(m_info.get("duration") or song.get("duration") or 0)
                                 sc = score_candidate(s_title, s_sub, query, duration=dur)
-                                scored.append((sc, song))
+                                scored_res.append((sc, song))
 
-                            scored.sort(key=lambda x: x[0], reverse=True)
+                            scored_res.sort(key=lambda x: x[0], reverse=True)
                             has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
 
-                            # First pass: try clean, unpenalized tracks
-                            for sc, song in scored:
+                            for sc, song in scored_res:
                                 if sc < 0 and not has_user_keyword:
                                     continue
                                 trk = cls._build_saavn_track(song, requester, is_autoplay, query)
                                 if trk:
                                     return trk
-
-                            # If all candidates had negative scores, save the best one as fallback
-                            if scored:
-                                fallback_song = scored[0][1]
-
-                # Step 2: Fallback to autocomplete.get + song.getDetails
-                auto_url = (
-                    f"https://www.jiosaavn.com/api.php?"
-                    f"__call=autocomplete.get&_format=json&_marker=0&cc=in&includeMetaTags=1&query={encoded_q}"
-                )
-                async with session.get(auto_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp2:
-                    if resp2.status == 200:
-                        text2 = await resp2.text()
-                        data2 = json.loads(text2)
-                        songs2 = data2.get("songs", {}).get("data", [])
-                        if songs2:
-                            scored2 = []
-                            for s in songs2:
-                                # Fetch duration from both top-level and more_info (varies by API response)
-                                s_dur = int(
-                                    s.get("duration")
-                                    or s.get("more_info", {}).get("duration")
-                                    or 0
-                                )
-                                sc2 = score_candidate(s.get("title") or "", s.get("description") or "", query, duration=s_dur)
-                                scored2.append((sc2, s))
-
-                            scored2.sort(key=lambda x: x[0], reverse=True)
-                            has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
-
-                            for sc2, first_song in scored2:
-                                if sc2 < 0 and not has_user_keyword:
-                                    continue
-                                pid = first_song.get("id")
-                                if pid:
-                                    det_url = (
-                                        f"https://www.jiosaavn.com/api.php?"
-                                        f"__call=song.getDetails&cc=in&_marker=0%3F_marker%3D0&_format=json&pids={pid}"
-                                    )
-                                    async with session.get(det_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp3:
-                                        if resp3.status == 200:
-                                            text3 = await resp3.text()
-                                            det_data = json.loads(text3)
-                                            sinfo = det_data.get(pid, {})
-                                            enc_url = sinfo.get("encrypted_media_url")
-                                            if enc_url:
-                                                dec_stream = cls._decrypt_saavn_url(enc_url)
-                                                if dec_stream:
-                                                    title = clean_track_title(first_song.get("title") or query)
-                                                    author = first_song.get("description") or first_song.get("more_info", {}).get("primary_artists") or "Official Artist"
-                                                    raw_image = first_song.get("image") or ""
-                                                    thumbnail = (
-                                                        raw_image.replace("150x150", "500x500").replace("50x50", "500x500")
-                                                        if raw_image
-                                                        else "https://cdn.discordapp.com/embed/avatars/0.png"
-                                                    )
-                                                    duration = int(sinfo.get("duration") or 0)
-                                                    webpage = first_song.get("url") or "https://www.jiosaavn.com"
-
-                                                    return Track(
-                                                        title=title,
-                                                        author=author,
-                                                        url=webpage,
-                                                        stream_url=dec_stream,
-                                                        duration=duration,
-                                                        thumbnail=thumbnail,
-                                                        requester=requester,
-                                                        is_autoplay=is_autoplay,
-                                                    )
         except Exception as e:
             logger.debug(f"JioSaavn search notice for '{query}': {e}")
 

@@ -150,14 +150,25 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await send_container_response(ctx, err_c)
             return
 
-    # ── Step 1: Direct Lavalink Search (Instant official YouTube Music, SoundCloud & Queries) ──
+    # ── Step 1: Direct Lavalink Search (Instant official YouTube, Direct URLs & Spotify Tracks) ──
     track: Optional[Track] = None
     lookup_target = query.strip()
-    if not lookup_target.startswith("http://") and not lookup_target.startswith("https://"):
-        lookup_target = f"ytmsearch:{lookup_target}"
+
+    # If single Spotify track URL, resolve metadata title first
+    if any(sp in lookup_target for sp in ("spotify.com/track/", "spotify.link/", "spotify:track:")):
+        try:
+            sp_title = await NativeExtractor._fetch_spotify_title(lookup_target)
+            if sp_title:
+                lookup_target = sp_title
+        except Exception as e:
+            logger.debug(f"Spotify track title fetch error: {e}")
 
     try:
-        results = await wavelink.Playable.search(lookup_target)
+        is_direct_url = lookup_target.startswith("http://") or lookup_target.startswith("https://")
+        if is_direct_url:
+            results = await wavelink.Playable.search(lookup_target)
+        else:
+            results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube)
         if isinstance(results, wavelink.Playlist) and results.tracks:
             pl = results
             was_idle = not player.is_playing and not player.is_paused

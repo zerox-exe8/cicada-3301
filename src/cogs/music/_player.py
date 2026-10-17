@@ -180,43 +180,42 @@ class GuildPlayer:
         return not any(domain in url for domain in self._NON_STREAM_DOMAINS)
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
-        """Resolve Lavalink Playable via direct playable, Wavelink search, or stream URL."""
+        """Resolve Lavalink Playable via direct playable, YouTube URL, or YouTube search."""
         # ── Priority 1: Attached Playable (already resolved by play.py Step 1) ──
         playable = getattr(track, "_playable", None)
         if playable:
             return playable
 
-        # ── Priority 2: YouTube/SoundCloud URL → Lavalink can handle directly ──
+        # ── Priority 2: Direct YouTube URL → Lavalink handles directly ──
         url = track.url or ""
-        is_yt = "youtu" in url or "soundcloud.com" in url
+        is_yt = "youtu" in url
         if is_yt and url.startswith("http"):
             try:
                 results = await wavelink.Playable.search(url)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"YouTube/SC URL resolve error for '{url}': {e}")
+                logger.debug(f"YouTube URL resolve error for '{url}': {e}")
 
-        # ── Priority 3: Direct 320kbps HTTP Stream URL (e.g. JioSaavn akamaized CDN) ──
-        if track.stream_url and self._is_direct_stream_url(track.stream_url):
+        # ── Priority 3: YouTube Search using title + author (or query) ──
+        search_target = f"{track.title} {track.author}".strip() or track.query or track.title
+        if search_target:
             try:
-                node = wavelink.Pool.get_node()
-                results = await node.fetch_tracks(track.stream_url)
+                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube)
+                if results:
+                    logger.debug(f"YouTube search fallback resolved '{track.title}' successfully")
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"YouTube search fallback error for '{search_target}': {e}")
+
+        # ── Priority 4: Plain title search fallback ──
+        if track.title:
+            try:
+                results = await wavelink.Playable.search(track.title, source=wavelink.TrackSource.YouTube)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"Direct HTTP stream load error for '{track.title}': {e}")
-
-        # ── Priority 4: ytmsearch fallback using title + author ──
-        # This fires when: JioSaavn page URL, Spotify page URL, or any non-stream URL
-        fallback_query = f"ytmsearch:{track.title} {track.author}".strip()
-        try:
-            results = await wavelink.Playable.search(fallback_query)
-            if results:
-                logger.debug(f"ytmsearch fallback resolved '{track.title}' successfully")
-                return results[0] if isinstance(results, list) else results.tracks[0]
-        except Exception as e:
-            logger.debug(f"ytmsearch fallback error for '{track.title}': {e}")
+                logger.debug(f"Title fallback error for '{track.title}': {e}")
 
         return None
 

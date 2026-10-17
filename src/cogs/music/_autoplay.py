@@ -222,7 +222,11 @@ class NativeSmartAutoplay:
 
                 import wavelink
                 try:
-                    res = await wavelink.Playable.search(v_url or e_clean)
+                    target = v_url or e_clean
+                    if target.startswith("http"):
+                        res = await wavelink.Playable.search(target)
+                    else:
+                        res = await wavelink.Playable.search(target, source=wavelink.TrackSource.YouTube)
                     if res:
                         top = res[0]
                         trk = Track(
@@ -248,7 +252,7 @@ class NativeSmartAutoplay:
         import wavelink
         for q in queries:
             try:
-                res = await wavelink.Playable.search(q)
+                res = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTube)
                 if res:
                     for top in res[:5]:
                         top_norm = normalize_history_title(top.title or "")

@@ -542,6 +542,7 @@ class NativeExtractor:
             return None
 
         encoded_q = urllib.parse.quote(query)
+        fallback_song = None
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -635,6 +636,8 @@ class NativeExtractor:
                                 scored_res.append((sc, song))
 
                             scored_res.sort(key=lambda x: x[0], reverse=True)
+                            if scored_res and scored_res[0][0] > -30.0:
+                                fallback_song = scored_res[0][1]
                             has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
 
                             for sc, song in scored_res:
@@ -676,15 +679,6 @@ class NativeExtractor:
                             if not any(d in a or a in d for d in dropped_tokens for a in author_tokens):
                                 return None
                         return short_track
-
-        # Step 5: If previous strict passes produced no track, but a candidate exists, use it only if relevant
-        if fallback_song:
-            fallback_track = cls._build_saavn_track(fallback_song, requester, is_autoplay, query)
-            if fallback_track:
-                fb_words = set(re.findall(r"\w{3,}", fallback_track.title.lower()))
-                q_words = set(re.findall(r"\w{3,}", query.lower())) - {"audio", "music", "song", "video", "official"}
-                if fb_words & q_words:
-                    return fallback_track
 
         return None
 
@@ -815,11 +809,14 @@ class NativeExtractor:
                 elif " - " in title:
                     parts = title.split(" - ", 1)
                     p0, p1 = parts[0].strip(), parts[1].strip()
-                    if len(p0.split()) <= 4 and (p0.lower() in query.lower() or any(w in p0.lower() for w in ["singh", "kumar", "tiwari", "sharma", "malik", "kaur", "khan", "ali", "alan", "gaga", "mars"])):
-                        author = p0
+                    p0_clean = re.sub(r"\b(?:qawwali|qawali|ghazal|song|full\s+song|remix|mix|official)\b", "", p0, flags=re.IGNORECASE).strip()
+                    p1_clean = re.sub(r"\b(?:qawwali|qawali|ghazal|song|full\s+song|remix|mix|official)\b", "", p1, flags=re.IGNORECASE).strip()
+                    artist_clues = ["singh", "kumar", "tiwari", "sharma", "malik", "kaur", "khan", "ali", "alan", "gaga", "mars", "nusrat", "fateh", "arijit", "atif"]
+                    if len(p0_clean.split()) <= 6 and (p0_clean.lower() in query.lower() or any(w in p0_clean.lower() for w in artist_clues)):
+                        author = p0_clean
                         title = p1
-                    elif len(p1.split()) <= 4 and (p1.lower() in query.lower() or any(w in p1.lower() for w in ["singh", "kumar", "tiwari", "sharma", "malik", "kaur", "khan", "ali", "alan", "gaga", "mars"])):
-                        author = p1
+                    elif len(p1_clean.split()) <= 6 and (p1_clean.lower() in query.lower() or any(w in p1_clean.lower() for w in artist_clues)):
+                        author = p1_clean
                         title = p0
                 duration = int((item.get("duration") or 0) / 1000)
                 thumbnail = item.get("artwork_url") or item.get("user", {}).get("avatar_url") or "https://cdn.discordapp.com/embed/avatars/0.png"

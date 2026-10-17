@@ -98,12 +98,6 @@ class Music(commands.Cog):
         title = getattr(track, "title", "Unknown")
         exception = getattr(payload, "exception", None)
         logger.error(f"Lavalink Track Exception for '{title}': {exception}")
-        # Auto-recover: advance player so voice channel doesn't stay stuck
-        player_obj = getattr(payload, "player", None)
-        if player_obj and player_obj.guild:
-            player = self.controller.get_player(player_obj.guild.id)
-            if player and hasattr(player, "on_track_end"):
-                await player.on_track_end()
 
     @commands.Cog.listener()
     async def on_wavelink_track_stuck(self, payload: Any) -> None:
@@ -118,9 +112,12 @@ class Music(commands.Cog):
         player_obj = getattr(payload, "player", None)
         if not player_obj or not player_obj.guild:
             return
+        reason = getattr(payload, "reason", "finished")
+        if str(reason).lower() in ("replaced", "cleanup"):
+            return
         player = self.controller.get_player(player_obj.guild.id)
         if player and hasattr(player, "on_track_end"):
-            await player.on_track_end()
+            await player.on_track_end(reason=str(reason))
 
     @commands.Cog.listener()
     async def on_voice_state_update(

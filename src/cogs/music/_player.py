@@ -57,6 +57,8 @@ class GuildPlayer:
         self.controller_message: Optional[discord.Message] = None
         self._disconnect_announced: bool = False
         self._empty_vc_task: Optional[asyncio.Task] = None
+        self._advance_lock: asyncio.Lock = asyncio.Lock()
+        self._last_advance_time: float = 0.0
 
     # ── State Properties ──
 
@@ -153,6 +155,7 @@ class GuildPlayer:
 
         self.current = track
         self.autoplay_history.add(track.title.lower())
+        self._last_advance_time = time.time()
 
         # Start playback on Lavalink node with volume
         vol_int = int(self.volume * 100)
@@ -290,36 +293,46 @@ class GuildPlayer:
 
     # ── Track End & Autoplay Transition ──
 
-    async def on_track_end(self) -> None:
+    async def on_track_end(self, reason: Optional[str] = None) -> None:
         """Invoked when Lavalink finishes playing a track."""
-        if self.loop_mode == "track" and self.current:
-            await self.play_track(self.current)
+        if reason and str(reason).lower() in ("replaced", "cleanup"):
             return
-        elif self.loop_mode == "queue" and self.current:
-            self.queue.append(self.current)
 
-        if self.queue:
-            next_track = self.queue.pop(0)
-            await self.play_track(next_track)
-        elif self.smart_autoplay and self.current:
-            # Smart Autoplay AI recommendation
-            try:
-                rec = await NativeSmartAutoplay.get_next_recommendation(
-                    self.current, self.autoplay_history, self.bot.db
-                )
-                if rec:
-                    rec.requester = "⚡ Smart Autoplay"
-                    await self.play_track(rec)
-                else:
+        now = time.time()
+        if now - self._last_advance_time < 0.8:
+            logger.debug(f"Guild {self.guild.id}: Duplicate on_track_end call debounced")
+            return
+
+        async with self._advance_lock:
+            self._last_advance_time = time.time()
+            if self.loop_mode == "track" and self.current:
+                await self.play_track(self.current)
+                return
+            elif self.loop_mode == "queue" and self.current:
+                self.queue.append(self.current)
+
+            if self.queue:
+                next_track = self.queue.pop(0)
+                await self.play_track(next_track)
+            elif self.smart_autoplay and self.current:
+                # Smart Autoplay AI recommendation
+                try:
+                    rec = await NativeSmartAutoplay.get_next_recommendation(
+                        self.current, self.autoplay_history, self.bot.db
+                    )
+                    if rec:
+                        rec.requester = "⚡ Smart Autoplay"
+                        await self.play_track(rec)
+                    else:
+                        self.current = None
+                        self.schedule_empty_vc_timer()
+                except Exception as e:
+                    logger.error(f"Guild {self.guild.id}: Smart autoplay error: {e}", exc_info=True)
                     self.current = None
                     self.schedule_empty_vc_timer()
-            except Exception as e:
-                logger.error(f"Guild {self.guild.id}: Smart autoplay error: {e}", exc_info=True)
+            else:
                 self.current = None
                 self.schedule_empty_vc_timer()
-        else:
-            self.current = None
-            self.schedule_empty_vc_timer()
 
     # ── Components V2 Controller Card ──
 

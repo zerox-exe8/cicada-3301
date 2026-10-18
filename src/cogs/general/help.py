@@ -242,13 +242,13 @@ class Help(commands.Cog):
         if cat_name.lower() == "moderation":
             priority_order = [
                 # Core Enforcement
-                "ban", "unban", "kick", "timeout", "mute", "unmute", "warn", "warnings", "delwarn", "clearwarns",
+                "ban", "unban", "kick", "timeout", "mute", "unmute", "warn", "warnings", "delwarn",
                 # Channels & Cleanup
-                "lock", "unlock", "purge", "clear", "slowmode", "snipe", "snipeall", "clearsnipe", "clearsnipeall",
+                "lock", "unlock", "purge", "slowmode", "snipe", "snipeall", "clearsnipe", "clearsnipeall",
                 # Roles
                 "role", "roleall", "roleinfo", "listroles",
                 # Server Tools & Expressions
-                "emojis", "expressions", "stickers", "delemoji", "delsticker", "steal",
+                "emojis", "expressions", "stickers", "delemoji", "steal",
                 # Server Info & Utilities
                 "server", "serveravatar", "serverbanner", "serverinfo", "channelinfo", "membercount", "userinfo", "avatar", "banner", "profile",
                 # System / Bot Info & Settings

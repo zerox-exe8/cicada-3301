@@ -137,7 +137,8 @@ UNWANTED_VERSION_KEYWORDS = [
     "originally performed", "originally by", "backing track", "backing",
     "amateur", "re-recorded", "tribute to", "bgm", "theme music",
     "rework", "re-work", "private school", "remake", "rendition", "adaptation",
-    "sound tower", "cover version"
+    "sound tower", "cover version", "different version", "different", "another version",
+    "arz kiya", "spoof", "mimicry", "short version", "reaction", "version",
 ]
 
 
@@ -177,10 +178,6 @@ def score_candidate(
             for t in tokens
         )
 
-    matched = sum(1 for tok in q_tokens if _fuzzy_match(tok, title_tokens) or tok in c_author)
-    if q_tokens:
-        score += (matched / len(q_tokens)) * 60.0
-
     # Ensure the candidate's TITLE has substantive overlap with the query
     substantive_q_tokens = {
         w for w in q_tokens
@@ -188,12 +185,20 @@ def score_candidate(
     }
     title_matched = sum(1 for tok in substantive_q_tokens if _fuzzy_match(tok, title_tokens))
     if substantive_q_tokens and not title_matched:
-        # Reduced from -80: fuzzy matching already handles most transliteration cases
-        score -= 30.0
+        # Candidate has ZERO matching substantive title words: immediately disqualify
+        return -500.0
+
+    matched = sum(1 for tok in q_tokens if _fuzzy_match(tok, title_tokens) or tok in c_author)
+    if q_tokens:
+        score += (matched / len(q_tokens)) * 60.0
+
+    # Check for unwanted bracket keywords (e.g. '(Different Version)', '(Cover)', '(Acoustic)')
+    bracket_content = " ".join(re.findall(r"[\(\[\{]([^\)\]\}]+)[\)\]\}]", c_title)).lower()
+    has_unwanted_bracket = any(kw in bracket_content for kw in UNWANTED_VERSION_KEYWORDS if kw not in user_requested)
 
     clean_c_title = re.sub(r"\(.*?\)|\[.*?\]", "", c_title).strip()
     clean_title_matches = bool(clean_c_title and (q_lower == clean_c_title or clean_c_title in q_lower or q_lower.startswith(clean_c_title)))
-    if clean_title_matches:
+    if clean_title_matches and not has_unwanted_bracket:
         score += 45.0
 
     # Penalize if query had explicit artist/author tokens not in candidate title that don't match candidate author
@@ -225,13 +230,9 @@ def score_candidate(
 
         pattern = rf"\b{re.escape(kw)}\b"
         if re.search(pattern, c_title) or re.search(pattern, c_author):
-            # If the clean title already matches the user query perfectly, lightly penalize rather than discard
-            if clean_title_matches and kw in {"remix", "remixed", "dance mix"}:
-                score -= 20.0
-            else:
-                # Reduced from -120: many official song titles legitimately contain words
-                # like "guitar", "theme", "status" — -120 was discarding them incorrectly
-                score -= 60.0
+            # Heavily penalize unrequested alternate versions/covers/parodies so official songs win
+            score -= 250.0
+            break
 
     if views > 10_000_000:
         score += 40.0
@@ -542,7 +543,6 @@ class NativeExtractor:
             return None
 
         encoded_q = urllib.parse.quote(query)
-        fallback_song = None
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -636,8 +636,6 @@ class NativeExtractor:
                                 scored_res.append((sc, song))
 
                             scored_res.sort(key=lambda x: x[0], reverse=True)
-                            if scored_res and scored_res[0][0] > -30.0:
-                                fallback_song = scored_res[0][1]
                             has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
 
                             for sc, song in scored_res:
@@ -649,36 +647,20 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"JioSaavn search notice for '{query}': {e}")
 
-        # Step 3: Relaxed modifier fallback if complex phrase failed
-        relaxed = re.sub(
-            r"\b(?:8d(?:\s*audio)?|3d(?:\s*audio)?|16d|spatial\s*audio|lofi|lo-fi|slowed(?:\s*\+\s*reverb)?|reverb|mashup|sad|status|version|acoustic|unplugged|bass boosted|dholki mix|remix|full song|song|track|use headphones?)\b",
-            "",
-            query,
-            flags=re.IGNORECASE,
-        )
-        relaxed = re.sub(r"\s+", " ", relaxed).strip()
-        if relaxed and relaxed.lower() != query.lower():
-            relaxed_track = await cls._extract_jiosaavn(relaxed, requester, is_autoplay)
-            if relaxed_track:
-                return relaxed_track
-
-        # Step 4: Shortened query fallback only if it matches substantive song title tokens
-        clean_tokens = [w for w in query.split() if w.lower() not in {"8d", "3d", "audio", "song", "music", "video", "-", "|", "the", "a", "an"}]
-        if len(clean_tokens) >= 3:
-            short_q = " ".join(clean_tokens[:3])
-            if short_q.lower() != query.lower():
-                short_track = await cls._extract_jiosaavn(short_q, requester, is_autoplay)
-                if short_track:
-                    short_title_words = set(re.findall(r"\w{3,}", short_track.title.lower()))
-                    query_substantive = set(re.findall(r"\w{3,}", query.lower())) - {"audio", "music", "song", "video", "official"}
-                    if short_title_words & query_substantive:
-                        # Validate that dropped tokens (likely artist/singer) are not completely violated
-                        dropped_tokens = [w.lower() for w in clean_tokens[3:] if len(w) >= 3]
-                        if len(dropped_tokens) >= 2:
-                            author_tokens = re.findall(r"\w{3,}", short_track.author.lower())
-                            if not any(d in a or a in d for d in dropped_tokens for a in author_tokens):
-                                return None
-                        return short_track
+        # Step 3: Relaxed modifier fallback ONLY if user did not specify explicit version keywords
+        has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
+        if not has_user_keyword:
+            relaxed = re.sub(
+                r"\b(?:8d(?:\s*audio)?|3d(?:\s*audio)?|16d|spatial\s*audio|lofi|lo-fi|slowed(?:\s*\+\s*reverb)?|reverb|mashup|sad|status|version|acoustic|unplugged|bass boosted|dholki mix|remix|full song|song|track|use headphones?)\b",
+                "",
+                query,
+                flags=re.IGNORECASE,
+            )
+            relaxed = re.sub(r"\s+", " ", relaxed).strip()
+            if relaxed and relaxed.lower() != query.lower():
+                relaxed_track = await cls._extract_jiosaavn(relaxed, requester, is_autoplay)
+                if relaxed_track:
+                    return relaxed_track
 
         return None
 
@@ -787,10 +769,6 @@ class NativeExtractor:
                                 continue
                             item = candidate
                             break
-
-                        if not item and scored:
-                            # Fallback to top scored candidate so valid songs are never dropped to Not Found
-                            item = scored[0][1]
 
                 if not item:
                     return None
@@ -957,13 +935,10 @@ class NativeExtractor:
                     winner = e
                     break
 
-                if not winner and scored:
-                    winner = scored[0][1]
-
                 if not winner:
                     return None
 
-                candidates_to_try = [winner] + [c[1] for c in scored if c[1] != winner][:2]
+                candidates_to_try = [winner] + [c[1] for c in scored if c[1] != winner and (c[0] >= 0 or has_user_keyword)][:2]
                 for cand in candidates_to_try:
                     vid_id = cand.get("id")
                     cand_url = cand.get("url") or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else None)
@@ -1162,53 +1137,8 @@ class NativeExtractor:
 
     @classmethod
     async def _resolve_canonical_query(cls, query: str) -> str:
-        """
-        Ultra-fast (0.2s) canonical metadata resolver via YouTube public search index.
-        Discovers the official song title & primary singer for bare song titles (e.g. 'tum hardafa ho'),
-        preventing matching against obscure DIY indie uploaders on JioSaavn or SoundCloud.
-        """
-        if not query or query.startswith(("http://", "https://")) or "youtu" in query or "spotify" in query:
-            return query
-
-        q_clean = query.strip()
-        now = time.time()
-        if q_clean.lower() in _CANONICAL_CACHE:
-            ts, val = _CANONICAL_CACHE[q_clean.lower()]
-            if now - ts < _CANONICAL_CACHE_TTL:
-                return val
-
-        user_version_kws = [kw for kw in UNWANTED_VERSION_KEYWORDS if kw in q_clean.lower()]
-
-        try:
-            url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(q_clean)}"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        text = await resp.text()
-                        matches = re.findall(r'"title":\{"runs":\[\{"text":"([^"]+)"\}\]', text)
-                        q_words = [w for w in re.findall(r"\w+", q_clean.lower()) if len(w) > 2]
-                        for m in matches[:5]:
-                            parsed = cls._parse_youtube_title(m)
-                            if parsed:
-                                parsed_lower = parsed.lower()
-                                if all(w in parsed_lower for w in q_words):
-                                    for kw in user_version_kws:
-                                        if kw not in parsed_lower:
-                                            parsed = f"{parsed} {kw}"
-                                    _CANONICAL_CACHE[q_clean.lower()] = (now, parsed)
-                                    if len(_CANONICAL_CACHE) > 500:
-                                        oldest_key = min(_CANONICAL_CACHE.keys(), key=lambda k: _CANONICAL_CACHE[k][0])
-                                        _CANONICAL_CACHE.pop(oldest_key, None)
-                                    return parsed
-        except Exception as e:
-            logger.debug(f"Canonical resolution notice for '{q_clean}': {e}")
-
-        _CANONICAL_CACHE[q_clean.lower()] = (now, q_clean)
-        return q_clean
+        """Safe query pass-through without destructive web scraping."""
+        return query.strip() if query else ""
 
     @staticmethod
     async def _fetch_youtube_title(youtube_url: str) -> Optional[str]:

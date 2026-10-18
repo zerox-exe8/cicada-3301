@@ -7,7 +7,7 @@ import logging
 import random
 import re
 import urllib.parse
-from typing import List, Optional, Set
+from typing import Any, List, Optional, Set
 
 import aiohttp
 import yt_dlp

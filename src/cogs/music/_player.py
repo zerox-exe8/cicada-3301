@@ -90,18 +90,19 @@ class GuildPlayer:
     async def connect_voice(self, channel: discord.VoiceChannel | discord.StageChannel) -> None:
         """Connect or move to the specified voice channel using Wavelink."""
         vc = self.guild.voice_client
-        if vc and isinstance(vc, wavelink.Player):
+        if vc and isinstance(vc, wavelink.Player) and vc.connected:
             if vc.channel and vc.channel.id != channel.id:
                 await vc.move_to(channel)
             self.voice_client = vc
             return
 
-        # If connected to a non-wavelink player (e.g. leftover discord.VoiceClient), disconnect it first
-        if vc and not isinstance(vc, wavelink.Player):
+        # If connected to an invalid, disconnected, or non-wavelink player, clean it up first
+        if vc:
             try:
                 await vc.disconnect(force=True)
             except Exception:
                 pass
+            self.voice_client = None
 
         # Ensure Wavelink node is connected before connecting player
         try:
@@ -135,49 +136,69 @@ class GuildPlayer:
 
     async def play_track(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:
         """Stream a track via the dedicated Lavalink node with 0% stutter."""
+        # 1. Verify voice connection or attempt fast recovery
         if not self.voice_client or not self.voice_client.connected:
             vc = self.guild.voice_client
-            if vc and isinstance(vc, wavelink.Player):
+            if vc and isinstance(vc, wavelink.Player) and vc.connected:
                 self.voice_client = vc
 
-        # If voice client is still completing handshake, wait briefly
-        if self.voice_client and not self.voice_client.connected:
-            for _ in range(6):
-                await asyncio.sleep(0.5)
-                if self.voice_client.connected:
-                    break
+        if not self.voice_client or not self.voice_client.connected:
+            target_ch = getattr(self.guild.me.voice, "channel", None)
+            if target_ch:
+                try:
+                    await self.connect_voice(target_ch)
+                except Exception:
+                    pass
 
         if not self.voice_client or not self.voice_client.connected:
             logger.warning(f"Guild {self.guild.id}: Cannot play, voice client not connected.")
+            if message_to_edit and isinstance(message_to_edit, discord.Message):
+                err_c = KyroContainer(accent_color=None)
+                err_c.add_text("**Voice Disconnected**\n> Kyro is not connected to a voice channel. Please join a voice channel and use `?play` to start.")
+                try:
+                    await edit_container_response(message_to_edit, err_c)
+                except Exception:
+                    pass
             return
 
-        # Direct playable if already resolved, otherwise resolve via Lavalink
+        # 2. Direct playable if already attached, otherwise resolve via Lavalink with strict timeout
         playable = getattr(track, "_playable", None)
         if not playable:
-            playable = await self._resolve_playable(track)
+            try:
+                playable = await self._resolve_playable(track)
+            except Exception as e:
+                logger.error(f"Error resolving playable for '{track.title}': {e}")
+                playable = None
 
         if not playable:
             logger.error(f"Guild {self.guild.id}: Lavalink could not resolve playable for '{track.title}'")
-            # Try next in queue if available
             if self.queue:
                 next_t = self.queue.pop(0)
                 await self.play_track(next_t, message_to_edit=message_to_edit)
             else:
                 self.current = None
-                await self.send_queue_ended_card()
+                if message_to_edit and isinstance(message_to_edit, discord.Message):
+                    err_c = KyroContainer(accent_color=None)
+                    err_c.add_text(f"**Failed to Stream Track:** `{track.title}`\n> The audio source could not be loaded. Please try another song.")
+                    try:
+                        await edit_container_response(message_to_edit, err_c)
+                    except Exception:
+                        pass
+                else:
+                    await self.send_queue_ended_card()
                 self.schedule_empty_vc_timer()
             return
 
         self.current = track
         self.autoplay_history.add(track.title.lower())
-        self._last_advance_time = time.time()
         self._was_paused_for_empty_vc = False
+        self.cancel_empty_vc_timer(auto_resume=False)
 
-        # Start playback on Lavalink node with volume (explicitly unpaused)
+        # 3. Start playback on Lavalink node with volume (explicitly unpaused)
         vol_int = int(self.volume * 100)
         await self.voice_client.play(playable, volume=vol_int, paused=False)
 
-        # Send sleek Now Playing card with buttons
+        # 4. Send or edit sleek Now Playing card with buttons
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
 
     # Domains that are NOT direct audio streams — Lavalink can't play their page URLs
@@ -196,7 +217,6 @@ class GuildPlayer:
         if not url or not url.startswith("http"):
             return False
         # Only JioSaavn Akamai MP4/AAC CDN direct streams are 100% playable via Lavalink HTTP.
-        # SoundCloud HLS (.m3u8), Spotify web, YouTube links return 403 on raw HTTP.
         u_low = url.lower()
         if any(dom in u_low for dom in ("saavncdn.com", "jiosaavn.com")) and ".mp4" in u_low:
             return True
@@ -204,72 +224,71 @@ class GuildPlayer:
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
         """Resolve Lavalink Playable via direct unblocked CDN stream, attached playable, or search."""
-        # ── Priority 1: Direct Stream URL (JioSaavn 320kbps CDN stream) ──
-        # Direct Akamai HTTP streams are 100% unblocked on Lavalink
-        stream_url = getattr(track, "stream_url", None)
-        if stream_url and self._is_direct_stream_url(stream_url):
-            try:
-                results = await wavelink.Playable.search(stream_url)
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"Direct stream URL resolve error for '{stream_url}': {e}")
-
-        # ── Priority 1.5: If no stream_url, resolve via NativeExtractor CDN first ──
-        if not stream_url:
-            try:
-                from src.cogs.music._extractor import NativeExtractor
-                target_q = track.query or f"{track.title} {track.author}".strip() or track.url
-                if target_q:
-                    ext = await NativeExtractor.extract(target_q, requester=track.requester)
-                    if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
-                        track.stream_url = ext.stream_url
-                        results = await wavelink.Playable.search(ext.stream_url)
-                        if results:
-                            return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"NativeExtractor resolve fallback error: {e}")
-
-        # ── Priority 2: Attached Playable (already resolved by play.py Step 1) ──
+        # ── Priority 1: Attached Playable (already resolved by play.py) ──
         playable = getattr(track, "_playable", None)
         if playable:
             return playable
+
+        # ── Priority 2: Direct Stream URL (JioSaavn 320kbps CDN stream) ──
+        stream_url = getattr(track, "stream_url", None)
+        if stream_url and self._is_direct_stream_url(stream_url):
+            try:
+                results = await asyncio.wait_for(wavelink.Playable.search(stream_url), timeout=4.0)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"Direct stream URL resolve notice for '{stream_url}': {e}")
 
         # ── Priority 3: Direct URL (YouTube, SoundCloud, direct stream) ──
         url = track.url or ""
         if url.startswith(("http://", "https://")):
             try:
-                results = await wavelink.Playable.search(url)
+                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=4.0)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"Direct URL resolve error for '{url}': {e}")
+                logger.debug(f"Direct URL resolve notice for '{url}': {e}")
 
-        # ── Priority 4: Search Fallbacks (YouTube Music -> YouTube -> Spotify) ──
+        # ── Priority 4: Search Fallbacks (YouTube Music -> YouTube -> JioSaavn) ──
         search_target = f"{track.title} {track.author}".strip() or track.query or track.title
         if search_target:
             try:
-                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic)
+                results = await asyncio.wait_for(
+                    wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic),
+                    timeout=4.0
+                )
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"YouTube Music search error for '{search_target}': {e}")
+                logger.debug(f"YouTube Music search notice for '{search_target}': {e}")
 
         if search_target:
             try:
-                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube)
+                results = await asyncio.wait_for(
+                    wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
+                    timeout=4.0
+                )
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"YouTube search error for '{search_target}': {e}")
+                logger.debug(f"YouTube search notice for '{search_target}': {e}")
 
-        if search_target:
-            try:
-                results = await wavelink.Playable.search(f"spsearch:{search_target}")
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"Spotify search error for '{search_target}': {e}")
+        # ── Priority 5: Fallback to NativeExtractor CDN stream ──
+        try:
+            from src.cogs.music._extractor import NativeExtractor
+            target_q = track.query or search_target
+            if target_q:
+                ext = await asyncio.wait_for(
+                    NativeExtractor.extract(target_q, requester=track.requester),
+                    timeout=5.0
+                )
+                if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
+                    track.stream_url = ext.stream_url
+                    results = await asyncio.wait_for(wavelink.Playable.search(ext.stream_url), timeout=4.0)
+                    if results:
+                        return results[0] if isinstance(results, list) else results.tracks[0]
+        except Exception as e:
+            logger.debug(f"NativeExtractor resolve fallback notice: {e}")
 
         return None
 
@@ -297,12 +316,15 @@ class GuildPlayer:
 
     async def stop(self) -> None:
         """Stop playback and disconnect."""
+        self.cancel_empty_vc_timer(auto_resume=False)
         self.queue.clear()
         self.current = None
+        self.autoplay_history.clear()
+        self._was_paused_for_empty_vc = False
 
         if self.voice_client:
             try:
-                await self.voice_client.disconnect()
+                await self.voice_client.disconnect(force=True)
             except Exception:
                 pass
             self.voice_client = None

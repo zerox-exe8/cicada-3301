@@ -441,7 +441,7 @@ class Emojis(commands.Cog, name="Moderation-Emojis"):
 
     @commands.command(
         name="emojis",
-        aliases=["expr", "expressions", "emojimanager", "stickers", "delemoji"],
+        aliases=["expr", "expressions", "emojimanager", "stickers", "delemoji", "delsticker"],
         help="Interactive studio to browse, preview, and delete server emojis or stickers.",
     )
     @commands.guild_only()

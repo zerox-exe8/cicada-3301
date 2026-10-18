@@ -8,7 +8,6 @@ import discord
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
-    from src.cogs.music._types import TrackItem
 
 logger = logging.getLogger("Kyro.Music.Analytics")
 

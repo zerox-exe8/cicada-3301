@@ -102,21 +102,65 @@ async def execute_saved_playlist_playback(
         random.shuffle(play_order)
 
     # resolve first track immediately for instant start
+    import wavelink
     first_row = play_order[0]
     first_query = resolve_track_query(first_row)
-    first_track = await NativeExtractor.extract(first_query, requester=user.display_name)
+    first_track: Optional[Track] = None
 
-    if not first_track:
-        # Fallback to secondary search
-        alt_q = f"{first_row.get('title', '')} {first_row.get('author', '')}".strip()
-        first_track = await NativeExtractor.extract(alt_q, requester=user.display_name)
-
-    if not first_track:
-        # Tier 3: YouTube fallback
-        clean_q = f"{first_row.get('title', '')} {first_row.get('author', '')}".strip()
-        first_track = await asyncio.to_thread(
-            NativeExtractor._extract_youtube_fallback, clean_q, user.display_name, False
+    # Priority 1: High-speed Lavalink YouTube Music resolution
+    try:
+        results = await asyncio.wait_for(
+            wavelink.Playable.search(first_query, source=wavelink.TrackSource.YouTubeMusic),
+            timeout=4.0
         )
+        if results and not isinstance(results, wavelink.Playlist):
+            top_p = results[0]
+            first_track = Track(
+                title=top_p.title or first_row.get("title", "Unknown Track"),
+                author=top_p.author or first_row.get("author", "Unknown Artist"),
+                url=top_p.uri or first_row.get("url", ""),
+                stream_url="",
+                duration=int((top_p.length or 0) / 1000) or int(first_row.get("duration", 0)),
+                thumbnail=top_p.artwork,
+                requester=user.display_name,
+                requester_id=user.id,
+                query=first_query,
+            )
+            first_track._playable = top_p
+    except Exception:
+        pass
+
+    # Priority 2: NativeExtractor (JioSaavn CDN cascade)
+    if not first_track:
+        try:
+            first_track = await NativeExtractor.extract(first_query, requester=user.display_name)
+        except Exception:
+            pass
+
+    # Priority 3: Fallback search by title + artist
+    if not first_track:
+        alt_q = f"{first_row.get('title', '')} {first_row.get('author', '')}".strip()
+        try:
+            results = await asyncio.wait_for(
+                wavelink.Playable.search(alt_q, source=wavelink.TrackSource.YouTube),
+                timeout=4.0
+            )
+            if results and not isinstance(results, wavelink.Playlist):
+                top_p = results[0]
+                first_track = Track(
+                    title=top_p.title or first_row.get("title", "Unknown Track"),
+                    author=top_p.author or first_row.get("author", "Unknown Artist"),
+                    url=top_p.uri or first_row.get("url", ""),
+                    stream_url="",
+                    duration=int((top_p.length or 0) / 1000) or int(first_row.get("duration", 0)),
+                    thumbnail=top_p.artwork,
+                    requester=user.display_name,
+                    requester_id=user.id,
+                    query=alt_q,
+                )
+                first_track._playable = top_p
+        except Exception:
+            pass
 
     if not first_track:
         c = KyroContainer()

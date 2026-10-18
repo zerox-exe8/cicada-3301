@@ -59,6 +59,7 @@ class GuildPlayer:
         self._disconnect_announced: bool = False
         self._empty_vc_task: Optional[asyncio.Task] = None
         self._advance_lock: asyncio.Lock = asyncio.Lock()
+        self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._last_advance_time: float = 0.0
 
     # ── State Properties ──
@@ -88,49 +89,78 @@ class GuildPlayer:
     # ── Voice Connection ──
 
     async def connect_voice(self, channel: discord.VoiceChannel | discord.StageChannel) -> None:
-        """Connect or move to the specified voice channel using Wavelink."""
-        vc = self.guild.voice_client
-        if vc and isinstance(vc, wavelink.Player) and vc.connected:
-            if vc.channel and vc.channel.id != channel.id:
-                await vc.move_to(channel)
-            self.voice_client = vc
-            return
+        """Connect or move to the specified voice channel using Wavelink with race-condition locking."""
+        async with self._connect_lock:
+            vc = self.guild.voice_client
+            if vc and isinstance(vc, wavelink.Player) and vc.connected:
+                if vc.channel and vc.channel.id != channel.id:
+                    await vc.move_to(channel)
+                self.voice_client = vc
+                return
 
-        # If connected to an invalid, disconnected, or non-wavelink player, clean it up first
-        if vc:
+            # If connected to an invalid, disconnected, or non-wavelink player, clean it up first
+            if vc:
+                try:
+                    await vc.disconnect(force=True)
+                except Exception:
+                    pass
+                try:
+                    vc.cleanup()
+                except Exception:
+                    pass
+                self.voice_client = None
+                await asyncio.sleep(0.2)
+
+            # Ensure Wavelink node is connected before connecting player
             try:
-                await vc.disconnect(force=True)
+                wavelink.Pool.get_node()
             except Exception:
-                pass
-            self.voice_client = None
+                from src.core.config import Config
+                try:
+                    node = wavelink.Node(
+                        uri=Config.LAVALINK_URI,
+                        password=Config.LAVALINK_PASSWORD,
+                        inactive_player_timeout=300,
+                    )
+                    await wavelink.Pool.connect(nodes=[node], client=self.bot)
+                    for _ in range(10):
+                        if node.status == wavelink.NodeStatus.CONNECTED:
+                            break
+                        await asyncio.sleep(0.5)
+                except Exception as e:
+                    logger.error(f"On-demand Lavalink node connect error: {e}")
 
-        # Ensure Wavelink node is connected before connecting player
-        try:
-            wavelink.Pool.get_node()
-        except Exception:
-            from src.core.config import Config
-            try:
-                node = wavelink.Node(
-                    uri=Config.LAVALINK_URI,
-                    password=Config.LAVALINK_PASSWORD,
-                    inactive_player_timeout=300,
-                )
-                await wavelink.Pool.connect(nodes=[node], client=self.bot)
-                for _ in range(10):
-                    if node.status == wavelink.NodeStatus.CONNECTED:
-                        break
-                    await asyncio.sleep(0.5)
-            except Exception as e:
-                logger.error(f"On-demand Lavalink node connect error: {e}")
-
-        # Connect as Wavelink Player
-        try:
-            self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True)
-            if self.voice_client:
-                self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
-        except Exception as e:
-            logger.error(f"Guild {self.guild.id}: Wavelink connect error: {e}")
-            raise
+            # Connect as Wavelink Player with automatic retry on temporary Discord gateway blip
+            for attempt in range(2):
+                try:
+                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=20.0)
+                    if self.voice_client:
+                        self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
+                    break
+                except (asyncio.TimeoutError, Exception) as e:
+                    if attempt == 0:
+                        logger.warning(f"Guild {self.guild.id}: Voice connect attempt {attempt + 1} failed ({e}), retrying once...")
+                        stale_vc = self.guild.voice_client
+                        if stale_vc:
+                            try:
+                                await stale_vc.disconnect(force=True)
+                            except Exception:
+                                pass
+                        await asyncio.sleep(0.5)
+                    else:
+                        logger.error(f"Guild {self.guild.id}: Wavelink connect error: {e}")
+                        if hasattr(self.bot, "sentinel") and self.bot.sentinel:
+                            from src.sentinel.models import SubsystemType, IncidentSeverity
+                            self.bot.sentinel.record_incident(
+                                SubsystemType.VOICE,
+                                IncidentSeverity.CRITICAL,
+                                "Voice Gateway Connect Failure",
+                                f"Failed connecting to channel {channel.name} ({channel.id}): {e}",
+                                action_taken="Purged stale voice client",
+                                resolved=False,
+                                guild_id=self.guild.id,
+                            )
+                        raise
 
     # ── Playback Engine ──
 
@@ -297,6 +327,10 @@ class GuildPlayer:
     def pause(self) -> bool:
         """Pause playback."""
         if self.voice_client and self.voice_client.playing and not self.voice_client.paused:
+            try:
+                self.voice_client._paused = True
+            except Exception:
+                pass
             asyncio.create_task(self.voice_client.pause(True))
             return True
         return False
@@ -304,6 +338,10 @@ class GuildPlayer:
     def resume(self) -> bool:
         """Resume playback."""
         if self.voice_client and self.voice_client.paused:
+            try:
+                self.voice_client._paused = False
+            except Exception:
+                pass
             asyncio.create_task(self.voice_client.pause(False))
             self._was_paused_for_empty_vc = False
             return True
@@ -311,6 +349,8 @@ class GuildPlayer:
 
     async def skip(self) -> None:
         """Skip currently playing track."""
+        if self.loop_mode == "track":
+            self.loop_mode = "off"
         if self.voice_client:
             await self.voice_client.skip(force=True)
 
@@ -457,7 +497,8 @@ class GuildPlayer:
         container.add_separator(divider=True)
 
         # 3. Song, Artist, and Duration with heart emoji in front (NO normal/unicode emojis, no source)
-        song_display = f"[{track.title}]({track.url})" if track.url else track.title
+        safe_title = track.title.replace("[", "(").replace("]", ")")
+        song_display = f"[{safe_title}]({track.url})" if track.url else safe_title
         artist_display = track.author or "Unknown Artist"
         duration_display = track.formatted_duration or "00:00"
 
@@ -502,15 +543,16 @@ class GuildPlayer:
         container = self.build_now_playing_container(track)
         view = MusicControlView(self.bot, player=self, track_url=track.url)
 
-        target = message_to_edit or self.controller_message
-        if target and isinstance(target, discord.Message):
+        # If an explicit message was provided to edit (e.g. initial 'Searching...' card in ?play), edit it
+        if message_to_edit and isinstance(message_to_edit, discord.Message):
             try:
-                await edit_container_response(target, container, view=view, content=None)
-                self.controller_message = target
+                await edit_container_response(message_to_edit, container, view=view, content=None)
+                self.controller_message = message_to_edit
                 return
             except Exception as e:
-                logger.debug(f"Failed to edit existing controller message: {e}")
+                logger.debug(f"Failed to edit message_to_edit: {e}")
 
+        # For every song starting from queue, skip, autoplay, or fresh play: send a brand-new Now Playing card!
         try:
             msg = await send_container_response(
                 self.home_channel, container, view=view, content=None

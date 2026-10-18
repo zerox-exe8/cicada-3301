@@ -18,8 +18,11 @@ async def execute_nowplaying(cog: Music, ctx: commands.Context) -> None:
         await send_container_response(ctx, container)
         return
 
+    player.home_channel = ctx.channel
     container = player.build_now_playing_container(player.current)
     view = MusicControlView(cog.bot, player, ctx.guild.id, track_url=player.current.url)
-    await send_container_response(
+    msg = await send_container_response(
         ctx, container, view=view, content=None
     )
+    if isinstance(msg, discord.Message):
+        player.controller_message = msg

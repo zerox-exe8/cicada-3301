@@ -90,6 +90,18 @@ class ErrorHandler(commands.Cog):
             import traceback
             tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
             logger.error(f"Unhandled error in '{ctx.command}': {error}\n{tb}")
+            if hasattr(self.bot, "sentinel") and self.bot.sentinel:
+                from src.sentinel.models import SubsystemType, IncidentSeverity
+                cmd_name = ctx.command.qualified_name if ctx.command else "Unknown"
+                self.bot.sentinel.record_incident(
+                    SubsystemType.COMMAND,
+                    IncidentSeverity.WARNING,
+                    f"Command Exception: {cmd_name}",
+                    str(error),
+                    action_taken="Returned ephemeral internal error container",
+                    resolved=True,
+                    guild_id=ctx.guild.id if ctx.guild else None,
+                )
             container.add_section(
                 content=(
                     f"**{err_icon}Internal Error**\n"

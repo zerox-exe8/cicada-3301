@@ -11,17 +11,22 @@ if TYPE_CHECKING:
 
 async def execute_queue(cog: Music, ctx: commands.Context, page: int = 1) -> None:
     player = cog.controller.get_player(ctx.guild.id)
-    if not player or not player.is_connected or not player.current:
+    if not player or not player.is_connected or (not player.current and not player.queue):
         container = KyroContainer(accent_color=None)
         container.add_text("**No active queue found in this server.**")
         await send_container_response(ctx, container)
         return
 
     container = KyroContainer(accent_color=None)
-    container.add_text(
-        f"**Live Player Queue — {ctx.guild.name}**\n"
-        f"**Now Playing:** [{player.current.title}]({player.current.url}) `[{player.current.formatted_duration}]`"
-    )
+    if player.current:
+        curr_title = player.current.title.replace("[", "(").replace("]", ")")
+        curr_link = f"[{curr_title}]({player.current.url})" if player.current.url else f"**{curr_title}**"
+        container.add_text(
+            f"**Live Player Queue — {ctx.guild.name}**\n"
+            f"**Now Playing:** {curr_link} `[{player.current.formatted_duration}]`"
+        )
+    else:
+        container.add_text(f"**Live Player Queue — {ctx.guild.name}**")
     container.add_separator(divider=True)
 
     if not player.queue:
@@ -40,7 +45,9 @@ async def execute_queue(cog: Music, ctx: commands.Context, page: int = 1) -> Non
 
         lines = []
         for i, track in enumerate(page_tracks, start=start_idx + 1):
-            lines.append(f"`{i:02d}.` [{track.title}]({track.url}) `[{track.formatted_duration}]` — `{track.requester}`")
+            safe_title = track.title.replace("[", "(").replace("]", ")")
+            track_link = f"[{safe_title}]({track.url})" if track.url else f"**{safe_title}**"
+            lines.append(f"`{i:02d}.` {track_link} `[{track.formatted_duration}]` — `{track.requester}`")
 
         container.add_text("\n".join(lines))
         container.add_separator(divider=True)

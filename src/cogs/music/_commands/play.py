@@ -114,23 +114,36 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     requester_id=ctx.author.id,
                     query=first_item.query or f"{first_item.title} {first_item.author}",
                 )
-                for it in pl.tracks[1:]:
-                    t = Track(
-                        title=it.title,
-                        author=it.author,
-                        url=it.url or clean_q,
-                        stream_url="",
-                        duration=it.duration,
-                        thumbnail=pl.thumbnail,
-                        requester=ctx.author.display_name,
-                        requester_id=ctx.author.id,
-                        query=it.query or f"{it.title} {it.author}",
-                    )
-                    player.queue.append(t)
                 if was_idle:
+                    for it in pl.tracks[1:]:
+                        t = Track(
+                            title=it.title,
+                            author=it.author,
+                            url=it.url or clean_q,
+                            stream_url="",
+                            duration=it.duration,
+                            thumbnail=pl.thumbnail,
+                            requester=ctx.author.display_name,
+                            requester_id=ctx.author.id,
+                            query=it.query or f"{it.title} {it.author}",
+                        )
+                        player.queue.append(t)
                     await player.play_track(first_track, message_to_edit=search_msg)
                 else:
                     player.queue.append(first_track)
+                    for it in pl.tracks[1:]:
+                        t = Track(
+                            title=it.title,
+                            author=it.author,
+                            url=it.url or clean_q,
+                            stream_url="",
+                            duration=it.duration,
+                            thumbnail=pl.thumbnail,
+                            requester=ctx.author.display_name,
+                            requester_id=ctx.author.id,
+                            query=it.query or f"{it.title} {it.author}",
+                        )
+                        player.queue.append(t)
                 pl_card = KyroContainer(accent_color=None)
                 pl_card.add_section(
                     content=(
@@ -203,25 +216,40 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         query=query,
                     )
                     first_track._playable = first_p
-                    for p in pl.tracks[1:]:
-                        p_thumb = p.artwork or (f"https://i.ytimg.com/vi/{p.identifier}/hqdefault.jpg" if getattr(p, "identifier", None) else None)
-                        t = Track(
-                            title=p.title or "Unknown Track",
-                            author=p.author or "Unknown Artist",
-                            url=p.uri or query,
-                            stream_url="",
-                            duration=int((p.length or 0) / 1000),
-                            thumbnail=p_thumb,
-                            requester=ctx.author.display_name,
-                            requester_id=ctx.author.id,
-                            query=query,
-                        )
-                        t._playable = p
-                        player.queue.append(t)
                     if was_idle:
+                        for p in pl.tracks[1:]:
+                            p_thumb = p.artwork or (f"https://i.ytimg.com/vi/{p.identifier}/hqdefault.jpg" if getattr(p, "identifier", None) else None)
+                            t = Track(
+                                title=p.title or "Unknown Track",
+                                author=p.author or "Unknown Artist",
+                                url=p.uri or query,
+                                stream_url="",
+                                duration=int((p.length or 0) / 1000),
+                                thumbnail=p_thumb,
+                                requester=ctx.author.display_name,
+                                requester_id=ctx.author.id,
+                                query=query,
+                            )
+                            t._playable = p
+                            player.queue.append(t)
                         await player.play_track(first_track, message_to_edit=search_msg)
                     else:
                         player.queue.append(first_track)
+                        for p in pl.tracks[1:]:
+                            p_thumb = p.artwork or (f"https://i.ytimg.com/vi/{p.identifier}/hqdefault.jpg" if getattr(p, "identifier", None) else None)
+                            t = Track(
+                                title=p.title or "Unknown Track",
+                                author=p.author or "Unknown Artist",
+                                url=p.uri or query,
+                                stream_url="",
+                                duration=int((p.length or 0) / 1000),
+                                thumbnail=p_thumb,
+                                requester=ctx.author.display_name,
+                                requester_id=ctx.author.id,
+                                query=query,
+                            )
+                            t._playable = p
+                            player.queue.append(t)
                     pl_card = KyroContainer(accent_color=None)
                     pl_card.add_section(
                         content=(

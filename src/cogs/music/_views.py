@@ -100,7 +100,7 @@ class MusicControlView(discord.ui.View):
     async def btn_pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         try:
             if not interaction.response.is_done():
-                await interaction.response.defer()
+                await interaction.response.defer(ephemeral=True)
         except Exception:
             pass
 
@@ -134,7 +134,7 @@ class MusicControlView(discord.ui.View):
     async def btn_skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         try:
             if not interaction.response.is_done():
-                await interaction.response.defer()
+                await interaction.response.defer(ephemeral=True)
         except Exception:
             pass
 
@@ -156,7 +156,7 @@ class MusicControlView(discord.ui.View):
     async def btn_vol_down(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         try:
             if not interaction.response.is_done():
-                await interaction.response.defer()
+                await interaction.response.defer(ephemeral=True)
         except Exception:
             pass
 
@@ -180,7 +180,7 @@ class MusicControlView(discord.ui.View):
     async def btn_vol_up(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         try:
             if not interaction.response.is_done():
-                await interaction.response.defer()
+                await interaction.response.defer(ephemeral=True)
         except Exception:
             pass
 
@@ -204,7 +204,7 @@ class MusicControlView(discord.ui.View):
     async def btn_stop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         try:
             if not interaction.response.is_done():
-                await interaction.response.defer()
+                await interaction.response.defer(ephemeral=True)
         except Exception:
             pass
 
@@ -270,7 +270,7 @@ class MusicControlView(discord.ui.View):
             return
 
         playlist_id = pl_row["id"]
-        save_title = (current.title or "Unknown Track")[:250]
+        save_title = (current.title or "Unknown Track")[:250].replace("[", "(").replace("]", ")")
         save_author = (current.author or "Official Artist")[:250]
 
         existing = await db.fetch_one(
@@ -366,21 +366,35 @@ class MusicControlView(discord.ui.View):
             pass
 
         player = self._get_player(interaction)
-        if not player or not player.queue:
+        if not player or (not player.queue and not player.current):
             c = KyroContainer()
             c.add_section(content="**Queue Empty**\n> The playback queue is currently empty.")
             await send_container_response(interaction, c, ephemeral=True)
             return
 
+        curr_text = ""
+        if player.current:
+            safe_curr = player.current.title.replace("[", "(").replace("]", ")")
+            curr_link = f"[{safe_curr}]({player.current.url})" if player.current.url else f"**{safe_curr}**"
+            curr_text = f"**Now Playing:** {curr_link} `[{player.current.formatted_duration}]`\n\n"
+
+        if not player.queue:
+            c = KyroContainer()
+            c.add_section(content=f"{curr_text}**Upcoming Queue:** None\n> Use `?play <song>` to add more songs.")
+            await send_container_response(interaction, c, ephemeral=True)
+            return
+
         q_lines = []
         for i, t in enumerate(player.queue[:10], 1):
-            q_lines.append(f"`{i}.` **{t.title}** (`{t.formatted_duration}`) • {t.author}")
+            safe_title = t.title.replace("[", "(").replace("]", ")")
+            track_link = f"[{safe_title}]({t.url})" if t.url else f"**{safe_title}**"
+            q_lines.append(f"`{i:02d}.` {track_link} `[{t.formatted_duration}]` — `{t.requester}`")
 
         remaining = len(player.queue) - 10
         rem_text = f"\n*...and {remaining} more in queue*" if remaining > 0 else ""
         c = KyroContainer()
         c.add_section(
-            content=f"**Upcoming Queue ({len(player.queue)} tracks)**\n" + "\n".join(q_lines) + rem_text
+            content=f"{curr_text}**Upcoming Queue ({len(player.queue)} tracks):**\n" + "\n".join(q_lines) + rem_text
         )
         await send_container_response(interaction, c, ephemeral=True)
 

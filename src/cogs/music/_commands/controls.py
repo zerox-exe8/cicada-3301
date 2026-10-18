@@ -157,6 +157,10 @@ async def execute_jump(cog: Music, ctx: commands.Context, index: int) -> None:
         await send_container_response(ctx, container)
         return
 
+    # If single track loop is on, disable it so skip properly advances to the jumped track
+    if player.loop_mode == "track":
+        player.loop_mode = "off"
+
     # Keep target track at index 0 and clear preceding tracks
     del player.queue[:index - 1]
     target_track = player.queue[0]

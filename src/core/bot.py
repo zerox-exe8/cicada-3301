@@ -106,6 +106,10 @@ class KyroBot(commands.Bot):
         self.no_prefix_users: set[int] = set()
         self.custom_status: str | None = None
 
+        # Autonomous In-Bot SRE Sentinel Agent
+        from src.sentinel.agent import KyroSentinel
+        self.sentinel: KyroSentinel = KyroSentinel(self)
+
         # Attach Global Command Guard
         self.add_check(self._global_command_check)
 
@@ -212,6 +216,9 @@ class KyroBot(commands.Bot):
         # dynamically Load all Cogs
         await self._load_all_extensions()
 
+        # Start Autonomous Sentinel SRE Agent
+        self.sentinel.start()
+
         logger.info("Setup hook completed successfully.")
 
     async def _load_all_extensions(self) -> None:
@@ -235,6 +242,9 @@ class KyroBot(commands.Bot):
     async def close(self) -> None:
         """Gracefully release database pools and network sessions."""
         logger.info("Shutting down Kyro Bot gracefully...")
+
+        if hasattr(self, "sentinel") and self.sentinel:
+            self.sentinel.stop()
 
         if self.session:
             await self.session.close()

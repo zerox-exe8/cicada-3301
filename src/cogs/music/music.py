@@ -103,6 +103,18 @@ class Music(commands.Cog):
         exception = getattr(payload, "exception", None)
         logger.error(f"Lavalink Track Exception for '{title}': {exception}")
         player_obj = getattr(payload, "player", None)
+        guild_id = player_obj.guild.id if player_obj and player_obj.guild else None
+        if hasattr(self.bot, "sentinel") and self.bot.sentinel:
+            from src.sentinel.models import SubsystemType, IncidentSeverity
+            self.bot.sentinel.record_incident(
+                SubsystemType.MUSIC,
+                IncidentSeverity.WARNING,
+                "Lavalink Track Exception",
+                f"Track '{title}': {exception}",
+                action_taken="Advanced queue to next available stream",
+                resolved=True,
+                guild_id=guild_id,
+            )
         if player_obj and player_obj.guild:
             player = self.controller.get_player(player_obj.guild.id)
             if player and hasattr(player, "on_track_end"):
@@ -115,10 +127,38 @@ class Music(commands.Cog):
         title = getattr(track, "title", "Unknown")
         logger.warning(f"Lavalink Track Stuck for '{title}'")
         player_obj = getattr(payload, "player", None)
+        guild_id = player_obj.guild.id if player_obj and player_obj.guild else None
+        if hasattr(self.bot, "sentinel") and self.bot.sentinel:
+            from src.sentinel.models import SubsystemType, IncidentSeverity
+            self.bot.sentinel.record_incident(
+                SubsystemType.MUSIC,
+                IncidentSeverity.WARNING,
+                "Lavalink Track Stuck",
+                f"Playback buffer stalled for '{title}'",
+                action_taken="Force terminated stuck track to unblock queue",
+                resolved=True,
+                guild_id=guild_id,
+            )
         if player_obj and player_obj.guild:
             player = self.controller.get_player(player_obj.guild.id)
             if player and hasattr(player, "on_track_end"):
                 await player.on_track_end(reason="loadFailed")
+
+    @commands.Cog.listener()
+    async def on_wavelink_node_closed(self, node: Any, disconnected: Any) -> None:
+        """Invoked when Lavalink node drops connection."""
+        node_id = getattr(node, "identifier", "default")
+        logger.warning(f"Lavalink node closed: {node_id}")
+        if hasattr(self.bot, "sentinel") and self.bot.sentinel:
+            from src.sentinel.models import SubsystemType, IncidentSeverity
+            self.bot.sentinel.record_incident(
+                SubsystemType.MUSIC,
+                IncidentSeverity.CRITICAL,
+                "Lavalink Node Closed",
+                f"Node '{node_id}' closed connection unexpectedly",
+                action_taken="Watchdog scheduled auto-reconnect",
+                resolved=False,
+            )
 
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: Any) -> None:

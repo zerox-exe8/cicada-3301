@@ -58,8 +58,13 @@ class Help(commands.Cog):
             if category_name.lower() == "security":
                 category_name = "Antinuke"
 
+            # Explicit module mapping for Media and Giveaway
+            if cog_name.lower() in ("mediachannels", "media"):
+                category_name = "Media"
+            elif cog_name.lower() in ("giveaways", "giveaway"):
+                category_name = "Giveaway"
             # Merge any legacy General / Utility commands directly into Moderation
-            if category_name.lower() in ("general", "utility"):
+            elif category_name.lower() in ("general", "utility"):
                 category_name = "Moderation"
 
             if category_name not in categories:
@@ -78,8 +83,19 @@ class Help(commands.Cog):
                         if c not in categories[category_name]:
                             categories[category_name].append(c)
 
-        # Ensure ordered display in dropdown: Antinuke, Moderation, Welcomer, Join to Create, Ticket, Audit Logs, Music, etc.
-        priority_order = ["Antinuke", "Moderation", "Welcomer", "Join to Create", "Ticket", "Audit Logs", "Music", "Premium"]
+        # Ensure ordered display in dropdown: Antinuke, Moderation, Giveaway, Media, Welcomer, Join to Create, Ticket, Audit Logs, Music, etc.
+        priority_order = [
+            "Antinuke",
+            "Moderation",
+            "Giveaway",
+            "Media",
+            "Welcomer",
+            "Join to Create",
+            "Ticket",
+            "Audit Logs",
+            "Music",
+            "Premium",
+        ]
         ordered_categories: dict[str, list[commands.Command]] = {}
         for cat in priority_order:
             if cat in categories and categories[cat]:
@@ -102,6 +118,8 @@ class Help(commands.Cog):
             "Premium": e_reg.get("verified_premium", e_reg.get("icon_premium", "")),
             "Audit Logs": e_reg.get("icons_podcast", e_reg.get("icon_logging", "")),
             "Join to Create": e_reg.get("icons_connect", e_reg.get("icons_channel", e_reg.get("icons_podcast", ""))),
+            "Giveaway": e_reg.get("giveaway", e_reg.get("discord_giveaway", e_reg.get("s_giveaway", ""))),
+            "Media": e_reg.get("media", e_reg.get("icon_media", e_reg.get("icons_image", ""))),
         }
         return mapping.get(cat_name, e_reg.get("icon_moderation", ""))
 
@@ -117,11 +135,17 @@ class Help(commands.Cog):
             "Premium": "verified_premium",
             "Audit Logs": "icons_podcast",
             "Join to Create": "icons_connect",
+            "Giveaway": "giveaway",
+            "Media": "media",
         }
         emoji_name = mapping.get(cat_name, "icon_moderation")
         emoji_data = e_reg.get_select_emoji(emoji_name, fallback_unicode=None)
         if not emoji_data and cat_name == "Join to Create":
             emoji_data = e_reg.get_select_emoji("icons_channel", fallback_unicode=None) or e_reg.get_select_emoji("icon_moderation", fallback_unicode=None)
+        if not emoji_data and cat_name == "Giveaway":
+            emoji_data = e_reg.get_select_emoji("discord_giveaway", fallback_unicode=None) or e_reg.get_select_emoji("s_giveaway", fallback_unicode=None)
+        if not emoji_data and cat_name == "Media":
+            emoji_data = e_reg.get_select_emoji("icon_media", fallback_unicode=None) or e_reg.get_select_emoji("icons_image", fallback_unicode=None)
         return emoji_data
 
     def _build_home_container(
@@ -268,6 +292,29 @@ class Help(commands.Cog):
                 return (p_idx, is_sub, cmd.qualified_name.lower())
 
             sorted_cmds = sorted(commands_list, key=_sort_key)
+        elif cat_name.lower() == "media":
+            priority_order = ["media", "media setup", "media disable", "media show"]
+            def _media_sort_key(cmd: commands.Command) -> tuple[int, str]:
+                qname = cmd.qualified_name.lower()
+                try:
+                    p_idx = priority_order.index(qname)
+                except ValueError:
+                    p_idx = 999
+                return (p_idx, qname)
+            sorted_cmds = sorted(commands_list, key=_media_sort_key)
+        elif cat_name.lower() == "giveaway":
+            priority_order = [
+                "giveaway", "giveaway start", "giveaway end", "giveaway reroll", "giveaway list",
+                "gstart", "gend", "greroll", "glist"
+            ]
+            def _gw_sort_key(cmd: commands.Command) -> tuple[int, str]:
+                qname = cmd.qualified_name.lower()
+                try:
+                    p_idx = priority_order.index(qname)
+                except ValueError:
+                    p_idx = 999
+                return (p_idx, qname)
+            sorted_cmds = sorted(commands_list, key=_gw_sort_key)
         else:
             def _gen_sort_key(cmd: commands.Command) -> tuple[str, int, str]:
                 parts = cmd.qualified_name.lower().split()
@@ -354,7 +401,12 @@ class Help(commands.Cog):
             if target_cmd and await self._can_run_command(target_cmd, ctx):
                 current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
                 cat = getattr(target_cmd.cog, "category", "Moderation")
-                if cat.lower() in ("general", "utility"):
+                cog_name = target_cmd.cog_name.lower() if target_cmd.cog_name else ""
+                if cog_name in ("mediachannels", "media"):
+                    cat = "Media"
+                elif cog_name in ("giveaways", "giveaway"):
+                    cat = "Giveaway"
+                elif cat.lower() in ("general", "utility"):
                     cat = "Moderation"
                 elif cat.lower() == "security":
                     cat = "Antinuke"
@@ -369,7 +421,7 @@ class Help(commands.Cog):
                 cat_icon_prefix = f"{cat_icon} " if cat_icon else ""
                 container.add_section(
                     content=(
-                        f"**{cat_icon_prefix}Command: `{target_cmd.name}`**\n"
+                        f"**{cat_icon_prefix}Command: `{target_cmd.qualified_name}`**\n"
                         f"> {desc}"
                     )
                 )
@@ -378,6 +430,25 @@ class Help(commands.Cog):
                     f"{dot} **Usage:** `{usage}`\n"
                     f"{dot} **Aliases:** {aliases} | **Category:** `{cat}`"
                 )
+
+                # Show subcommands if target is a group (e.g. ?help media, ?help giveaway)
+                if isinstance(target_cmd, commands.Group) and target_cmd.commands:
+                    sub_list = []
+                    for sub in sorted(target_cmd.commands, key=lambda s: s.name):
+                        if not sub.hidden and await self._can_run_command(sub, ctx):
+                            sub_sig = f" {sub.signature}" if sub.signature else ""
+                            sub_usage = f"`{current_prefix}{sub.qualified_name}{sub_sig}`".strip()
+                            sub_desc = sub.description or sub.help or ""
+                            if sub_desc:
+                                sub_list.append(f"{dot} {sub_usage}\n> {sub_desc}")
+                            else:
+                                sub_list.append(f"{dot} {sub_usage}")
+                    if sub_list:
+                        container.add_separator(divider=True)
+                        container.add_section(
+                            content="**Subcommands:**\n" + "\n".join(sub_list)
+                        )
+
                 container.add_separator(divider=True)
                 container.add_text(f"-# Requested by {ctx.author.display_name}")
                 await send_container_response(ctx, container)
@@ -395,6 +466,11 @@ class Help(commands.Cog):
                 "security": "Antinuke",
                 "antinuke": "Antinuke",
                 "anti-nuke": "Antinuke",
+                "media": "Media",
+                "mediachannels": "Media",
+                "giveaway": "Giveaway",
+                "giveaways": "Giveaway",
+                "gw": "Giveaway",
             }
             target_cat_name = category_aliases.get(query)
             if not target_cat_name:

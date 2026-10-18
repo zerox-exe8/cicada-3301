@@ -248,7 +248,7 @@ class ConcludedGiveawayView(discord.ui.View):
 
 class Giveaways(commands.Cog):
     """Enterprise Giveaway Management system with live countdowns and fair winner draws."""
-    category: str = "Utility"
+    category: str = "Giveaway"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
@@ -298,7 +298,10 @@ class Giveaways(commands.Cog):
 
     @giveaway_ticker.before_loop
     async def before_ticker(self) -> None:
-        await self.bot.wait_until_ready()
+        try:
+            await self.bot.wait_until_ready()
+        except Exception:
+            pass
 
     async def conclude_giveaway(self, message_id: int) -> Optional[dict]:
         """Finalize giveaway, edit card, disable button, and announce winners."""

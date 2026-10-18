@@ -53,7 +53,7 @@ URL_REGEX = re.compile(
 
 class MediaChannels(commands.Cog):
     """Media-only channels system: strictly confines configured channels to media content."""
-    category: str = "Moderation"
+    category: str = "Media"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot

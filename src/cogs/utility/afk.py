@@ -214,7 +214,7 @@ class AFKCog(commands.Cog, name="AFK"):
         original_nickname: Optional[str] = None
         new_nick: Optional[str] = None
         if isinstance(ctx.author, discord.Member):
-            original_nickname = ctx.author.nick or ctx.author.name
+            original_nickname = ctx.author.nick
             # Check if bot can edit author's nickname
             me = ctx.guild.me
             can_manage = me.guild_permissions.manage_nicknames or me.guild_permissions.administrator
@@ -228,11 +228,14 @@ class AFKCog(commands.Cog, name="AFK"):
                 current_display = ctx.author.display_name
                 if not current_display.startswith("[AFK] "):
                     new_nick = f"[AFK] {current_display}"[:32]
-                    try:
-                        await ctx.author.edit(nick=new_nick, reason="Kyro AFK Status Update")
-                        nickname_changed = True
-                    except Exception as e:
-                        logger.debug(f"Unable to update nickname for AFK user {ctx.author}: {e}")
+                    nickname_changed = True
+                    async def _apply_afk_nick(member: discord.Member, target_nick: str) -> None:
+                        try:
+                            await member.edit(nick=target_nick, reason="Kyro AFK Status Update")
+                        except Exception as e:
+                            logger.debug(f"Unable to update nickname for AFK user {member}: {e}")
+
+                    asyncio.create_task(_apply_afk_nick(ctx.author, new_nick))
 
         # Update cache
         afk_entry = AFKData(
@@ -312,97 +315,95 @@ class AFKCog(commands.Cog, name="AFK"):
         # check if the message author was AFK (Welcome back)
         # ----------------------------------------------------
         if author_key in self._afk_cache:
-            afk_data = self._afk_cache[author_key]
-            # Grace period: ignore messages sent within 6 seconds of setting AFK
-            elapsed_seconds = (now - afk_data.created_at).total_seconds()
-            if elapsed_seconds > 6.0:
-                # Remove from cache & database
-                self._afk_cache.pop(author_key, None)
+            # If this message is invoking the afk command, don't trigger welcome back
+            if message.content:
                 try:
-                    await self.bot.db.execute(
-                        "DELETE FROM user_afk WHERE user_id = ? AND guild_id = ?;",
-                        author_id,
-                        guild_id,
-                    )
-                except Exception as e:
-                    logger.debug(f"Failed to delete AFK record from database: {e}")
+                    ctx = await self.bot.get_context(message)
+                    if ctx.valid and ctx.command and ctx.command.qualified_name == "afk":
+                        return
+                except Exception:
+                    pass
 
-                # Restore nickname if it was changed
-                if afk_data.nickname_changed and isinstance(message.author, discord.Member):
+            # Atomic pop: ensure welcome back only triggers once
+            afk_data = self._afk_cache.pop(author_key, None)
+            if not afk_data:
+                return
+
+            # Revert nickname in background without blocking welcome back response
+            if afk_data.nickname_changed and isinstance(message.author, discord.Member):
+                async def _revert_afk_nick(member: discord.Member, orig_nick: Optional[str]) -> None:
                     try:
-                        current_nick = message.author.nick or ""
-                        if current_nick.startswith("[AFK] "):
-                            await message.author.edit(
-                                nick=afk_data.original_nickname,
-                                reason="Kyro AFK Status Removal",
-                            )
+                        curr = member.nick or ""
+                        if curr.startswith("[AFK] "):
+                            await member.edit(nick=orig_nick, reason="Kyro AFK Status Removal")
                     except Exception as e:
-                        logger.debug(f"Unable to revert nickname for {message.author}: {e}")
+                        logger.debug(f"Unable to revert nickname for {member}: {e}")
 
-                # Check and deliver pending AFK notes / voice mails
-                pending_notes = []
-                try:
-                    pending_notes = await self.bot.db.fetch_all(
-                        "SELECT sender_name, note, created_at FROM user_afk_notes WHERE target_user_id = $1 AND guild_id = $2 ORDER BY created_at ASC LIMIT 8;",
+                asyncio.create_task(_revert_afk_nick(message.author, afk_data.original_nickname))
+
+            # Remove from database in background
+            asyncio.create_task(
+                self.bot.db.execute(
+                    "DELETE FROM user_afk WHERE user_id = ? AND guild_id = ?;",
+                    author_id,
+                    guild_id,
+                )
+            )
+
+            # Check and deliver pending AFK notes / voice mails
+            pending_notes = []
+            try:
+                pending_notes = await self.bot.db.fetch_all(
+                    "SELECT sender_name, note, created_at FROM user_afk_notes WHERE target_user_id = $1 AND guild_id = $2 ORDER BY created_at ASC LIMIT 8;",
+                    author_id,
+                    guild_id,
+                )
+                if pending_notes:
+                    await self.bot.db.execute(
+                        "DELETE FROM user_afk_notes WHERE target_user_id = $1 AND guild_id = $2;",
                         author_id,
                         guild_id,
                     )
-                    if pending_notes:
-                        await self.bot.db.execute(
-                            "DELETE FROM user_afk_notes WHERE target_user_id = $1 AND guild_id = $2;",
-                            author_id,
-                            guild_id,
-                        )
-                except Exception as e:
-                    logger.debug(f"Failed to fetch AFK notes: {e}")
+            except Exception as e:
+                logger.debug(f"Failed to fetch AFK notes: {e}")
 
-                # Send welcome back card
-                e_reg = getattr(self.bot, "custom_emojis", None)
-                heart_dot = e_reg.get("heart_dot", "") if e_reg else ""
-                dot_str = f"{heart_dot} " if heart_dot else ""
-                duration_str = format_duration(elapsed_seconds)
+            # Send welcome back card immediately
+            e_reg = getattr(self.bot, "custom_emojis", None)
+            heart_dot = e_reg.get("heart_dot", "") if e_reg else ""
+            dot_str = f"{heart_dot} " if heart_dot else ""
+            elapsed_seconds = max((now - afk_data.created_at).total_seconds(), 0.0)
+            duration_str = format_duration(elapsed_seconds)
 
-                raw_reason = afk_data.reason.strip() if afk_data.reason else ""
-                reason_val = raw_reason if (raw_reason and raw_reason.lower() != "afk") else "None"
+            raw_reason = afk_data.reason.strip() if afk_data.reason else ""
+            reason_val = raw_reason if (raw_reason and raw_reason.lower() != "afk") else "None"
 
-                container = KyroContainer(accent_color=None)
-                container.add_text(f"### Welcome Back, {message.author.name}!")
-                container.add_separator(divider=True)
+            container = KyroContainer(accent_color=None)
+            container.add_text(f"### Welcome Back, {message.author.name}!")
+            container.add_separator(divider=True)
 
-                body_lines = [
-                    f"{dot_str}**Reason:** {reason_val}",
-                    f"{dot_str}**AFK Removed:** `{duration_str}`",
-                ]
+            body_lines = [
+                f"{dot_str}**Reason:** {reason_val}",
+                f"{dot_str}**AFK Removed:** `{duration_str}`",
+            ]
 
-                if pending_notes:
-                    body_lines.append(f"{dot_str}**Notes:** {len(pending_notes)} Note{'s' if len(pending_notes) > 1 else ''}")
-                    for n in pending_notes:
-                        s_name = n.get("sender_name", "Someone")
-                        note_msg = n.get("note", "")
-                        body_lines.append(f"> **{s_name}:** {note_msg}")
-                else:
-                    body_lines.append(f"{dot_str}**Notes:** None")
+            if pending_notes:
+                body_lines.append(f"{dot_str}**Notes:** {len(pending_notes)} Note{'s' if len(pending_notes) > 1 else ''}")
+                for n in pending_notes:
+                    s_name = n.get("sender_name", "Someone")
+                    note_msg = n.get("note", "")
+                    body_lines.append(f"> **{s_name}:** {note_msg}")
+            else:
+                body_lines.append(f"{dot_str}**Notes:** None")
 
-                container.add_section(content="\n".join(body_lines))
-                container.add_thumbnail(message.author.display_avatar.url)
-                container.add_separator(divider=True)
-                container.add_text(f"-# Welcome back {message.author.name}")
+            container.add_section(content="\n".join(body_lines))
+            container.add_thumbnail(message.author.display_avatar.url)
+            container.add_separator(divider=True)
+            container.add_text(f"-# Welcome back {message.author.name}")
 
-                delete_delay = 15.0 if pending_notes else 5.0
-
-                try:
-                    notice_msg = await send_container_response(message.channel, container)
-                    if notice_msg and isinstance(notice_msg, discord.Message):
-                        async def _cleanup_notice(m: discord.Message) -> None:
-                            await asyncio.sleep(delete_delay)
-                            try:
-                                await m.delete()
-                            except Exception:
-                                pass
-
-                        asyncio.create_task(_cleanup_notice(notice_msg))
-                except Exception as e:
-                    logger.debug(f"Failed to send AFK welcome back notice: {e}")
+            try:
+                await send_container_response(message.channel, container)
+            except Exception as e:
+                logger.debug(f"Failed to send AFK welcome back notice: {e}")
 
         # ----------------------------------------------------
         # check if any mentioned users are AFK

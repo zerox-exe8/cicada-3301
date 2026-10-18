@@ -415,20 +415,29 @@ class GuildPlayer:
     # ── Components V2 Controller Card ──
 
     def build_now_playing_container(self, track: Track) -> KyroContainer:
-        """Construct the Components V2 Now Playing card."""
+        """Construct the Components V2 Now Playing card matching custom layout."""
         e_reg = getattr(self.bot, "custom_emojis", None)
         dot = e_reg.get("heart_dot", "•") if e_reg else "•"
+        music_emoji = e_reg.get("music", "🎵") if e_reg else "🎵"
+        link_emoji = e_reg.get("link", "🔗") if e_reg else "🔗"
 
         container = KyroContainer(accent_color=None)
-        title_display = f"[{track.title}]({track.url})" if track.url else track.title
-        container.add_section(
-            content=(
-                f"### {title_display}\n"
-                f"{dot} **Artist:** `{track.author or 'Unknown Artist'}`\n"
-                f"{dot} **Duration:** `{track.formatted_duration}` • **Source:** `Lavalink 320kbps`\n"
-                f"{dot} **Requested by:** {track.requester}"
-            )
-        )
+
+        # Title: Now Playing
+        # Niche: Song, Artist, and Track Link (duration & source completely removed)
+        song_display = f"[{track.title}]({track.url})" if track.url else track.title
+        artist_display = track.author or "Unknown Artist"
+        link_line = f"> {link_emoji} [Track Link]({track.url})" if track.url else ""
+
+        section_lines = [
+            f"## {music_emoji} Now Playing",
+            f"{dot} **Song:** {song_display}",
+            f"{dot} **Artist:** `{artist_display}`",
+        ]
+        if link_line:
+            section_lines.append(link_line)
+
+        container.add_section(content="\n".join(section_lines))
 
         # Resolve thumbnail (fallback to YouTube thumbnail if missing)
         thumb = track.thumbnail
@@ -444,11 +453,11 @@ class GuildPlayer:
 
         container.add_separator(divider=True)
 
-        ap_status = "ON" if self.smart_autoplay else "OFF"
-        q_len = len(self.queue)
+        # Footer: Requested by (+ player state indicators)
         vol_pct = int(self.volume * 100)
+        ap_status = "ON" if self.smart_autoplay else "OFF"
         container.add_text(
-            f"-# Volume: `{vol_pct}%` • Loop: `{self.loop_mode.upper()}` • Autoplay: `{ap_status}` • Queue: `{q_len}`"
+            f"-# Requested by: {track.requester} • Vol: `{vol_pct}%` • Loop: `{self.loop_mode.upper()}` • Autoplay: `{ap_status}`"
         )
         return container
 
@@ -458,15 +467,12 @@ class GuildPlayer:
             return
 
         container = self.build_now_playing_container(track)
-        view = MusicControlView(self.bot, player=self)
-        e_reg = getattr(self.bot, "custom_emojis", None)
-        music_emoji = e_reg.get("music", "🎵") if e_reg else "🎵"
-        header_text = f"### {music_emoji} Now Playing {music_emoji}"
+        view = MusicControlView(self.bot, player=self, track_url=track.url)
 
         target = message_to_edit or self.controller_message
         if target and isinstance(target, discord.Message):
             try:
-                await edit_container_response(target, container, view=view, content=header_text)
+                await edit_container_response(target, container, view=view, content=None)
                 self.controller_message = target
                 return
             except Exception as e:
@@ -474,7 +480,7 @@ class GuildPlayer:
 
         try:
             msg = await send_container_response(
-                self.home_channel, container, view=view, content=header_text
+                self.home_channel, container, view=view, content=None
             )
             if isinstance(msg, discord.Message):
                 self.controller_message = msg
@@ -487,12 +493,9 @@ class GuildPlayer:
             return
 
         container = self.build_now_playing_container(self.current)
-        view = MusicControlView(self.bot, player=self)
-        e_reg = getattr(self.bot, "custom_emojis", None)
-        music_emoji = e_reg.get("music", "🎵") if e_reg else "🎵"
-        header_text = f"### {music_emoji} Now Playing {music_emoji}"
+        view = MusicControlView(self.bot, player=self, track_url=self.current.url)
         try:
-            await edit_container_response(self.controller_message, container, view=view, content=header_text)
+            await edit_container_response(self.controller_message, container, view=view, content=None)
         except Exception as e:
             logger.debug(f"Failed to edit controller message: {e}")
 

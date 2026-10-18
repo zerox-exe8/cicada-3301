@@ -16,7 +16,13 @@ logger = logging.getLogger("Kyro.Music.Views")
 class MusicControlView(discord.ui.View):
     """Interactive media control row with zero unicode emojis (uses custom application emojis)."""
 
-    def __init__(self, bot: KyroBot, player: Optional[GuildPlayer] = None, guild_id: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        bot: KyroBot,
+        player: Optional[GuildPlayer] = None,
+        guild_id: Optional[int] = None,
+        track_url: Optional[str] = None,
+    ) -> None:
         super().__init__(timeout=None)
         self.bot = bot
         self.player = player
@@ -24,6 +30,19 @@ class MusicControlView(discord.ui.View):
 
         # Apply custom emojis from assets if available
         self._apply_custom_emojis()
+
+        # Add Track Link button in row 1 if track has a valid URL
+        if track_url and track_url.startswith(("http://", "https://")):
+            link_btn = discord.ui.Button(
+                label="Link",
+                url=track_url,
+                style=discord.ButtonStyle.link,
+                row=1,
+            )
+            e_reg = getattr(self.bot, "custom_emojis", None)
+            if e_reg:
+                link_btn.emoji = e_reg.get_emoji_obj("link")
+            self.add_item(link_btn)
 
     def _apply_custom_emojis(self) -> None:
         e_reg = getattr(self.bot, "custom_emojis", None)

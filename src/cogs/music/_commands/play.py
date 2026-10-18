@@ -93,7 +93,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     if is_playlist_url(clean_q) and not is_yt_query:
         pl = await NativeExtractor.extract_playlist(clean_q, requester=ctx.author.display_name)
         if pl and pl.tracks:
-            was_idle = not player.is_playing and not player.is_paused
+            was_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
             first_item = pl.tracks[0]
             first_track = Track(
                 title=first_item.title,
@@ -172,15 +172,28 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     is_direct_url = lookup_target.startswith(("http://", "https://"))
 
     try:
-        # Fast Lavalink search directly (< 1s for URLs & YouTube text search)
+        # Fast Lavalink search directly (< 1s for URLs & multi-source text search)
         if is_direct_url:
             results = await wavelink.Playable.search(lookup_target)
         else:
-            results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube)
+            try:
+                results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube)
+            except Exception:
+                results = None
+            if not results:
+                try:
+                    results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTubeMusic)
+                except Exception:
+                    results = None
+            if not results:
+                try:
+                    results = await wavelink.Playable.search(f"spsearch:{lookup_target}")
+                except Exception:
+                    results = None
 
         if isinstance(results, wavelink.Playlist) and results.tracks:
             pl = results
-            was_idle = not player.is_playing and not player.is_paused
+            was_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
             first_p = pl.tracks[0]
             first_thumb = first_p.artwork or (f"https://i.ytimg.com/vi/{first_p.identifier}/hqdefault.jpg" if getattr(first_p, "identifier", None) else None)
             first_track = Track(
@@ -260,7 +273,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTubeMusic)
                 if isinstance(results, wavelink.Playlist) and results.tracks:
                     pl = results
-                    was_idle = not player.is_playing and not player.is_paused
+                    was_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
                     first_p = pl.tracks[0]
                     first_track = Track(
                         title=first_p.title or "Unknown Track",
@@ -355,7 +368,9 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             pass
 
     # Play immediately if idle, else enqueue
-    if not player.is_playing and not player.is_paused:
+    is_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
+    if is_idle:
+        player._was_paused_for_empty_vc = False
         await player.play_track(track, message_to_edit=search_msg)
     else:
         player.queue.append(track)

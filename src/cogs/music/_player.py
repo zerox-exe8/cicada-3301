@@ -137,11 +137,19 @@ class GuildPlayer:
         """Stream a track via the dedicated Lavalink node with 0% stutter."""
         if not self.voice_client or not self.voice_client.connected:
             vc = self.guild.voice_client
-            if vc and isinstance(vc, wavelink.Player) and vc.connected:
+            if vc and isinstance(vc, wavelink.Player):
                 self.voice_client = vc
-            else:
-                logger.warning(f"Guild {self.guild.id}: Cannot play, voice client not connected.")
-                return
+
+        # If voice client is still completing handshake, wait briefly
+        if self.voice_client and not self.voice_client.connected:
+            for _ in range(6):
+                await asyncio.sleep(0.5)
+                if self.voice_client.connected:
+                    break
+
+        if not self.voice_client or not self.voice_client.connected:
+            logger.warning(f"Guild {self.guild.id}: Cannot play, voice client not connected.")
+            return
 
         # Direct playable if already resolved, otherwise resolve via Lavalink
         playable = getattr(track, "_playable", None)
@@ -154,15 +162,20 @@ class GuildPlayer:
             if self.queue:
                 next_t = self.queue.pop(0)
                 await self.play_track(next_t, message_to_edit=message_to_edit)
+            else:
+                self.current = None
+                await self.send_queue_ended_card()
+                self.schedule_empty_vc_timer()
             return
 
         self.current = track
         self.autoplay_history.add(track.title.lower())
         self._last_advance_time = time.time()
+        self._was_paused_for_empty_vc = False
 
-        # Start playback on Lavalink node with volume
+        # Start playback on Lavalink node with volume (explicitly unpaused)
         vol_int = int(self.volume * 100)
-        await self.voice_client.play(playable, volume=vol_int)
+        await self.voice_client.play(playable, volume=vol_int, paused=False)
 
         # Send sleek Now Playing card with buttons
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
@@ -196,41 +209,15 @@ class GuildPlayer:
         if playable:
             return playable
 
-        # ── Priority 1.5: Direct Stream URL (JioSaavn 320kbps CDN stream) ──
-        stream_url = getattr(track, "stream_url", None)
-        if stream_url and self._is_direct_stream_url(stream_url):
-            try:
-                results = await wavelink.Playable.search(stream_url)
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"Direct stream URL resolve error for '{stream_url}': {e}")
-
-        # ── Priority 1.8: If no stream_url, resolve via NativeExtractor CDN first ──
-        if not stream_url:
-            try:
-                from src.cogs.music._extractor import NativeExtractor
-                target_q = track.query or f"{track.title} {track.author}".strip() or track.url
-                if target_q:
-                    ext = await NativeExtractor.extract(target_q, requester=track.requester)
-                    if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
-                        track.stream_url = ext.stream_url
-                        results = await wavelink.Playable.search(ext.stream_url)
-                        if results:
-                            return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"NativeExtractor resolve fallback error: {e}")
-
-        # ── Priority 2: Direct YouTube URL → Lavalink handles directly ──
+        # ── Priority 2: Direct URL (YouTube, SoundCloud, direct stream) ──
         url = track.url or ""
-        is_yt = "youtu" in url
-        if is_yt and url.startswith("http"):
+        if url.startswith(("http://", "https://")):
             try:
                 results = await wavelink.Playable.search(url)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"YouTube URL resolve error for '{url}': {e}")
+                logger.debug(f"Direct URL resolve error for '{url}': {e}")
 
         # ── Priority 3: YouTube Search using title + author (or query) ──
         search_target = f"{track.title} {track.author}".strip() or track.query or track.title
@@ -243,37 +230,66 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"YouTube search error for '{search_target}': {e}")
 
-        # ── Priority 3.5: Fallback search with original query ──
-        if track.query and track.query != search_target:
+        # ── Priority 3.5: YouTube Music Search ──
+        if search_target:
             try:
-                results = await wavelink.Playable.search(track.query, source=wavelink.TrackSource.YouTube)
+                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"YouTube query search error for '{track.query}': {e}")
+                logger.debug(f"YouTube Music search error for '{search_target}': {e}")
 
-        # ── Priority 4: Plain title search fallback ──
-        if track.title:
+        # ── Priority 3.8: Spotify Search via Lavalink ──
+        if search_target:
             try:
-                results = await wavelink.Playable.search(track.title, source=wavelink.TrackSource.YouTube)
+                results = await wavelink.Playable.search(f"spsearch:{search_target}")
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"Title fallback error for '{track.title}': {e}")
+                logger.debug(f"Spotify search error for '{search_target}': {e}")
+
+        # ── Priority 4: Direct Stream URL (JioSaavn 320kbps CDN stream) ──
+        stream_url = getattr(track, "stream_url", None)
+        if stream_url and self._is_direct_stream_url(stream_url):
+            try:
+                results = await wavelink.Playable.search(stream_url)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"Direct stream URL resolve error for '{stream_url}': {e}")
+
+        # ── Priority 5: Fallback to NativeExtractor CDN if Lavalink search found nothing ──
+        try:
+            from src.cogs.music._extractor import NativeExtractor
+            target_q = track.query or f"{track.title} {track.author}".strip() or track.url
+            if target_q:
+                ext = await NativeExtractor.extract(target_q, requester=track.requester)
+                if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
+                    track.stream_url = ext.stream_url
+                    results = await wavelink.Playable.search(ext.stream_url)
+                    if results:
+                        return results[0] if isinstance(results, list) else results.tracks[0]
+        except Exception as e:
+            logger.debug(f"NativeExtractor resolve fallback error: {e}")
 
         return None
 
     # ── Controls ──
 
-    def pause(self) -> None:
+    def pause(self) -> bool:
         """Pause playback."""
-        if self.voice_client and self.voice_client.playing:
+        if self.voice_client and self.voice_client.playing and not self.voice_client.paused:
             asyncio.create_task(self.voice_client.pause(True))
+            return True
+        return False
 
-    def resume(self) -> None:
+    def resume(self) -> bool:
         """Resume playback."""
         if self.voice_client and self.voice_client.paused:
             asyncio.create_task(self.voice_client.pause(False))
+            self._was_paused_for_empty_vc = False
+            return True
+        return False
 
     async def skip(self) -> None:
         """Skip currently playing track."""
@@ -337,6 +353,8 @@ class GuildPlayer:
                 await self.play_track(next_track)
             else:
                 self.current = None
+                await self.send_queue_ended_card()
+                self.schedule_empty_vc_timer()
             return
 
         now = time.time()

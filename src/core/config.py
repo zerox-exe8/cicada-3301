@@ -69,7 +69,7 @@ class Config:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
 
     # Lavalink / Audio Settings
-    LAVALINK_URI: str = os.getenv("LAVALINK_URI", "http://127.0.0.1:2333").strip()
+    LAVALINK_URI: str = os.getenv("LAVALINK_URI", "http://lava2.kasawa.pro:2334").strip()
     LAVALINK_PASSWORD: str = os.getenv("LAVALINK_PASSWORD", "youshallnotpass").strip()
 
     # Aesthetics

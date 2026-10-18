@@ -61,7 +61,11 @@ class Music(commands.Cog):
                 inactive_player_timeout=300,
             )
             await wavelink.Pool.connect(nodes=[node], client=self.bot)
-            logger.info(f"Connected to Lavalink Node at {Config.LAVALINK_URI}")
+            for _ in range(10):
+                if node.status == wavelink.NodeStatus.CONNECTED:
+                    break
+                await asyncio.sleep(0.5)
+            logger.info(f"Connected to Lavalink Node at {Config.LAVALINK_URI} (status={node.status})")
         except Exception as e:
             logger.error(f"Failed to connect to Lavalink node: {e}")
 
@@ -98,6 +102,11 @@ class Music(commands.Cog):
         title = getattr(track, "title", "Unknown")
         exception = getattr(payload, "exception", None)
         logger.error(f"Lavalink Track Exception for '{title}': {exception}")
+        player_obj = getattr(payload, "player", None)
+        if player_obj and player_obj.guild:
+            player = self.controller.get_player(player_obj.guild.id)
+            if player and hasattr(player, "on_track_end"):
+                await player.on_track_end(reason="loadFailed")
 
     @commands.Cog.listener()
     async def on_wavelink_track_stuck(self, payload: Any) -> None:
@@ -105,6 +114,11 @@ class Music(commands.Cog):
         track = getattr(payload, "track", None)
         title = getattr(track, "title", "Unknown")
         logger.warning(f"Lavalink Track Stuck for '{title}'")
+        player_obj = getattr(payload, "player", None)
+        if player_obj and player_obj.guild:
+            player = self.controller.get_player(player_obj.guild.id)
+            if player and hasattr(player, "on_track_end"):
+                await player.on_track_end(reason="loadFailed")
 
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: Any) -> None:

@@ -169,6 +169,8 @@ class EmojiRegistry:
                     ("volume_down", "volume_down"),
                     ("volume_up", "volume_up"),
                     ("icons_stop_button", "icons_stop_button"),
+                    ("icons_loop", "icons_loop"),
+                    ("queue", "queue"),
                 ]:
                     if m_name not in self._emojis and len(self._emojis) < 50:
                         m_file = music_dir / f"{file_stem}.png"

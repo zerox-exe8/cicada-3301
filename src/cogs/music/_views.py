@@ -31,19 +31,6 @@ class MusicControlView(discord.ui.View):
         # Apply custom emojis from assets if available
         self._apply_custom_emojis()
 
-        # Add Track Link button in row 1 if track has a valid URL
-        if track_url and track_url.startswith(("http://", "https://")):
-            link_btn = discord.ui.Button(
-                label="Link",
-                url=track_url,
-                style=discord.ButtonStyle.link,
-                row=1,
-            )
-            e_reg = getattr(self.bot, "custom_emojis", None)
-            if e_reg:
-                link_btn.emoji = e_reg.get_emoji_obj("link")
-            self.add_item(link_btn)
-
     def _apply_custom_emojis(self) -> None:
         e_reg = getattr(self.bot, "custom_emojis", None)
         if not e_reg:
@@ -79,12 +66,14 @@ class MusicControlView(discord.ui.View):
                     child.emoji = e_reg.get_emoji_obj("queue")
 
     def _get_player(self, interaction: discord.Interaction) -> Optional[GuildPlayer]:
-        if self.player:
-            return self.player
-        music_cog = self.bot.get_cog("Music")
-        if music_cog and hasattr(music_cog, "controller"):
-            return music_cog.controller.get_player(interaction.guild_id)
-        return None
+        if interaction.guild_id:
+            music_cog = self.bot.get_cog("Music")
+            if music_cog and hasattr(music_cog, "controller"):
+                p = music_cog.controller.get_player(interaction.guild_id)
+                if p:
+                    self.player = p
+                    return p
+        return self.player
 
     def _check_voice(self, interaction: discord.Interaction, player: Optional[GuildPlayer]) -> Optional[str]:
         """Verify that user is connected to the same voice channel as Kyro."""
@@ -115,6 +104,12 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:playpause",
     )
     async def btn_pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -136,8 +131,6 @@ class MusicControlView(discord.ui.View):
                 button.emoji = e_reg.get_emoji_obj("music") or e_reg.get_emoji_obj("paused")
 
         await player.update_controller_message(force=True)
-        if not interaction.response.is_done():
-            await interaction.response.defer()
 
     @discord.ui.button(
         label="Skip",
@@ -145,6 +138,12 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:skip",
     )
     async def btn_skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -154,8 +153,6 @@ class MusicControlView(discord.ui.View):
             return
 
         await player.skip()
-        if not interaction.response.is_done():
-            await interaction.response.defer()
 
     @discord.ui.button(
         label="Vol -",
@@ -163,6 +160,12 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:voldown",
     )
     async def btn_vol_down(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -174,8 +177,6 @@ class MusicControlView(discord.ui.View):
         cur_vol = int(player.volume * 100)
         player.set_volume(cur_vol - 10)
         await player.update_controller_message(force=True)
-        if not interaction.response.is_done():
-            await interaction.response.defer()
 
     @discord.ui.button(
         label="Vol +",
@@ -183,6 +184,12 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:volup",
     )
     async def btn_vol_up(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -194,8 +201,6 @@ class MusicControlView(discord.ui.View):
         cur_vol = int(player.volume * 100)
         player.set_volume(cur_vol + 10)
         await player.update_controller_message(force=True)
-        if not interaction.response.is_done():
-            await interaction.response.defer()
 
     @discord.ui.button(
         label="Stop",
@@ -203,6 +208,12 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:stop",
     )
     async def btn_stop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -213,8 +224,6 @@ class MusicControlView(discord.ui.View):
 
         player._disconnect_announced = True
         await player.stop()
-        if not interaction.response.is_done():
-            await interaction.response.defer()
 
     @discord.ui.button(
         label="Like",
@@ -223,6 +232,12 @@ class MusicControlView(discord.ui.View):
         row=1,
     )
     async def btn_like(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         if not player or not player.current:
             c = KyroContainer()
@@ -295,6 +310,12 @@ class MusicControlView(discord.ui.View):
         row=1,
     )
     async def btn_loop(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -316,6 +337,12 @@ class MusicControlView(discord.ui.View):
         row=1,
     )
     async def btn_autoplay(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -338,6 +365,12 @@ class MusicControlView(discord.ui.View):
         row=1,
     )
     async def btn_queue(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         if not player or not player.queue:
             c = KyroContainer()
@@ -356,3 +389,14 @@ class MusicControlView(discord.ui.View):
             content=f"**Upcoming Queue ({len(player.queue)} tracks)**\n" + "\n".join(q_lines) + rem_text
         )
         await send_container_response(interaction, c, ephemeral=True)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item[Any]) -> None:
+        logger.error(f"Error in music control view item {item}: {error}", exc_info=error)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            c = KyroContainer()
+            c.add_section(content="**Control Notice**\n> An unexpected issue occurred while executing this action.")
+            await send_container_response(interaction, c, ephemeral=True)
+        except Exception:
+            pass

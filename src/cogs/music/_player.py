@@ -417,7 +417,13 @@ class GuildPlayer:
     def build_now_playing_container(self, track: Track) -> KyroContainer:
         """Construct the Components V2 Now Playing card matching custom layout."""
         e_reg = getattr(self.bot, "custom_emojis", None)
-        dot = e_reg.get("heart_dot", "") if e_reg else ""
+        heart_e = ""
+        if e_reg:
+            heart_e = (
+                e_reg.get("heart_dot", "")
+                or e_reg.get("icons_heart", "")
+                or e_reg.get("heart", "")
+            )
         link_emoji = e_reg.get("link", "") if e_reg else ""
 
         container = KyroContainer(accent_color=None)
@@ -428,16 +434,18 @@ class GuildPlayer:
         # 2. 1 Divider line directly beneath Now Playing
         container.add_separator(divider=True)
 
-        # 3. Song, Artist, and Track Link (NO normal/unicode emojis, no duration, no source)
+        # 3. Song, Artist, and Duration with heart emoji in front (NO normal/unicode emojis, no source)
         song_display = f"[{track.title}]({track.url})" if track.url else track.title
         artist_display = track.author or "Unknown Artist"
+        duration_display = track.formatted_duration or "00:00"
 
-        bullet = f"{dot} " if dot else "> "
+        bullet = f"{heart_e} " if heart_e else "> "
         link_prefix = f"{link_emoji} " if link_emoji else ""
 
         body_lines = [
             f"{bullet}**Song:** {song_display}",
             f"{bullet}**Artist:** `{artist_display}`",
+            f"{bullet}**Duration:** `{duration_display}`",
         ]
         if track.url:
             body_lines.append(f"> {link_prefix}[Track Link]({track.url})")
@@ -510,14 +518,14 @@ class GuildPlayer:
         if not self.home_channel:
             return
 
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
-        music_emoji = self.bot.custom_emojis.get("music", "🎵")
+        dot = self.bot.custom_emojis.get("heart_dot", "")
+        bullet = f"{dot} " if dot else "> "
 
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
                 f"# **Queue Concluded**\n"
-                f"{dot} All queued songs have finished playing.\n"
+                f"{bullet}All queued songs have finished playing.\n"
                 f"> Add more tracks using `?play <song>` or enable autoplay with `?autoplay on`!"
             )
         )

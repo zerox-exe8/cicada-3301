@@ -147,6 +147,19 @@ class EmojiRegistry:
                             logger.info("Auto-uploaded gpp_winner to application emojis.")
                         except Exception as e:
                             logger.debug(f"Could not auto-upload gpp_winner emoji: {e}")
+
+                # Auto-sync heart_dot emoji from assets/emoji
+                if "heart_dot" not in self._emojis and len(self._emojis) < 50:
+                    hd_path = Path(__file__).resolve().parent.parent.parent / "assets" / "emoji" / "heart_dot.png"
+                    if hd_path.exists():
+                        try:
+                            with open(hd_path, "rb") as f:
+                                data = f.read()
+                            new_e = await self.bot.create_application_emoji(name="heart_dot", image=data)
+                            self._emojis["heart_dot"] = new_e
+                            logger.info("Auto-uploaded heart_dot to application emojis.")
+                        except Exception as e:
+                            logger.debug(f"Could not auto-upload heart_dot emoji: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 
@@ -251,7 +264,9 @@ class EmojiRegistry:
                 "icons_rightarrow": ["icons_arrow", "heart_dot"],
                 "icon_arrow_left": ["icons_leftarrow"],
                 "icons_leftarrow": ["icon_arrow_left"],
-                "heart_dot": ["icons_rightarrow", "icons_arrow"],
+                "heart_dot": ["icons_heart", "heart"],
+                "icons_heart": ["heart_dot", "heart"],
+                "heart": ["heart_dot", "icons_heart"],
                 "ticket_nox": ["icon_ticket", "ticket_support"],
                 "icon_ticket": ["ticket_nox", "ticket_support", "ticket"],
                 "icons_locked": ["icon_lock", "icon_locked"],
@@ -321,7 +336,9 @@ class EmojiRegistry:
                 "icons_rightarrow": ["icons_arrow", "heart_dot"],
                 "icon_arrow_left": ["icons_leftarrow"],
                 "icons_leftarrow": ["icon_arrow_left"],
-                "heart_dot": ["icons_rightarrow", "icons_arrow"],
+                "heart_dot": ["icons_heart", "heart"],
+                "icons_heart": ["heart_dot", "heart"],
+                "heart": ["heart_dot", "icons_heart"],
                 "ticket_nox": ["icon_ticket", "ticket_support"],
                 "icon_ticket": ["ticket_nox", "ticket_support", "ticket"],
                 "icons_locked": ["icon_lock", "icon_locked"],

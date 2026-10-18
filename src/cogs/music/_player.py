@@ -417,27 +417,32 @@ class GuildPlayer:
     def build_now_playing_container(self, track: Track) -> KyroContainer:
         """Construct the Components V2 Now Playing card matching custom layout."""
         e_reg = getattr(self.bot, "custom_emojis", None)
-        dot = e_reg.get("heart_dot", "•") if e_reg else "•"
-        music_emoji = e_reg.get("music", "🎵") if e_reg else "🎵"
-        link_emoji = e_reg.get("link", "🔗") if e_reg else "🔗"
+        dot = e_reg.get("heart_dot", "") if e_reg else ""
+        link_emoji = e_reg.get("link", "") if e_reg else ""
 
         container = KyroContainer(accent_color=None)
 
-        # Title: Now Playing
-        # Niche: Song, Artist, and Track Link (duration & source completely removed)
+        # 1. Title: Now Playing (ZERO emoji on title)
+        container.add_text("## Now Playing")
+
+        # 2. 1 Divider line directly beneath Now Playing
+        container.add_separator(divider=True)
+
+        # 3. Song, Artist, and Track Link (NO normal/unicode emojis, no duration, no source)
         song_display = f"[{track.title}]({track.url})" if track.url else track.title
         artist_display = track.author or "Unknown Artist"
-        link_line = f"> {link_emoji} [Track Link]({track.url})" if track.url else ""
 
-        section_lines = [
-            f"## {music_emoji} Now Playing",
-            f"{dot} **Song:** {song_display}",
-            f"{dot} **Artist:** `{artist_display}`",
+        bullet = f"{dot} " if dot else "> "
+        link_prefix = f"{link_emoji} " if link_emoji else ""
+
+        body_lines = [
+            f"{bullet}**Song:** {song_display}",
+            f"{bullet}**Artist:** `{artist_display}`",
         ]
-        if link_line:
-            section_lines.append(link_line)
+        if track.url:
+            body_lines.append(f"> {link_prefix}[Track Link]({track.url})")
 
-        container.add_section(content="\n".join(section_lines))
+        container.add_section(content="\n".join(body_lines))
 
         # Resolve thumbnail (fallback to YouTube thumbnail if missing)
         thumb = track.thumbnail
@@ -451,13 +456,14 @@ class GuildPlayer:
         if thumb:
             container.add_thumbnail(thumb)
 
+        # 4. Divider line before footer
         container.add_separator(divider=True)
 
-        # Footer: Requested by (+ player state indicators)
+        # 5. Footer: Requested by (+ player state indicators without unicode bullets)
         vol_pct = int(self.volume * 100)
         ap_status = "ON" if self.smart_autoplay else "OFF"
         container.add_text(
-            f"-# Requested by: {track.requester} • Vol: `{vol_pct}%` • Loop: `{self.loop_mode.upper()}` • Autoplay: `{ap_status}`"
+            f"-# Requested by: {track.requester} | Vol: `{vol_pct}%` | Loop: `{self.loop_mode.upper()}` | Autoplay: `{ap_status}`"
         )
         return container
 

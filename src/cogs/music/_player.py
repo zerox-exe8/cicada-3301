@@ -447,8 +447,6 @@ class GuildPlayer:
             f"{dot_prefix}**Artist:** `{artist_display}`",
             f"{dot_prefix}**Duration:** `{duration_display}`",
         ]
-        if track.url:
-            body_lines.append(f"> {link_prefix}[Track Link]({track.url})")
 
         container.add_section(content="\n".join(body_lines))
 

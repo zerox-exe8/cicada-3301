@@ -203,52 +203,9 @@ class GuildPlayer:
         return False
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
-        """Resolve Lavalink Playable via direct playable, YouTube URL, or YouTube search."""
-        # ── Priority 1: Attached Playable (already resolved by play.py Step 1) ──
-        playable = getattr(track, "_playable", None)
-        if playable:
-            return playable
-
-        # ── Priority 2: Direct URL (YouTube, SoundCloud, direct stream) ──
-        url = track.url or ""
-        if url.startswith(("http://", "https://")):
-            try:
-                results = await wavelink.Playable.search(url)
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"Direct URL resolve error for '{url}': {e}")
-
-        # ── Priority 3: YouTube Search using title + author (or query) ──
-        search_target = f"{track.title} {track.author}".strip() or track.query or track.title
-        if search_target:
-            try:
-                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube)
-                if results:
-                    logger.debug(f"YouTube search resolved '{track.title}' successfully")
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"YouTube search error for '{search_target}': {e}")
-
-        # ── Priority 3.5: YouTube Music Search ──
-        if search_target:
-            try:
-                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic)
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"YouTube Music search error for '{search_target}': {e}")
-
-        # ── Priority 3.8: Spotify Search via Lavalink ──
-        if search_target:
-            try:
-                results = await wavelink.Playable.search(f"spsearch:{search_target}")
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"Spotify search error for '{search_target}': {e}")
-
-        # ── Priority 4: Direct Stream URL (JioSaavn 320kbps CDN stream) ──
+        """Resolve Lavalink Playable via direct unblocked CDN stream, attached playable, or search."""
+        # ── Priority 1: Direct Stream URL (JioSaavn 320kbps CDN stream) ──
+        # Direct Akamai HTTP streams are 100% unblocked on Lavalink
         stream_url = getattr(track, "stream_url", None)
         if stream_url and self._is_direct_stream_url(stream_url):
             try:
@@ -258,19 +215,61 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"Direct stream URL resolve error for '{stream_url}': {e}")
 
-        # ── Priority 5: Fallback to NativeExtractor CDN if Lavalink search found nothing ──
-        try:
-            from src.cogs.music._extractor import NativeExtractor
-            target_q = track.query or f"{track.title} {track.author}".strip() or track.url
-            if target_q:
-                ext = await NativeExtractor.extract(target_q, requester=track.requester)
-                if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
-                    track.stream_url = ext.stream_url
-                    results = await wavelink.Playable.search(ext.stream_url)
-                    if results:
-                        return results[0] if isinstance(results, list) else results.tracks[0]
-        except Exception as e:
-            logger.debug(f"NativeExtractor resolve fallback error: {e}")
+        # ── Priority 1.5: If no stream_url, resolve via NativeExtractor CDN first ──
+        if not stream_url:
+            try:
+                from src.cogs.music._extractor import NativeExtractor
+                target_q = track.query or f"{track.title} {track.author}".strip() or track.url
+                if target_q:
+                    ext = await NativeExtractor.extract(target_q, requester=track.requester)
+                    if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
+                        track.stream_url = ext.stream_url
+                        results = await wavelink.Playable.search(ext.stream_url)
+                        if results:
+                            return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"NativeExtractor resolve fallback error: {e}")
+
+        # ── Priority 2: Attached Playable (already resolved by play.py Step 1) ──
+        playable = getattr(track, "_playable", None)
+        if playable:
+            return playable
+
+        # ── Priority 3: Direct URL (YouTube, SoundCloud, direct stream) ──
+        url = track.url or ""
+        if url.startswith(("http://", "https://")):
+            try:
+                results = await wavelink.Playable.search(url)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"Direct URL resolve error for '{url}': {e}")
+
+        # ── Priority 4: Search Fallbacks (YouTube Music -> YouTube -> Spotify) ──
+        search_target = f"{track.title} {track.author}".strip() or track.query or track.title
+        if search_target:
+            try:
+                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"YouTube Music search error for '{search_target}': {e}")
+
+        if search_target:
+            try:
+                results = await wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube)
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"YouTube search error for '{search_target}': {e}")
+
+        if search_target:
+            try:
+                results = await wavelink.Playable.search(f"spsearch:{search_target}")
+                if results:
+                    return results[0] if isinstance(results, list) else results.tracks[0]
+            except Exception as e:
+                logger.debug(f"Spotify search error for '{search_target}': {e}")
 
         return None
 
@@ -348,6 +347,23 @@ class GuildPlayer:
 
         if reason and str(reason).lower() in ("loadfailed", "load_failed"):
             logger.warning(f"Guild {self.guild.id}: Lavalink reported track loadFailed.")
+            # If track failed on Lavalink (e.g. YouTube blocked), attempt recovery via unblocked JioSaavn CDN stream
+            cur_track = self.current
+            if cur_track and not getattr(cur_track, "_cdn_recovered", False):
+                cur_track._cdn_recovered = True
+                try:
+                    from src.cogs.music._extractor import NativeExtractor
+                    target_q = cur_track.query or f"{cur_track.title} {cur_track.author}".strip() or cur_track.title
+                    ext = await NativeExtractor.extract(target_q, requester=cur_track.requester)
+                    if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
+                        cur_track.stream_url = ext.stream_url
+                        cur_track._playable = None
+                        logger.info(f"Guild {self.guild.id}: Recovering failed track with JioSaavn CDN stream: '{cur_track.title}'")
+                        await self.play_track(cur_track)
+                        return
+                except Exception as e:
+                    logger.debug(f"CDN track recovery error: {e}")
+
             if self.queue:
                 next_track = self.queue.pop(0)
                 await self.play_track(next_track)
@@ -506,7 +522,7 @@ class GuildPlayer:
                     self.controller_message,
                     container,
                     view=None,
-                    content=f"### {music_emoji} Queue Ended {music_emoji}",
+                    content=None,
                 )
                 self.controller_message = None
                 return
@@ -517,7 +533,7 @@ class GuildPlayer:
             await send_container_response(
                 self.home_channel,
                 container,
-                content=f"### {music_emoji} Queue Ended {music_emoji}",
+                content=None,
             )
         except Exception:
             pass

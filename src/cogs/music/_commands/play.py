@@ -156,7 +156,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await send_container_response(ctx, err_c)
             return
 
-    # ── Step 1: Direct Lavalink Search (Instant official YouTube, Direct URLs & Spotify Tracks) ──
+    # ── Step 1: Track Extraction & Resolution ──
     track: Optional[Track] = None
     lookup_target = clean_q
 
@@ -171,52 +171,136 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     is_direct_url = lookup_target.startswith(("http://", "https://"))
 
-    try:
-        # Fast Lavalink search directly (< 1s for URLs & multi-source text search)
-        if is_direct_url:
+    # Direct URL: Resolve via Wavelink directly
+    if is_direct_url:
+        try:
             results = await wavelink.Playable.search(lookup_target)
-        else:
+            if isinstance(results, wavelink.Playlist) and results.tracks:
+                pl = results
+                was_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
+                first_p = pl.tracks[0]
+                first_thumb = first_p.artwork or (f"https://i.ytimg.com/vi/{first_p.identifier}/hqdefault.jpg" if getattr(first_p, "identifier", None) else None)
+                first_track = Track(
+                    title=first_p.title or "Unknown Track",
+                    author=first_p.author or "Unknown Artist",
+                    url=first_p.uri or query,
+                    stream_url="",
+                    duration=int((first_p.length or 0) / 1000),
+                    thumbnail=first_thumb,
+                    requester=ctx.author.display_name,
+                    requester_id=ctx.author.id,
+                    query=query,
+                )
+                first_track._playable = first_p
+                for p in pl.tracks[1:]:
+                    p_thumb = p.artwork or (f"https://i.ytimg.com/vi/{p.identifier}/hqdefault.jpg" if getattr(p, "identifier", None) else None)
+                    t = Track(
+                        title=p.title or "Unknown Track",
+                        author=p.author or "Unknown Artist",
+                        url=p.uri or query,
+                        stream_url="",
+                        duration=int((p.length or 0) / 1000),
+                        thumbnail=p_thumb,
+                        requester=ctx.author.display_name,
+                        requester_id=ctx.author.id,
+                        query=query,
+                    )
+                    t._playable = p
+                    player.queue.append(t)
+                if was_idle:
+                    await player.play_track(first_track, message_to_edit=search_msg)
+                else:
+                    player.queue.append(first_track)
+                pl_card = KyroContainer(accent_color=None)
+                pl_card.add_section(
+                    content=(
+                        f"**Queued Playlist: [{pl.name}]({query})**\n"
+                        f"> **Total Tracks:** `{len(pl.tracks)} songs`\n"
+                        f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
+                        f"> **Requested By:** `{ctx.author.display_name}`"
+                    ) if was_idle else (
+                        f"**Queued Playlist: [{pl.name}]({query})**\n"
+                        f"> **Total Tracks Added:** `{len(pl.tracks)} songs`\n"
+                        f"> **Requested By:** `{ctx.author.display_name}`"
+                    )
+                )
+                await send_container_response(ctx, pl_card)
+                return
+            elif results and not isinstance(results, wavelink.Playlist):
+                top_p = results[0]
+                top_thumb = top_p.artwork or (f"https://i.ytimg.com/vi/{top_p.identifier}/hqdefault.jpg" if getattr(top_p, "identifier", None) else None)
+                track = Track(
+                    title=top_p.title or "Unknown Track",
+                    author=top_p.author or "Unknown Artist",
+                    url=top_p.uri or query,
+                    stream_url="",
+                    duration=int((top_p.length or 0) / 1000),
+                    thumbnail=top_thumb,
+                    requester=ctx.author.display_name,
+                    requester_id=ctx.author.id,
+                    query=query,
+                )
+                track._playable = top_p
+        except Exception as e:
+            logger.debug(f"Direct URL search notice: {e}")
+
+    # Plain text query: Try NativeExtractor first (100% Unblocked 320kbps JioSaavn Akamai MP4 stream)
+    if not track:
+        try:
+            track = await NativeExtractor.extract(lookup_target, requester=ctx.author.display_name)
+        except Exception as e:
+            logger.debug(f"NativeExtractor primary search notice: {e}")
+
+    # Pre-resolve Lavalink playable from direct JioSaavn CDN stream if available
+    if track and track.stream_url and ("saavncdn.com" in track.stream_url.lower() or ".mp4" in track.stream_url.lower()):
+        try:
+            direct_results = await wavelink.Playable.search(track.stream_url)
+            if direct_results:
+                track._playable = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
+        except Exception as e:
+            logger.debug(f"Direct stream playable pre-resolve notice: {e}")
+
+    # Fallback to YouTube Music / YouTube / Spotify if NativeExtractor didn't find anything
+    if not track:
+        try:
+            results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTubeMusic)
+        except Exception:
+            results = None
+        if not results:
             try:
                 results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube)
             except Exception:
                 results = None
-            if not results:
-                try:
-                    results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTubeMusic)
-                except Exception:
-                    results = None
-            if not results:
-                try:
-                    results = await wavelink.Playable.search(f"spsearch:{lookup_target}")
-                except Exception:
-                    results = None
+        if not results:
+            try:
+                results = await wavelink.Playable.search(f"spsearch:{lookup_target}")
+            except Exception:
+                results = None
 
         if isinstance(results, wavelink.Playlist) and results.tracks:
             pl = results
             was_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
             first_p = pl.tracks[0]
-            first_thumb = first_p.artwork or (f"https://i.ytimg.com/vi/{first_p.identifier}/hqdefault.jpg" if getattr(first_p, "identifier", None) else None)
             first_track = Track(
                 title=first_p.title or "Unknown Track",
                 author=first_p.author or "Unknown Artist",
                 url=first_p.uri or query,
                 stream_url="",
                 duration=int((first_p.length or 0) / 1000),
-                thumbnail=first_thumb,
+                thumbnail=first_p.artwork,
                 requester=ctx.author.display_name,
                 requester_id=ctx.author.id,
                 query=query,
             )
             first_track._playable = first_p
             for p in pl.tracks[1:]:
-                p_thumb = p.artwork or (f"https://i.ytimg.com/vi/{p.identifier}/hqdefault.jpg" if getattr(p, "identifier", None) else None)
                 t = Track(
                     title=p.title or "Unknown Track",
                     author=p.author or "Unknown Artist",
                     url=p.uri or query,
                     stream_url="",
                     duration=int((p.length or 0) / 1000),
-                    thumbnail=p_thumb,
+                    thumbnail=p.artwork,
                     requester=ctx.author.display_name,
                     requester_id=ctx.author.id,
                     query=query,
@@ -244,98 +328,18 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             return
         elif results and not isinstance(results, wavelink.Playlist):
             top_p = results[0]
-            top_thumb = top_p.artwork or (f"https://i.ytimg.com/vi/{top_p.identifier}/hqdefault.jpg" if getattr(top_p, "identifier", None) else None)
             track = Track(
                 title=top_p.title or "Unknown Track",
                 author=top_p.author or "Unknown Artist",
                 url=top_p.uri or query,
                 stream_url="",
                 duration=int((top_p.length or 0) / 1000),
-                thumbnail=top_thumb,
+                thumbnail=top_p.artwork,
                 requester=ctx.author.display_name,
                 requester_id=ctx.author.id,
                 query=query,
             )
             track._playable = top_p
-    except Exception as e:
-        logger.debug(f"Direct Wavelink search notice: {e}")
-
-    if not track:
-        # Fallback to NativeExtractor only if Lavalink search yielded nothing
-        try:
-            track = await NativeExtractor.extract(lookup_target, requester=ctx.author.display_name)
-        except Exception as e:
-            logger.debug(f"NativeExtractor primary search notice: {e}")
-
-        # Fallback to YouTube Music if NativeExtractor didn't find anything
-        if not track:
-            try:
-                results = await wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTubeMusic)
-                if isinstance(results, wavelink.Playlist) and results.tracks:
-                    pl = results
-                    was_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
-                    first_p = pl.tracks[0]
-                    first_track = Track(
-                        title=first_p.title or "Unknown Track",
-                        author=first_p.author or "Unknown Artist",
-                        url=first_p.uri or query,
-                        stream_url="",
-                        duration=int((first_p.length or 0) / 1000),
-                        thumbnail=first_p.artwork,
-                        requester=ctx.author.display_name,
-                        requester_id=ctx.author.id,
-                        query=query,
-                    )
-                    first_track._playable = first_p
-                    for p in pl.tracks[1:]:
-                        t = Track(
-                            title=p.title or "Unknown Track",
-                            author=p.author or "Unknown Artist",
-                            url=p.uri or query,
-                            stream_url="",
-                            duration=int((p.length or 0) / 1000),
-                            thumbnail=p.artwork,
-                            requester=ctx.author.display_name,
-                            requester_id=ctx.author.id,
-                            query=query,
-                        )
-                        t._playable = p
-                        player.queue.append(t)
-                    if was_idle:
-                        await player.play_track(first_track, message_to_edit=search_msg)
-                    else:
-                        player.queue.append(first_track)
-                    pl_card = KyroContainer(accent_color=None)
-                    pl_card.add_section(
-                        content=(
-                            f"**Queued Playlist: [{pl.name}]({query})**\n"
-                            f"> **Total Tracks:** `{len(pl.tracks)} songs`\n"
-                            f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
-                            f"> **Requested By:** `{ctx.author.display_name}`"
-                        ) if was_idle else (
-                            f"**Queued Playlist: [{pl.name}]({query})**\n"
-                            f"> **Total Tracks Added:** `{len(pl.tracks)} songs`\n"
-                            f"> **Requested By:** `{ctx.author.display_name}`"
-                        )
-                    )
-                    await send_container_response(ctx, pl_card)
-                    return
-                elif results and not isinstance(results, wavelink.Playlist):
-                    top_p = results[0]
-                    track = Track(
-                        title=top_p.title or "Unknown Track",
-                        author=top_p.author or "Unknown Artist",
-                        url=top_p.uri or query,
-                        stream_url="",
-                        duration=int((top_p.length or 0) / 1000),
-                        thumbnail=top_p.artwork,
-                        requester=ctx.author.display_name,
-                        requester_id=ctx.author.id,
-                        query=query,
-                    )
-                    track._playable = top_p
-            except Exception as e:
-                logger.debug(f"Direct Wavelink fallback search notice: {e}")
 
     if not track:
         err_container = KyroContainer(accent_color=None)

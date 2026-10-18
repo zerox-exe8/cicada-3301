@@ -56,14 +56,8 @@ class MusicControlView(discord.ui.View):
                     child.emoji = e_reg.get_emoji_obj("volume_up") or e_reg.get_emoji_obj("volup")
                 elif "stop" in cid:
                     child.emoji = e_reg.get_emoji_obj("icons_stop_button") or e_reg.get_emoji_obj("stop")
-                elif "like" in cid:
-                    child.emoji = e_reg.get_emoji_obj("heart_dot") or e_reg.get_emoji_obj("icons_heart")
-                elif "loop" in cid:
-                    child.emoji = e_reg.get_emoji_obj("icons_loop") or e_reg.get_emoji_obj("loop")
-                elif "autoplay" in cid:
-                    child.emoji = e_reg.get_emoji_obj("icon_switch_on") or e_reg.get_emoji_obj("switch_on")
-                elif "queue" in cid:
-                    child.emoji = e_reg.get_emoji_obj("queue")
+                elif "like" in cid or "loop" in cid or "autoplay" in cid or "queue" in cid:
+                    child.emoji = None
 
     def _get_player(self, interaction: discord.Interaction) -> Optional[GuildPlayer]:
         if interaction.guild_id:

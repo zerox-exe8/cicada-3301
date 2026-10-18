@@ -49,19 +49,34 @@ class MusicControlView(discord.ui.View):
         if not e_reg:
             return
 
+        is_paused = bool(self.player and self.player.is_paused)
+
         for child in self.children:
             if isinstance(child, discord.ui.Button):
                 cid = child.custom_id or ""
                 if "playpause" in cid:
-                    child.emoji = e_reg.get_emoji_obj("paused")
+                    if is_paused:
+                        child.label = "Resume"
+                        child.emoji = e_reg.get_emoji_obj("music") or e_reg.get_emoji_obj("paused")
+                    else:
+                        child.label = "Pause"
+                        child.emoji = e_reg.get_emoji_obj("paused")
                 elif "skip" in cid:
                     child.emoji = e_reg.get_emoji_obj("skip")
                 elif "voldown" in cid:
-                    child.emoji = e_reg.get_emoji_obj("volume_down")
+                    child.emoji = e_reg.get_emoji_obj("volume_down") or e_reg.get_emoji_obj("voldown")
                 elif "volup" in cid:
-                    child.emoji = e_reg.get_emoji_obj("volume_up")
+                    child.emoji = e_reg.get_emoji_obj("volume_up") or e_reg.get_emoji_obj("volup")
                 elif "stop" in cid:
-                    child.emoji = e_reg.get_emoji_obj("icons_stop_button")
+                    child.emoji = e_reg.get_emoji_obj("icons_stop_button") or e_reg.get_emoji_obj("stop")
+                elif "like" in cid:
+                    child.emoji = e_reg.get_emoji_obj("heart_dot") or e_reg.get_emoji_obj("icons_heart")
+                elif "loop" in cid:
+                    child.emoji = e_reg.get_emoji_obj("icons_loop") or e_reg.get_emoji_obj("loop")
+                elif "autoplay" in cid:
+                    child.emoji = e_reg.get_emoji_obj("icon_switch_on") or e_reg.get_emoji_obj("switch_on")
+                elif "queue" in cid:
+                    child.emoji = e_reg.get_emoji_obj("queue")
 
     def _get_player(self, interaction: discord.Interaction) -> Optional[GuildPlayer]:
         if self.player:
@@ -108,12 +123,17 @@ class MusicControlView(discord.ui.View):
             await send_container_response(interaction, c, ephemeral=True)
             return
 
+        e_reg = getattr(self.bot, "custom_emojis", None)
         if player.is_paused:
             player.resume()
             button.label = "Pause"
+            if e_reg:
+                button.emoji = e_reg.get_emoji_obj("paused")
         elif player.is_playing:
             player.pause()
             button.label = "Resume"
+            if e_reg:
+                button.emoji = e_reg.get_emoji_obj("music") or e_reg.get_emoji_obj("paused")
 
         await player.update_controller_message(force=True)
         if not interaction.response.is_done():

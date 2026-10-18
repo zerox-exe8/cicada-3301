@@ -160,6 +160,27 @@ class EmojiRegistry:
                             logger.info("Auto-uploaded heart_dot to application emojis.")
                         except Exception as e:
                             logger.debug(f"Could not auto-upload heart_dot emoji: {e}")
+
+                # Auto-sync music control emojis from assets/music
+                music_dir = Path(__file__).resolve().parent.parent.parent / "assets" / "music"
+                for m_name, file_stem in [
+                    ("paused", "Paused"),
+                    ("skip", "skip"),
+                    ("volume_down", "volume_down"),
+                    ("volume_up", "volume_up"),
+                    ("icons_stop_button", "icons_stop_button"),
+                ]:
+                    if m_name not in self._emojis and len(self._emojis) < 50:
+                        m_file = music_dir / f"{file_stem}.png"
+                        if m_file.exists():
+                            try:
+                                with open(m_file, "rb") as f:
+                                    data = f.read()
+                                new_e = await self.bot.create_application_emoji(name=m_name, image=data)
+                                self._emojis[m_name] = new_e
+                                logger.info(f"Auto-uploaded {m_name} to application emojis.")
+                            except Exception as e:
+                                logger.debug(f"Could not auto-upload {m_name}: {e}")
         except Exception as e:
             logger.warning(f"Failed to fetch application emojis: {e}")
 
@@ -286,18 +307,23 @@ class EmojiRegistry:
                 # Music Emojis
                 "music": ["icon_music", "music_playing", "music_music"],
                 "icon_music": ["music", "music_playing", "music_music"],
-                "paused": ["icons_pause", "icon_clear"],
-                "icons_pause": ["paused"],
+                "paused": ["icons_pause", "icon_pause"],
+                "icons_pause": ["paused", "icon_pause"],
                 "skip": ["icons_rightarrow", "icon_arrow_left", "icons_arrow"],
                 "queue": ["icons_list", "icon_playlist", "icons_todolist"],
-                "icons_stop_button": ["icon_delete", "icon_x", "icons_wrong"],
+                "icons_stop_button": ["stop", "icon_stop", "icon_delete", "icon_x"],
+                "stop": ["icons_stop_button", "icon_stop", "icon_delete", "icon_x"],
                 "icons_loop": ["ub_refresh_icon", "icons_update"],
+                "loop": ["icons_loop", "ub_refresh_icon"],
                 "icons_shuffle": ["icons_magicwand", "icons_splash"],
                 "switch_on": ["icon_switch_on"],
                 "switch_off": ["icon_switch_off"],
                 "icon_switch_on": ["switch_on"],
                 "icon_switch_off": ["switch_off"],
-                "volume_up": ["volume_down"],
+                "voldown": ["volume_down", "vol_down"],
+                "volume_down": ["voldown", "vol_down"],
+                "volup": ["volume_up", "vol_up"],
+                "volume_up": ["volup", "vol_up", "volume_down"],
                 "room_icon_mute": ["volume_down", "icons_micmute"],
                 # System Features
                 "media": ["icon_media", "icons_image", "icons_file"],
@@ -358,15 +384,23 @@ class EmojiRegistry:
                 # Music Emojis
                 "music": ["icon_music", "music_playing", "music_music"],
                 "icon_music": ["music", "music_playing", "music_music"],
-                "paused": ["icons_pause", "icon_clear"],
-                "icons_pause": ["paused"],
+                "paused": ["icons_pause", "icon_pause"],
+                "icons_pause": ["paused", "icon_pause"],
                 "skip": ["icons_rightarrow", "icon_arrow_left", "icons_arrow"],
                 "queue": ["icons_list", "icon_playlist", "icons_todolist"],
-                "icons_stop_button": ["icon_delete", "icon_x", "icons_wrong"],
+                "icons_stop_button": ["stop", "icon_stop", "icon_delete", "icon_x"],
+                "stop": ["icons_stop_button", "icon_stop", "icon_delete", "icon_x"],
                 "icons_loop": ["ub_refresh_icon", "icons_update"],
                 "loop": ["icons_loop", "ub_refresh_icon"],
                 "icons_shuffle": ["icons_magicwand", "icons_splash"],
-                "volume_up": ["volume_down"],
+                "switch_on": ["icon_switch_on"],
+                "switch_off": ["icon_switch_off"],
+                "icon_switch_on": ["switch_on"],
+                "icon_switch_off": ["switch_off"],
+                "voldown": ["volume_down", "vol_down"],
+                "volume_down": ["voldown", "vol_down"],
+                "volup": ["volume_up", "vol_up"],
+                "volume_up": ["volup", "vol_up", "volume_down"],
                 "room_icon_mute": ["volume_down", "icons_micmute"],
                 # System Features
                 "media": ["icon_media", "icons_image", "icons_file"],

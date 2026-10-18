@@ -439,13 +439,13 @@ class GuildPlayer:
         artist_display = track.author or "Unknown Artist"
         duration_display = track.formatted_duration or "00:00"
 
-        bullet = f"{heart_e} " if heart_e else "> "
+        dot_prefix = f"> {heart_e} " if heart_e else "> "
         link_prefix = f"{link_emoji} " if link_emoji else ""
 
         body_lines = [
-            f"{bullet}**Song:** {song_display}",
-            f"{bullet}**Artist:** `{artist_display}`",
-            f"{bullet}**Duration:** `{duration_display}`",
+            f"{dot_prefix}**Song:** {song_display}",
+            f"{dot_prefix}**Artist:** `{artist_display}`",
+            f"{dot_prefix}**Duration:** `{duration_display}`",
         ]
         if track.url:
             body_lines.append(f"> {link_prefix}[Track Link]({track.url})")
@@ -467,12 +467,11 @@ class GuildPlayer:
         # 4. Divider line before footer
         container.add_separator(divider=True)
 
-        # 5. Footer: Requested by (+ player state indicators without unicode bullets)
-        vol_pct = int(self.volume * 100)
-        ap_status = "ON" if self.smart_autoplay else "OFF"
-        container.add_text(
-            f"-# Requested by: {track.requester} | Vol: `{vol_pct}%` | Loop: `{self.loop_mode.upper()}` | Autoplay: `{ap_status}`"
-        )
+        # 5. Footer: Requested by ONLY
+        container.add_text(f"-# Requested by: {track.requester}")
+
+        # 6. Divider line after footer before action row buttons
+        container.add_separator(divider=True)
         return container
 
     async def send_now_playing_card(self, track: Track, message_to_edit: Optional[discord.Message] = None) -> None:

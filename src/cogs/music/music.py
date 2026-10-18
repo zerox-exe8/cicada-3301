@@ -69,9 +69,22 @@ class Music(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to connect to Lavalink node: {e}")
 
+    async def _load_247_cache(self) -> None:
+        """Load persistent 24/7 guild state from database."""
+        while not self.bot.is_ready():
+            await asyncio.sleep(1)
+        if hasattr(self.bot, "db") and self.bot.db:
+            try:
+                rows = await self.bot.db.fetch_all("SELECT guild_id FROM guild_music_247 WHERE is_247 = TRUE;")
+                self.controller._247_cache = {int(r["guild_id"]) for r in rows}
+                logger.info(f"Loaded {len(self.controller._247_cache)} 24/7 music guild(s) into memory.")
+            except Exception as e:
+                logger.debug(f"Notice loading 24/7 music state: {e}")
+
     async def cog_load(self) -> None:
         """Schedule Lavalink connection upon bot readiness."""
         asyncio.create_task(self._connect_lavalink())
+        asyncio.create_task(self._load_247_cache())
 
     async def cog_unload(self) -> None:
         """Close Lavalink node pool on reload/shutdown."""

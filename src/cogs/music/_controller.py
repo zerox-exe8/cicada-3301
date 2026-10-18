@@ -18,13 +18,16 @@ class MusicController:
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
         self.players: Dict[int, GuildPlayer] = {}
+        self._247_cache: set[int] = set()
 
     def get_player(self, guild_id: int) -> Optional[GuildPlayer]:
         return self.players.get(guild_id)
 
     def get_or_create_player(self, guild: discord.Guild) -> GuildPlayer:
         if guild.id not in self.players:
-            self.players[guild.id] = GuildPlayer(self.bot, guild)
+            player = GuildPlayer(self.bot, guild)
+            player.is_247 = guild.id in self._247_cache
+            self.players[guild.id] = player
         return self.players[guild.id]
 
     async def remove_player(self, guild_id: int) -> None:

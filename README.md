@@ -1,195 +1,216 @@
-# ⚡ Kyro — Next-Generation Discord Infrastructure
+# Kyro
 
-<div align="center">
-  <img src="./assets/branding/kyro_banner.webp" alt="Kyro Banner" width="100%" style="border-radius: 10px; margin-bottom: 20px;" />
+> Built for our community — keeping your server safe, active, and effortlessly connected.
 
-  <h3>Built for our community.</h3>
-  <p>Keeping your server safe, active, and effortlessly connected.</p>
-
-  <p>
-    <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
-    <img src="https://img.shields.io/badge/discord.py-2.4+-5865F2?style=for-the-badge&logo=discord&logoColor=white" />
-    <img src="https://img.shields.io/badge/PostgreSQL-Supabase-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" />
-    <img src="https://img.shields.io/badge/Deployment-Render%20Cloud-46E3B7?style=for-the-badge&logo=render&logoColor=white" />
-    <img src="https://img.shields.io/badge/UI-Components%20V2%20(Type%2017)-FF73FA?style=for-the-badge" />
-  </p>
-</div>
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![discord.py](https://img.shields.io/badge/discord.py-2.4+-5865F2?style=flat-square&logo=discord&logoColor=white)](https://github.com/Rapptz/discord.py)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com)
+[![Architecture](https://img.shields.io/badge/UI-Components%20V2-FF73FA?style=flat-square)](https://discord.com)
+[![Deployment](https://img.shields.io/badge/Deployment-Cloud%20Service-46E3B7?style=flat-square)](https://render.com)
 
 ---
 
-## 📖 Overview
+## Overview
 
-**Kyro** is an enterprise-grade, high-concurrency Discord bot architecture engineered for performance, reliability, and clean aesthetics. 
+Kyro is an enterprise-grade, high-concurrency Discord bot architecture engineered for performance, reliability, and modern user experiences. Built for our community — keeping your server safe, active, and effortlessly connected.
 
-Unlike traditional bots constrained by legacy Discord embeds and sluggish database queries, Kyro operates with a **0ms In-Memory Caching Architecture** coupled with **Discord Components V2 (Type 17 Containers)**, delivering sub-millisecond execution speeds and clean, modern UI cards across Desktop, Web, and Mobile.
+Unlike traditional bots constrained by legacy Discord embeds and sluggish database queries, Kyro combines an asynchronous in-memory caching engine with native Discord Components V2 (Type 17 Container Cards and Type 14 Separators), providing sub-millisecond execution and seamless interface navigation across Desktop, Web, and Mobile.
 
 ---
 
-## 🏛️ System Architecture
+## Key Architectural Highlights
+
+### 1. Discord Components V2 Design System
+- Replaces dated legacy embeds with native Discord Type 17 Containers and Type 14 Dividers.
+- Features clean, structured cards with custom application emojis resolved dynamically from the Discord Developer Portal.
+- Standardizes interaction deferrals to eliminate loading delays and API errors.
+
+### 2. Autonomous Sentinel SRE Agent
+- Built-in site reliability engineering agent that runs continuous health checks on the bot process.
+- Non-blocking watchdog loop that monitors PostgreSQL pools, Lavalink voice streaming nodes, and Discord Gateway ping.
+- Automated self-healing with circuit breaker protection to recover dropped connections without taking the bot offline.
+
+### 3. Studio Audio Engine
+- Dedicated Lavalink streaming node powered by Wavelink.
+- Concurrency-locked voice connections to prevent gateway race conditions and handshake timeouts.
+- Dynamic queue management, track sanitization, and seamless 24/7 stay mode.
+
+### 4. Sub-Millisecond In-Memory Caching
+- Critical runtime states (prefixes, developer authorizations, maintenance status, global blacklists, and module configs) are cached in memory upon boot.
+- Read operations execute in less than 0.001ms directly from RAM.
+- Write operations atomically update both the PostgreSQL database pool and the local memory cache.
+
+---
+
+## System Architecture
 
 ```text
-                       ┌─────────────────────────────────────────┐
-                       │           Discord Gateway API           │
-                       └────────────────────┬────────────────────┘
-                                            │
-                                  (Interaction/Message)
-                                            ▼
-                       ┌─────────────────────────────────────────┐
-                       │         Kyro Async Core Client         │
-                       └──────────────┬───────────────────┬──────┘
-                                      │                   │
-                     (0ms Memory Read)│                   │(Atomic Write)
-                                      ▼                   ▼
-                       ┌─────────────────────────┐  ┌─────────────────────────┐
-                       │  In-Memory Fast Caches  │  │  Supabase PostgreSQL    │
-                       │  • Guild Prefixes       │  │  • Connection Pool      │
-                       │  • Active Subscriptions │  │  • Persistent Schemas   │
-                       │  • System Maintenance   │  │  • Customer Analytics   │
-                       │  • Global Blacklists    │  │  • Audit Logs           │
-                       └─────────────────────────┘  └─────────────────────────┘
-                                      │
-                                      ▼
-                       ┌─────────────────────────────────────────┐
-                       │    Components V2 REST Dispatcher        │
-                       │    (Type 17 Container Layout Cards)     │
-                       └─────────────────────────────────────────┘
+                       +-----------------------------------------+
+                       |           Discord Gateway API           |
+                       +--------------------+--------------------+
+                                            |
+                                  (Interaction / Message)
+                                            v
+                       +-----------------------------------------+
+                       |         Kyro Async Core Client          |
+                       +--------------+-------------------+------+
+                                      |                   |
+                     (0ms Memory Read)|                   |(Atomic Write)
+                                      v                   v
+                       +-------------------------+  +-------------------------+
+                       |  In-Memory Fast Caches  |  |  Supabase PostgreSQL    |
+                       |  - Guild Prefixes       |  |  - Connection Pool      |
+                       |  - System Maintenance   |  |  - Persistent Schemas   |
+                       |  - Global Blacklists    |  |  - Customer Analytics   |
+                       |  - Module Settings      |  |  - Audit Logs           |
+                       +-------------------------+  +-------------------------+
+                                      |
+                                      v
+                       +-----------------------------------------+
+                       |    Components V2 REST Dispatcher        |
+                       |    (Type 17 Container Layout Cards)     |
+                       +-----------------------------------------+
 ```
-
-### ⚡ 1. Hybrid 0ms In-Memory Caching
-- Critical configurations (Guild Prefixes, Developer IDs, Maintenance State, Blacklists, and Subscriptions) are preloaded into memory upon startup.
-- Message processing reads from RAM cache directly (`<0.001ms`), bypassing database round-trips entirely.
-- Write operations atomically update both the PostgreSQL database pool and the in-memory cache.
-
-### 🎨 2. Native Discord Components V2 Containers (Type 17)
-- Replaces outdated, noisy Discord Embeds with native **Components V2 Containers**.
-- Structured Text Displays, Section Rows, dynamic Separators, and integrated Action Rows.
-- Zero standard unicode emoji spam — dynamically uses custom **Application Emojis** cached directly from the Discord Developer Portal.
-
-### 🌐 3. 24/7 Cloud Resilience (Render Web Service)
-- Integrated `aiohttp` HTTP health server running on port `8080`.
-- Provides an active `/health` endpoint for continuous zero-downtime monitoring on Render.com, Railway, or VPS.
 
 ---
 
-## 📂 Project Structure
+## Modules Directory
+
+Kyro provides a modular suite of tools built for our community — keeping your server safe, active, and effortlessly connected.
+
+| Module | Description | Core Capabilities |
+| :--- | :--- | :--- |
+| **Antinuke** | High-velocity server protection and threat mitigation | Anti-ban, anti-kick, anti-role, bot addition guard, whitelisting |
+| **Moderation** | Comprehensive community enforcement tools | Ban, kick, mute, timeout, warn, lock, purge, role management |
+| **Music** | Studio audio streaming engine with 24/7 mode | Dedicated Lavalink node, queue, loop, autoplay, jump, volume |
+| **Giveaway** | Interactive giveaways with Components V2 countdowns | Fair winner selection, reroll, requirements, persistent views |
+| **Media** | Strict channel media content enforcement | Media-only channels, auto-deletion of text, domain whitelist |
+| **Welcomer** | Dynamic member join and leave greetings | Card generators, autoroles, channel routing, custom formats |
+| **Join to Create** | Autonomous temporary voice room management | Dynamic creation, permission controls, auto-cleanup on empty |
+| **Ticket** | Private support ticket channels and transcripts | Category routing, claim system, interactive buttons, logs |
+| **Audit Logs** | Real-time event tracking and moderation logs | Message edits/deletions, member updates, role and channel changes |
+| **Premium** | SaaS subscription and tier management | Guild and user premium tiers, key generation and redemption |
+
+---
+
+## Project Structure
 
 ```text
 Kyro/
-├── .env                  # Secrets, Bot Token & Supabase Database URL
-├── .env.example          # Environment configuration template
-├── render.yaml           # 1-Click Render Cloud Deployment Blueprint
-├── requirements.txt      # Python dependencies
-├── README.md             # Bot overview & documentation
-├── PROJECT_CONTEXT.md    # Exhaustive Technical Specification for AI & Developers
-│
-├── assets/               # Branding assets & custom application emojis
-│   ├── branding/
-│   │   ├── kyro_banner.webp
-│   │   └── kyro_icon.webp
-│   ├── emoji/
-│   ├── emoji2/
-│   └── music/
-│
-└── src/
-    ├── main.py           # Application bootstrap & lifecycle manager
-    │
-    ├── core/             # Core Engine & HTTP Server
-    │   ├── bot.py        # KyroBot custom client with setup hooks
-    │   ├── config.py     # Environment variable validator & constants
-    │   ├── context.py    # CustomContext with container dispatcher methods
-    │   └── server.py     # 24/7 aiohttp Keep-Alive Health Server
-    │
-    ├── database/         # Database Persistence Layer
-    │   ├── base.py       # Abstract database protocol
-    │   └── postgres.py   # asyncpg Supabase PostgreSQL pool & table schemas
-    │
-    ├── managers/         # Domain Logic & In-Memory Cache Engines
-    │   ├── blacklist_manager.py   # Global user and guild blacklist filter
-    │   ├── guild_manager.py       # Custom per-guild prefix caching
-    │   ├── log_manager.py         # Multi-channel audit logging settings
-    │   ├── permission_manager.py  # Bot owner & developer access control
-    │   ├── premium_manager.py     # Subscriptions, keys, and customer analytics
-    │   └── system_manager.py      # Global maintenance mode & command toggles
-    │
-    ├── utils/            # Shared Utilities & Design System
-    │   ├── containers.py # Discord Components V2 builder & REST dispatcher
-    │   ├── decorators.py # @require_guild_premium() and @require_user_premium()
-    │   ├── emojis.py     # Dynamic Custom Application Emoji registry
-    │   ├── embeds.py     # Fallback legacy embed utilities
-    │   ├── logger.py     # Colored console logger
-    │   └── views.py      # Base interaction view utilities
-    │
-    ├── errors/           # Centralized Error Handling
-    │   ├── exceptions.py # Domain custom exceptions
-    │   └── handler.py    # Global on_command_error listener & error UI cards
-    │
-    └── cogs/             # Modular Feature Packages (Ready for custom expansion)
+|-- .env.example          # Environment variables template
+|-- render.yaml           # Deployment blueprint
+|-- requirements.txt      # Python dependencies
+|-- README.md             # Project documentation
+|-- AGENTS.md             # Architectural guidelines and standards
+|
+|-- assets/               # Assets and custom application emojis
+|   |-- avatar/           # Bot avatar presets
+|   |-- banner/           # Bot banner presets
+|   |-- emoji/            # Custom application emojis
+|   |-- emoji2/           # Additional emoji assets
+|   `-- music/            # Music controller assets
+|
+`-- src/
+    |-- main.py           # Application entrypoint
+    |
+    |-- core/             # Core engine, bot client, and cache
+    |   |-- bot.py        # KyroBot client implementation
+    |   |-- config.py     # Environment configuration validator
+    |   |-- context.py    # CustomContext with container dispatcher
+    |   `-- server.py     # HTTP keep-alive health server
+    |
+    |-- sentinel/         # Autonomous SRE Sentinel Agent
+    |   |-- agent.py      # Background watchdog and self-healing engine
+    |   `-- models.py     # Incident, severity, and subsystem types
+    |
+    |-- database/         # Database persistence layer
+    |   |-- base.py       # Abstract database interface
+    |   `-- postgres.py   # asyncpg Supabase PostgreSQL pool and schema
+    |
+    |-- managers/         # Domain managers and memory caches
+    |   |-- antinuke_manager.py
+    |   |-- guild_manager.py
+    |   |-- giveaway_manager.py
+    |   |-- media_manager.py
+    |   |-- log_manager.py
+    |   `-- premium_manager.py
+    |
+    |-- utils/            # Design system and helpers
+    |   |-- containers.py # Discord Components V2 container builder
+    |   |-- emojis.py     # Application emoji registry
+    |   `-- views.py      # Base interaction view utilities
+    |
+    `-- cogs/             # Modular feature packages
+        |-- antinuke/     # Security and anti-abuse systems
+        |-- developer/    # Developer diagnostic and sentinel consoles
+        |-- general/      # Help console and utility commands
+        |-- moderation/   # Moderation tools and media channels
+        |-- music/        # Lavalink audio engine and player controls
+        |-- ticket/       # Interactive ticket support system
+        `-- utility/      # Giveaways, autoroles, and temp voice
 ```
 
 ---
 
-## 🚀 Getting Started & Local Setup
+## Getting Started
 
 ### 1. Prerequisites
 - Python **3.11** or higher
-- A Supabase / PostgreSQL database instance
-- A Discord Bot Application from [Discord Developer Portal](https://discord.com/developers/applications)
+- A PostgreSQL database instance (such as Supabase)
+- A Discord Bot Application configured with Message Content, Server Members, and Presence Intents enabled in the [Discord Developer Portal](https://discord.com/developers/applications)
 
 ### 2. Installation
 ```bash
 # Clone the repository
-git clone <repository_url>
+git clone https://github.com/zerox-exe8/cicada-3301.git
 cd Kyro
 
-# Create and activate virtual environment
+# Create and activate a virtual environment
 python -m venv venv
-# On Windows:
+
+# Windows:
 venv\Scripts\activate
-# On Linux/macOS:
+
+# Linux / macOS:
 source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Environment Variables
-Create `.env` based on `.env.example`:
+### 3. Environment Setup
+Create a `.env` file based on `.env.example`:
 ```env
-BOT_TOKEN=your_discord_bot_token_here
-DATABASE_URL=postgresql://postgres.xxxx:password@aws-0-region.pooler.supabase.com:6543/postgres
-DEVELOPER_IDS=1082437832087445604
+BOT_TOKEN=your_bot_token_here
+DATABASE_URL=postgresql://user:password@host:port/database
+DEVELOPER_IDS=your_discord_user_id
 DEFAULT_PREFIX=?
-ENVIRONMENT=DEVELOPMENT
+ENVIRONMENT=PRODUCTION
 PORT=8080
 ```
 
-### 4. Run the Bot
+### 4. Running
 ```bash
 python -m src.main
 ```
 
 ---
 
-## ☁️ 24/7 Cloud Deployment (Render.com)
+## 24/7 Cloud Deployment
 
-1. Link your GitHub repository to [Render.com](https://render.com).
-2. Create a **Web Service** using `render.yaml`.
-3. Set Build Command: `pip install -r requirements.txt`.
-4. Set Start Command: `python -m src.main`.
-5. Add Environment Variables (`BOT_TOKEN`, `DATABASE_URL`, `DEVELOPER_IDS`, etc.).
+Kyro includes a lightweight, non-blocking HTTP health check server running on port `8080` (endpoint: `/health`), enabling zero-downtime hosting on cloud providers such as Render, Railway, or VPS instances.
 
-Render will automatically deploy Kyro alongside its integrated Keep-Alive Web Server (`http://0.0.0.0:8080`) for continuous 24/7 operation.
-
----
-
-## 🛡️ Credits & Lead Architect
-
-- **Bot Name**: Kyro
-- **Lead Architect & Developer**: `zerox.exe`
-- **Framework**: `discord.py` (Components V2 Extended)
-- **Database**: `Supabase PostgreSQL` with `asyncpg`
+To deploy on Render:
+1. Connect your repository to Render.
+2. Select Web Service and apply `render.yaml`.
+3. Configure the required environment variables in the Render dashboard.
 
 ---
-<div align="center">
-  <sub>Engineered for next-generation Discord communities.</sub>
-</div>
+
+## Credits
+
+- **Application**: Kyro
+- **Description**: Built for our community — keeping your server safe, active, and effortlessly connected.
+- **Lead Architect**: `zerox.exe`
+- **Framework**: `discord.py` (Components V2)
+- **Database**: PostgreSQL with `asyncpg`

@@ -180,7 +180,23 @@ async def execute_stay(cog: Music, ctx: commands.Context) -> None:
         return
 
     player = cog.controller.get_or_create_player(ctx.guild)
-    player.is_247 = not player.is_247
+    player.is_247 = not getattr(player, "is_247", False)
+
+    if player.is_247:
+        if hasattr(cog.controller, "_247_cache"):
+            cog.controller._247_cache.add(ctx.guild.id)
+        player.cancel_empty_vc_timer(auto_resume=False)
+        # Connect immediately if not already connected
+        if not player.is_connected and ctx.author.voice and ctx.author.voice.channel:
+            try:
+                await player.connect_voice(ctx.author.voice.channel)
+            except Exception:
+                pass
+    else:
+        if hasattr(cog.controller, "_247_cache"):
+            cog.controller._247_cache.discard(ctx.guild.id)
+        if not player.is_playing and not player.queue:
+            player.schedule_empty_vc_timer()
 
     # Persist in database
     if hasattr(cog.bot, "db") and cog.bot.db and getattr(cog.bot.db, "pool", None):
@@ -205,4 +221,6 @@ async def execute_stay(cog: Music, ctx: commands.Context) -> None:
             f"> Kyro will {'remain connected in voice indefinitely even when empty' if player.is_247 else 'automatically disconnect when the voice channel is empty'}."
         )
     )
+    container.add_separator(divider=True)
+    container.add_text(f"-# Requested by {ctx.author.display_name}")
     await send_container_response(ctx, container)

@@ -52,6 +52,7 @@ class GuildPlayer:
         self.loop_mode: str = "off"  # "off", "track", "queue"
         self.smart_autoplay: bool = False
         self.autoplay_history: Set[str] = set()
+        self.is_247: bool = False
 
         # UI & Communication
         self.home_channel: Optional[discord.TextChannel | discord.Thread] = None
@@ -626,12 +627,16 @@ class GuildPlayer:
 
     def schedule_empty_vc_timer(self) -> None:
         """Schedule disconnect after 3 minutes of idle queue."""
+        if getattr(self, "is_247", False):
+            return
         self.cancel_empty_vc_timer()
         self._empty_vc_task = asyncio.create_task(self._empty_vc_timeout(180))
 
     async def _empty_vc_timeout(self, seconds: int) -> None:
         try:
             await asyncio.sleep(seconds)
+            if getattr(self, "is_247", False):
+                return
             if not self.is_playing and not self.queue:
                 logger.info(f"Guild {self.guild.id}: Idle timeout reached, disconnecting silently.")
                 await self.stop()

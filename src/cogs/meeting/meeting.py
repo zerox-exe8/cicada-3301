@@ -15,7 +15,15 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
-import discord.ext.voice_recv as voice_recv
+
+try:
+    import discord.ext.voice_recv as voice_recv
+    VOICE_RECV_AVAILABLE = True
+    AudioSinkBase = voice_recv.AudioSink
+except (ImportError, Exception):
+    voice_recv = None
+    VOICE_RECV_AVAILABLE = False
+    AudioSinkBase = object
 
 from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
@@ -27,7 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("Kyro.Meeting")
 
 
-class MeetingAudioSink(voice_recv.AudioSink):
+class MeetingAudioSink(AudioSinkBase):
     """
     High-performance Voice Sink for multi-speaker meetings.
     Applies real-time noise gating and downsamples 48kHz stereo to 16kHz mono PCM,
@@ -434,8 +442,9 @@ class MeetingCog(commands.Cog):
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         return container
 
-    @commands.hybrid_group(
+    @commands.group(
         name="meeting",
+        aliases=["meetings", "meet"],
         description="Autonomous VC Meeting Recording & Intelligence Summarization.",
         invoke_without_command=True,
     )
@@ -634,6 +643,14 @@ class MeetingCog(commands.Cog):
                     target_ch.id,
                     settings.get("privacy_mode", "locked"),
                 )
+
+        # Check voice receiver module availability
+        if not VOICE_RECV_AVAILABLE or voice_recv is None:
+            await ctx.send_warning(
+                "Voice receiver module (`discord-ext-voice-recv`) is not active in this bot environment.\n"
+                "Please run `pip install discord-ext-voice-recv` on the server."
+            )
+            return
 
         # Connect with VoiceRecvClient
         try:

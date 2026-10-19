@@ -93,6 +93,7 @@ class Help(commands.Cog):
             "Join to Create",
             "Ticket",
             "Audit Logs",
+            "Meeting",
             "Music",
             "Premium",
         ]
@@ -120,6 +121,7 @@ class Help(commands.Cog):
             "Join to Create": e_reg.get("icons_connect", e_reg.get("icons_channel", e_reg.get("icons_podcast", ""))),
             "Giveaway": e_reg.get("giveaway", e_reg.get("discord_giveaway", e_reg.get("s_giveaway", ""))),
             "Media": e_reg.get("media", e_reg.get("icon_media", e_reg.get("icons_image", ""))),
+            "Meeting": e_reg.get("icons_podcast", e_reg.get("icon_logging", "")),
         }
         return mapping.get(cat_name, e_reg.get("icon_moderation", ""))
 
@@ -137,6 +139,7 @@ class Help(commands.Cog):
             "Join to Create": "icons_connect",
             "Giveaway": "giveaway",
             "Media": "media",
+            "Meeting": "icons_podcast",
         }
         emoji_name = mapping.get(cat_name, "icon_moderation")
         emoji_data = e_reg.get_select_emoji(emoji_name, fallback_unicode=None)
@@ -315,6 +318,18 @@ class Help(commands.Cog):
                     p_idx = 999
                 return (p_idx, qname)
             sorted_cmds = sorted(commands_list, key=_gw_sort_key)
+        elif cat_name.lower() == "meeting":
+            priority_order = [
+                "meeting", "meeting setup", "meeting disable", "meeting show", "meeting start", "meeting stop"
+            ]
+            def _meeting_sort_key(cmd: commands.Command) -> tuple[int, str]:
+                qname = cmd.qualified_name.lower()
+                try:
+                    p_idx = priority_order.index(qname)
+                except ValueError:
+                    p_idx = 999
+                return (p_idx, qname)
+            sorted_cmds = sorted(commands_list, key=_meeting_sort_key)
         else:
             def _gen_sort_key(cmd: commands.Command) -> tuple[str, int, str]:
                 parts = cmd.qualified_name.lower().split()
@@ -471,6 +486,9 @@ class Help(commands.Cog):
                 "giveaway": "Giveaway",
                 "giveaways": "Giveaway",
                 "gw": "Giveaway",
+                "meeting": "Meeting",
+                "meetings": "Meeting",
+                "meet": "Meeting",
             }
             target_cat_name = category_aliases.get(query)
             if not target_cat_name:

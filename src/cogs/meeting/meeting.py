@@ -22,6 +22,18 @@ try:
     import discord.ext.voice_recv as voice_recv
     VOICE_RECV_AVAILABLE = True
     AudioSinkBase = voice_recv.AudioSink
+
+    # Discord.py bug workaround: SocketReader starts paused and clears _idle_paused.
+    # Its register() checks if self._idle_paused before setting _running, which evaluates
+    # to False, leaving the socket reading thread permanently deadlocked.
+    import discord.voice_state as _vs
+
+    def _fixed_socket_reader_register(self, callback) -> None:
+        self._callbacks.append(callback)
+        self._idle_paused = False
+        self._running.set()
+
+    _vs.SocketReader.register = _fixed_socket_reader_register
 except (ImportError, Exception):
     voice_recv = None
     VOICE_RECV_AVAILABLE = False
@@ -70,6 +82,10 @@ class MeetingAudioSink(AudioSinkBase):
         """Receive audio frame, downsample to 16kHz mono, and buffer with SSRC tracking."""
         try:
             self.packet_count += 1
+            if self.packet_count == 1:
+                logger.info("MeetingAudioSink received first incoming voice packet from Discord.")
+            elif self.packet_count % 1000 == 0:
+                logger.debug(f"MeetingAudioSink captured {self.packet_count} packets so far.")
             if not data or not data.pcm:
                 return
 
@@ -902,6 +918,15 @@ class MeetingCog(commands.Cog):
                 pass
             await ctx.send_error(f"Failed to initiate voice receive pipeline: `{e}`", ephemeral=False)
             return
+
+        # Force-resume discord.py SocketReader to guarantee UDP packet loop is unblocked
+        try:
+            sock_reader = getattr(voice_client._connection, "_socket_reader", None)
+            if sock_reader:
+                sock_reader.resume(force=True)
+                logger.info(f"Unblocked and force-resumed SocketReader (running={sock_reader._running.is_set()})")
+        except Exception as _sr_err:
+            logger.warning(f"Failed to force-resume SocketReader: {_sr_err}")
 
         # Prime Discord Voice SFU and punch UDP firewall hole to start receiving participant audio
         try:

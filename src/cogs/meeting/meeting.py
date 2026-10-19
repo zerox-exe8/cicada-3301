@@ -23,7 +23,7 @@ try:
     VOICE_RECV_AVAILABLE = True
     AudioSinkBase = voice_recv.AudioSink
 
-    # Discord.py bug workaround: SocketReader starts paused and clears _idle_paused.
+    # 1. Discord.py bug workaround: SocketReader starts paused and clears _idle_paused.
     # Its register() checks if self._idle_paused before setting _running, which evaluates
     # to False, leaving the socket reading thread permanently deadlocked.
     import discord.voice_state as _vs
@@ -34,6 +34,43 @@ try:
         self._running.set()
 
     _vs.SocketReader.register = _fixed_socket_reader_register
+
+    # 2. Disable Discord DAVE (E2EE) protocol for VoiceRecvClient.
+    # discord-ext-voice-recv does not support DAVE MLS encryption. Setting
+    # max_dave_protocol_version to 0 tells Discord Voice Gateway to stream standard
+    # unencrypted Opus audio packets instead of binary encrypted DAVE frames.
+    _vs.VoiceConnectionState.max_dave_protocol_version = property(lambda self: 0)
+
+    # 3. Crash-proof PacketRouter and PacketDecoder.
+    # By default, any Opus decode error or corrupted jitter frame unhandled in _do_run
+    # triggers `finally: stop_listening()`, which permanently killed packet reception.
+    import discord.ext.voice_recv.router as _vr_router
+
+    _orig_decoder_decode = _vr_router.PacketDecoder._decode_packet
+
+    def _safe_decode_packet(self, packet):
+        try:
+            return _orig_decoder_decode(self, packet)
+        except Exception:
+            return packet, b""
+
+    _vr_router.PacketDecoder._decode_packet = _safe_decode_packet
+
+    _orig_router_do_run = _vr_router.PacketRouter._do_run
+
+    def _safe_router_do_run(self):
+        while not self._end_thread.is_set():
+            self.waiter.wait()
+            with self._lock:
+                for decoder in self.waiter.items:
+                    try:
+                        data = decoder.pop_data()
+                        if data is not None:
+                            self.sink.write(data.source, data)
+                    except Exception:
+                        pass
+
+    _vr_router.PacketRouter._do_run = _safe_router_do_run
 except (ImportError, Exception):
     voice_recv = None
     VOICE_RECV_AVAILABLE = False

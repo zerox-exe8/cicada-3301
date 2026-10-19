@@ -250,26 +250,49 @@ class ErrorHandler(commands.Cog):
         else:
             import traceback
             tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
-            logger.error(f"Unhandled error in '{ctx.command}': {error}\n{tb}")
+            cmd_name = ctx.command.qualified_name if ctx.command else "Unknown"
+            logger.error(f"Unhandled error in '{cmd_name}': {error}\n{tb}")
+
             if hasattr(self.bot, "sentinel") and self.bot.sentinel:
                 from src.sentinel.models import SubsystemType, IncidentSeverity
-                cmd_name = ctx.command.qualified_name if ctx.command else "Unknown"
                 self.bot.sentinel.record_incident(
                     SubsystemType.COMMAND,
                     IncidentSeverity.WARNING,
                     f"Command Exception: {cmd_name}",
                     str(error),
-                    action_taken="Sent error container to user; pending root cause resolution",
+                    action_taken="Handled via maintenance responder; pending developer review",
                     resolved=False,
                     guild_id=ctx.guild.id if ctx.guild else None,
                     traceback=tb,
                 )
-            container.add_section(
-                content=(
-                    f"**{err_icon}Internal Error**\n"
-                    f"> `{error}`"
+
+            is_dev = False
+            if hasattr(self.bot, "perm_mgr") and self.bot.perm_mgr:
+                is_dev = self.bot.perm_mgr.is_developer_sync(ctx.author.id)
+
+            if is_dev:
+                container.add_section(
+                    content=(
+                        f"**{warn_icon}Command Exception (Developer Mode)**\n"
+                        f"> `{cmd_name}` encountered an unhandled exception:\n"
+                        f"> `{type(error).__name__}: {error}`"
+                    )
                 )
-            )
+            else:
+                tools_icon = f"{e_reg.get('icons_settings', e_reg.get('icon_dev', '⚙️'))} " if e_reg else ""
+                dot = e_reg.get("heart_dot", "•") if e_reg else "•"
+                container.add_section(
+                    content=(
+                        f"**{tools_icon}Command Under Maintenance**\n"
+                        f"> Yeh command abhi active development ya maintenance phase me hai.\n"
+                        f"> Hamari team is par kaam kar rahi hai, kripya thodi der baad dobara koshish karein!"
+                    )
+                )
+                container.add_separator(divider=True)
+                container.add_text(
+                    f"> {dot} **Status:** `Work in Progress / Maintenance`\n"
+                    f"> {dot} **Notice:** New features & fixes are actively being deployed."
+                )
 
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -374,12 +397,33 @@ class ErrorHandler(commands.Cog):
                     guild_id=interaction.guild_id,
                     traceback=tb,
                 )
-            container.add_section(
-                content=(
-                    f"**{err_icon}Internal Error**\n"
-                    f"> `{error}`"
+            is_dev = False
+            if hasattr(self.bot, "perm_mgr") and self.bot.perm_mgr:
+                is_dev = self.bot.perm_mgr.is_developer_sync(interaction.user.id)
+
+            if is_dev:
+                container.add_section(
+                    content=(
+                        f"**{warn_icon}Slash Command Exception (Developer Mode)**\n"
+                        f"> `{cmd_name}` encountered an unhandled exception:\n"
+                        f"> `{type(error).__name__}: {error}`"
+                    )
                 )
-            )
+            else:
+                tools_icon = f"{e_reg.get('icons_settings', e_reg.get('icon_dev', '⚙️'))} " if e_reg else ""
+                dot = e_reg.get("heart_dot", "•") if e_reg else "•"
+                container.add_section(
+                    content=(
+                        f"**{tools_icon}Command Under Maintenance**\n"
+                        f"> Yeh command abhi active development ya maintenance phase me hai.\n"
+                        f"> Hamari team is par kaam kar rahi hai, kripya thodi der baad dobara koshish karein!"
+                    )
+                )
+                container.add_separator(divider=True)
+                container.add_text(
+                    f"> {dot} **Status:** `Work in Progress / Maintenance`\n"
+                    f"> {dot} **Notice:** New features & fixes are actively being deployed."
+                )
 
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {interaction.user.display_name}")

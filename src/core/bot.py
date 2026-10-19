@@ -242,6 +242,7 @@ class KyroBot(commands.Bot):
     async def close(self) -> None:
         """Gracefully release database pools and network sessions."""
         logger.info("Shutting down Kyro Bot gracefully...")
+        self._is_shutting_down = True
 
         if hasattr(self, "sentinel") and self.sentinel:
             self.sentinel.stop()

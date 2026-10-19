@@ -65,16 +65,56 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
             await ctx.send_error(f"Git pull failed: `{e}`")
             return
 
-        # now trigger full reload
-        all_exts = self._discover_all_cogs()
+        # Differential cog discovery: only reload cogs whose source files actually changed
+        diff_exts: set[str] = set()
+        try:
+            diff_proc = await asyncio.create_subprocess_exec(
+                "git", "-C", str(self.root_dir), "diff", "HEAD@{1}", "HEAD", "--name-only",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            diff_out, _ = await asyncio.wait_for(diff_proc.communicate(), timeout=5.0)
+            changed_lines = diff_out.decode("utf-8", errors="replace").splitlines()
+            for line in changed_lines:
+                clean = line.strip().replace("\\", "/")
+                if not clean.endswith(".py") or "src/cogs" not in clean:
+                    continue
+                p = Path(clean)
+                rel = p.relative_to(Path("src/cogs"))
+                cog_folder = rel.parts[0] if len(rel.parts) > 1 else ""
+                if cog_folder:
+                    folder_path = self.cogs_dir / cog_folder
+                    for f in folder_path.rglob("*.py"):
+                        if any(part.startswith("_") for part in f.relative_to(self.cogs_dir).parts):
+                            continue
+                        f_rel = f.relative_to(self.root_dir)
+                        diff_exts.add(".".join(f_rel.with_suffix("").parts))
+                else:
+                    if not p.name.startswith("_"):
+                        f_rel = p.relative_to(self.root_dir)
+                        diff_exts.add(".".join(f_rel.with_suffix("").parts))
+        except Exception:
+            diff_exts = set()
+
+        if diff_exts:
+            target_exts = list(diff_exts)
+        else:
+            target_exts = self._discover_all_cogs()
+            # If full reload, protect music if players are actively streaming
+            music_cog = self.bot.get_cog("Music")
+            if music_cog and hasattr(music_cog, "controller"):
+                has_active = any(getattr(p, "playing", False) for p in music_cog.controller.players.values())
+                if has_active and "src.cogs.music.music" in target_exts:
+                    target_exts.remove("src.cogs.music.music")
+
         self_ext = "src.cogs.developer.reload"
-        if self_ext in all_exts:
-            all_exts.remove(self_ext)
-            all_exts.append(self_ext)
+        if self_ext in target_exts:
+            target_exts.remove(self_ext)
+            target_exts.append(self_ext)
 
         reloaded = []
         failed = []
-        for ext in all_exts:
+        for ext in target_exts:
             try:
                 await self._reload_or_load(ext)
                 reloaded.append(ext.split(".")[-1])

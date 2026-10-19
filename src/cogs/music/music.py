@@ -43,7 +43,13 @@ class Music(commands.Cog):
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
-        self.controller = MusicController(bot)
+        # Preserve active controller and players across hot-reloads
+        if hasattr(bot, "_music_controller") and bot._music_controller:
+            self.controller = bot._music_controller
+        else:
+            self.controller = MusicController(bot)
+            bot._music_controller = self.controller
+
         self.analytics = MusicAnalytics(bot)
         # Register persistent view for button interactions
         self.bot.add_view(MusicControlView(bot, None))
@@ -82,17 +88,27 @@ class Music(commands.Cog):
                 logger.debug(f"Notice loading 24/7 music state: {e}")
 
     async def cog_load(self) -> None:
-        """Schedule Lavalink connection upon bot readiness."""
-        asyncio.create_task(self._connect_lavalink())
+        """Schedule Lavalink connection upon bot readiness if not already connected."""
+        import wavelink
+        has_nodes = False
+        try:
+            if hasattr(wavelink.Pool, "_nodes") and wavelink.Pool._nodes:
+                has_nodes = any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool._nodes.values())
+        except Exception:
+            pass
+
+        if not has_nodes:
+            asyncio.create_task(self._connect_lavalink())
         asyncio.create_task(self._load_247_cache())
 
     async def cog_unload(self) -> None:
-        """Close Lavalink node pool on reload/shutdown."""
-        import wavelink
-        try:
-            await wavelink.Pool.close()
-        except Exception:
-            pass
+        """Close Lavalink node pool only on bot shutdown, preserving active streams during hot-reload."""
+        if getattr(self.bot, "_is_shutting_down", False):
+            import wavelink
+            try:
+                await wavelink.Pool.close()
+            except Exception:
+                pass
 
     @commands.Cog.listener()
     async def on_wavelink_track_start(self, payload: Any) -> None:

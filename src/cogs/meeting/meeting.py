@@ -35,22 +35,46 @@ try:
 
     _vs.SocketReader.register = _fixed_socket_reader_register
 
-    # 2. Disable Discord DAVE (E2EE) protocol for VoiceRecvClient.
-    # discord-ext-voice-recv does not support DAVE MLS encryption. Setting
-    # max_dave_protocol_version to 0 tells Discord Voice Gateway to stream standard
-    # unencrypted Opus audio packets instead of binary encrypted DAVE frames.
-    _vs.VoiceConnectionState.max_dave_protocol_version = property(lambda self: 0)
-
-    # 3. Crash-proof PacketRouter and PacketDecoder.
-    # By default, any Opus decode error or corrupted jitter frame unhandled in _do_run
-    # triggers `finally: stop_listening()`, which permanently killed packet reception.
+    # 2. Crash-proof PacketRouter and DAVE E2EE packet decryption.
+    # When Discord negotiates DAVE E2EE, decrypt payload with dave_session before passing to Opus decoder.
+    # Any jitter or decode anomaly gracefully returns (packet, b"") instead of crashing the thread.
     import discord.ext.voice_recv.router as _vr_router
+
+    try:
+        import davey as _davey
+    except ImportError:
+        _davey = None
 
     _orig_decoder_decode = _vr_router.PacketDecoder._decode_packet
 
     def _safe_decode_packet(self, packet):
+        assert self._decoder is not None
         try:
-            return _orig_decoder_decode(self, packet)
+            if not packet:
+                return _orig_decoder_decode(self, packet)
+
+            opus_data = packet.decrypted_data
+            if not opus_data:
+                return packet, b""
+
+            # If voice connection is encrypted with DAVE, decrypt payload via dave_session
+            if _davey:
+                vc = getattr(self.sink, "voice_client", None)
+                conn = getattr(vc, "_connection", None) if vc else None
+                dave_session = getattr(conn, "dave_session", None) if conn else None
+
+                if dave_session and getattr(dave_session, "ready", False):
+                    user_id = getattr(self, "_cached_id", None) or (vc._get_id_from_ssrc(self.ssrc) if vc else None)
+                    if user_id:
+                        try:
+                            decrypted = dave_session.decrypt(user_id, _davey.MediaType.audio, opus_data)
+                            if decrypted:
+                                opus_data = decrypted
+                        except Exception:
+                            pass
+
+            pcm = self._decoder.decode(opus_data, fec=False)
+            return packet, pcm
         except Exception:
             return packet, b""
 
@@ -443,16 +467,20 @@ class MeetingCog(commands.Cog):
             }
 
         prompt = (
-            "You are the Executive Meeting Intelligence Analyst for Kyro.\n"
+            "You are the Meeting Intelligence Assistant for Kyro Discord Bot.\n"
             "Analyze the following conversation transcript from a Discord voice meeting.\n"
-            "The conversation may be in Hindi, Hinglish (Hindi + English mixed), Marathi, or other Indian regional languages, or English.\n"
-            "Extract key insights cleanly, ignoring casual mic checks or filler words.\n\n"
+            "The conversation may be in Hindi, Hinglish (Hindi + English mixed), Marathi, other Indian languages, or English.\n\n"
+            "CRITICAL INSTRUCTIONS FOR EASY USER UNDERSTANDING:\n"
+            "- A normal server member must be able to understand the summary instantly.\n"
+            "- Write the summary, decisions, and action items in simple, friendly, everyday conversational language (Hinglish / natural words) matching the style and tone of the participants.\n"
+            "- Do NOT use stiff corporate or robotic jargon. Keep it direct and helpful.\n"
+            "- If users were joking, chatting casually, or planning something, reflect that naturally.\n\n"
             "Respond STRICTLY in valid JSON matching this schema:\n"
             "{\n"
-            '  "summary": "A concise 2-3 sentence executive summary of the meeting in clear English/Hinglish.",\n'
-            '  "decisions": "Bullet points of key decisions agreed upon during the meeting (use markdown • bullet points).",\n'
-            '  "action_items": "Bullet points of action items with assigned person if mentioned (e.g. • @Name: Task description).",\n'
-            '  "topics": "Brief comma-separated key topics discussed."\n'
+            '  "summary": "A clear, natural 2-3 sentence overview of what was talked about in simple everyday language.",\n'
+            '  "decisions": "Bullet points of key decisions or agreements reached (e.g. • Kal sabhi log 9 baje stream karenge).",\n'
+            '  "action_items": "Bullet points of tasks or next steps with member names (e.g. • @Name: Bot setup karega).",\n'
+            '  "topics": "2-4 brief key topics discussed (e.g. Gaming, Bot Updates, Server Rules)."\n'
             "}\n\n"
             f"Transcript:\n{full_transcript[:15000]}"
         )

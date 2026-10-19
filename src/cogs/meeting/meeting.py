@@ -60,6 +60,7 @@ class MeetingAudioSink(AudioSinkBase):
         self.speaker_chunks: dict[Any, int] = {}
         self._ssrc_to_uid: dict[int, Any] = {}
         self._voice_client: Optional[Any] = None
+        self.packet_count: int = 0
 
     def wants_opus(self) -> bool:
         """Request decoded 48kHz 16-bit stereo PCM from voice_recv."""
@@ -68,12 +69,17 @@ class MeetingAudioSink(AudioSinkBase):
     def write(self, user: Optional[discord.Member | discord.User], data: voice_recv.VoiceData) -> None:
         """Receive audio frame, downsample to 16kHz mono, and buffer with SSRC tracking."""
         try:
+            self.packet_count += 1
             if not data or not data.pcm:
                 return
 
             pcm = data.pcm
             if len(pcm) < 12:
                 return
+
+            # Ensure even byte count for 16-bit array
+            if len(pcm) % 2 != 0:
+                pcm = pcm[: len(pcm) - 1]
 
             # Downsample 48kHz stereo 16-bit -> 16kHz mono (taking left channel every 3rd sample)
             try:
@@ -294,7 +300,7 @@ class MeetingCog(commands.Cog):
         gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
         if gemini_key:
             b64_audio = base64.b64encode(wav_data).decode("utf-8")
-            models = ["gemini-3.5-transcribe", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]
+            models = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"]
 
             prompt = (
                 "You are an expert audio transcription system specializing in Indian speech and multilingual meetings. "
@@ -326,9 +332,10 @@ class MeetingCog(commands.Cog):
                         ) as resp:
                             if resp.status == 200:
                                 g_data = await resp.json()
-                                candidates = g_data.get("candidates", [])
+                                candidates = g_data.get("candidates") or []
                                 if candidates:
-                                    parts = candidates[0].get("content", {}).get("parts", [])
+                                    content = candidates[0].get("content") or {}
+                                    parts = content.get("parts") or []
                                     if parts:
                                         g_text = parts[0].get("text", "").strip()
                                         # Filter out non-speech hallucination artifacts
@@ -501,6 +508,7 @@ class MeetingCog(commands.Cog):
             if full_speaker_text and len(full_speaker_text) > 3:
                 speaker_transcripts.append((name, full_speaker_text))
 
+        captured_packets = getattr(sink, "packet_count", 0)
         sink.cleanup()
         dot = self.bot.custom_emojis.get("heart_dot", "•")
 
@@ -511,10 +519,16 @@ class MeetingCog(commands.Cog):
                     content="**Kyro Meeting Intelligence**\n> *Session ended without audible speech.*"
                 )
                 c.add_separator(divider=True)
+                diag_msg = (
+                    "No voice packets received from Discord (all members were muted or channel was silent)."
+                    if captured_packets == 0
+                    else "Voice packets were received, but audio was below speech recognition threshold."
+                )
                 c.add_text(
                     f"> {dot} **Duration:** `{duration_fmt}`\n"
                     f"> {dot} **Status:** `No Speech Detected`\n"
-                    f"> {dot} **Notice:** Participants were muted or below the audio threshold."
+                    f"> {dot} **Audio Packets Captured:** `{captured_packets}`\n"
+                    f"> {dot} **Notice:** {diag_msg}"
                 )
                 c.add_separator(divider=True)
                 c.add_text(f"-# Kyro Voice Intelligence • <t:{int(time.time())}:f>")
@@ -853,7 +867,7 @@ class MeetingCog(commands.Cog):
         # Connect with VoiceRecvClient (reconnect=False prevents reconnection oscillation)
         try:
             voice_client: voice_recv.VoiceRecvClient = await vc.connect(
-                cls=voice_recv.VoiceRecvClient, timeout=20.0, reconnect=False
+                cls=voice_recv.VoiceRecvClient, timeout=20.0, reconnect=False, self_deaf=False, self_mute=False
             )
         except Exception as e:
             logger.error(f"Failed to connect to VC for meeting in guild {guild.id}: {e}", exc_info=True)
@@ -888,6 +902,17 @@ class MeetingCog(commands.Cog):
                 pass
             await ctx.send_error(f"Failed to initiate voice receive pipeline: `{e}`", ephemeral=False)
             return
+
+        # Prime Discord Voice SFU and punch UDP firewall hole to start receiving participant audio
+        try:
+            if hasattr(voice_client, "ws") and voice_client.ws:
+                await voice_client.ws.speak(discord.gateway.SpeakingState.voice)
+                for _ in range(5):
+                    voice_client.send_audio_packet(b"\xf8\xff\xfe", encode=False)
+                    await asyncio.sleep(0.02)
+                await voice_client.ws.speak(discord.gateway.SpeakingState.none)
+        except Exception as e:
+            logger.debug(f"Notice priming voice gateway speaking state: {e}")
 
         self._sessions[guild.id] = MeetingSession(
             guild_id=guild.id,

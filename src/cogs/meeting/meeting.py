@@ -27,6 +27,13 @@ except (ImportError, Exception):
     VOICE_RECV_AVAILABLE = False
     AudioSinkBase = object
 
+try:
+    import speech_recognition as sr
+    SPEECH_RECOGNITION_AVAILABLE = True
+except (ImportError, Exception):
+    sr = None
+    SPEECH_RECOGNITION_AVAILABLE = False
+
 from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 from src.cogs.meeting._setup_view import MeetingSetupWizard, ensure_meeting_channel
@@ -243,14 +250,98 @@ class MeetingCog(commands.Cog):
 
     async def _transcribe_audio(self, wav_io: io.BytesIO) -> str:
         """
-        Transcribe a single WAV audio chunk using Groq Whisper with automatic fallback to Google Gemini.
-        Guarantees resilient transcription even if Groq is unconfigured or rate-limited.
+        State-of-the-art multilingual and Indian regional speech-to-text pipeline.
+        Tier 1: Google Speech Recognition (free, specialized in hi-IN, mr-IN, en-IN conversational speech).
+        Tier 2: Google Gemini Multimodal (gemini-3.5-transcribe & gemini-3.5-flash-lite) for deep multilingual context.
+        Tier 3: Groq Whisper-large-v3-turbo (if configured).
         """
         wav_data = wav_io.read()
-        if not wav_data or len(wav_data) < 100:
+        if not wav_data or len(wav_data) < 1000:
             return ""
 
-        # 1. Primary: Groq Whisper-large-v3-turbo (if key is set)
+        # Tier 1: Google Speech Recognition (Optimized for Indian dialects: Hindi, Hinglish, Marathi, etc.)
+        if SPEECH_RECOGNITION_AVAILABLE and sr is not None:
+            try:
+                def _run_google_sr() -> str:
+                    recognizer = sr.Recognizer()
+                    recognizer.energy_threshold = 300
+                    recognizer.dynamic_energy_threshold = False
+                    with sr.AudioFile(io.BytesIO(wav_data)) as source:
+                        audio = recognizer.record(source)
+                    # Try hi-IN (Hindi + Hinglish) first
+                    try:
+                        res = recognizer.recognize_google(audio, language="hi-IN")
+                        if res and len(res.strip()) > 1:
+                            return res.strip()
+                    except Exception:
+                        pass
+                    # Fallback to en-IN (Indian English / Mixed)
+                    try:
+                        res = recognizer.recognize_google(audio, language="en-IN")
+                        if res and len(res.strip()) > 1:
+                            return res.strip()
+                    except Exception:
+                        pass
+                    return ""
+
+                sr_result = await asyncio.to_thread(_run_google_sr)
+                if sr_result:
+                    return sr_result
+            except Exception as e:
+                logger.debug(f"Notice from Google Speech Recognition: {e}")
+
+        # Tier 2: Google Gemini Multimodal Audio (gemini-3.5-transcribe, gemini-3.5-flash-lite)
+        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if gemini_key:
+            b64_audio = base64.b64encode(wav_data).decode("utf-8")
+            models = ["gemini-3.5-transcribe", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]
+
+            prompt = (
+                "You are an expert audio transcription system specializing in Indian speech and multilingual meetings. "
+                "Transcribe the spoken audio verbatim in its original language (Hindi, Hinglish, Marathi, Bengali, Tamil, Telugu, Gujarati, Bhojpuri, Punjabi, or Indian English). "
+                "Output ONLY the transcribed words. Do not add timestamps (e.g. 00:00), speaker tags, commentary, or non-speech labels like <noise> or [silence]. "
+                "If no human speech is spoken, output an empty response."
+            )
+
+            for model_name in models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+                headers = {"Content-Type": "application/json", "x-goog-api-key": gemini_key}
+                payload = {
+                    "contents": [{
+                        "parts": [
+                            {"inline_data": {"mime_type": "audio/wav", "data": b64_audio}},
+                            {"text": prompt}
+                        ]
+                    }],
+                    "generationConfig": {"temperature": 0.0},
+                }
+
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            url,
+                            headers=headers,
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=25.0),
+                        ) as resp:
+                            if resp.status == 200:
+                                g_data = await resp.json()
+                                candidates = g_data.get("candidates", [])
+                                if candidates:
+                                    parts = candidates[0].get("content", {}).get("parts", [])
+                                    if parts:
+                                        g_text = parts[0].get("text", "").strip()
+                                        # Filter out non-speech hallucination artifacts
+                                        clean_text = g_text.replace("<noise>", "").replace("00:00", "").replace("[silence]", "").replace("[blank_audio]", "").strip()
+                                        if clean_text and len(clean_text) > 1:
+                                            return clean_text
+                            else:
+                                err_txt = await resp.text()
+                                logger.debug(f"Gemini {model_name} HTTP {resp.status}: {err_txt[:150]}")
+                except Exception as e:
+                    logger.debug(f"Gemini model {model_name} failed: {e}")
+
+        # Tier 3: Groq Whisper-large-v3-turbo (if GROQ_API_KEY is configured)
         groq_key = os.getenv("GROQ_API_KEY", "").strip()
         if groq_key:
             try:
@@ -265,63 +356,15 @@ class MeetingCog(commands.Cog):
                         "https://api.groq.com/openai/v1/audio/transcriptions",
                         headers=headers,
                         data=form,
-                        timeout=aiohttp.ClientTimeout(total=25.0),
+                        timeout=aiohttp.ClientTimeout(total=20.0),
                     ) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             txt = data.get("text", "").strip()
                             if txt:
                                 return txt
-                        else:
-                            err_text = await resp.text()
-                            logger.warning(f"Groq Whisper HTTP {resp.status}, falling back to Gemini: {err_text[:200]}")
             except Exception as e:
-                logger.warning(f"Groq Whisper exception ({e}), falling back to Gemini.")
-
-        # 2. Resilient Multimodal Audio Fallback: Google Gemini
-        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-        if gemini_key:
-            b64_audio = base64.b64encode(wav_data).decode("utf-8")
-            models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
-
-            for model_name in models:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-                headers = {"Content-Type": "application/json", "x-goog-api-key": gemini_key}
-                payload = {
-                    "contents": [{
-                        "parts": [
-                            {"inline_data": {"mime_type": "audio/wav", "data": b64_audio}},
-                            {
-                                "text": (
-                                    "Transcribe this audio verbatim in its original spoken language (Hindi, English, or Hinglish). "
-                                    "Output ONLY the verbatim transcript text, without any commentary, disclaimers, timestamps, or quotes."
-                                )
-                            }
-                        ]
-                    }],
-                    "generationConfig": {"temperature": 0.1},
-                }
-
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            url,
-                            headers=headers,
-                            json=payload,
-                            timeout=aiohttp.ClientTimeout(total=30.0),
-                        ) as resp:
-                            if resp.status == 200:
-                                g_data = await resp.json()
-                                parts = g_data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                                if parts:
-                                    g_text = parts[0].get("text", "").strip()
-                                    if g_text:
-                                        return g_text
-                            else:
-                                err_txt = await resp.text()
-                                logger.warning(f"Gemini transcription model {model_name} HTTP {resp.status}: {err_txt[:200]}")
-                except Exception as e:
-                    logger.warning(f"Gemini transcription model {model_name} failed: {e}")
+                logger.debug(f"Groq Whisper exception: {e}")
 
         return ""
 
@@ -340,17 +383,18 @@ class MeetingCog(commands.Cog):
             }
 
         prompt = (
-            "You are the Lead Systems Architect & Executive Meeting Analyst for a high-performance team.\n"
-            "Analyze the following conversation transcript from a Discord voice meeting. "
-            "Extract key insights cleanly, ignoring casual chit-chat, filler words, or connection tests.\n\n"
+            "You are the Executive Meeting Intelligence Analyst for Kyro.\n"
+            "Analyze the following conversation transcript from a Discord voice meeting.\n"
+            "The conversation may be in Hindi, Hinglish (Hindi + English mixed), Marathi, or other Indian regional languages, or English.\n"
+            "Extract key insights cleanly, ignoring casual mic checks or filler words.\n\n"
             "Respond STRICTLY in valid JSON matching this schema:\n"
             "{\n"
-            '  "summary": "A concise 2-3 sentence executive summary of the meeting agenda and main takeaway.",\n'
+            '  "summary": "A concise 2-3 sentence executive summary of the meeting in clear English/Hinglish.",\n'
             '  "decisions": "Bullet points of key decisions agreed upon during the meeting (use markdown • bullet points).",\n'
             '  "action_items": "Bullet points of action items with assigned person if mentioned (e.g. • @Name: Task description).",\n'
             '  "topics": "Brief comma-separated key topics discussed."\n'
             "}\n\n"
-            f"Transcript:\n{full_transcript[:12000]}"
+            f"Transcript:\n{full_transcript[:15000]}"
         )
 
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
@@ -359,7 +403,7 @@ class MeetingCog(commands.Cog):
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
         }
 
-        models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
+        models = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"]
         for m in models:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
             try:
@@ -440,8 +484,10 @@ class MeetingCog(commands.Cog):
                         sink.speaker_chunks[uid] = 0
                     sink.speaker_buffers[uid] = prev_buf + sink.speaker_buffers[uid]
 
-        for uid, name in list(sink.speaker_names.items()):
-            chunks = sink.get_speaker_wav_chunks(uid, chunk_seconds=120)
+        all_uids = set(sink.speaker_names.keys()) | set(sink.speaker_buffers.keys())
+        for uid in all_uids:
+            name = sink.speaker_names.get(uid, f"Speaker-{uid}")
+            chunks = sink.get_speaker_wav_chunks(uid, chunk_seconds=30)
             if not chunks:
                 continue
 

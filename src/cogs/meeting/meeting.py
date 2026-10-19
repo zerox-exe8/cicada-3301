@@ -415,6 +415,25 @@ class MeetingCog(commands.Cog):
 
     # ------------------ COMMAND INTERFACE ------------------
 
+    def _build_usage_card(self, ctx: CustomContext) -> KyroContainer:
+        """Construct the Components V2 usage guide for meeting commands."""
+        prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(content="**Meeting Commands**")
+        container.add_separator(divider=True)
+        container.add_text(
+            f"{dot} `{prefix}meeting setup`\n"
+            f"{dot} `{prefix}meeting disable`\n"
+            f"{dot} `{prefix}meeting show`\n"
+            f"{dot} `{prefix}meeting start`\n"
+            f"{dot} `{prefix}meeting stop`"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        return container
+
     @commands.hybrid_group(
         name="meeting",
         description="Autonomous VC Meeting Recording & Intelligence Summarization.",
@@ -422,8 +441,11 @@ class MeetingCog(commands.Cog):
     )
     @commands.guild_only()
     async def meeting_group(self, ctx: CustomContext) -> None:
-        """Display live meeting status and configuration overview."""
-        await self._show_meeting_status(ctx)
+        """Display Meeting usage guide when invoked without subcommands."""
+        if ctx.invoked_subcommand is not None:
+            return
+        container = self._build_usage_card(ctx)
+        await send_container_response(ctx, container)
 
     @meeting_group.command(name="setup", description="Launch the step-by-step Meeting Intelligence setup wizard.")
     async def meeting_setup(self, ctx: CustomContext) -> None:
@@ -436,8 +458,43 @@ class MeetingCog(commands.Cog):
         container = wizard.get_dashboard_container()
         await send_container_response(ctx, container, view=wizard)
 
-    @meeting_group.command(name="status", aliases=["show", "info", "config"], description="Show Meeting status, feed channel, and metrics.")
-    async def meeting_status(self, ctx: CustomContext) -> None:
+    @meeting_group.command(name="disable", description="Disable Meeting Intelligence on this server.")
+    async def meeting_disable(self, ctx: CustomContext) -> None:
+        """Turn off meeting recording and summary generation."""
+        if not (ctx.author.guild_permissions.administrator or ctx.author.id == ctx.guild.owner_id):
+            await ctx.send_warning("Only administrators can disable Meeting Intelligence.")
+            return
+
+        session = self._sessions.pop(ctx.guild.id, None)
+        if session:
+            try:
+                session.voice_client.stop_listening()
+                await session.voice_client.disconnect(force=True)
+                session.sink.cleanup()
+            except Exception:
+                pass
+
+        await self.bot.db.execute(
+            "INSERT INTO meeting_settings (guild_id, enabled) VALUES ($1, FALSE) ON CONFLICT(guild_id) DO UPDATE SET enabled = FALSE;",
+            ctx.guild.id,
+        )
+
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(content="**Kyro Meeting Intelligence**\n> Meeting recording is now disabled on this server.")
+        container.add_separator(divider=True)
+        container.add_text(
+            f"> {dot} **Status:** {sw_off} `Disabled`\n"
+            f"> {dot} **Notice:** Use `{ctx.clean_prefix}meeting setup` or `,meeting start` to re-enable."
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Disabled by {ctx.author.display_name} • <t:{int(time.time())}:f>")
+        await send_container_response(ctx, container)
+
+    @meeting_group.command(name="show", aliases=["status", "info", "config"], description="Show Meeting status, feed channel, and metrics.")
+    async def meeting_show(self, ctx: CustomContext) -> None:
         """Display live meeting configuration and active session status."""
         await self._show_meeting_status(ctx)
 
@@ -528,6 +585,14 @@ class MeetingCog(commands.Cog):
         """Connect to author's voice channel and initiate recording sink."""
         guild = ctx.guild
         author = ctx.author
+
+        # Check if meeting intelligence is enabled
+        settings = await self._get_meeting_settings(guild.id)
+        if not settings.get("enabled", True):
+            await ctx.send_warning(
+                f"Meeting Intelligence is currently **disabled** on this server. Use `{ctx.clean_prefix}meeting setup` to enable."
+            )
+            return
 
         # Check voice state
         if not isinstance(author, discord.Member) or not author.voice or not author.voice.channel:

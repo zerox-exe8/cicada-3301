@@ -98,9 +98,10 @@ class ErrorHandler(commands.Cog):
                     IncidentSeverity.WARNING,
                     f"Command Exception: {cmd_name}",
                     str(error),
-                    action_taken="Returned ephemeral internal error container",
-                    resolved=True,
+                    action_taken="Sent error container to user; pending root cause resolution",
+                    resolved=False,
                     guild_id=ctx.guild.id if ctx.guild else None,
+                    traceback=tb,
                 )
             container.add_section(
                 content=(

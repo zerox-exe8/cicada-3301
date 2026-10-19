@@ -31,6 +31,8 @@ class Incident:
     action_taken: str = ""
     resolved: bool = True
     timestamp: datetime = field(default_factory=datetime.utcnow)
+    traceback: Optional[str] = None
+    ai_analysis: Optional[str] = None
 
     @property
     def formatted_time(self) -> str:

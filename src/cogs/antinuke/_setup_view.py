@@ -368,6 +368,13 @@ class AntinukeSetupWizard(ui.View):
         module_updates["role_protection"] = any(k in self.selected_modules for k in ["role_create", "role_delete", "role_update"])
         module_updates["webhook_protection"] = any(k in self.selected_modules for k in ["webhook_create", "webhook_delete"])
 
+        # Enable all 5 chat defense protections automatically
+        module_updates["anti_link_protection"] = True
+        module_updates["anti_invites_protection"] = True
+        module_updates["anti_scam_protection"] = True
+        module_updates["anti_spam_protection"] = True
+        module_updates["anti_mass_mention_protection"] = True
+
         # 3. Update master settings
         await self.bot.antinuke_mgr.update_settings(
             self.guild.id,

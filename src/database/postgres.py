@@ -677,6 +677,11 @@ class PostgresDatabase(BaseDatabase):
                 webhook_delete_protection BOOLEAN DEFAULT TRUE,
                 member_role_protection BOOLEAN DEFAULT TRUE,
                 sticker_protection BOOLEAN DEFAULT TRUE,
+                anti_link_protection BOOLEAN DEFAULT TRUE,
+                anti_invites_protection BOOLEAN DEFAULT TRUE,
+                anti_scam_protection BOOLEAN DEFAULT TRUE,
+                anti_spam_protection BOOLEAN DEFAULT TRUE,
+                anti_mass_mention_protection BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
@@ -691,6 +696,11 @@ class PostgresDatabase(BaseDatabase):
             "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS webhook_delete_protection BOOLEAN DEFAULT TRUE;",
             "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS member_role_protection BOOLEAN DEFAULT TRUE;",
             "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS sticker_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS anti_link_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS anti_invites_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS anti_scam_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS anti_spam_protection BOOLEAN DEFAULT TRUE;",
+            "ALTER TABLE antinuke_settings ADD COLUMN IF NOT EXISTS anti_mass_mention_protection BOOLEAN DEFAULT TRUE;",
             # Antinuke Whitelist and Extra Owners table
             """
             CREATE TABLE IF NOT EXISTS antinuke_whitelist (
@@ -766,6 +776,33 @@ class PostgresDatabase(BaseDatabase):
             );
             """,
             "CREATE INDEX IF NOT EXISTS idx_giveaways_active ON giveaways(guild_id, is_ended, ends_at);",
+            # Voice Meeting Sessions table
+            """
+            CREATE TABLE IF NOT EXISTS meeting_sessions (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                host_id BIGINT NOT NULL,
+                duration_seconds INT DEFAULT 0,
+                speaker_count INT DEFAULT 0,
+                summary TEXT DEFAULT '',
+                decisions TEXT DEFAULT '',
+                action_items TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_meeting_sessions_guild ON meeting_sessions(guild_id, created_at DESC);",
+            # Voice Meeting Configuration & Settings table
+            """
+            CREATE TABLE IF NOT EXISTS meeting_settings (
+                guild_id BIGINT PRIMARY KEY,
+                enabled BOOLEAN DEFAULT TRUE,
+                channel_id BIGINT,
+                privacy_mode VARCHAR(20) DEFAULT 'locked',
+                modules TEXT DEFAULT 'summary,decisions,action_items,topics,auto_leave',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

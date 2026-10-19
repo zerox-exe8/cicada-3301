@@ -188,6 +188,11 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
         ("Anti-Emoji Delete", cfg.get("emoji_protection", True)),
         ("Anti-Sticker Delete", cfg.get("sticker_protection", True)),
         ("Anti-Integration", cfg.get("integration_protection", True)),
+        ("Anti-Link", cfg.get("anti_link_protection", True)),
+        ("Anti-Invites", cfg.get("anti_invites_protection", True)),
+        ("Anti-Scam", cfg.get("anti_scam_protection", True)),
+        ("Anti-Spam", cfg.get("anti_spam_protection", True)),
+        ("Anti-Mass Mention", cfg.get("anti_mass_mention_protection", True)),
     ]
 
     # Straight vertical lines with > blockquote, switch on/off emoji first, then module name
@@ -250,7 +255,8 @@ def build_antinuke_status_card(
     all_keys = [
         "ban", "kick", "bot", "prune", "channel_create", "channel_delete", "channel_update",
         "role_create", "role_delete", "role_update", "everyone", "member_role", "vanity",
-        "webhook_create", "webhook_delete", "guild_update", "automod", "emoji", "sticker", "integration"
+        "webhook_create", "webhook_delete", "guild_update", "automod", "emoji", "sticker", "integration",
+        "anti_link", "anti_invites", "anti_scam", "anti_spam", "anti_mass_mention"
     ]
     if is_enabled:
         active_count = sum(1 for k in all_keys if bot.antinuke_mgr.is_module_enabled(guild.id, k))
@@ -431,6 +437,11 @@ class AntinukePanelCog(commands.Cog):
             enabled=True,
             punishment="strip_roles",
             log_channel_id=log_channel.id if log_channel else None,
+            anti_link_protection=True,
+            anti_invites_protection=True,
+            anti_scam_protection=True,
+            anti_spam_protection=True,
+            anti_mass_mention_protection=True,
         )
         self.bot.antinuke_mgr.snapshot_guild_state(guild)
 
@@ -442,7 +453,8 @@ class AntinukePanelCog(commands.Cog):
         all_keys = [
             "ban", "kick", "bot", "prune", "channel_create", "channel_delete", "channel_update",
             "role_create", "role_delete", "role_update", "everyone", "member_role", "vanity",
-            "webhook_create", "webhook_delete", "guild_update", "automod", "emoji", "sticker", "integration"
+            "webhook_create", "webhook_delete", "guild_update", "automod", "emoji", "sticker", "integration",
+            "anti_link", "anti_invites", "anti_scam", "anti_spam", "anti_mass_mention"
         ]
         active_count = sum(1 for k in all_keys if self.bot.antinuke_mgr.is_module_enabled(guild.id, k))
         total_count = len(all_keys)

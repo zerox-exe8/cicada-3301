@@ -35,6 +35,11 @@ PROTECTION_MODULES = [
     "webhook_create",
     "webhook_delete",
     "member_role",
+    "anti_link",
+    "anti_invites",
+    "anti_scam",
+    "anti_spam",
+    "anti_mass_mention",
 ]
 
 
@@ -101,6 +106,11 @@ class AntinukeManager:
                 "webhook_create_protection": bool(row.get("webhook_create_protection", wh_prot)),
                 "webhook_delete_protection": bool(row.get("webhook_delete_protection", wh_prot)),
                 "member_role_protection": bool(row.get("member_role_protection", True)),
+                "anti_link_protection": bool(row.get("anti_link_protection", True)),
+                "anti_invites_protection": bool(row.get("anti_invites_protection", True)),
+                "anti_scam_protection": bool(row.get("anti_scam_protection", True)),
+                "anti_spam_protection": bool(row.get("anti_spam_protection", True)),
+                "anti_mass_mention_protection": bool(row.get("anti_mass_mention_protection", True)),
             }
 
         # 2. Load whitelists
@@ -189,6 +199,11 @@ class AntinukeManager:
                 "webhook_create_protection": True,
                 "webhook_delete_protection": True,
                 "member_role_protection": True,
+                "anti_link_protection": True,
+                "anti_invites_protection": True,
+                "anti_scam_protection": True,
+                "anti_spam_protection": True,
+                "anti_mass_mention_protection": True,
             }
         return self._settings[guild_id]
 
@@ -253,6 +268,11 @@ class AntinukeManager:
             "webhook_create_protection",
             "webhook_delete_protection",
             "member_role_protection",
+            "anti_link_protection",
+            "anti_invites_protection",
+            "anti_scam_protection",
+            "anti_spam_protection",
+            "anti_mass_mention_protection",
         ]
 
         vals = [guild_id] + [cfg.get(c) for c in cols[1:]]

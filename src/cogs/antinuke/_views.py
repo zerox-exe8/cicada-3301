@@ -28,6 +28,11 @@ ALL_PROTECTION_KEYS = [
     "emoji",
     "sticker",
     "integration",
+    "anti_link",
+    "anti_invites",
+    "anti_scam",
+    "anti_spam",
+    "anti_mass_mention",
 ]
 
 
@@ -160,8 +165,17 @@ class AntinukeControlView(ui.View):
         if new_state:
             from src.cogs.antinuke.panel import ensure_unified_log_channel
             await ensure_unified_log_channel(self.bot, self.guild, interaction.user)
-
-        await self.bot.antinuke_mgr.update_settings(self.guild.id, enabled=new_state)
+            await self.bot.antinuke_mgr.update_settings(
+                self.guild.id,
+                enabled=True,
+                anti_link_protection=True,
+                anti_invites_protection=True,
+                anti_scam_protection=True,
+                anti_spam_protection=True,
+                anti_mass_mention_protection=True,
+            )
+        else:
+            await self.bot.antinuke_mgr.update_settings(self.guild.id, enabled=False)
 
         from src.cogs.antinuke.panel import build_antinuke_card
         container, new_view = build_antinuke_card(self.bot, self.guild, self.author_id)

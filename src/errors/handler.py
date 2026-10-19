@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from src.utils.containers import KyroContainer, send_container_response
@@ -14,12 +15,23 @@ class ErrorHandler(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self._default_tree_error = None
+
+    async def cog_load(self) -> None:
+        """Register application command error handler."""
+        self._default_tree_error = self.bot.tree.on_error
+        self.bot.tree.on_error = self.on_app_command_error
+
+    async def cog_unload(self) -> None:
+        """Restore default application command error handler."""
+        if self._default_tree_error:
+            self.bot.tree.on_error = self._default_tree_error
 
     @commands.Cog.listener()
     async def on_command_error(
         self, ctx: commands.Context, error: commands.CommandError
     ) -> None:
-        """Handle errors occurring during command execution."""
+        """Handle errors occurring during text/hybrid prefix command execution."""
         if hasattr(ctx.command, "on_error"):
             return
 
@@ -79,6 +91,155 @@ class ErrorHandler(commands.Cog):
                 )
             )
 
+        elif isinstance(error, commands.MemberNotFound):
+            arg = getattr(error, "argument", "specified")
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Member Not Found**\n"
+                    f"> Could not find member `{arg}` in this server.\n"
+                    f"> Please mention the member, use their username, or provide their User ID.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.UserNotFound):
+            arg = getattr(error, "argument", "specified")
+            container.add_section(
+                content=(
+                    f"**{warn_icon}User Not Found**\n"
+                    f"> Could not find user `{arg}`.\n"
+                    f"> Please provide a valid User ID or mention.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.RoleNotFound):
+            arg = getattr(error, "argument", "specified")
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Role Not Found**\n"
+                    f"> Could not find role `{arg}` in this server.\n"
+                    f"> Please mention the role or provide its exact name or ID.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, (commands.ChannelNotFound, commands.ChannelNotReadable)):
+            arg = getattr(error, "argument", "specified")
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Channel Not Found**\n"
+                    f"> Could not find or access channel `{arg}`.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.MessageNotFound):
+            arg = getattr(error, "argument", "specified")
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Message Not Found**\n"
+                    f"> Could not find message `{arg}` in this channel.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.ThreadNotFound):
+            arg = getattr(error, "argument", "specified")
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Thread Not Found**\n"
+                    f"> Could not find thread `{arg}`.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.BadUnionArgument):
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Invalid Parameter**\n"
+                    f"> Could not convert parameter `{error.param.name}` to a valid target.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.BadLiteralArgument):
+            literals = ", ".join(f"`{lit}`" for lit in error.literals)
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Invalid Option**\n"
+                    f"> Invalid choice for parameter `{error.param.name}`. Expected one of: {literals}.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.RangeError):
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Value Out of Range**\n"
+                    f"> Value `{error.value}` is outside the permitted range (`{error.minimum}` - `{error.maximum}`).\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.BadArgument):
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Invalid Argument**\n"
+                    f"> {str(error)}\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.TooManyArguments):
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Too Many Arguments**\n"
+                    f"> You provided extra arguments that are not accepted.\n"
+                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                )
+            )
+
+        elif isinstance(error, commands.DisabledCommand):
+            container.add_section(
+                content=(
+                    f"**{lock_icon}Command Disabled**\n"
+                    f"> This command is temporarily disabled."
+                )
+            )
+
+        elif isinstance(error, commands.NoPrivateMessage):
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Server Only**\n"
+                    f"> This command can only be used inside a Discord server."
+                )
+            )
+
+        elif isinstance(error, commands.MaxConcurrencyReached):
+            container.add_section(
+                content=(
+                    f"**{clock_icon}Concurrency Limit Reached**\n"
+                    f"> This command is already running the maximum allowed number of times ({error.number}). Try again shortly."
+                )
+            )
+
+        elif isinstance(error, discord.Forbidden):
+            container.add_section(
+                content=(
+                    f"**{lock_icon}Permission Denied**\n"
+                    f"> I do not have sufficient Discord permissions or role hierarchy to perform this action."
+                )
+            )
+
+        elif isinstance(error, discord.NotFound):
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Resource Not Found**\n"
+                    f"> The requested Discord resource (channel, message, user, or role) could not be found."
+                )
+            )
+
         elif isinstance(error, discord.HTTPException) and error.status == 429:
             logger.error(
                 f"Discord REST API 429 Rate Limit active during '{ctx.command}': {error}. "
@@ -117,6 +278,116 @@ class ErrorHandler(commands.Cog):
             await send_container_response(ctx, container, ephemeral=True)
         except Exception as e:
             logger.debug(f"Failed to dispatch error container: {e}")
+
+    async def on_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors occurring during application / slash command execution."""
+        error = getattr(error, "original", error)
+
+        e_reg = getattr(self.bot, "custom_emojis", None)
+        err_icon = f"{e_reg.get('icons_wrong', e_reg.get('icon_x', ''))} " if e_reg else ""
+        warn_icon = f"{e_reg.get('icons_warning', '')} " if e_reg else ""
+        clock_icon = f"{e_reg.get('icons_clock', '')} " if e_reg else ""
+        lock_icon = f"{e_reg.get('icons_locked', e_reg.get('icon_lock', ''))} " if e_reg else ""
+
+        container = KyroContainer(accent_color=None)
+
+        if isinstance(error, app_commands.CommandOnCooldown):
+            container.add_section(
+                content=(
+                    f"**{clock_icon}Cooldown Active**\n"
+                    f"> This command is currently on cooldown. Try again in `{error.retry_after:.1f}s`."
+                )
+            )
+
+        elif isinstance(error, app_commands.MissingPermissions):
+            missing_perms = ", ".join(f"`{p}`" for p in error.missing_permissions)
+            container.add_section(
+                content=(
+                    f"**{lock_icon}Permission Denied**\n"
+                    f"> You need the following permissions to execute this command:\n> {missing_perms}"
+                )
+            )
+
+        elif isinstance(error, app_commands.BotMissingPermissions):
+            missing_perms = ", ".join(f"`{p}`" for p in error.missing_permissions)
+            container.add_section(
+                content=(
+                    f"**{lock_icon}Bot Missing Permissions**\n"
+                    f"> I need the following permissions in this channel:\n> {missing_perms}"
+                )
+            )
+
+        elif isinstance(error, app_commands.CheckFailure):
+            container.add_section(
+                content=(
+                    f"**{lock_icon}Access Denied**\n"
+                    f"> {str(error) or 'You do not have permission to use this command.'}"
+                )
+            )
+
+        elif isinstance(error, app_commands.TransformerError):
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Invalid Parameter**\n"
+                    f"> Could not parse value `{error.value}` for parameter `{error.param.name}`."
+                )
+            )
+
+        elif isinstance(error, discord.Forbidden):
+            container.add_section(
+                content=(
+                    f"**{lock_icon}Permission Denied**\n"
+                    f"> I do not have sufficient Discord permissions or role hierarchy to perform this action."
+                )
+            )
+
+        elif isinstance(error, discord.NotFound):
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Resource Not Found**\n"
+                    f"> The requested Discord resource (channel, message, user, or role) was not found."
+                )
+            )
+
+        elif isinstance(error, discord.HTTPException) and error.status == 429:
+            logger.error(
+                f"Discord REST API 429 Rate Limit active during slash command '{interaction.command}': {error}."
+            )
+            return
+
+        else:
+            import traceback
+            tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+            cmd_name = interaction.command.qualified_name if interaction.command else "Unknown"
+            logger.error(f"Unhandled slash error in '{cmd_name}': {error}\n{tb}")
+            if hasattr(self.bot, "sentinel") and self.bot.sentinel:
+                from src.sentinel.models import SubsystemType, IncidentSeverity
+                self.bot.sentinel.record_incident(
+                    SubsystemType.COMMAND,
+                    IncidentSeverity.WARNING,
+                    f"Slash Command Exception: {cmd_name}",
+                    str(error),
+                    action_taken="Sent error container to user; pending root cause resolution",
+                    resolved=False,
+                    guild_id=interaction.guild_id,
+                    traceback=tb,
+                )
+            container.add_section(
+                content=(
+                    f"**{err_icon}Internal Error**\n"
+                    f"> `{error}`"
+                )
+            )
+
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {interaction.user.display_name}")
+
+        try:
+            await send_container_response(interaction, container, ephemeral=True)
+        except Exception as e:
+            logger.debug(f"Failed to dispatch slash error container: {e}")
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -52,6 +52,7 @@ class MeetingAudioSink(AudioSinkBase):
         self.speaker_names: dict[Any, str] = {}
         self.speaker_chunks: dict[Any, int] = {}
         self._ssrc_to_uid: dict[int, Any] = {}
+        self.voice_client: Optional[Any] = None
 
     def wants_opus(self) -> bool:
         """Request decoded 48kHz 16-bit stereo PCM from voice_recv."""
@@ -59,80 +60,83 @@ class MeetingAudioSink(AudioSinkBase):
 
     def write(self, user: Optional[discord.Member | discord.User], data: voice_recv.VoiceData) -> None:
         """Receive audio frame, downsample to 16kHz mono, and buffer with SSRC tracking."""
-        if not data or not data.pcm:
-            return
-
-        pcm = data.pcm
-        if len(pcm) < 12:
-            return
-
-        # Downsample 48kHz stereo 16-bit -> 16kHz mono (taking left channel every 3rd sample)
         try:
-            pcm_array = array.array("h", pcm)
-            downsampled = pcm_array[0::6].tobytes()
+            if not data or not data.pcm:
+                return
+
+            pcm = data.pcm
+            if len(pcm) < 12:
+                return
+
+            # Downsample 48kHz stereo 16-bit -> 16kHz mono (taking left channel every 3rd sample)
+            try:
+                pcm_array = array.array("h", pcm)
+                downsampled = pcm_array[0::6].tobytes()
+            except Exception:
+                return
+
+            # Resolve speaker identification
+            uid: Any = None
+            name: str = "Unknown Speaker"
+
+            ssrc = getattr(data.packet, "ssrc", None) if hasattr(data, "packet") else None
+
+            if user and not getattr(user, "bot", False):
+                uid = user.id
+                name = getattr(user, "display_name", str(user))
+                if ssrc:
+                    self._ssrc_to_uid[ssrc] = uid
+            elif ssrc:
+                # Check if SSRC was mapped before
+                if ssrc in self._ssrc_to_uid:
+                    uid = self._ssrc_to_uid[ssrc]
+                    name = self.speaker_names.get(uid, f"Speaker-{ssrc}")
+                else:
+                    # Try resolving via voice_client SSRC table
+                    vc = getattr(self, "voice_client", None) or getattr(self, "_voice_client", None)
+                    if vc:
+                        resolved_id = getattr(vc, "_get_id_from_ssrc", lambda s: None)(ssrc)
+                        if resolved_id:
+                            guild = getattr(vc, "guild", None)
+                            member = guild.get_member(resolved_id) if guild else None
+                            if member:
+                                if getattr(member, "bot", False):
+                                    return
+                                uid = member.id
+                                name = member.display_name
+                            else:
+                                uid = resolved_id
+                                name = f"User-{resolved_id}"
+                            self._ssrc_to_uid[ssrc] = uid
+
+                if not uid:
+                    uid = f"ssrc_{ssrc}"
+                    name = f"Speaker-{ssrc}"
+            else:
+                return
+
+            # If audio was previously recorded under provisional 'ssrc_{ssrc}', merge into resolved uid
+            if ssrc:
+                provisional_key = f"ssrc_{ssrc}"
+                if provisional_key in self.speaker_buffers and uid != provisional_key:
+                    prev_audio = self.speaker_buffers.pop(provisional_key, bytearray())
+                    self.speaker_names.pop(provisional_key, None)
+                    self.speaker_chunks.pop(provisional_key, None)
+                    if uid not in self.speaker_buffers:
+                        self.speaker_buffers[uid] = bytearray()
+                        self.speaker_names[uid] = name
+                        self.speaker_chunks[uid] = 0
+                    self.speaker_buffers[uid] = prev_audio + self.speaker_buffers[uid]
+
+            if uid not in self.speaker_buffers:
+                self.speaker_buffers[uid] = bytearray()
+                self.speaker_names[uid] = name
+                self.speaker_chunks[uid] = 0
+
+            self.speaker_buffers[uid].extend(downsampled)
+            self.speaker_chunks[uid] += 1
         except Exception:
             return
-
-        # Resolve speaker identification
-        uid: Any = None
-        name: str = "Unknown Speaker"
-
-        ssrc = getattr(data.packet, "ssrc", None) if hasattr(data, "packet") else None
-
-        if user and not getattr(user, "bot", False):
-            uid = user.id
-            name = getattr(user, "display_name", str(user))
-            if ssrc:
-                self._ssrc_to_uid[ssrc] = uid
-        elif ssrc:
-            # Check if SSRC was mapped before
-            if ssrc in self._ssrc_to_uid:
-                uid = self._ssrc_to_uid[ssrc]
-                name = self.speaker_names.get(uid, f"Speaker-{ssrc}")
-            else:
-                # Try resolving via voice_client SSRC table
-                vc = getattr(self, "voice_client", None)
-                if vc:
-                    resolved_id = getattr(vc, "_get_id_from_ssrc", lambda s: None)(ssrc)
-                    if resolved_id:
-                        guild = getattr(vc, "guild", None)
-                        member = guild.get_member(resolved_id) if guild else None
-                        if member:
-                            if getattr(member, "bot", False):
-                                return
-                            uid = member.id
-                            name = member.display_name
-                        else:
-                            uid = resolved_id
-                            name = f"User-{resolved_id}"
-                        self._ssrc_to_uid[ssrc] = uid
-
-            if not uid:
-                uid = f"ssrc_{ssrc}"
-                name = f"Speaker-{ssrc}"
-        else:
-            return
-
-        # If audio was previously recorded under provisional 'ssrc_{ssrc}', merge into resolved uid
-        if ssrc:
-            provisional_key = f"ssrc_{ssrc}"
-            if provisional_key in self.speaker_buffers and uid != provisional_key:
-                prev_audio = self.speaker_buffers.pop(provisional_key, bytearray())
-                self.speaker_names.pop(provisional_key, None)
-                self.speaker_chunks.pop(provisional_key, None)
-                if uid not in self.speaker_buffers:
-                    self.speaker_buffers[uid] = bytearray()
-                    self.speaker_names[uid] = name
-                    self.speaker_chunks[uid] = 0
-                self.speaker_buffers[uid] = prev_audio + self.speaker_buffers[uid]
-
-        if uid not in self.speaker_buffers:
-            self.speaker_buffers[uid] = bytearray()
-            self.speaker_names[uid] = name
-            self.speaker_chunks[uid] = 0
-
-        self.speaker_buffers[uid].extend(downsampled)
-        self.speaker_chunks[uid] += 1
 
     def get_speaker_wav_chunks(self, user_id: Any, chunk_seconds: int = 120) -> list[io.BytesIO]:
         """Split a speaker's PCM buffer into WAV chunks (default 120s max each) for robust API ingestion."""
@@ -764,6 +768,19 @@ class MeetingCog(commands.Cog):
         except Exception:
             pass
 
+        # Cleanly disconnect any idle, stale, or existing voice connection before attaching VoiceRecvClient
+        existing_vc = guild.voice_client
+        if existing_vc:
+            try:
+                await existing_vc.disconnect(force=True)
+            except Exception:
+                pass
+            try:
+                existing_vc.cleanup()
+            except Exception:
+                pass
+            await asyncio.sleep(0.3)
+
         # Auto-ensure meeting channel if not yet created
         settings = await self._get_meeting_settings(guild.id)
         if not settings.get("channel_id"):
@@ -787,23 +804,43 @@ class MeetingCog(commands.Cog):
             )
             return
 
-        # Connect with VoiceRecvClient
+        # Connect with VoiceRecvClient (reconnect=False prevents reconnection oscillation)
         try:
             voice_client: voice_recv.VoiceRecvClient = await vc.connect(
-                cls=voice_recv.VoiceRecvClient, timeout=15.0, reconnect=True
+                cls=voice_recv.VoiceRecvClient, timeout=20.0, reconnect=False
             )
         except Exception as e:
             logger.error(f"Failed to connect to VC for meeting in guild {guild.id}: {e}", exc_info=True)
-            await ctx.send_error(f"Could not connect to voice channel: `{e}`")
+            await ctx.send_error(f"Could not connect to voice channel: `{e}`", ephemeral=False)
+            return
+
+        # Wait up to 5 seconds for Discord voice gateway encryption handshake and secret key to populate
+        handshake_ok = False
+        for _ in range(50):
+            if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
+                handshake_ok = True
+                break
+            await asyncio.sleep(0.1)
+
+        if not handshake_ok:
+            try:
+                await voice_client.disconnect(force=True)
+            except Exception:
+                pass
+            await ctx.send_error("Could not complete Discord voice encryption handshake. Please try again.", ephemeral=False)
             return
 
         sink = MeetingAudioSink(noise_gate=0)
+        sink.voice_client = voice_client
         try:
             voice_client.listen(sink)
         except Exception as e:
             logger.error(f"Failed to attach sink in guild {guild.id}: {e}", exc_info=True)
-            await voice_client.disconnect(force=True)
-            await ctx.send_error(f"Failed to initiate voice receive pipeline: `{e}`")
+            try:
+                await voice_client.disconnect(force=True)
+            except Exception:
+                pass
+            await ctx.send_error(f"Failed to initiate voice receive pipeline: `{e}`", ephemeral=False)
             return
 
         self._sessions[guild.id] = MeetingSession(
@@ -881,6 +918,10 @@ class MeetingCog(commands.Cog):
         guild = member.guild
         session = self._sessions.get(guild.id)
         if not session:
+            return
+
+        # Ignore bot's own voice updates to prevent self-disconnect triggers
+        if member.bot or (self.bot.user and member.id == self.bot.user.id):
             return
 
         # Check if auto_leave is enabled in guild settings

@@ -54,7 +54,7 @@ class CustomContext(commands.Context):
         self,
         message: str,
         title: str = "Error",
-        ephemeral: bool = True,
+        ephemeral: bool = False,
     ) -> Any:
         """Send a formatted error container card."""
         e_reg = getattr(self.bot, "custom_emojis", None)

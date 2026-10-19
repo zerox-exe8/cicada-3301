@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import array
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -38,81 +40,137 @@ logger = logging.getLogger("Kyro.Meeting")
 class MeetingAudioSink(AudioSinkBase):
     """
     High-performance Voice Sink for multi-speaker meetings.
-    Applies real-time noise gating and downsamples 48kHz stereo to 16kHz mono PCM,
-    reducing memory consumption by 600% while optimizing for Whisper STT.
+    Downsamples 48kHz stereo to 16kHz mono PCM using fast array operations,
+    buffers per speaker (with SSRC resolution and buffer merging),
+    and optimizes audio for high-accuracy Gemini/Whisper transcription.
     """
 
-    def __init__(self, noise_gate: int = 250) -> None:
+    def __init__(self, noise_gate: int = 0) -> None:
         super().__init__()
         self.noise_gate = noise_gate
-        self.speaker_buffers: dict[int, bytearray] = {}
-        self.speaker_names: dict[int, str] = {}
-        self.speaker_chunks: dict[int, int] = {}
+        self.speaker_buffers: dict[Any, bytearray] = {}
+        self.speaker_names: dict[Any, str] = {}
+        self.speaker_chunks: dict[Any, int] = {}
+        self._ssrc_to_uid: dict[int, Any] = {}
 
     def wants_opus(self) -> bool:
         """Request decoded 48kHz 16-bit stereo PCM from voice_recv."""
         return False
 
     def write(self, user: Optional[discord.Member | discord.User], data: voice_recv.VoiceData) -> None:
-        """Receive 20ms audio frame, filter silence, downsample to 16kHz mono, and buffer."""
-        if not user or user.bot or not data.pcm:
+        """Receive audio frame, downsample to 16kHz mono, and buffer with SSRC tracking."""
+        if not data or not data.pcm:
             return
 
         pcm = data.pcm
-        if len(pcm) < 3840:
+        if len(pcm) < 12:
             return
 
-        # Fast noise gate / amplitude peak check
+        # Downsample 48kHz stereo 16-bit -> 16kHz mono (taking left channel every 3rd sample)
         try:
-            sample_count = len(pcm) // 2
-            samples = struct.unpack(f"<{sample_count}h", pcm)
-            peak = max(abs(s) for s in samples)
-            if peak < self.noise_gate:
-                return
+            pcm_array = array.array("h", pcm)
+            downsampled = pcm_array[0::6].tobytes()
         except Exception:
             return
 
-        # Downsample 48kHz stereo -> 16kHz mono (exact 3:1 integer step)
-        downsampled = bytearray()
-        pcm_len = len(pcm)
-        for i in range(0, pcm_len - 11, 12):
-            try:
-                left, right = struct.unpack_from("<hh", pcm, i)
-                mono = (left + right) // 2
-                downsampled.extend(struct.pack("<h", mono))
-            except Exception:
-                break
+        # Resolve speaker identification
+        uid: Any = None
+        name: str = "Unknown Speaker"
 
-        uid = user.id
+        ssrc = getattr(data.packet, "ssrc", None) if hasattr(data, "packet") else None
+
+        if user and not getattr(user, "bot", False):
+            uid = user.id
+            name = getattr(user, "display_name", str(user))
+            if ssrc:
+                self._ssrc_to_uid[ssrc] = uid
+        elif ssrc:
+            # Check if SSRC was mapped before
+            if ssrc in self._ssrc_to_uid:
+                uid = self._ssrc_to_uid[ssrc]
+                name = self.speaker_names.get(uid, f"Speaker-{ssrc}")
+            else:
+                # Try resolving via voice_client SSRC table
+                vc = getattr(self, "voice_client", None)
+                if vc:
+                    resolved_id = getattr(vc, "_get_id_from_ssrc", lambda s: None)(ssrc)
+                    if resolved_id:
+                        guild = getattr(vc, "guild", None)
+                        member = guild.get_member(resolved_id) if guild else None
+                        if member:
+                            if getattr(member, "bot", False):
+                                return
+                            uid = member.id
+                            name = member.display_name
+                        else:
+                            uid = resolved_id
+                            name = f"User-{resolved_id}"
+                        self._ssrc_to_uid[ssrc] = uid
+
+            if not uid:
+                uid = f"ssrc_{ssrc}"
+                name = f"Speaker-{ssrc}"
+        else:
+            return
+
+        # If audio was previously recorded under provisional 'ssrc_{ssrc}', merge into resolved uid
+        if ssrc:
+            provisional_key = f"ssrc_{ssrc}"
+            if provisional_key in self.speaker_buffers and uid != provisional_key:
+                prev_audio = self.speaker_buffers.pop(provisional_key, bytearray())
+                self.speaker_names.pop(provisional_key, None)
+                self.speaker_chunks.pop(provisional_key, None)
+                if uid not in self.speaker_buffers:
+                    self.speaker_buffers[uid] = bytearray()
+                    self.speaker_names[uid] = name
+                    self.speaker_chunks[uid] = 0
+                self.speaker_buffers[uid] = prev_audio + self.speaker_buffers[uid]
+
         if uid not in self.speaker_buffers:
             self.speaker_buffers[uid] = bytearray()
-            self.speaker_names[uid] = user.display_name
+            self.speaker_names[uid] = name
             self.speaker_chunks[uid] = 0
 
         self.speaker_buffers[uid].extend(downsampled)
         self.speaker_chunks[uid] += 1
 
-    def get_speaker_wav(self, user_id: int) -> Optional[io.BytesIO]:
-        """Convert a speaker's 16kHz mono PCM buffer into a compliant in-memory WAV buffer."""
+    def get_speaker_wav_chunks(self, user_id: Any, chunk_seconds: int = 120) -> list[io.BytesIO]:
+        """Split a speaker's PCM buffer into WAV chunks (default 120s max each) for robust API ingestion."""
         buf = self.speaker_buffers.get(user_id)
-        if not buf or len(buf) < 16000 * 2:  # Less than 1 second of speech
-            return None
+        if not buf or len(buf) < 16000 * 2 * 0.3:  # Less than 0.3 seconds of speech
+            return []
 
-        wav_io = io.BytesIO()
-        with wave.open(wav_io, "wb") as wf:
-            wf.setnchannels(1)  # Mono
-            wf.setsampwidth(2)  # 16-bit
-            wf.setframerate(16000)  # 16kHz
-            wf.writeframes(bytes(buf))
+        chunk_bytes = chunk_seconds * 16000 * 2
+        chunks: list[io.BytesIO] = []
 
-        wav_io.seek(0)
-        return wav_io
+        for offset in range(0, len(buf), chunk_bytes):
+            slice_data = bytes(buf[offset : offset + chunk_bytes])
+            if len(slice_data) < 16000 * 2 * 0.3:
+                continue
+
+            wav_io = io.BytesIO()
+            with wave.open(wav_io, "wb") as wf:
+                wf.setnchannels(1)  # Mono
+                wf.setsampwidth(2)  # 16-bit
+                wf.setframerate(16000)  # 16kHz
+                wf.writeframes(slice_data)
+
+            wav_io.seek(0)
+            chunks.append(wav_io)
+
+        return chunks
+
+    def get_speaker_wav(self, user_id: Any) -> Optional[io.BytesIO]:
+        """Convert a speaker's 16kHz mono PCM buffer into a single in-memory WAV buffer."""
+        chunks = self.get_speaker_wav_chunks(user_id, chunk_seconds=600)
+        return chunks[0] if chunks else None
 
     def cleanup(self) -> None:
         """Clear memory buffers."""
         self.speaker_buffers.clear()
         self.speaker_names.clear()
         self.speaker_chunks.clear()
+        self._ssrc_to_uid.clear()
 
 
 @dataclass
@@ -180,39 +238,86 @@ class MeetingCog(commands.Cog):
     # ------------------ CORE AI TRANSCRIPTION & SUMMARIZATION ------------------
 
     async def _transcribe_audio(self, wav_io: io.BytesIO) -> str:
-        """Transcribe a single speaker's WAV audio using Groq Whisper-large-v3-turbo."""
-        api_key = os.getenv("GROQ_API_KEY", "").strip()
-        if not api_key:
-            logger.warning("GROQ_API_KEY not configured for meeting transcription.")
+        """
+        Transcribe a single WAV audio chunk using Groq Whisper with automatic fallback to Google Gemini.
+        Guarantees resilient transcription even if Groq is unconfigured or rate-limited.
+        """
+        wav_data = wav_io.read()
+        if not wav_data or len(wav_data) < 100:
             return ""
 
-        wav_data = wav_io.read()
-        if len(wav_data) > 25 * 1024 * 1024:
-            wav_data = wav_data[: 24 * 1024 * 1024]
+        # 1. Primary: Groq Whisper-large-v3-turbo (if key is set)
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        if groq_key:
+            try:
+                form = aiohttp.FormData()
+                form.add_field("file", wav_data, filename="speaker.wav", content_type="audio/wav")
+                form.add_field("model", "whisper-large-v3-turbo")
+                form.add_field("response_format", "json")
+                headers = {"Authorization": f"Bearer {groq_key}"}
 
-        form = aiohttp.FormData()
-        form.add_field("file", wav_data, filename="speaker.wav", content_type="audio/wav")
-        form.add_field("model", "whisper-large-v3-turbo")
-        form.add_field("response_format", "json")
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "https://api.groq.com/openai/v1/audio/transcriptions",
+                        headers=headers,
+                        data=form,
+                        timeout=aiohttp.ClientTimeout(total=25.0),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            txt = data.get("text", "").strip()
+                            if txt:
+                                return txt
+                        else:
+                            err_text = await resp.text()
+                            logger.warning(f"Groq Whisper HTTP {resp.status}, falling back to Gemini: {err_text[:200]}")
+            except Exception as e:
+                logger.warning(f"Groq Whisper exception ({e}), falling back to Gemini.")
 
-        headers = {"Authorization": f"Bearer {api_key}"}
+        # 2. Resilient Multimodal Audio Fallback: Google Gemini
+        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if gemini_key:
+            b64_audio = base64.b64encode(wav_data).decode("utf-8")
+            models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.groq.com/openai/v1/audio/transcriptions",
-                    headers=headers,
-                    data=form,
-                    timeout=aiohttp.ClientTimeout(total=45.0),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data.get("text", "").strip()
-                    else:
-                        err_text = await resp.text()
-                        logger.warning(f"Groq Whisper transcription error (HTTP {resp.status}): {err_text}")
-        except Exception as e:
-            logger.error(f"Error calling Groq Whisper API: {e}", exc_info=True)
+            for model_name in models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+                headers = {"Content-Type": "application/json", "x-goog-api-key": gemini_key}
+                payload = {
+                    "contents": [{
+                        "parts": [
+                            {"inline_data": {"mime_type": "audio/wav", "data": b64_audio}},
+                            {
+                                "text": (
+                                    "Transcribe this audio verbatim in its original spoken language (Hindi, English, or Hinglish). "
+                                    "Output ONLY the verbatim transcript text, without any commentary, disclaimers, timestamps, or quotes."
+                                )
+                            }
+                        ]
+                    }],
+                    "generationConfig": {"temperature": 0.1},
+                }
+
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            url,
+                            headers=headers,
+                            json=payload,
+                            timeout=aiohttp.ClientTimeout(total=30.0),
+                        ) as resp:
+                            if resp.status == 200:
+                                g_data = await resp.json()
+                                parts = g_data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    g_text = parts[0].get("text", "").strip()
+                                    if g_text:
+                                        return g_text
+                            else:
+                                err_txt = await resp.text()
+                                logger.warning(f"Gemini transcription model {model_name} HTTP {resp.status}: {err_txt[:200]}")
+                except Exception as e:
+                    logger.warning(f"Gemini transcription model {model_name} failed: {e}")
 
         return ""
 
@@ -241,7 +346,7 @@ class MeetingCog(commands.Cog):
             '  "action_items": "Bullet points of action items with assigned person if mentioned (e.g. • @Name: Task description).",\n'
             '  "topics": "Brief comma-separated key topics discussed."\n'
             "}\n\n"
-            f"Transcript:\n{full_transcript[:8000]}"
+            f"Transcript:\n{full_transcript[:12000]}"
         )
 
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
@@ -250,27 +355,35 @@ class MeetingCog(commands.Cog):
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
         }
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent",
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=15.0),
-                ) as resp:
-                    if resp.status == 200:
-                        g_data = await resp.json()
-                        parts = g_data.get("candidates", [])[0].get("content", {}).get("parts", [])
-                        if parts:
-                            parsed = json.loads(parts[0].get("text", "{}"))
-                            return {
-                                "summary": parsed.get("summary", "Summary synthesized successfully."),
-                                "decisions": parsed.get("decisions", "• No explicit decisions recorded."),
-                                "action_items": parsed.get("action_items", "• No pending action items."),
-                                "topics": parsed.get("topics", "General discussion"),
-                            }
-        except Exception as e:
-            logger.error(f"Error calling Gemini intelligence for meeting: {e}", exc_info=True)
+        models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
+        for m in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        json=payload,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=20.0),
+                    ) as resp:
+                        if resp.status == 200:
+                            g_data = await resp.json()
+                            parts = g_data.get("candidates", [])[0].get("content", {}).get("parts", [])
+                            if parts:
+                                raw_text = parts[0].get("text", "{}")
+                                if "```json" in raw_text:
+                                    raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+                                elif "```" in raw_text:
+                                    raw_text = raw_text.split("```")[1].split("```")[0].strip()
+                                parsed = json.loads(raw_text)
+                                return {
+                                    "summary": parsed.get("summary", "Summary synthesized successfully."),
+                                    "decisions": parsed.get("decisions", "• No explicit decisions recorded."),
+                                    "action_items": parsed.get("action_items", "• No pending action items."),
+                                    "topics": parsed.get("topics", "General discussion"),
+                                }
+            except Exception as e:
+                logger.error(f"Error calling Gemini intelligence ({m}) for meeting: {e}", exc_info=True)
 
         return {
             "summary": "Meeting concluded. Discussion transcribed.",
@@ -303,18 +416,40 @@ class MeetingCog(commands.Cog):
         duration = int(time.time() - session.start_time)
         duration_fmt = f"{duration // 60}m {duration % 60}s"
 
-        # Transcribe each active speaker
+        # Transcribe each active speaker using safe chunks
         speaker_transcripts: list[tuple[str, str]] = []
         sink = session.sink
 
-        for uid, name in sink.speaker_names.items():
-            wav_buf = sink.get_speaker_wav(uid)
-            if not wav_buf:
+        # Final pass: attempt resolving any remaining provisional ssrc speakers
+        vc = session.voice_client
+        if vc:
+            for ssrc, uid in list(sink._ssrc_to_uid.items()):
+                prov_key = f"ssrc_{ssrc}"
+                if prov_key in sink.speaker_buffers:
+                    prev_buf = sink.speaker_buffers.pop(prov_key, bytearray())
+                    sink.speaker_names.pop(prov_key, None)
+                    sink.speaker_chunks.pop(prov_key, None)
+                    if uid not in sink.speaker_buffers:
+                        m = guild.get_member(uid)
+                        sink.speaker_buffers[uid] = bytearray()
+                        sink.speaker_names[uid] = m.display_name if m else f"User-{uid}"
+                        sink.speaker_chunks[uid] = 0
+                    sink.speaker_buffers[uid] = prev_buf + sink.speaker_buffers[uid]
+
+        for uid, name in list(sink.speaker_names.items()):
+            chunks = sink.get_speaker_wav_chunks(uid, chunk_seconds=120)
+            if not chunks:
                 continue
 
-            text = await self._transcribe_audio(wav_buf)
-            if text and len(text.strip()) > 3:
-                speaker_transcripts.append((name, text.strip()))
+            speaker_texts: list[str] = []
+            for ch in chunks:
+                chunk_text = await self._transcribe_audio(ch)
+                if chunk_text:
+                    speaker_texts.append(chunk_text)
+
+            full_speaker_text = " ".join(speaker_texts).strip()
+            if full_speaker_text and len(full_speaker_text) > 3:
+                speaker_transcripts.append((name, full_speaker_text))
 
         sink.cleanup()
         dot = self.bot.custom_emojis.get("heart_dot", "•")
@@ -662,7 +797,7 @@ class MeetingCog(commands.Cog):
             await ctx.send_error(f"Could not connect to voice channel: `{e}`")
             return
 
-        sink = MeetingAudioSink(noise_gate=250)
+        sink = MeetingAudioSink(noise_gate=0)
         try:
             voice_client.listen(sink)
         except Exception as e:

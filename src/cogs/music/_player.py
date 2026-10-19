@@ -270,9 +270,10 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"Direct stream URL resolve notice for '{stream_url}': {e}")
 
-        # ── Priority 3: Direct URL (YouTube, SoundCloud, direct stream) ──
+        # ── Priority 3: Direct URL (Non-YouTube direct streams) ──
         url = track.url or ""
-        if url.startswith(("http://", "https://")):
+        is_yt = any(dom in url.lower() for dom in ("youtube.com/", "youtu.be/", "music.youtube.com/"))
+        if url.startswith(("http://", "https://")) and not is_yt:
             try:
                 results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=4.0)
                 if results:

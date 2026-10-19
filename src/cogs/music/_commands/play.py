@@ -283,12 +283,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             except Exception as e:
                 logger.debug(f"Direct URL search notice: {e}")
 
-        # Case B: Plain text query -> High-speed Unblocked NativeExtractor first (JioSaavn / Mobile yt-dlp / SoundCloud)
-        if not track and not is_direct_url:
+        # Case B: Unblocked NativeExtractor (YouTube URL, Plain Text, JioSaavn, SoundCloud)
+        if not track:
             try:
                 track = await asyncio.wait_for(
                     NativeExtractor.extract(lookup_target, requester=ctx.author.display_name),
-                    timeout=6.0
+                    timeout=8.0
                 )
                 if track and track.stream_url and player._is_direct_stream_url(track.stream_url):
                     try:

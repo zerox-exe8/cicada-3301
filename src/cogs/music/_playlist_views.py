@@ -107,33 +107,40 @@ async def execute_saved_playlist_playback(
     first_query = resolve_track_query(first_row)
     first_track: Optional[Track] = None
 
-    # Priority 1: High-speed Lavalink YouTube Music resolution
+    # Priority 1: NativeExtractor (Unblocked JioSaavn CDN / yt-dlp Mobile / SoundCloud)
     try:
-        results = await asyncio.wait_for(
-            wavelink.Playable.search(first_query, source=wavelink.TrackSource.YouTubeMusic),
-            timeout=4.0
-        )
-        if results and not isinstance(results, wavelink.Playlist):
-            top_p = results[0]
-            first_track = Track(
-                title=top_p.title or first_row.get("title", "Unknown Track"),
-                author=top_p.author or first_row.get("author", "Unknown Artist"),
-                url=top_p.uri or first_row.get("url", ""),
-                stream_url="",
-                duration=int((top_p.length or 0) / 1000) or int(first_row.get("duration", 0)),
-                thumbnail=top_p.artwork,
-                requester=user.display_name,
-                requester_id=user.id,
-                query=first_query,
-            )
-            first_track._playable = top_p
+        first_track = await NativeExtractor.extract(first_query, requester=user.display_name)
+        if first_track and first_track.stream_url and player._is_direct_stream_url(first_track.stream_url):
+            try:
+                direct_results = await asyncio.wait_for(wavelink.Playable.search(first_track.stream_url), timeout=4.0)
+                if direct_results:
+                    first_track._playable = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
+            except Exception:
+                pass
     except Exception:
-        pass
+        first_track = None
 
-    # Priority 2: NativeExtractor (JioSaavn CDN cascade)
+    # Priority 2: High-speed Lavalink YouTube Music resolution fallback
     if not first_track:
         try:
-            first_track = await NativeExtractor.extract(first_query, requester=user.display_name)
+            results = await asyncio.wait_for(
+                wavelink.Playable.search(first_query, source=wavelink.TrackSource.YouTubeMusic),
+                timeout=4.0
+            )
+            if results and not isinstance(results, wavelink.Playlist):
+                top_p = results[0]
+                first_track = Track(
+                    title=top_p.title or first_row.get("title", "Unknown Track"),
+                    author=top_p.author or first_row.get("author", "Unknown Artist"),
+                    url=top_p.uri or first_row.get("url", ""),
+                    stream_url="",
+                    duration=int((top_p.length or 0) / 1000) or int(first_row.get("duration", 0)),
+                    thumbnail=top_p.artwork,
+                    requester=user.display_name,
+                    requester_id=user.id,
+                    query=first_query,
+                )
+                first_track._playable = top_p
         except Exception:
             pass
 

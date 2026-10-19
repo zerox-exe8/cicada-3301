@@ -52,7 +52,7 @@ YDL_OPTIONS = {
     "ignoreerrors": True,
     "extractor_args": {
         "youtube": {
-            "player_client": ["mweb", "android", "web", "ios"],
+            "player_client": ["android", "ios"],
         }
     },
 }
@@ -904,6 +904,11 @@ class NativeExtractor:
             "extract_flat": True,
             "ignoreerrors": True,
             "socket_timeout": 10,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios"],
+                }
+            },
         }
         with yt_dlp.YoutubeDL(ydl_flat) as ydl:
             try:
@@ -1425,7 +1430,7 @@ class NativeExtractor:
             "source_address": "0.0.0.0",
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["mweb", "android", "web", "ios"],
+                    "player_client": ["android", "ios"],
                 }
             },
         }

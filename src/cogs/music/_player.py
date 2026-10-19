@@ -247,9 +247,9 @@ class GuildPlayer:
         """Return True only if url is a raw audio stream Lavalink can play via HTTP."""
         if not url or not url.startswith("http"):
             return False
-        # Only JioSaavn Akamai MP4/AAC CDN direct streams are 100% playable via Lavalink HTTP.
+        # Raw audio streams directly playable via Lavalink HTTP (JioSaavn Akamai, googlevideo, soundcloud raw)
         u_low = url.lower()
-        if any(dom in u_low for dom in ("saavncdn.com", "jiosaavn.com")) and ".mp4" in u_low:
+        if any(dom in u_low for dom in ("saavncdn.com", "jiosaavn.com", "googlevideo.com", "sndcdn.com", "media.soundcloud.com")) and any(ext in u_low for ext in (".mp4", "videoplayback", ".m4a", ".webm", ".opus", ".mp3")):
             return True
         return False
 
@@ -280,8 +280,24 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"Direct URL resolve notice for '{url}': {e}")
 
-        # ── Priority 4: Search Fallbacks (YouTube Music -> YouTube -> JioSaavn) ──
-        search_target = f"{track.title} {track.author}".strip() or track.query or track.title
+        # ── Priority 4: NativeExtractor Direct Stream (JioSaavn CDN / yt-dlp Mobile / SoundCloud) ──
+        try:
+            from src.cogs.music._extractor import NativeExtractor
+            target_q = track.query or search_target
+            if target_q:
+                ext = await asyncio.wait_for(
+                    NativeExtractor.extract(target_q, requester=track.requester),
+                    timeout=5.0
+                )
+                if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
+                    track.stream_url = ext.stream_url
+                    results = await asyncio.wait_for(wavelink.Playable.search(ext.stream_url), timeout=4.0)
+                    if results:
+                        return results[0] if isinstance(results, list) else results.tracks[0]
+        except Exception as e:
+            logger.debug(f"NativeExtractor resolve notice: {e}")
+
+        # ── Priority 5: Fallbacks (YouTube Music -> YouTube via Lavalink) ──
         if search_target:
             try:
                 results = await asyncio.wait_for(
@@ -303,23 +319,6 @@ class GuildPlayer:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
                 logger.debug(f"YouTube search notice for '{search_target}': {e}")
-
-        # ── Priority 5: Fallback to NativeExtractor CDN stream ──
-        try:
-            from src.cogs.music._extractor import NativeExtractor
-            target_q = track.query or search_target
-            if target_q:
-                ext = await asyncio.wait_for(
-                    NativeExtractor.extract(target_q, requester=track.requester),
-                    timeout=5.0
-                )
-                if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
-                    track.stream_url = ext.stream_url
-                    results = await asyncio.wait_for(wavelink.Playable.search(ext.stream_url), timeout=4.0)
-                    if results:
-                        return results[0] if isinstance(results, list) else results.tracks[0]
-        except Exception as e:
-            logger.debug(f"NativeExtractor resolve fallback notice: {e}")
 
         return None
 
@@ -421,8 +420,8 @@ class GuildPlayer:
                     if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
                         cur_track.stream_url = ext.stream_url
                         cur_track._playable = None
-                        logger.info(f"Guild {self.guild.id}: Recovering failed track with JioSaavn CDN stream: '{cur_track.title}'")
-                        await self.play_track(cur_track)
+                        logger.info(f"Guild {self.guild.id}: Recovering failed track with direct stream: '{cur_track.title}'")
+                        await self.play_track(cur_track, message_to_edit=self.controller_message)
                         return
                 except Exception as e:
                     logger.debug(f"CDN track recovery error: {e}")

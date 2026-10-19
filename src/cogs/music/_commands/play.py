@@ -89,9 +89,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         clean_q = clean_q[1:-1].strip()
 
     try:
-        # Check if Playlist URL (Spotify, SoundCloud, etc.)
-        is_yt_query = any(yt in clean_q.lower() for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/"))
-        if is_playlist_url(clean_q) and not is_yt_query:
+        # Check if Playlist URL (Spotify, YouTube, SoundCloud, etc.)
+        if is_playlist_url(clean_q):
             try:
                 pl = await asyncio.wait_for(
                     NativeExtractor.extract_playlist(clean_q, requester=ctx.author.display_name),
@@ -194,9 +193,10 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 logger.debug(f"Spotify track title fetch notice: {e}")
 
         is_direct_url = lookup_target.startswith(("http://", "https://"))
+        is_yt_track = any(yt in lookup_target.lower() for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/"))
 
-        # Case A: Direct URL -> Resolve via Lavalink directly
-        if is_direct_url:
+        # Case A: Non-YouTube Direct URL -> Resolve via Lavalink directly
+        if is_direct_url and not is_yt_track:
             try:
                 results = await asyncio.wait_for(wavelink.Playable.search(lookup_target), timeout=6.0)
                 if isinstance(results, wavelink.Playlist) and results.tracks:
@@ -283,7 +283,24 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             except Exception as e:
                 logger.debug(f"Direct URL search notice: {e}")
 
-        # Case B: Plain text query -> High-speed Lavalink YouTube Music Search FIRST (0.3s, 100% accurate)
+        # Case B: Plain text query -> High-speed Unblocked NativeExtractor first (JioSaavn / Mobile yt-dlp / SoundCloud)
+        if not track and not is_direct_url:
+            try:
+                track = await asyncio.wait_for(
+                    NativeExtractor.extract(lookup_target, requester=ctx.author.display_name),
+                    timeout=6.0
+                )
+                if track and track.stream_url and player._is_direct_stream_url(track.stream_url):
+                    try:
+                        direct_results = await asyncio.wait_for(wavelink.Playable.search(track.stream_url), timeout=4.0)
+                        if direct_results:
+                            track._playable = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
+                    except Exception as e:
+                        logger.debug(f"Direct stream playable resolution error: {e}")
+            except Exception as e:
+                logger.debug(f"NativeExtractor search notice: {e}")
+
+        # Fallback 1: Lavalink YouTube Music Search
         if not track and not is_direct_url:
             try:
                 results = await asyncio.wait_for(
@@ -320,7 +337,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             except Exception as e:
                 logger.debug(f"YouTube Music search notice: {e}")
 
-        # Fallback 1: YouTube Search via Lavalink
+        # Fallback 2: YouTube Search via Lavalink
         if not track and not is_direct_url:
             try:
                 results = await asyncio.wait_for(
@@ -356,23 +373,6 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     track._playable = top_p
             except Exception as e:
                 logger.debug(f"YouTube fallback search notice: {e}")
-
-        # Fallback 2: NativeExtractor (Unblocked JioSaavn CDN search)
-        if not track:
-            try:
-                track = await asyncio.wait_for(
-                    NativeExtractor.extract(lookup_target, requester=ctx.author.display_name),
-                    timeout=6.0
-                )
-                if track and track.stream_url and ("saavncdn.com" in track.stream_url.lower() or ".mp4" in track.stream_url.lower()):
-                    try:
-                        direct_results = await asyncio.wait_for(wavelink.Playable.search(track.stream_url), timeout=4.0)
-                        if direct_results:
-                            track._playable = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.debug(f"NativeExtractor fallback search notice: {e}")
 
         # If still no track found, edit the searching message to inform user
         if not track:

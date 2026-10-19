@@ -52,7 +52,7 @@ class MeetingAudioSink(AudioSinkBase):
         self.speaker_names: dict[Any, str] = {}
         self.speaker_chunks: dict[Any, int] = {}
         self._ssrc_to_uid: dict[int, Any] = {}
-        self.voice_client: Optional[Any] = None
+        self._voice_client: Optional[Any] = None
 
     def wants_opus(self) -> bool:
         """Request decoded 48kHz 16-bit stereo PCM from voice_recv."""
@@ -831,7 +831,7 @@ class MeetingCog(commands.Cog):
             return
 
         sink = MeetingAudioSink(noise_gate=0)
-        sink.voice_client = voice_client
+        sink._voice_client = voice_client
         try:
             voice_client.listen(sink)
         except Exception as e:

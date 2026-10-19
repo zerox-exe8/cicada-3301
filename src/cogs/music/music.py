@@ -368,6 +368,11 @@ class Music(commands.Cog):
     @app_commands.describe(query="Song title, artist name, Spotify or YouTube URL")
     async def play(self, ctx: CustomContext, *, query: Optional[str] = None) -> None:
         """Play high-fidelity music tracks in your voice channel."""
+        if ctx.interaction and not ctx.interaction.response.is_done():
+            try:
+                await ctx.interaction.response.defer()
+            except Exception:
+                pass
         await execute_play(self, ctx, query)
 
     @commands.hybrid_command(

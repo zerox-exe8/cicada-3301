@@ -18,6 +18,13 @@ logger = logging.getLogger("Kyro.Music.Play")
 
 async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] = None) -> None:
     """Execute native play command."""
+    # Immediately defer interaction if slash command to avoid 3-second Discord timeout (10062)
+    if ctx.interaction and not ctx.interaction.response.is_done():
+        try:
+            await ctx.interaction.response.defer()
+        except Exception:
+            pass
+
     if not ctx.author.voice or not ctx.author.voice.channel:
         container = KyroContainer(accent_color=None)
         container.add_text("**You must be in a voice channel to play music.**")
@@ -167,7 +174,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         "> If this is a personal playlist, please open **Spotify** -> click **3 dots (`...`)** -> **Make Public** so Kyro can load the songs!"
                     )
                 )
-                if search_msg and isinstance(search_msg, discord.Message):
+                if search_msg:
                     try:
                         await edit_container_response(search_msg, err_c)
                         return
@@ -378,7 +385,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         if not track:
             err_container = KyroContainer(accent_color=None)
             err_container.add_text(f"**No results found for:** `{query}`")
-            if search_msg and isinstance(search_msg, discord.Message):
+            if search_msg:
                 try:
                     await edit_container_response(search_msg, err_container)
                     return
@@ -424,7 +431,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 ),
                 accessory={"type": 11, "media": {"url": track.thumbnail}} if track.thumbnail else None,
             )
-            if search_msg and isinstance(search_msg, discord.Message):
+            if search_msg:
                 try:
                     await edit_container_response(search_msg, queue_container)
                     return
@@ -437,7 +444,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         logger.error(f"Guild {ctx.guild.id}: Uncaught error in execute_play for '{query}': {e}", exc_info=True)
         err_card = KyroContainer(accent_color=None)
         err_card.add_text(f"**Playback Error:** `{e}`")
-        if search_msg and isinstance(search_msg, discord.Message):
+        if search_msg:
             try:
                 await edit_container_response(search_msg, err_card)
                 return

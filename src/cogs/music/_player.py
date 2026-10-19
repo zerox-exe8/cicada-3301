@@ -227,7 +227,18 @@ class GuildPlayer:
 
         # 3. Start playback on Lavalink node with volume (explicitly unpaused)
         vol_int = int(self.volume * 100)
-        await self.voice_client.play(playable, volume=vol_int, paused=False)
+        try:
+            await self.voice_client.play(playable, volume=vol_int, paused=False)
+        except Exception as play_err:
+            logger.error(f"Guild {self.guild.id}: voice_client.play error for '{track.title}': {play_err}")
+            if message_to_edit:
+                err_c = KyroContainer(accent_color=None)
+                err_c.add_text(f"**Failed to Stream Track:** `{track.title}`\n> Playback dispatch error: `{play_err}`")
+                try:
+                    await edit_container_response(message_to_edit, err_c)
+                except Exception:
+                    pass
+            raise
 
         # 4. Send or edit sleek Now Playing card with buttons
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
@@ -255,6 +266,8 @@ class GuildPlayer:
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
         """Resolve Lavalink Playable via direct unblocked CDN stream, attached playable, or search."""
+        search_target = f"{track.title} {track.author}".strip() or track.query or track.title
+
         # ── Priority 1: Attached Playable (already resolved by play.py) ──
         playable = getattr(track, "_playable", None)
         if playable:
@@ -545,7 +558,7 @@ class GuildPlayer:
         view = MusicControlView(self.bot, player=self, track_url=track.url)
 
         # If an explicit message was provided to edit (e.g. initial 'Searching...' card in ?play), edit it
-        if message_to_edit and isinstance(message_to_edit, discord.Message):
+        if message_to_edit:
             try:
                 await edit_container_response(message_to_edit, container, view=view, content=None)
                 self.controller_message = message_to_edit

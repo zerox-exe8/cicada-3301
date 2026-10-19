@@ -113,7 +113,10 @@ class ErrorHandler(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
 
-        await send_container_response(ctx, container, ephemeral=True)
+        try:
+            await send_container_response(ctx, container, ephemeral=True)
+        except Exception as e:
+            logger.debug(f"Failed to dispatch error container: {e}")
 
 
 async def setup(bot: commands.Bot) -> None:

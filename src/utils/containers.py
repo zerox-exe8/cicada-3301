@@ -336,63 +336,121 @@ async def send_container_response(
     )
     file_list = [file] if file is not None else (files or [])
 
+    interaction = None
     if isinstance(target, discord.Interaction):
         interaction = target
+    elif hasattr(target, "interaction") and getattr(target, "interaction", None) is not None:
+        interaction = target.interaction
+
+    if interaction:
         bot = getattr(interaction, "client", getattr(interaction, "bot", None))
         app_id = getattr(bot, "application_id", None) or (bot.user.id if bot and bot.user else None)
         if ephemeral:
-            payload["flags"] |= 64  # EPHEMERAL
+            payload["flags"] = payload.get("flags", 0) | 64  # EPHEMERAL
 
         if interaction.response.is_done():
-            if file_list:
-                form = _prepare_multipart_form(payload, file_list)
-                msg_data = await bot.http.request(
-                    discord.http.Route(
-                        "POST",
-                        f"/webhooks/{app_id}/{interaction.token}",
-                    ),
-                    form=form,
-                    files=file_list,
-                )
-            else:
-                msg_data = await bot.http.request(
-                    discord.http.Route(
-                        "POST",
-                        f"/webhooks/{app_id}/{interaction.token}",
-                    ),
-                    json=payload,
-                )
-            if view and hasattr(bot, "_connection"):
-                msg_id = int(msg_data["id"]) if isinstance(msg_data, dict) and "id" in msg_data else None
-                state = getattr(bot, "_connection", None) or getattr(bot, "_state", None) or bot
-                if hasattr(state, "store_view"):
-                    state.store_view(view, msg_id)
-            return msg_data
+            try:
+                if file_list:
+                    form = _prepare_multipart_form(payload, file_list)
+                    msg_data = await bot.http.request(
+                        discord.http.Route(
+                            "POST",
+                            f"/webhooks/{app_id}/{interaction.token}",
+                        ),
+                        form=form,
+                        files=file_list,
+                    )
+                else:
+                    msg_data = await bot.http.request(
+                        discord.http.Route(
+                            "POST",
+                            f"/webhooks/{app_id}/{interaction.token}",
+                        ),
+                        json=payload,
+                    )
+                if view and hasattr(bot, "_connection"):
+                    msg_id = int(msg_data["id"]) if isinstance(msg_data, dict) and "id" in msg_data else None
+                    state = getattr(bot, "_connection", None) or getattr(bot, "_state", None) or bot
+                    if hasattr(state, "store_view"):
+                        state.store_view(view, msg_id)
+                if isinstance(msg_data, dict):
+                    msg_data["_bot"] = bot
+                    msg_data["channel_id"] = interaction.channel_id
+                    channel_obj = getattr(target, "channel", None) or getattr(interaction, "channel", None)
+                    state = getattr(bot, "_connection", bot)
+                    if hasattr(state, "create_message") and channel_obj:
+                        try:
+                            return state.create_message(channel=channel_obj, data=msg_data)
+                        except Exception:
+                            pass
+                return msg_data
+            except Exception as e:
+                logger.warning(f"Interaction followup webhook failed ({e}), falling back to direct channel dispatch...")
         else:
-            # Send initial response via raw interaction callback
-            if file_list:
-                form = _prepare_multipart_form(payload, file_list, wrapper={"type": 4, "data": payload})
-                res = await bot.http.request(
-                    discord.http.Route(
-                        "POST",
-                        f"/interactions/{interaction.id}/{interaction.token}/callback",
-                    ),
-                    form=form,
-                    files=file_list,
-                )
-            else:
-                res = await bot.http.request(
-                    discord.http.Route(
-                        "POST",
-                        f"/interactions/{interaction.id}/{interaction.token}/callback",
-                    ),
-                    json={"type": 4, "data": payload},
-                )
-            if view:
-                state = getattr(bot, "_connection", None) or getattr(bot, "_state", None) or bot
-                if hasattr(state, "store_view"):
-                    state.store_view(view)
-            return res
+            try:
+                # Send initial response via raw interaction callback
+                if file_list:
+                    form = _prepare_multipart_form(payload, file_list, wrapper={"type": 4, "data": payload})
+                    res = await bot.http.request(
+                        discord.http.Route(
+                            "POST",
+                            f"/interactions/{interaction.id}/{interaction.token}/callback",
+                        ),
+                        form=form,
+                        files=file_list,
+                    )
+                else:
+                    res = await bot.http.request(
+                        discord.http.Route(
+                            "POST",
+                            f"/interactions/{interaction.id}/{interaction.token}/callback",
+                        ),
+                        json={"type": 4, "data": payload},
+                    )
+                if view:
+                    state = getattr(bot, "_connection", None) or getattr(bot, "_state", None) or bot
+                    if hasattr(state, "store_view"):
+                        state.store_view(view)
+                return res
+            except discord.HTTPException as e:
+                # 40060: Interaction has already been acknowledged -> Fallback to webhook followup!
+                if e.code == 40060 or "already been acknowledged" in str(e).lower():
+                    try:
+                        if file_list:
+                            form = _prepare_multipart_form(payload, file_list)
+                            msg_data = await bot.http.request(
+                                discord.http.Route(
+                                    "POST",
+                                    f"/webhooks/{app_id}/{interaction.token}",
+                                ),
+                                form=form,
+                                files=file_list,
+                            )
+                        else:
+                            msg_data = await bot.http.request(
+                                discord.http.Route(
+                                    "POST",
+                                    f"/webhooks/{app_id}/{interaction.token}",
+                                ),
+                                json=payload,
+                            )
+                        if isinstance(msg_data, dict):
+                            msg_data["_bot"] = bot
+                            msg_data["channel_id"] = interaction.channel_id
+                            channel_obj = getattr(target, "channel", None) or getattr(interaction, "channel", None)
+                            state = getattr(bot, "_connection", bot)
+                            if hasattr(state, "create_message") and channel_obj:
+                                try:
+                                    return state.create_message(channel=channel_obj, data=msg_data)
+                                except Exception:
+                                    pass
+                        return msg_data
+                    except Exception as e2:
+                        logger.warning(f"Interaction followup fallback failed: {e2}")
+                elif e.code == 10062 or "unknown interaction" in str(e).lower():
+                    logger.warning("Interaction expired (10062), falling back to channel dispatch...")
+                else:
+                    raise
     else:
         obj = target
 
@@ -441,6 +499,8 @@ async def send_container_response(
 
             # Reconstruct discord.Message if state is accessible
             if isinstance(msg_data, dict):
+                msg_data["_bot"] = bot_instance
+                msg_data["channel_id"] = channel_id
                 channel_obj = getattr(obj, "channel", obj if isinstance(obj, discord.abc.Messageable) else None)
                 state = getattr(bot_instance, "_connection", bot_instance)
                 if hasattr(state, "create_message") and channel_obj:
@@ -503,7 +563,7 @@ async def send_container_response(
 
 
 async def edit_container_response(
-    interaction_or_msg: discord.Interaction | discord.Message,
+    interaction_or_msg: discord.Interaction | discord.Message | dict[str, Any],
     container: KyroContainer | list[KyroContainer],
     view: discord.ui.View | None = None,
     file: discord.File | None = None,
@@ -515,18 +575,25 @@ async def edit_container_response(
     payload.pop("flags", None)
     file_list = [file] if file is not None else (files or [])
 
-    if isinstance(interaction_or_msg, discord.Message):
+    if isinstance(interaction_or_msg, (discord.Message, dict)):
         msg = interaction_or_msg
-        bot = getattr(msg, "bot", None) or getattr(getattr(msg, "_state", None), "client", None) or getattr(msg, "_state", None)
-        http_client = getattr(bot, "http", None)
-        if http_client:
+        channel_id = getattr(getattr(msg, "channel", None), "id", None) or (int(msg.get("channel_id", 0)) if isinstance(msg, dict) else None)
+        msg_id = getattr(msg, "id", None) or (int(msg.get("id", 0)) if isinstance(msg, dict) else None)
+        bot = (
+            getattr(msg, "bot", None)
+            or getattr(getattr(msg, "_state", None), "client", None)
+            or getattr(msg, "_state", None)
+            or (msg.get("_bot") if isinstance(msg, dict) else None)
+        )
+        http_client = getattr(bot, "http", None) or (getattr(bot, "_state", None) and getattr(bot._state, "http", None))
+        if http_client and channel_id and msg_id:
             try:
                 if file_list:
                     form = _prepare_multipart_form(payload, file_list)
                     await http_client.request(
                         discord.http.Route(
                             "PATCH",
-                            f"/channels/{msg.channel.id}/messages/{msg.id}",
+                            f"/channels/{channel_id}/messages/{msg_id}",
                         ),
                         form=form,
                         files=file_list,
@@ -535,14 +602,14 @@ async def edit_container_response(
                     await http_client.request(
                         discord.http.Route(
                             "PATCH",
-                            f"/channels/{msg.channel.id}/messages/{msg.id}",
+                            f"/channels/{channel_id}/messages/{msg_id}",
                         ),
                         json=payload,
                     )
                 if view:
-                    state = getattr(bot, "_connection", None) or getattr(msg, "_state", None) or bot
+                    state = getattr(bot, "_connection", None) or getattr(bot, "_state", None) or bot
                     if hasattr(state, "store_view"):
-                        state.store_view(view, msg.id)
+                        state.store_view(view, msg_id)
                 return
             except Exception as e:
                 logger.error(f"Direct channel PATCH edit failed: {e}")

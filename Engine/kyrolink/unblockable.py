@@ -83,7 +83,7 @@ class UnblockableResolver:
                 client_list = custom_clients
 
         ydl_opts: Dict[str, Any] = {
-            "format": "bestaudio/18/best",
+            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/18/best",
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
@@ -94,8 +94,7 @@ class UnblockableResolver:
             "prefer_free_formats": True,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android"],
-                    "player_skip": ["webpage", "configs", "js", "translated_subs"],
+                    "player_client": ["tv_embedded", "tv", "ios", "mweb", "android"],
                 }
             },
         }

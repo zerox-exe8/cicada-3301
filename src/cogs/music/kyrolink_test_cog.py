@@ -131,7 +131,7 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
                 vc.stop()
 
             ffmpeg_options = {
-                "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -user_agent \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\"",
                 "options": "-vn"
             }
             audio_source = discord.FFmpegOpusAudio(stream_url, **ffmpeg_options)
@@ -155,9 +155,9 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
             f"> **Track:** `{title}`\n"
             f"> **Artist:** `{author}`\n"
             f"> **Duration:** `{duration_str}`\n\n"
-            f"⚡ **Audio Engine:** `KyroLink Unblockable`\n"
+            f"⚡ **Audio Engine:** `KyroLink InnerTube Protocol`\n"
             f"🚀 **Quality:** `{bitrate} kbps ({'Spotify Studio Lossless' if bitrate >= 320 else 'High Bitrate'})`\n"
-            f"🛡️ **Anti-Ban:** `Android Innertube + Proxy Safe`\n"
+            f"🛡️ **Anti-Ban:** `Multi-Client Rotation (TV + iOS + Android)`\n"
             f"⏱️ **Resolved in:** `{elapsed_ms:.1f}ms` | **Source:** `{source}`"
         )
         if status_msg and isinstance(status_msg, discord.Message):

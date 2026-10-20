@@ -130,13 +130,18 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
             if vc.is_playing():
                 vc.stop()
 
+            def _after_play(error: Optional[Exception]) -> None:
+                if error:
+                    logger.error("[KYROLINK COG] Playback after callback exception: %s", error)
+                else:
+                    logger.info("[KYROLINK COG] Playback finished cleanly.")
+
             ffmpeg_options = {
-                "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -user_agent \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\"",
-                "options": "-vn"
+                "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                "options": "-vn -loglevel warning"
             }
             audio_source = discord.FFmpegOpusAudio(stream_url, **ffmpeg_options)
-            vc.play(audio_source)
-
+            vc.play(audio_source, after=_after_play)
 
         except Exception as play_err:
             logger.error("[KYROLINK COG] Voice playback error: %s", play_err)
@@ -157,7 +162,7 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
             f"> **Duration:** `{duration_str}`\n\n"
             f"⚡ **Audio Engine:** `KyroLink InnerTube Protocol`\n"
             f"🚀 **Quality:** `{bitrate} kbps ({'Spotify Studio Lossless' if bitrate >= 320 else 'High Bitrate'})`\n"
-            f"🛡️ **Anti-Ban:** `Multi-Client Rotation (TV + iOS + Android)`\n"
+            f"🛡️ **Anti-Ban:** `Multi-Client Rotation (iOS + Android Innertube)`\n"
             f"⏱️ **Resolved in:** `{elapsed_ms:.1f}ms` | **Source:** `{source}`"
         )
         if status_msg and isinstance(status_msg, discord.Message):
@@ -192,9 +197,9 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
             f"> **Frame Interval:** `20.00ms (Exact 50 frames/sec)`\n"
             f"> **Jitter Buffer:** `5-Second AudioRingBuffer`\n\n"
             f"🛡️ **Active Unblockable Providers:**\n"
-            f"• **YouTube:** `Android Innertube Mobile Client (Zero 429 / Anti-BotGuard)`\n"
+            f"• **YouTube:** `Multi-Client Rotation (iOS + Android Innertube)`\n"
             f"• **Spotify:** `OEmbed & Web API Metadata Bridging`\n"
-            f"• **SoundCloud:** `Auxiliary Fallback Stream`\n\n"
+            f"• **SoundCloud:** `DISABLED (Per Master Directive)`\n\n"
             f"💡 **Usage:** Use `?kplay <song name, spotify url, or youtube url>` to test!"
         )
         await send_container_response(ctx, c)

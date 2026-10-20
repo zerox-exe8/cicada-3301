@@ -7,6 +7,8 @@ All tasks in this repository must strictly adhere to the following non-negotiabl
 
 ## 1. Absolute Directives & Safety Guardrails
 
+- **MEMOS AS THE FOUNDATIONAL CORE:**
+  `MemOS` (`M:\Kyro Systum Engine\MemOS`) is the central Memory Operating System for the entire system. Every task, decision, and code modification (big or small) must strictly consult, track, and adhere to MemOS memory and architecture principles.
 - **NEVER RUN THE BOT PROCESS LOCALLY:**
   Do NOT execute `python main.py` or any background command that logs into Discord with the production bot token. The bot is actively hosted on a remote server; running locally causes gateway token session collisions, socket disconnects, and service downtime.
 - **NEVER MODIFY UI / VISUAL DESIGN WITHOUT EXPLICIT PERMISSION:**

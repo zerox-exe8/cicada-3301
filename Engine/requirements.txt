@@ -7,4 +7,5 @@ redis>=5.0.4
 aiohttp>=3.9.5
 pyDes>=2.0.1
 yt-dlp>=2024.8.6
+pytubefix>=11.2.1
 websockets>=12.0

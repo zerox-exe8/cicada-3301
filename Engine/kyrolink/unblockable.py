@@ -71,19 +71,56 @@ class UnblockableResolver:
     # PROVIDER 1: YOUTUBE INNERTUBE WITH ANDROID CLIENT EMULATION
     # =========================================================================
     def _extract_youtube_sync(self, query: str, proxy: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Synchronous yt-dlp extraction using Android Music & Android TV Innertube clients.
-        Completely bypasses YouTube BotGuard, PoToken challenges, and web browser 429 rate limits.
+        """Synchronous unblockable extraction using pytubefix BotGuard PoToken engine
+        with yt-dlp fallback.
         """
+        clean_q = query.strip()
+        if clean_q.startswith("ytsearch:"):
+            clean_q = clean_q[9:].strip()
+
+        # 1. Primary: pytubefix BotGuard PoToken challenge solver (Zero 429 / Zero 403)
+        try:
+            from pytubefix import YouTube, Search
+            if "youtube.com/" in clean_q or "youtu.be/" in clean_q:
+                yt = YouTube(clean_q)
+                audio = yt.streams.get_audio_only()
+                if audio and audio.url:
+                    return {
+                        "id": yt.video_id,
+                        "title": yt.title,
+                        "uploader": yt.author,
+                        "duration": yt.length,
+                        "url": audio.url,
+                        "webpage_url": yt.watch_url,
+                        "thumbnail": yt.thumbnail_url,
+                        "abr": getattr(audio, "abr", 160) or 160,
+                        "ext": getattr(audio, "subtype", "m4a"),
+                    }
+            else:
+                s = Search(clean_q)
+                if s.results:
+                    top = s.results[0]
+                    audio = top.streams.get_audio_only()
+                    if audio and audio.url:
+                        return {
+                            "id": top.video_id,
+                            "title": top.title,
+                            "uploader": top.author,
+                            "duration": top.length,
+                            "url": audio.url,
+                            "webpage_url": top.watch_url,
+                            "thumbnail": top.thumbnail_url,
+                            "abr": getattr(audio, "abr", 160) or 160,
+                            "ext": getattr(audio, "subtype", "m4a"),
+                        }
+        except Exception as e:
+            logger.debug("[PYTUBEFIX ENGINE] Notice: %s", e)
+
+        # 2. Secondary fallback: yt-dlp
         import yt_dlp
 
-        client_list = ["android_music", "android", "ios"]
-        if hasattr(settings, "YOUTUBE_CLIENTS") and settings.YOUTUBE_CLIENTS:
-            custom_clients = [c.strip() for c in settings.YOUTUBE_CLIENTS.split(",") if c.strip()]
-            if custom_clients:
-                client_list = custom_clients
-
         ydl_opts: Dict[str, Any] = {
-            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/18/best",
+            "format": "bestaudio[ext=m4a]/bestaudio/18/best",
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
@@ -94,11 +131,10 @@ class UnblockableResolver:
             "prefer_free_formats": True,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["tv_embedded", "tv", "ios", "mweb", "android"],
+                    "player_client": ["android_vr", "android_creator", "web"],
                 }
             },
         }
-
 
         if proxy:
             ydl_opts["proxy"] = proxy

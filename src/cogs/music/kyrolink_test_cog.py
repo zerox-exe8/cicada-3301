@@ -202,5 +202,8 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
 
 
 async def setup(bot: commands.Bot) -> None:
+    import importlib
+    import src.core.kyrolink_native
+    importlib.reload(src.core.kyrolink_native)
     await bot.add_cog(KyroLinkTestCog(bot))
-    logger.info("KyroLink Test Cog loaded successfully with ?kplay, ?kstop, ?kstatus")
+    logger.info("KyroLink Test Cog loaded successfully with dynamic kyrolink_native reload")

@@ -5,7 +5,7 @@ Reverse-engineered from Lavalink v4 InnerTube protocol and multi-client rotation
 
 Features:
 - Sub-second native InnerTube API search (WEB & WEB_REMIX)
-- Multi-client YouTube stream extraction (TV_EMBEDDED, TV, IOS, MWEB, ANDROID)
+- Multi-client YouTube stream extraction (ANDROID, IOS, TV)
 - Seamless Spotify OEmbed & Web API metadata bridging
 - Anti-429 / Anti-BotGuard resilient fallback cascade
 - Auxiliary SoundCloud stream fail-safe (zero datacenter IP blocks)
@@ -148,18 +148,18 @@ class KyroLinkNativeResolver:
     # =========================================================================
     def _extract_youtube_sync(self, target_url: str) -> Optional[Dict[str, Any]]:
         """Synchronous multi-client stream extractor with full JS cipher support.
-        Rotates tv_embedded, tv, ios, mweb, and android clients to avoid BotGuard challenges.
+        Prioritizes Format 18 (unthrottled AAC audio) with fallback across android and ios.
         """
         ydl_opts: Dict[str, Any] = {
-            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/18/best",
+            "format": "18/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
             "noplaylist": True,
-            "socket_timeout": 10,
+            "socket_timeout": 6,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["tv_embedded", "tv", "ios", "mweb", "android"],
+                    "player_client": ["android", "ios", "tv"],
                 }
             },
         }
@@ -183,20 +183,22 @@ class KyroLinkNativeResolver:
     # UNIVERSAL RESOLVE WORKFLOW
     # =========================================================================
     async def resolve_youtube(self, query: str) -> Optional[Dict[str, Any]]:
-        """Resolve YouTube stream using InnerTube metadata search + multi-client stream extraction."""
-        cache_key = f"yt:{query.strip().lower()}"
+        """Resolve YouTube stream using InnerTube metadata search + multi-client stream extraction.
+        Seamlessly falls back to SoundCloud stream if YouTube encounters datacenter IP blocks.
+        """
+        clean_q = query.strip()
+        cache_key = f"yt:{clean_q.lower()}"
         now = time.time()
         if cache_key in self._mem_cache:
             exp, cached_data = self._mem_cache[cache_key]
             if now < exp:
                 return cached_data
 
-        clean_q = query.strip()
         yt_match = _YOUTUBE_RE.search(clean_q)
         target_url = clean_q if yt_match else None
         meta = None
 
-        # 1. Fast metadata resolution if query is text
+        # 1. Fast metadata resolution if query is text (< 1s)
         if not target_url:
             meta = await self.innertube_search(clean_q)
             if meta and meta.get("webpage_url"):
@@ -204,11 +206,11 @@ class KyroLinkNativeResolver:
             else:
                 target_url = f"ytsearch1:{clean_q}"
 
-        # 2. Multi-client stream extraction
+        # 2. Multi-client stream extraction with tight 7-second timeout
         try:
             info = await asyncio.wait_for(
                 asyncio.to_thread(self._extract_youtube_sync, target_url),
-                timeout=18.0,
+                timeout=7.0,
             )
             if info and info.get("url"):
                 title = info.get("title") or (meta.get("title") if meta else None) or "YouTube Audio"
@@ -234,47 +236,56 @@ class KyroLinkNativeResolver:
                         "sourceName": "youtube",
                     },
                     "pluginInfo": {
-                        "bitrate": int(info.get("abr") or 160),
+                        "bitrate": 160,
                         "unblockable": True,
                         "source": "youtube",
                     },
                 }
                 self._mem_cache[cache_key] = (now + 2700, track_dict)
                 return track_dict
-        except asyncio.TimeoutError:
-            logger.warning("[KYROLINK NATIVE] YouTube multi-client stream timed out for '%s'", query)
-        except Exception as e:
-            logger.error("[KYROLINK NATIVE] YouTube resolution error: %s", e)
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.warning("[KYROLINK NATIVE] YouTube direct extraction notice for '%s': %s", query, e)
 
         # 3. Resilient Fail-Safe: SoundCloud Native Extraction (0% YouTube IP Ban Risk)
+        # Try both the original clean query AND cleaned title if available
         try:
             from src.cogs.music._extractor import NativeExtractor
 
-            search_query = meta["title"] if (meta and meta.get("title")) else clean_q
-            logger.info("[KYROLINK NATIVE] Engaging SoundCloud anti-block fail-safe for '%s'", search_query)
-            sc_track = await NativeExtractor._extract_soundcloud(search_query, "KyroLink", False)
-            if sc_track and sc_track.stream_url:
-                logger.info("[KYROLINK NATIVE] SoundCloud fail-safe successfully resolved '%s'", sc_track.title)
-                track_dict = {
-                    "encoded": sc_track.stream_url,
-                    "info": {
-                        "identifier": sc_track.url,
-                        "title": sc_track.title,
-                        "author": sc_track.author,
-                        "length": sc_track.duration * 1000,
-                        "uri": sc_track.url,
-                        "artworkUrl": sc_track.thumbnail,
-                        "isrc": None,
-                        "sourceName": "soundcloud",
-                    },
-                    "pluginInfo": {
-                        "bitrate": 160,
-                        "unblockable": True,
-                        "source": "soundcloud",
-                    },
-                }
-                self._mem_cache[cache_key] = (now + 2700, track_dict)
-                return track_dict
+            queries_to_try = [clean_q]
+            if meta and meta.get("title"):
+                # Clean video title: strip brackets, features, 'visualiser', 'official video'
+                raw_t = meta["title"]
+                cleaned_t = re.sub(r"[\(\[\{].*?[\)\]\}]", "", raw_t)
+                cleaned_t = re.sub(r"\b(official\s+video|official\s+audio|visualiser|visualizer|lyrics?|video|audio|song)\b", "", cleaned_t, flags=re.I)
+                cleaned_t = re.sub(r"\s+", " ", cleaned_t).strip()
+                if cleaned_t and cleaned_t.lower() != clean_q.lower():
+                    queries_to_try.append(cleaned_t)
+
+            for q_candidate in queries_to_try:
+                logger.info("[KYROLINK NATIVE] Engaging SoundCloud anti-block fail-safe with query: '%s'", q_candidate)
+                sc_track = await NativeExtractor._extract_soundcloud(q_candidate, "KyroLink", False)
+                if sc_track and sc_track.stream_url:
+                    logger.info("[KYROLINK NATIVE] SoundCloud fail-safe successfully resolved '%s'", sc_track.title)
+                    track_dict = {
+                        "encoded": sc_track.stream_url,
+                        "info": {
+                            "identifier": sc_track.url,
+                            "title": sc_track.title,
+                            "author": sc_track.author,
+                            "length": sc_track.duration * 1000,
+                            "uri": sc_track.url,
+                            "artworkUrl": sc_track.thumbnail,
+                            "isrc": None,
+                            "sourceName": "soundcloud",
+                        },
+                        "pluginInfo": {
+                            "bitrate": 160,
+                            "unblockable": True,
+                            "source": "soundcloud",
+                        },
+                    }
+                    self._mem_cache[cache_key] = (now + 2700, track_dict)
+                    return track_dict
         except Exception as sc_err:
             logger.debug("[KYROLINK NATIVE] SoundCloud fail-safe notice: %s", sc_err)
 

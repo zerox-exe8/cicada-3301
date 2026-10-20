@@ -200,10 +200,9 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 logger.debug(f"Spotify track title fetch notice: {e}")
 
         is_direct_url = lookup_target.startswith(("http://", "https://"))
-        is_yt_track = any(yt in lookup_target.lower() for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/"))
 
-        # Case A: Non-YouTube Direct URL -> Resolve via Lavalink directly
-        if is_direct_url and not is_yt_track:
+        # Case A: Direct URL (YouTube, SoundCloud, Direct HTTP Streams, Playlists) -> Resolve via Lavalink directly
+        if is_direct_url:
             try:
                 results = await asyncio.wait_for(wavelink.Playable.search(lookup_target), timeout=6.0)
                 if isinstance(results, wavelink.Playlist) and results.tracks:

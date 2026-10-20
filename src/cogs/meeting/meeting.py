@@ -228,8 +228,42 @@ class MeetingAudioSink(AudioSinkBase):
         except Exception:
             return
 
-    def get_speaker_wav_chunks(self, user_id: Any, chunk_seconds: int = 120) -> list[io.BytesIO]:
-        """Split a speaker's PCM buffer into WAV chunks (default 120s max each) for robust API ingestion."""
+    @staticmethod
+    def _normalize_pcm(pcm_bytes: bytes, target_peak: int = 25000) -> bytes:
+        """
+        Automatic Gain Control (AGC) & Dynamic Peak Normalization.
+        Amplifies soft, whispered, or low-mic speech by up to 15x
+        so speech recognition engines can transcribe quiet voices clearly.
+        """
+        if not pcm_bytes or len(pcm_bytes) < 4:
+            return pcm_bytes
+
+        try:
+            samples = array.array("h", pcm_bytes)
+            if not samples:
+                return pcm_bytes
+
+            max_amp = max(abs(s) for s in samples)
+            if max_amp < 30:  # Pure absolute silence / line noise
+                return pcm_bytes
+
+            # If audio is already loud enough, do not over-boost
+            if max_amp >= 22000:
+                return pcm_bytes
+
+            gain = min(15.0, float(target_peak) / float(max_amp))
+            if gain <= 1.05:
+                return pcm_bytes
+
+            normalized = array.array(
+                "h", (min(32767, max(-32768, int(s * gain))) for s in samples)
+            )
+            return normalized.tobytes()
+        except Exception:
+            return pcm_bytes
+
+    def get_speaker_wav_chunks(self, user_id: Any, chunk_seconds: int = 30) -> list[io.BytesIO]:
+        """Split a speaker's PCM buffer into WAV chunks (default 30s max each) with AGC normalization."""
         buf = self.speaker_buffers.get(user_id)
         if not buf or len(buf) < 16000 * 2 * 0.3:  # Less than 0.3 seconds of speech
             return []
@@ -242,12 +276,15 @@ class MeetingAudioSink(AudioSinkBase):
             if len(slice_data) < 16000 * 2 * 0.3:
                 continue
 
+            # Apply AGC Normalization to amplify quiet/soft voices
+            normalized_slice = self._normalize_pcm(slice_data)
+
             wav_io = io.BytesIO()
             with wave.open(wav_io, "wb") as wf:
                 wf.setnchannels(1)  # Mono
                 wf.setsampwidth(2)  # 16-bit
                 wf.setframerate(16000)  # 16kHz
-                wf.writeframes(slice_data)
+                wf.writeframes(normalized_slice)
 
             wav_io.seek(0)
             chunks.append(wav_io)
@@ -342,13 +379,14 @@ class MeetingCog(commands.Cog):
         if not wav_data or len(wav_data) < 1000:
             return ""
 
-        # Tier 1: Google Speech Recognition (Optimized for Indian dialects: Hindi, Hinglish, Marathi, etc.)
+        # Tier 1: Google Speech Recognition (Free, zero-key, optimized for Indian dialects: Hindi, Hinglish, Marathi, etc.)
         if SPEECH_RECOGNITION_AVAILABLE and sr is not None:
             try:
                 def _run_google_sr() -> str:
                     recognizer = sr.Recognizer()
-                    recognizer.energy_threshold = 300
-                    recognizer.dynamic_energy_threshold = False
+                    recognizer.dynamic_energy_threshold = True
+                    recognizer.energy_threshold = 40
+                    recognizer.pause_threshold = 0.6
                     with sr.AudioFile(io.BytesIO(wav_data)) as source:
                         audio = recognizer.record(source)
                     # Try hi-IN (Hindi + Hinglish) first
@@ -365,6 +403,13 @@ class MeetingCog(commands.Cog):
                             return res.strip()
                     except Exception:
                         pass
+                    # Fallback to mr-IN (Marathi)
+                    try:
+                        res = recognizer.recognize_google(audio, language="mr-IN")
+                        if res and len(res.strip()) > 1:
+                            return res.strip()
+                    except Exception:
+                        pass
                     return ""
 
                 sr_result = await asyncio.to_thread(_run_google_sr)
@@ -373,11 +418,11 @@ class MeetingCog(commands.Cog):
             except Exception as e:
                 logger.debug(f"Notice from Google Speech Recognition: {e}")
 
-        # Tier 2: Google Gemini Multimodal Audio (gemini-3.5-transcribe, gemini-3.5-flash-lite)
+        # Tier 2: Google Gemini Multimodal Audio (gemini-2.5-flash) - 100% Free Tier (1,500 req/day)
         gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
         if gemini_key:
             b64_audio = base64.b64encode(wav_data).decode("utf-8")
-            models = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"]
+            models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"]
 
             prompt = (
                 "You are an expert audio transcription system specializing in Indian speech and multilingual meetings. "

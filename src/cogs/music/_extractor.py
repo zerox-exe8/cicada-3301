@@ -415,16 +415,17 @@ class NativeExtractor:
             clean_yt_url = f"https://www.youtube.com/watch?v={video_id}"
             orig_yt_url = clean_yt_url
 
-            # Fast 0.05s oEmbed title resolution (100% unblocked on Cloud/Render)
+            # Priority 1: Direct YouTube stream extraction via yt-dlp Android
+            track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
+            if track:
+                _SEARCH_CACHE[cache_key] = (now, track)
+                return track
+
+            # Priority 2: Fast 0.05s oEmbed title resolution
             yt_title = await cls._fetch_youtube_title(clean_yt_url)
             if yt_title:
                 yt_query = cls._parse_youtube_title(yt_title)
                 raw_q = yt_query or yt_title
-            else:
-                track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
-                if track:
-                    _SEARCH_CACHE[cache_key] = (now, track)
-                    return track
 
         # direct SoundCloud URL Handling
         elif "soundcloud.com/" in raw_q:
@@ -460,6 +461,16 @@ class NativeExtractor:
         has_noise = bool(AUDIO_FORMAT_PREFIX_PATTERN.search(raw_q) or AUDIO_FORMAT_TAGS.search(raw_q))
         if not track and cleaned_query.lower() != raw_q.lower() and not has_noise:
             track = await cls._extract_jiosaavn(raw_q, requester, is_autoplay)
+
+        if track and orig_yt_url:
+            # Prevent hijacking to an unrelated JioSaavn song if user provided a YouTube URL
+            q_words = {w for w in re.findall(r"\w{3,}", raw_q.lower()) if w not in {"video", "audio", "song", "full", "official", "lyrics", "version"}}
+            t_words = {w for w in re.findall(r"\w{3,}", track.title.lower())}
+            a_words = {w for w in re.findall(r"\w{3,}", track.author.lower())}
+            combined_match = (t_words | a_words) & q_words
+            if q_words and not combined_match:
+                logger.warning(f"JioSaavn mismatch for YouTube URL '{orig_yt_url}': '{track.title}' by '{track.author}' has no overlap with '{raw_q}'")
+                track = None
 
         # Tier 2: YouTube Fallback (Direct Stream via Android Emulation)
         if not track:

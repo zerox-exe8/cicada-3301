@@ -33,6 +33,7 @@ for p in possible_engine_paths:
 
 from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
+from src.core.kyrolink_native import KyroLinkNativeResolver
 
 logger = logging.getLogger("Kyro.KyroLinkTest")
 
@@ -42,56 +43,29 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._in_process_resolver = None
-
-    def _get_fallback_resolver(self):
-        """In-process resolver fallback if standalone engine daemon is not running."""
-        if self._in_process_resolver is None:
-            try:
-                from kyrolink.proxy_manager import ProxyPoolManager
-                from kyrolink.unblockable import UnblockableResolver
-                pool = ProxyPoolManager()
-                self._in_process_resolver = UnblockableResolver(proxy_pool=pool)
-            except Exception as e:
-                logger.error("[KYROLINK COG] Failed to load in-process resolver: %s", e, exc_info=True)
-        return self._in_process_resolver
+        self.resolver = KyroLinkNativeResolver()
 
     async def _resolve_track_anywhere(self, query: str) -> Optional[dict[str, Any]]:
-        """Try resolving via EngineClient, fallback to in-process UnblockableResolver."""
-        # 1. Try EngineClient if available
+        """Resolve track via KyroLink Native (Spotify + YouTube Android Innertube)."""
+        # 1. Native in-process resolver (Fastest, zero JVM, anti-429, anti-BotGuard)
+        try:
+            track_data = await self.resolver.resolve(query)
+            if track_data:
+                return track_data
+        except Exception as e:
+            logger.error("[KYROLINK COG] Native resolve error: %s", e, exc_info=True)
+
+        # 2. Fallback to standalone EngineClient if daemon is running
         if hasattr(self.bot, "engine") and self.bot.engine:
             try:
                 track_data = await self.bot.engine.resolve_track(query)
                 if track_data:
                     return track_data
             except Exception as e:
-                logger.debug("[KYROLINK COG] EngineClient resolve notice: %s", e)
+                logger.debug("[KYROLINK COG] EngineClient notice: %s", e)
 
-        # 2. Fallback to in-process UnblockableResolver directly (Spotify + YouTube Native)
-        resolver = self._get_fallback_resolver()
-
-        if resolver:
-            track = await resolver.resolve(query)
-            if track:
-                return {
-                    "encoded": track.stream_url,
-                    "info": {
-                        "identifier": track.id,
-                        "title": track.title,
-                        "author": track.artist,
-                        "length": track.duration * 1000,
-                        "uri": track.webpage_url or track.stream_url,
-                        "artworkUrl": track.thumbnail,
-                        "isrc": track.isrc,
-                        "sourceName": track.source,
-                    },
-                    "pluginInfo": {
-                        "bitrate": track.bitrate_kbps,
-                        "unblockable": True,
-                        "source": track.source,
-                    }
-                }
         return None
+
 
     @commands.command(name="kplay", aliases=["kp", "kyroplay"])
     async def kplay(self, ctx: CustomContext, *, query: str) -> None:

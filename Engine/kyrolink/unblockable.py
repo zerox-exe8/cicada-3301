@@ -83,21 +83,23 @@ class UnblockableResolver:
                 client_list = custom_clients
 
         ydl_opts: Dict[str, Any] = {
-            "format": "bestaudio[ext=m4a][abr>=160]/bestaudio[ext=webm][abr>=160]/bestaudio/best",
+            "format": "bestaudio/18/best",
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
             "noplaylist": True,
             "skip_download": True,
-            "socket_timeout": 8,
+            "socket_timeout": 12,
+            "default_search": "ytsearch1",
             "prefer_free_formats": True,
             "extractor_args": {
                 "youtube": {
-                    "player_client": client_list,
-                    "player_skip": ["webpage", "configs", "js"],
+                    "player_client": ["android"],
+                    "player_skip": ["webpage", "configs", "js", "translated_subs"],
                 }
             },
         }
+
 
         if proxy:
             ydl_opts["proxy"] = proxy

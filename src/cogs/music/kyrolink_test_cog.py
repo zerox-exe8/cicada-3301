@@ -48,14 +48,12 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
         """In-process resolver fallback if standalone engine daemon is not running."""
         if self._in_process_resolver is None:
             try:
-                from managers.media import MediaManager
                 from kyrolink.proxy_manager import ProxyPoolManager
                 from kyrolink.unblockable import UnblockableResolver
-                media = MediaManager()
                 pool = ProxyPoolManager()
-                self._in_process_resolver = UnblockableResolver(media_manager=media, proxy_pool=pool)
+                self._in_process_resolver = UnblockableResolver(proxy_pool=pool)
             except Exception as e:
-                logger.error("[KYROLINK COG] Failed to load in-process resolver: %s", e)
+                logger.error("[KYROLINK COG] Failed to load in-process resolver: %s", e, exc_info=True)
         return self._in_process_resolver
 
     async def _resolve_track_anywhere(self, query: str) -> Optional[dict[str, Any]]:
@@ -69,8 +67,9 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
             except Exception as e:
                 logger.debug("[KYROLINK COG] EngineClient resolve notice: %s", e)
 
-        # 2. Fallback to in-process UnblockableResolver directly
+        # 2. Fallback to in-process UnblockableResolver directly (Spotify + YouTube Native)
         resolver = self._get_fallback_resolver()
+
         if resolver:
             track = await resolver.resolve(query)
             if track:
@@ -106,10 +105,10 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
 
         channel = ctx.author.voice.channel
 
-        # 2. Send loading card
         loading_c = KyroContainer()
-        loading_c.add_text(f"⚡ **KyroLink Resolving...**\n> Query: `{query}`\n> Routing through: **4-Tier Unblockable Pipeline**")
+        loading_c.add_text(f"⚡ **KyroLink Resolving...**\n> Query: `{query}`\n> Audio Engine: **Spotify & YouTube Android (Zero 429)**")
         status_msg = await send_container_response(ctx, loading_c)
+
 
         # 3. Resolve track via KyroLink
         start_time = time.perf_counter_ns()
@@ -140,29 +139,30 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
         try:
             # Check if voice_client already exists
             vc = ctx.voice_client
+            # If a Wavelink player is currently occupying the channel, disconnect it cleanly
+            # so KyroLink native audio client takes full control of the voice socket
+            import wavelink
+            if vc is not None and isinstance(vc, wavelink.Player):
+                logger.info("[KYROLINK] Disconnecting active Wavelink player for KyroLink native takeover.")
+                await vc.disconnect()
+                vc = None
+
             if vc is None:
                 vc = await channel.connect()
             elif vc.channel.id != channel.id:
                 await vc.move_to(channel)
 
-            # Determine audio playback mechanism
-            import wavelink
-            if isinstance(vc, wavelink.Player):
-                # If Wavelink player is connected
-                tracks = await wavelink.Playable.search(stream_url)
-                if tracks:
-                    await vc.play(tracks[0] if isinstance(tracks, list) else tracks.tracks[0])
-            else:
-                # Native discord.py VoiceClient with resilient stream options
-                if vc.is_playing():
-                    vc.stop()
+            # Native discord.py VoiceClient with resilient stream options
+            if vc.is_playing():
+                vc.stop()
 
-                ffmpeg_options = {
-                    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                    "options": "-vn"
-                }
-                audio_source = discord.FFmpegOpusAudio(stream_url, **ffmpeg_options)
-                vc.play(audio_source)
+            ffmpeg_options = {
+                "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                "options": "-vn"
+            }
+            audio_source = discord.FFmpegOpusAudio(stream_url, **ffmpeg_options)
+            vc.play(audio_source)
+
 
         except Exception as play_err:
             logger.error("[KYROLINK COG] Voice playback error: %s", play_err)
@@ -211,23 +211,20 @@ class KyroLinkTestCog(commands.Cog, name="KyroLink Test"):
     async def kstatus(self, ctx: CustomContext) -> None:
         """View live KyroLink health, active tiers, and proxy pool status."""
         c = KyroContainer()
-        engine_status = "ONLINE"
-        engine_url = "In-Process / http://127.0.0.1:8000"
-
         c.add_text(
             f"⚡ **KyroLink Audio Node Telemetry**\n"
             f"> **Status:** `OPERATIONAL`\n"
             f"> **Runtime:** `Zero-JVM Native AsyncIO`\n"
             f"> **Frame Interval:** `20.00ms (Exact 50 frames/sec)`\n"
             f"> **Jitter Buffer:** `5-Second AudioRingBuffer`\n\n"
-            f"🛡️ **Active Bypass Tiers:**\n"
-            f"• **Tier 1:** `Akamai 320kbps CDN (0% Cloud Block)`\n"
-            f"• **Tier 2:** `Spotify ISRC Studio Bridging`\n"
-            f"• **Tier 3:** `YouTube Android Mobile Innertube`\n"
-            f"• **Tier 4:** `SoundCloud / Invidious Fallback`\n\n"
-            f"💡 **Usage:** Use `?kplay <song name or spotify url>` to test!"
+            f"🛡️ **Active Unblockable Providers:**\n"
+            f"• **YouTube:** `Android Innertube Mobile Client (Zero 429 / Anti-BotGuard)`\n"
+            f"• **Spotify:** `OEmbed & Web API Metadata Bridging`\n"
+            f"• **SoundCloud:** `Auxiliary Fallback Stream`\n\n"
+            f"💡 **Usage:** Use `?kplay <song name, spotify url, or youtube url>` to test!"
         )
         await send_container_response(ctx, c)
+
 
 
 async def setup(bot: commands.Bot) -> None:

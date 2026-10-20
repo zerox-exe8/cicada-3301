@@ -46,6 +46,27 @@ class KyroLinkNativeResolver:
     def __init__(self) -> None:
         self._mem_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._session: Optional[aiohttp.ClientSession] = None
+        self._ydl: Optional[yt_dlp.YoutubeDL] = None
+
+    def _get_ydl(self) -> yt_dlp.YoutubeDL:
+        """Get or initialize persistent YoutubeDL instance to cache extractor JS and player session."""
+        if self._ydl is None:
+            ydl_opts: Dict[str, Any] = {
+                "format": "18/bestaudio[ext=m4a]/bestaudio/best",
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "noplaylist": True,
+                "socket_timeout": 8,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android"],
+                        "skip": ["webpage", "translated_subs", "comments"],
+                    }
+                },
+            }
+            self._ydl = yt_dlp.YoutubeDL(ydl_opts)
+        return self._ydl
 
     async def get_session(self) -> aiohttp.ClientSession:
         current_loop = asyncio.get_running_loop()
@@ -147,36 +168,23 @@ class KyroLinkNativeResolver:
     # MULTI-CLIENT YOUTUBE STREAM EXTRACTOR
     # =========================================================================
     def _extract_youtube_sync(self, target_url: str) -> Optional[Dict[str, Any]]:
-        """Synchronous multi-client stream extractor with full JS cipher support.
-        Prioritizes Format 18 (unthrottled AAC audio) with fallback across android and ios.
+        """Synchronous Android Innertube stream extractor with persistent session caching.
+        Prioritizes Format 18 (unthrottled AAC audio) via persistent android client (subsequent calls ~1.5s).
         """
-        ydl_opts: Dict[str, Any] = {
-            "format": "18/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "noplaylist": True,
-            "socket_timeout": 5,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "ios", "mweb"],
-                }
-            },
-        }
-
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(target_url, download=False)
-                if not info:
-                    return None
-                if "entries" in info and info["entries"]:
-                    for item in info["entries"]:
-                        if item and item.get("url"):
-                            return item
-                    return info["entries"][0]
-                return info
+            ydl = self._get_ydl()
+            info = ydl.extract_info(target_url, download=False)
+            if not info:
+                return None
+            if "entries" in info and info["entries"]:
+                for item in info["entries"]:
+                    if item and item.get("url"):
+                        return item
+                return info["entries"][0]
+            return info
         except Exception as e:
-            logger.debug("[KYROLINK NATIVE] yt-dlp multi-client notice: %s", e)
+            logger.debug("[KYROLINK NATIVE] yt-dlp android client notice: %s", e)
+            self._ydl = None
             return None
 
     # =========================================================================
@@ -325,11 +333,11 @@ class KyroLinkNativeResolver:
             else:
                 target_url = f"ytsearch1:{clean_q}"
 
-        # 2. Multi-client stream extraction with tight 4.5-second timeout
+        # 2. Android Innertube stream extraction (warm cache resolves in ~1.5s, cold ~6s)
         try:
             info = await asyncio.wait_for(
                 asyncio.to_thread(self._extract_youtube_sync, target_url),
-                timeout=4.5,
+                timeout=12.0,
             )
             if info and info.get("url"):
                 title = info.get("title") or (meta.get("title") if meta else None) or "YouTube Audio"

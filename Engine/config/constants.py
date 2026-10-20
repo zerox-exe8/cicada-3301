@@ -1,0 +1,22 @@
+from enum import IntEnum, StrEnum
+
+class EventPriority(IntEnum):
+    LOW = 0
+    NORMAL = 10
+    HIGH = 20
+    CRITICAL = 30  # For security breaches, raid attacks, kill-switch
+
+class OpCode(StrEnum):
+    HEARTBEAT = "HEARTBEAT"
+    EVENT_DISPATCH = "EVENT_DISPATCH"
+    COMMAND_EXECUTE = "COMMAND_EXECUTE"
+    ACTION_TAKEN = "ACTION_TAKEN"
+    STATE_SYNC = "STATE_SYNC"
+    ALERT_TRIGGER = "ALERT_TRIGGER"
+
+# System Limits & Engine Constants
+MAX_ACTOR_QUEUE_SIZE = 10_000
+DEFAULT_EVENT_TIMEOUT_SECONDS = 5.0
+L1_CACHE_TTL_SECONDS = 30
+CIRCUIT_BREAKER_FAIL_THRESHOLD = 5
+CIRCUIT_BREAKER_RESET_SECONDS = 15.0

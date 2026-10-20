@@ -1,0 +1,82 @@
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kyro-engine-core
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=production
+      - DEBUG=false
+      - WORKER_ID=engine-prod-01
+      - HOST=0.0.0.0
+      - PORT=8000
+      - REDIS_URL=redis://dragonfly:6379/0
+      - POSTGRES_DSN=postgresql://postgres:postgres_secure_pwd@postgres:5432/kyro_engine
+      - PROXY_LIST=${PROXY_LIST:-}
+      - YOUTUBE_CLIENTS=android_music,android,ios
+      - AUDIO_PREBUFFER_SECONDS=5
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - kyro-net
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # DragonflyDB: Drop-in multi-threaded Redis replacement (25x higher throughput)
+  dragonfly:
+    image: 'docker.dragonflydb.io/dragonflydb/dragonfly:latest'
+    container_name: kyro-dragonfly-cache
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    ulimits:
+      memlock: -1
+    networks:
+      - kyro-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: kyro-postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secure_pwd
+      POSTGRES_DB: kyro_engine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - kyro-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  kyro-net:
+    driver: bridge
+
+volumes:
+  postgres_data:

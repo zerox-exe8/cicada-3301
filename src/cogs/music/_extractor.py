@@ -688,40 +688,50 @@ class NativeExtractor:
         except Exception:
             return None
 
-    _SC_CLIENT_ID: Optional[str] = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
+    _SC_CLIENT_ID: Optional[str] = "pJaCCaoD8RMOSFmlbrbYQuyvkjP1fiES"
     _SC_CID_EXPIRE: float = 0.0
 
     @classmethod
-    async def _get_sc_client_id(cls, session: aiohttp.ClientSession) -> str:
-        """Fetch or refresh dynamic SoundCloud Client ID."""
+    def invalidate_sc_client_id(cls, dead_id: Optional[str] = None) -> None:
+        """Immediately invalidate dead SoundCloud Client ID and trigger refresh."""
+        if dead_id is None or cls._SC_CLIENT_ID == dead_id:
+            cls._SC_CLIENT_ID = None
+            cls._SC_CID_EXPIRE = 0.0
+
+    @classmethod
+    async def _get_sc_client_id(cls, session: aiohttp.ClientSession, force: bool = False) -> str:
+        """Fetch or refresh dynamic SoundCloud Client ID using reversed asset bundle inspection."""
         now = time.time()
-        if cls._SC_CLIENT_ID and now < cls._SC_CID_EXPIRE:
+        if not force and cls._SC_CLIENT_ID and now < cls._SC_CID_EXPIRE:
             return cls._SC_CLIENT_ID
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         }
         try:
             async with session.get("https://soundcloud.com", headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as resp:
-                text = await resp.text()
-                script_urls = re.findall(r'<script[^>]+src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', text)
-                for s_url in script_urls[-5:]:
-                    async with session.get(s_url, headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as s_resp:
-                        s_text = await s_resp.text()
-                        m = re.search(r'client_id:\s*"([a-zA-Z0-9]{32})"', s_text) or re.search(r'client_id=([a-zA-Z0-9]{32})', s_text)
-                        if m:
-                            cls._SC_CLIENT_ID = m.group(1)
-                            cls._SC_CID_EXPIRE = now + 86400.0
-                            return cls._SC_CLIENT_ID
+                if resp.status == 200:
+                    text = await resp.text()
+                    script_urls = re.findall(r'<script[^>]+src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', text)
+                    # Check scripts in reverse order (asset bundles with client_id are always at the end)
+                    for s_url in reversed(script_urls[-5:]):
+                        try:
+                            async with session.get(s_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as s_resp:
+                                if s_resp.status == 200:
+                                    s_text = await s_resp.text()
+                                    m = re.search(r'client_id[:=]"?([a-zA-Z0-9]{32})"?', s_text)
+                                    if m:
+                                        cls._SC_CLIENT_ID = m.group(1)
+                                        cls._SC_CID_EXPIRE = now + 86400.0
+                                        return cls._SC_CLIENT_ID
+                        except Exception:
+                            continue
         except Exception:
             pass
 
-        # If scrape failed AND current ID has expired, force-expire so next call retries
-        # instead of reusing a potentially dead ID for another hour
-        if not cls._SC_CLIENT_ID or now >= cls._SC_CID_EXPIRE:
-            # Known fallback IDs — at least one is usually still active
-            cls._SC_CLIENT_ID = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
-            cls._SC_CID_EXPIRE = now + 900.0  # Retry refresh in 15 min, not 1 hour
+        # Valid active fallback ID pool
+        cls._SC_CLIENT_ID = "pJaCCaoD8RMOSFmlbrbYQuyvkjP1fiES"
+        cls._SC_CID_EXPIRE = now + 3600.0
         return cls._SC_CLIENT_ID
 
     @classmethod
@@ -731,138 +741,118 @@ class NativeExtractor:
         requester: str,
         is_autoplay: bool,
     ) -> Optional[Track]:
-        """Search and extract direct audio stream from SoundCloud Worldwide catalog."""
+        """Search and extract direct audio stream from SoundCloud Worldwide catalog with multi-candidate resilience."""
         if not query:
             return None
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
         }
 
         try:
             async with aiohttp.ClientSession() as session:
-                cid = await cls._get_sc_client_id(session)
-                encoded_q = urllib.parse.quote(query)
-                item = None
+                for attempt in range(2):
+                    cid = await cls._get_sc_client_id(session, force=(attempt > 0))
+                    encoded_q = urllib.parse.quote(query)
 
-                if "soundcloud.com/" in query:
-                    resolve_url = f"https://api-v2.soundcloud.com/resolve?url={encoded_q}&client_id={cid}"
-                    async with session.get(resolve_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data.get("media"):
-                                item = data
-                else:
-                    search_url = f"https://api-v2.soundcloud.com/search/tracks?q={encoded_q}&client_id={cid}&limit=10"
-                    async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                        if resp.status != 200:
-                            return None
-                        data = await resp.json()
-                        collection = data.get("collection", [])
-                        if not collection:
-                            return None
-
-                        scored = []
-                        for it in collection:
-                            it_title = it.get("title") or ""
-                            it_user = it.get("user", {}).get("username") or ""
-                            it_dur = int((it.get("duration") or 0) / 1000)
-                            sc = score_candidate(it_title, it_user, query, duration=it_dur)
-                            scored.append((sc, it))
-
-                        scored.sort(key=lambda x: x[0], reverse=True)
-                        has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
-
-                        for sc, candidate in scored:
-                            if sc < 0 and not has_user_keyword:
+                    candidates_to_try = []
+                    if "soundcloud.com/" in query:
+                        resolve_url = f"https://api-v2.soundcloud.com/resolve?url={encoded_q}&client_id={cid}"
+                        async with session.get(resolve_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                            if resp.status == 401:
+                                cls.invalidate_sc_client_id(cid)
                                 continue
-                            item = candidate
-                            break
+                            if resp.status == 200:
+                                data = await resp.json()
+                                if data.get("media"):
+                                    candidates_to_try = [data]
+                    else:
+                        search_url = f"https://api-v2.soundcloud.com/search/tracks?q={encoded_q}&client_id={cid}&limit=10"
+                        async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                            if resp.status == 401:
+                                cls.invalidate_sc_client_id(cid)
+                                continue
+                            if resp.status != 200:
+                                return None
+                            data = await resp.json()
+                            collection = data.get("collection", [])
+                            if not collection:
+                                return None
 
-                if not item:
-                    return None
-                raw_item_title = item.get("title") or query
-                title = clean_track_title(raw_item_title)
-                author = item.get("user", {}).get("username") or "SoundCloud Artist"
+                            scored = []
+                            for it in collection:
+                                it_title = it.get("title") or ""
+                                it_user = it.get("user", {}).get("username") or ""
+                                it_dur = int((it.get("duration") or 0) / 1000)
+                                sc = score_candidate(it_title, it_user, query, duration=it_dur)
+                                scored.append((sc, it))
 
-                # Extract singer/artist if embedded in title (e.g. "Tum Hardafa Ho (Ankit Tiwari)")
-                m_artist = re.search(r"[\(\[\{]([^\)\]\}]+)[\)\]\}]", title)
-                if m_artist:
-                    cand_art = m_artist.group(1).strip()
-                    if cand_art and not any(kw in cand_art.lower() for kw in UNWANTED_VERSION_KEYWORDS) and len(cand_art.split()) <= 4:
-                        author = cand_art
-                        title = re.sub(r"[\(\[\{]" + re.escape(m_artist.group(0)[1:-1]) + r"[\)\]\}]", "", title).strip()
-                        title = re.sub(r"\s+", " ", title).strip()
-                elif " - " in title:
-                    parts = title.split(" - ", 1)
-                    p0, p1 = parts[0].strip(), parts[1].strip()
-                    p0_clean = re.sub(r"\b(?:qawwali|qawali|ghazal|song|full\s+song|remix|mix|official)\b", "", p0, flags=re.IGNORECASE).strip()
-                    p1_clean = re.sub(r"\b(?:qawwali|qawali|ghazal|song|full\s+song|remix|mix|official)\b", "", p1, flags=re.IGNORECASE).strip()
-                    artist_clues = ["singh", "kumar", "tiwari", "sharma", "malik", "kaur", "khan", "ali", "alan", "gaga", "mars", "nusrat", "fateh", "arijit", "atif"]
-                    if len(p0_clean.split()) <= 6 and (p0_clean.lower() in query.lower() or any(w in p0_clean.lower() for w in artist_clues)):
-                        author = p0_clean
-                        title = p1
-                    elif len(p1_clean.split()) <= 6 and (p1_clean.lower() in query.lower() or any(w in p1_clean.lower() for w in artist_clues)):
-                        author = p1_clean
-                        title = p0
-                duration = int((item.get("duration") or 0) / 1000)
-                thumbnail = item.get("artwork_url") or item.get("user", {}).get("avatar_url") or "https://cdn.discordapp.com/embed/avatars/0.png"
-                thumbnail = thumbnail.replace("-large", "-t500x500")
-                permalink = item.get("permalink_url") or "https://soundcloud.com"
+                            scored.sort(key=lambda x: x[0], reverse=True)
+                            has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
 
-                media = item.get("media", {}).get("transcodings", [])
-                stream_endpoint = None
-                for t in media:
-                    fmt = t.get("format", {})
-                    if fmt.get("protocol") == "progressive":
-                        stream_endpoint = t.get("url")
-                        break
-                    elif fmt.get("protocol") == "hls" and not stream_endpoint:
-                        stream_endpoint = t.get("url")
+                            for sc, candidate in scored:
+                                if sc < 0 and not has_user_keyword:
+                                    continue
+                                candidates_to_try.append(candidate)
 
-                if not stream_endpoint:
-                    # SoundCloud transcoding blocked (e.g. SoundCloud GO+ / geoblocked major label).
-                    # Seamlessly resolve audio via YouTube fallback using actual track title & artist
-                    fb_query = f"{title} {author}".strip() if author else title
-                    fallback_track = await asyncio.to_thread(
-                        cls._extract_youtube_fallback, fb_query, requester, is_autoplay
-                    )
-                    if fallback_track:
-                        fallback_track.url = permalink
-                        if thumbnail:
-                            fallback_track.thumbnail = thumbnail
-                        return fallback_track
-                    return None
+                            # If all were filtered out, still try the raw collection
+                            if not candidates_to_try:
+                                candidates_to_try = collection[:3]
 
-                async with session.get(f"{stream_endpoint}?client_id={cid}", headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as s_resp:
-                    if s_resp.status != 200:
-                        return None
-                    s_data = await s_resp.json()
-                    final_stream_url = s_data.get("url")
-                    if not final_stream_url:
-                        # Fallback to YouTube if stream URL extraction fails
-                        fb_query = f"{title} {author}".strip() if author else title
-                        fallback_track = await asyncio.to_thread(
-                            cls._extract_youtube_fallback, fb_query, requester, is_autoplay
+                    # Loop through top candidates to extract a valid playable stream
+                    for item in candidates_to_try[:4]:
+                        raw_item_title = item.get("title") or query
+                        title = clean_track_title(raw_item_title)
+                        author = item.get("user", {}).get("username") or "SoundCloud Artist"
+                        duration = int((item.get("duration") or 0) / 1000)
+
+                        # Skip 30-second preview snippets (SoundCloud Go+ previews) if a longer track might exist
+                        if duration <= 35 and len(candidates_to_try) > 1 and duration > 0:
+                            # Check if next candidates have normal duration
+                            longer_exists = any(int((c.get("duration") or 0)/1000) > 45 for c in candidates_to_try)
+                            if longer_exists:
+                                continue
+
+                        thumbnail = item.get("artwork_url") or item.get("user", {}).get("avatar_url") or "https://cdn.discordapp.com/embed/avatars/0.png"
+                        thumbnail = thumbnail.replace("-large", "-t500x500")
+                        permalink = item.get("permalink_url") or "https://soundcloud.com"
+
+                        media = item.get("media", {}).get("transcodings", [])
+                        # Prioritize progressive, then HLS
+                        sorted_transcodings = sorted(
+                            media,
+                            key=lambda x: 0 if x.get("format", {}).get("protocol") == "progressive" else 1
                         )
-                        if fallback_track:
-                            fallback_track.url = permalink
-                            return fallback_track
-                        return None
 
-                    return Track(
-                        title=title,
-                        author=author,
-                        url=permalink,
-                        stream_url=final_stream_url,
-                        duration=duration,
-                        thumbnail=thumbnail,
-                        requester=requester,
-                        is_autoplay=is_autoplay,
-                    )
+                        for t in sorted_transcodings:
+                            ep = t.get("url")
+                            if not ep:
+                                continue
+                            try:
+                                async with session.get(f"{ep}?client_id={cid}", headers=headers, timeout=aiohttp.ClientTimeout(total=4)) as s_resp:
+                                    if s_resp.status == 401:
+                                        cls.invalidate_sc_client_id(cid)
+                                        break
+                                    if s_resp.status == 200:
+                                        s_data = await s_resp.json()
+                                        final_stream_url = s_data.get("url")
+                                        if final_stream_url:
+                                            return Track(
+                                                title=title,
+                                                author=author,
+                                                url=permalink,
+                                                stream_url=final_stream_url,
+                                                duration=duration,
+                                                thumbnail=thumbnail,
+                                                requester=requester,
+                                                is_autoplay=is_autoplay,
+                                            )
+                            except Exception:
+                                continue
+
         except Exception as e:
-            logger.debug(f"SoundCloud extract notice for '{query}': {e}")
+            logger.debug("SoundCloud extract notice for '%s': %s", query, e)
 
         return None
 

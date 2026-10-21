@@ -61,6 +61,7 @@ class GuildPlayer:
         self._empty_vc_task: Optional[asyncio.Task] = None
         self._advance_lock: asyncio.Lock = asyncio.Lock()
         self._connect_lock: asyncio.Lock = asyncio.Lock()
+        self._queue_lock: asyncio.Lock = asyncio.Lock()
         self._last_advance_time: float = 0.0
 
     # ── State Properties ──
@@ -86,6 +87,46 @@ class GuildPlayer:
         if vc and isinstance(vc, wavelink.Player):
             return vc.paused
         return False
+
+    # ── Thread-Safe Queue Operations ──
+
+    async def add_track(self, track: Track) -> None:
+        """Thread-safely append a single track to the queue."""
+        async with self._queue_lock:
+            self.queue.append(track)
+
+    async def add_tracks(self, tracks: list[Track]) -> None:
+        """Thread-safely append multiple tracks to the queue."""
+        async with self._queue_lock:
+            self.queue.extend(tracks)
+
+    async def pop_next_track(self) -> Optional[Track]:
+        """Thread-safely pop the next track from the front of the queue."""
+        async with self._queue_lock:
+            if self.queue:
+                return self.queue.pop(0)
+            return None
+
+    async def clear_queue(self) -> int:
+        """Thread-safely clear all tracks from the queue and return count."""
+        async with self._queue_lock:
+            cnt = len(self.queue)
+            self.queue.clear()
+            return cnt
+
+    async def remove_track_at(self, index: int) -> Optional[Track]:
+        """Thread-safely remove a track at index (0-based) from queue."""
+        async with self._queue_lock:
+            if 0 <= index < len(self.queue):
+                return self.queue.pop(index)
+            return None
+
+    async def shuffle_queue(self) -> int:
+        """Thread-safely shuffle the upcoming queue."""
+        async with self._queue_lock:
+            import random
+            random.shuffle(self.queue)
+            return len(self.queue)
 
     # ── Voice Connection ──
 
@@ -245,9 +286,16 @@ class GuildPlayer:
                 playable = None
 
         if not playable:
-            logger.error(f"Guild {self.guild.id}: Lavalink could not resolve playable for '{track.title}'")
-            if self.queue:
-                next_t = self.queue.pop(0)
+            logger.warning(f"Guild {self.guild.id}: Lavalink could not resolve playable for '{track.title}'")
+            if self.home_channel:
+                try:
+                    warn_c = KyroContainer(accent_color=None)
+                    warn_c.add_text(f"⚠️ **Could not stream track:** `{track.title}`\n> Audio stream was unavailable on YouTube. Advancing to next track in queue...")
+                    await send_container_response(self.home_channel, warn_c)
+                except Exception:
+                    pass
+            next_t = await self.pop_next_track()
+            if next_t:
                 await self.play_track(next_t, message_to_edit=message_to_edit)
             else:
                 self.current = None
@@ -288,11 +336,9 @@ class GuildPlayer:
 
     # Domains that are NOT direct audio streams — Lavalink can't play their page URLs
     _NON_STREAM_DOMAINS = (
-        "jiosaavn.com",
         "spotify.com",
         "open.spotify.com",
         "music.youtube.com",
-        "soundcloud.com",
         "youtube.com/watch",
         "youtu.be",
     )
@@ -301,60 +347,36 @@ class GuildPlayer:
         """Return True only if url is a raw audio stream Lavalink can play via HTTP."""
         if not url or not url.startswith("http"):
             return False
-        # Raw audio streams directly playable via Lavalink HTTP (JioSaavn Akamai, googlevideo, soundcloud raw)
         u_low = url.lower()
-        if any(dom in u_low for dom in ("saavncdn.com", "jiosaavn.com", "googlevideo.com", "sndcdn.com", "media.soundcloud.com")) and any(ext in u_low for ext in (".mp4", "videoplayback", ".m4a", ".webm", ".opus", ".mp3")):
+        if "googlevideo.com" in u_low and any(ext in u_low for ext in (".mp4", "videoplayback", ".m4a", ".webm", ".opus", ".mp3")):
             return True
         return False
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
-        """Resolve Lavalink Playable via direct unblocked CDN stream, attached playable, or search."""
-        search_target = f"{track.title} {track.author}".strip() or track.query or track.title
-
+        """Resolve Lavalink Playable via attached playable, direct YouTube URL, or resilient YouTube search."""
         # ── Priority 1: Attached Playable (already resolved by play.py) ──
         playable = getattr(track, "_playable", None)
         if playable:
             return playable
 
-        # ── Priority 2: Direct Stream URL (JioSaavn 320kbps CDN stream) ──
-        stream_url = getattr(track, "stream_url", None)
-        if stream_url and self._is_direct_stream_url(stream_url):
-            try:
-                results = await asyncio.wait_for(wavelink.Playable.search(stream_url), timeout=4.0)
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"Direct stream URL resolve notice for '{stream_url}': {e}")
-
-        # ── Priority 3: Direct URL (YouTube, SoundCloud, direct streams) ──
         url = track.url or ""
-        if url.startswith(("http://", "https://")):
+        # ── Priority 2: Direct URL if it's YouTube video ──
+        if url.startswith(("http://", "https://")) and any(yt in url for yt in ("youtube.com/watch", "youtu.be/", "music.youtube.com/watch")):
             try:
                 results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=4.0)
                 if results:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
-                logger.debug(f"Direct URL resolve notice for '{url}': {e}")
+                logger.debug(f"Direct YouTube URL resolve notice for '{url}': {e}")
 
-        # ── Priority 4: NativeExtractor Direct Stream (JioSaavn CDN / yt-dlp Mobile / SoundCloud) ──
-        try:
-            from src.cogs.music._extractor import NativeExtractor
-            target_q = track.query or search_target
-            if target_q:
-                ext = await asyncio.wait_for(
-                    NativeExtractor.extract(target_q, requester=track.requester),
-                    timeout=5.0
-                )
-                if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
-                    track.stream_url = ext.stream_url
-                    results = await asyncio.wait_for(wavelink.Playable.search(ext.stream_url), timeout=4.0)
-                    if results:
-                        return results[0] if isinstance(results, list) else results.tracks[0]
-        except Exception as e:
-            logger.debug(f"NativeExtractor resolve notice: {e}")
+        # ── Priority 3: YouTube Search (Spotify bridged to YouTube or text query) ──
+        from src.cogs.music._extractor import clean_track_title
+        clean_title = clean_track_title(track.title) if track.title else ""
+        raw_author = track.author if (track.author and "spotify" not in track.author.lower()) else ""
+        search_target = f"{clean_title} {raw_author}".strip() or track.query or track.title
 
-        # ── Priority 5: Fallbacks (YouTube Music -> YouTube via Lavalink) ──
         if search_target:
+            # Step A: YouTube Music (highest audio fidelity & official track match)
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic),
@@ -365,7 +387,7 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"YouTube Music search notice for '{search_target}': {e}")
 
-        if search_target:
+            # Step B: Standard YouTube search
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
@@ -375,6 +397,18 @@ class GuildPlayer:
                     return results[0] if isinstance(results, list) else results.tracks[0]
             except Exception as e:
                 logger.debug(f"YouTube search notice for '{search_target}': {e}")
+
+            # Step C: Resilient fallback searching clean title only
+            if clean_title and clean_title != search_target:
+                try:
+                    results = await asyncio.wait_for(
+                        wavelink.Playable.search(clean_title, source=wavelink.TrackSource.YouTube),
+                        timeout=3.5
+                    )
+                    if results:
+                        return results[0] if isinstance(results, list) else results.tracks[0]
+                except Exception as e:
+                    logger.debug(f"Fallback YouTube clean title search notice for '{clean_title}': {e}")
 
         return None
 
@@ -465,25 +499,8 @@ class GuildPlayer:
 
         if reason and str(reason).lower() in ("loadfailed", "load_failed"):
             logger.warning(f"Guild {self.guild.id}: Lavalink reported track loadFailed.")
-            # If track failed on Lavalink (e.g. YouTube blocked), attempt recovery via unblocked JioSaavn CDN stream
-            cur_track = self.current
-            if cur_track and not getattr(cur_track, "_cdn_recovered", False):
-                cur_track._cdn_recovered = True
-                try:
-                    from src.cogs.music._extractor import NativeExtractor
-                    target_q = cur_track.query or f"{cur_track.title} {cur_track.author}".strip() or cur_track.title
-                    ext = await NativeExtractor.extract(target_q, requester=cur_track.requester)
-                    if ext and ext.stream_url and self._is_direct_stream_url(ext.stream_url):
-                        cur_track.stream_url = ext.stream_url
-                        cur_track._playable = None
-                        logger.info(f"Guild {self.guild.id}: Recovering failed track with direct stream: '{cur_track.title}'")
-                        await self.play_track(cur_track, message_to_edit=self.controller_message)
-                        return
-                except Exception as e:
-                    logger.debug(f"CDN track recovery error: {e}")
-
-            if self.queue:
-                next_track = self.queue.pop(0)
+            next_track = await self.pop_next_track()
+            if next_track:
                 await self.play_track(next_track)
             else:
                 self.current = None
@@ -502,10 +519,10 @@ class GuildPlayer:
                 await self.play_track(self.current)
                 return
             elif self.loop_mode == "queue" and self.current:
-                self.queue.append(self.current)
+                await self.add_track(self.current)
 
-            if self.queue:
-                next_track = self.queue.pop(0)
+            next_track = await self.pop_next_track()
+            if next_track:
                 await self.play_track(next_track)
             elif self.smart_autoplay and self.current:
                 # Smart Autoplay AI recommendation
@@ -599,22 +616,19 @@ class GuildPlayer:
         container = self.build_now_playing_container(track)
         view = MusicControlView(self.bot, player=self, track_url=track.url)
 
-        # If an explicit message was provided to edit (e.g. initial 'Searching...' card in ?play), edit it
-        if message_to_edit:
-            try:
-                await edit_container_response(message_to_edit, container, view=view, content=None)
-                self.controller_message = message_to_edit
-                return
-            except Exception as e:
-                logger.debug(f"Failed to edit message_to_edit: {e}")
-
-        # For every song starting from queue, skip, autoplay, or fresh play: send a brand-new Now Playing card!
+        # For every song starting from queue, skip, autoplay, or fresh play: send a brand-new clean Now Playing card!
         try:
             msg = await send_container_response(
                 self.home_channel, container, view=view, content=None
             )
             if isinstance(msg, discord.Message):
                 self.controller_message = msg
+                # Clean up initial temporary searching message if present
+                if message_to_edit and isinstance(message_to_edit, discord.Message) and message_to_edit.id != msg.id:
+                    try:
+                        await message_to_edit.delete()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.debug(f"Failed to send now playing card: {e}")
 

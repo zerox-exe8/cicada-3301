@@ -352,6 +352,10 @@ def is_playlist_url(raw_url: str) -> bool:
         u = u[1:-1].strip()
     u_low = u.lower()
 
+    # Spotify short links (mobile share links like spotify.link, spotify.app.link, spoti.fi)
+    if any(sp in u_low for sp in ("spotify.link/", "spotify.app.link/", "spoti.fi/")):
+        return True
+
     # YouTube Playlists (only pure playlists without specific video target 'v=')
     if any(yt in u_low for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
         if "/playlist" in u_low:
@@ -381,7 +385,7 @@ class NativeExtractor:
         requester: str = "DJ / AutoPlay",
         is_autoplay: bool = False,
     ) -> Optional[Track]:
-        """Extract a playable Track from query or URL using multi-tier fallback cascade."""
+        """Extract a playable Track from query or URL using Lavalink YouTube/YouTubeMusic resolution."""
         raw_q = query.strip()
         if not raw_q:
             return None
@@ -405,96 +409,147 @@ class NativeExtractor:
                     thumbnail=cached_track.thumbnail,
                     requester=requester,
                     is_autoplay=is_autoplay,
+                    query=cached_track.query,
                 )
+
+        import wavelink
 
         # direct YouTube URL Handling
         yt_match = YOUTUBE_URL_REGEX.search(raw_q)
         orig_yt_url = None
         if yt_match:
             video_id = yt_match.group(1)
-            clean_yt_url = f"https://www.youtube.com/watch?v={video_id}"
-            orig_yt_url = clean_yt_url
+            orig_yt_url = f"https://www.youtube.com/watch?v={video_id}"
+            try:
+                results = await asyncio.wait_for(wavelink.Playable.search(orig_yt_url), timeout=5.0)
+                if results:
+                    top = results[0] if isinstance(results, list) else results.tracks[0]
+                    thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
+                    trk = Track(
+                        title=top.title or "Unknown Track",
+                        author=top.author or "Unknown Artist",
+                        url=orig_yt_url,
+                        stream_url="",
+                        duration=int((top.length or 0) / 1000),
+                        thumbnail=thumb,
+                        requester=requester,
+                        is_autoplay=is_autoplay,
+                        query=raw_q,
+                    )
+                    trk._playable = top
+                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    return trk
+            except Exception as e:
+                logger.debug(f"Direct YouTube URL resolution notice: {e}")
 
-            # Priority 1: Direct YouTube stream extraction via yt-dlp Android
-            track = await asyncio.to_thread(cls._extract_youtube_fallback, clean_yt_url, requester, is_autoplay)
-            if track:
-                _SEARCH_CACHE[cache_key] = (now, track)
-                return track
-
-            # Priority 2: Fast 0.05s oEmbed title resolution
-            yt_title = await cls._fetch_youtube_title(clean_yt_url)
-            if yt_title:
-                yt_query = cls._parse_youtube_title(yt_title)
-                raw_q = yt_query or yt_title
-
-        # direct SoundCloud URL Handling
-        elif "soundcloud.com/" in raw_q:
-            track = await cls._extract_soundcloud(raw_q, requester, is_autoplay)
-            if track:
-                _SEARCH_CACHE[cache_key] = (now, track)
-                return track
-            return None
-
-        # spotify URL Handling (Extract '{Title} {Artist}' metadata to bridge to audio)
-        is_spotify = any(sp in raw_q for sp in ("spotify.com/", "spotify.link/", "spotify:track:"))
+        # Spotify URL Handling (Extract '{Title} {Artist}' metadata to bridge to YouTube)
+        is_spotify = any(sp in raw_q for sp in ("spotify.com/", "spotify.link/", "spotify:track:", "spotify.app.link/", "spoti.fi/"))
         orig_spotify_url = None
+        search_target = raw_q
+
         if is_spotify:
             sp_url = raw_q
             if sp_url.startswith("spotify:track:"):
                 sp_url = f"https://open.spotify.com/track/{sp_url.split(':')[-1]}"
             orig_spotify_url = sp_url
-            spotify_title = await cls._fetch_spotify_title(sp_url)
-            if spotify_title:
-                raw_q = spotify_title
+            try:
+                spotify_title = await asyncio.wait_for(cls._fetch_spotify_title(sp_url), timeout=5.0)
+                if spotify_title:
+                    search_target = spotify_title
+            except Exception as e:
+                logger.debug(f"Spotify metadata fetch notice: {e}")
+
         # Smart canonical query discovery: for bare search terms without known artists or URLs,
         # resolve the official track & primary artist from YouTube public index in ~0.2s.
-        is_direct_url = bool(yt_match or is_spotify or "soundcloud.com/" in raw_q or raw_q.startswith(("http://", "https://")))
+        is_direct_url = bool(orig_yt_url or is_spotify or raw_q.startswith(("http://", "https://")))
         if not is_direct_url:
             canonical_q = await cls._resolve_canonical_query(raw_q)
             if canonical_q and canonical_q.lower() != raw_q.lower():
-                raw_q = canonical_q
+                search_target = canonical_q
 
-        cleaned_query = parse_and_clean_query(raw_q)
+        cleaned_query = parse_and_clean_query(search_target)
 
-        # Tier 1: JioSaavn 320kbps HD Audio (Akamai CDN - 0% Block, 0.1s load)
-        track = await cls._extract_jiosaavn(cleaned_query, requester, is_autoplay)
-        has_noise = bool(AUDIO_FORMAT_PREFIX_PATTERN.search(raw_q) or AUDIO_FORMAT_TAGS.search(raw_q))
-        if not track and cleaned_query.lower() != raw_q.lower() and not has_noise:
-            track = await cls._extract_jiosaavn(raw_q, requester, is_autoplay)
+        # Priority 1: YouTube Music search via Lavalink (Official release priority)
+        try:
+            results = await asyncio.wait_for(
+                wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
+                timeout=4.5,
+            )
+            if results:
+                top = results[0] if isinstance(results, list) else results.tracks[0]
+                thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
+                trk = Track(
+                    title=top.title or cleaned_query,
+                    author=top.author or "Artist",
+                    url=orig_spotify_url or top.uri or orig_yt_url or raw_q,
+                    stream_url="",
+                    duration=int((top.length or 0) / 1000),
+                    thumbnail=thumb,
+                    requester=requester,
+                    is_autoplay=is_autoplay,
+                    query=raw_q,
+                )
+                trk._playable = top
+                _SEARCH_CACHE[cache_key] = (now, trk)
+                return trk
+        except Exception as e:
+            logger.debug(f"YouTube Music search notice: {e}")
 
-        if track and orig_yt_url:
-            # Prevent hijacking to an unrelated JioSaavn song if user provided a YouTube URL
-            q_words = {w for w in re.findall(r"\w{3,}", raw_q.lower()) if w not in {"video", "audio", "song", "full", "official", "lyrics", "version"}}
-            t_words = {w for w in re.findall(r"\w{3,}", track.title.lower())}
-            a_words = {w for w in re.findall(r"\w{3,}", track.author.lower())}
-            combined_match = (t_words | a_words) & q_words
-            if q_words and not combined_match:
-                logger.warning(f"JioSaavn mismatch for YouTube URL '{orig_yt_url}': '{track.title}' by '{track.author}' has no overlap with '{raw_q}'")
-                track = None
+        # Priority 2: Standard YouTube search via Lavalink
+        try:
+            results = await asyncio.wait_for(
+                wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTube),
+                timeout=4.5,
+            )
+            if results:
+                top = results[0] if isinstance(results, list) else results.tracks[0]
+                thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
+                trk = Track(
+                    title=top.title or cleaned_query,
+                    author=top.author or "Artist",
+                    url=orig_spotify_url or top.uri or orig_yt_url or raw_q,
+                    stream_url="",
+                    duration=int((top.length or 0) / 1000),
+                    thumbnail=thumb,
+                    requester=requester,
+                    is_autoplay=is_autoplay,
+                    query=raw_q,
+                )
+                trk._playable = top
+                _SEARCH_CACHE[cache_key] = (now, trk)
+                return trk
+        except Exception as e:
+            logger.debug(f"YouTube fallback search notice: {e}")
 
-        # Tier 2: YouTube Fallback (Direct Stream via Android Emulation)
-        if not track:
-            fallback_target = orig_yt_url if orig_yt_url else raw_q
-            track = await asyncio.to_thread(cls._extract_youtube_fallback, fallback_target, requester, is_autoplay)
+        # Priority 3: Raw query fallback if cleaned was different
+        if search_target.lower() != cleaned_query.lower():
+            try:
+                results = await asyncio.wait_for(
+                    wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
+                    timeout=4.0,
+                )
+                if results:
+                    top = results[0] if isinstance(results, list) else results.tracks[0]
+                    thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
+                    trk = Track(
+                        title=top.title or search_target,
+                        author=top.author or "Artist",
+                        url=orig_spotify_url or top.uri or orig_yt_url or raw_q,
+                        stream_url="",
+                        duration=int((top.length or 0) / 1000),
+                        thumbnail=thumb,
+                        requester=requester,
+                        is_autoplay=is_autoplay,
+                        query=raw_q,
+                    )
+                    trk._playable = top
+                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    return trk
+            except Exception as e:
+                logger.debug(f"Raw query fallback notice: {e}")
 
-        # Tier 3: SoundCloud Worldwide Engine (Phonk, Anime, Brazilian Funk, EDM, Remixes, English Indie)
-        if not track:
-            track = await cls._extract_soundcloud(cleaned_query, requester, is_autoplay)
-        if not track and cleaned_query.lower() != raw_q.lower() and not has_noise:
-            track = await cls._extract_soundcloud(raw_q, requester, is_autoplay)
+        return None
 
-        # Cache successful extraction
-        if track:
-            if orig_spotify_url:
-                track.url = orig_spotify_url
-            elif orig_yt_url:
-                track.url = orig_yt_url
-            _SEARCH_CACHE[cache_key] = (now, track)
-            if len(_SEARCH_CACHE) > 500:
-                oldest_key = min(_SEARCH_CACHE.keys(), key=lambda k: _SEARCH_CACHE[k][0])
-                _SEARCH_CACHE.pop(oldest_key, None)
-
-        return track
 
     @classmethod
     def _build_saavn_track(
@@ -1239,14 +1294,15 @@ class NativeExtractor:
         requester: str = "DJ / AutoPlay",
     ) -> Optional[PlaylistResult]:
         """Extract all tracks from a Spotify playlist or album via embed data."""
-        # Follow redirects for short spotify.link URLs
-        if "spotify.link/" in url:
+        # Follow redirects for short spotify mobile share URLs (spotify.link, spotify.app.link, spoti.fi)
+        if any(sp in url for sp in ("spotify.link/", "spotify.app.link/", "spoti.fi/")):
             try:
-                async with aiohttp.ClientSession() as s:
-                    async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                hdr = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+                async with aiohttp.ClientSession(headers=hdr) as s:
+                    async with s.get(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=6)) as r:
                         url = str(r.url)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Spotify short link redirect resolve notice: {e}")
 
         m = re.search(r"spotify\.com/(?:intl-[a-zA-Z\-]+/)?(playlist|album)/([a-zA-Z0-9]+)", url)
         if not m:
@@ -1302,6 +1358,7 @@ class NativeExtractor:
             logger.debug(f"spotifyscraper extraction notice: {e}")
 
         try:
+            html_text: Optional[str] = None
             async with aiohttp.ClientSession() as session:
                 # Tier 0: Official Spotify Web API (Fastest, 100% accurate, no scraping blocks)
                 sp_token = await cls._get_spotify_token(session)
@@ -1349,9 +1406,11 @@ class NativeExtractor:
 
                 # Primary Fallback: Spotify Embed scraper
                 async with session.get(embed_url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                    if resp.status != 200:
-                        return None
-                    html_text = await resp.text()
+                    if resp.status == 200:
+                        html_text = await resp.text()
+
+            if not html_text:
+                return None
 
             next_data = re.search(r'<script\s+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html_text, re.DOTALL)
             if not next_data:

@@ -41,6 +41,13 @@ async def resolve_audit_perpetrator(
     Resilient, latency-tolerant audit log resolver for antinuke triggers.
     Queries up to 8 recent entries with progressive retry backoff (0.25s, 0.5s, 0.85s) to survive Discord gateway lag.
     """
+    client = getattr(getattr(guild, "_state", None), "_get_client", lambda: None)()
+    sec_agent = getattr(client, "security_agent", None) if client else None
+    if sec_agent:
+        cached = sec_agent.check_audit_cache(guild.id, action, target_id)
+        if cached:
+            return cached
+
     delays = [initial_delay, 0.5, 0.85]
     for attempt in range(retries):
         await asyncio.sleep(delays[attempt] if attempt < len(delays) else 0.5)
@@ -51,11 +58,17 @@ async def resolve_audit_perpetrator(
                 if elapsed > max_age_seconds:
                     continue
 
+                found_user = None
                 if target_id is not None:
                     if entry.target and getattr(entry.target, "id", None) == target_id:
-                        return entry.user
+                        found_user = entry.user
                 else:
-                    return entry.user
+                    found_user = entry.user
+
+                if found_user:
+                    if sec_agent:
+                        sec_agent.store_audit_cache(guild.id, action, target_id, found_user)
+                    return found_user
         except (discord.Forbidden, discord.HTTPException) as e:
             logger.debug(f"Audit log query failed in guild {guild.id}: {e}")
             break
@@ -79,6 +92,12 @@ async def execute_punishment(
     Step 2: Auto-Quarantine: Apply maximum Discord communication timeout (28 days).
     Step 3: Ban or Kick according to guild configuration.
     """
+    # Delegate to high-concurrency SecurityAgent for single-flight deduplication & anti-429 protection
+    if hasattr(bot, "security_agent") and bot.security_agent:
+        return await bot.security_agent.execute_isolated_punishment(
+            guild, offender, action_name, reason=reason
+        )
+
     if offender.id == guild.owner_id:
         return "Owner Immune"
 

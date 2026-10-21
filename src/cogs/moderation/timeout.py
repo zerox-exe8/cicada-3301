@@ -114,6 +114,19 @@ class TimeoutCog(commands.Cog):
             await send_container_response(ctx, container)
             return
 
+        if not member.is_timed_out():
+            e_reg = self.bot.custom_emojis
+            dot = e_reg.get("heart_dot", "-")
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Member Not Timed Out**")
+            container.add_separator(divider=True)
+            container.add_text(
+                f"{dot} **Target:** **{member.display_name}** `「{member.id}」`\n"
+                f"{dot} **Status:** This member does not have an active timeout."
+            )
+            await send_container_response(ctx, container)
+            return
+
         await member.timeout(None, reason=f"{ctx.author} ({ctx.author.id}): {reason}")
         await dispatch_mod_log(self.bot, ctx.guild, "Timeout Removed", member, ctx.author, reason)
 

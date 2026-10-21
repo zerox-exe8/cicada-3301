@@ -55,6 +55,25 @@ class SlowmodeCog(commands.Cog):
             await send_container_response(ctx, container)
             return
 
+        if target_channel.slowmode_delay == seconds:
+            e_reg = self.bot.custom_emojis
+            dot = e_reg.get("heart_dot", "-")
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Slowmode Notice**")
+            container.add_separator(divider=True)
+            if seconds == 0:
+                container.add_text(
+                    f"{dot} **Channel:** {target_channel.mention}\n"
+                    f"{dot} **Status:** Slowmode is already disabled in this channel."
+                )
+            else:
+                container.add_text(
+                    f"{dot} **Channel:** {target_channel.mention}\n"
+                    f"{dot} **Status:** Slowmode is already set to `{seconds} seconds` in this channel."
+                )
+            await send_container_response(ctx, container)
+            return
+
         await target_channel.edit(slowmode_delay=seconds, reason=f"Slowmode set by {ctx.author}")
 
         e_reg = self.bot.custom_emojis

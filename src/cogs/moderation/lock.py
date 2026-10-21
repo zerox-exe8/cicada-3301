@@ -44,6 +44,19 @@ class LockCog(commands.Cog):
             return
 
         overwrite = target_channel.overwrites_for(ctx.guild.default_role)
+        if overwrite.send_messages is False:
+            e_reg = self.bot.custom_emojis
+            dot = e_reg.get("heart_dot", "-")
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Channel Already Locked**")
+            container.add_separator(divider=True)
+            container.add_text(
+                f"{dot} **Channel:** {target_channel.mention}\n"
+                f"{dot} **Status:** This channel is already locked for `@everyone`."
+            )
+            await send_container_response(ctx, container)
+            return
+
         overwrite.send_messages = False
         await target_channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=f"{ctx.author}: {reason}")
 
@@ -93,6 +106,19 @@ class LockCog(commands.Cog):
             return
 
         overwrite = target_channel.overwrites_for(ctx.guild.default_role)
+        if overwrite.send_messages is not False:
+            e_reg = self.bot.custom_emojis
+            dot = e_reg.get("heart_dot", "-")
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Channel Already Unlocked**")
+            container.add_separator(divider=True)
+            container.add_text(
+                f"{dot} **Channel:** {target_channel.mention}\n"
+                f"{dot} **Status:** This channel is not currently locked for `@everyone`."
+            )
+            await send_container_response(ctx, container)
+            return
+
         overwrite.send_messages = None
         await target_channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=f"{ctx.author}: {reason}")
 

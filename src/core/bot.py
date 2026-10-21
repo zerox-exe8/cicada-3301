@@ -110,6 +110,10 @@ class KyroBot(commands.Bot):
         from src.sentinel.agent import KyroSentinel
         self.sentinel: KyroSentinel = KyroSentinel(self)
 
+        # Autonomous Security, Antinuke & Moderation Engine
+        from src.managers.security_agent import SecurityAgent
+        self.security_agent: SecurityAgent = SecurityAgent(self)
+
         # Attach Global Command Guard
         self.add_check(self._global_command_check)
 

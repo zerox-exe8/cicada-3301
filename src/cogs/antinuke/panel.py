@@ -479,6 +479,23 @@ class AntinukePanelCog(commands.Cog):
     async def antinuke_disable(self, ctx: CustomContext) -> None:
         """Turn off Antinuke protection and auto-delete the kyro_logs channel."""
         guild = ctx.guild
+        cfg = self.bot.antinuke_mgr.get_settings(guild.id)
+        if not cfg.get("enabled", False):
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            sw_off = self.bot.custom_emojis.get("icon_switch_off", "[OFF]")
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content="**Kyro Antinuke**\n> Antinuke is already disabled on this server."
+            )
+            container.add_separator(divider=True)
+            container.add_text(
+                f"> {dot} **Status:** {sw_off}\n"
+                f"> {dot} **Protection Modules:** `Disabled`\n"
+                f"> {dot} Use `,antinuke enable` or `,antinuke setup` to activate protection."
+            )
+            await send_container_response(ctx, container)
+            return
+
         await self.bot.antinuke_mgr.update_settings(guild.id, enabled=False)
 
         # Auto-delete the kyro_logs channel only if it is the dedicated kyro_logs channel

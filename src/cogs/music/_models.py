@@ -26,8 +26,15 @@ class Track:
     def formatted_duration(self) -> str:
         if self.duration <= 0:
             return "Live Stream"
-        m = self.duration // 60
-        s = self.duration % 60
+        dur = self.duration
+        # Handle durations accidentally passed in milliseconds (> 86400 seconds)
+        if dur > 86400 and dur > 100000:
+            dur = dur // 1000
+        h = dur // 3600
+        m = (dur % 3600) // 60
+        s = dur % 60
+        if h > 0:
+            return f"{h:02d}:{m:02d}:{s:02d}"
         return f"{m:02d}:{s:02d}"
 
 

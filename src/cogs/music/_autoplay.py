@@ -179,60 +179,18 @@ class NativeSmartAutoplay:
                 queries.append(f"{random.choice(related_artists)} hits")
             queries.append(f"{clean_title} songs")
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Cookie": "geo=IN; cc=in; L=hindi%2Cenglish",
-            "X-Forwarded-For": "103.240.233.1",
-        }
-
-        # Strategy 1: Ultra-Fast JioSaavn Catalog Recommendation Pool (0% Cloud Block, 0.4s response)
-        try:
-            async with aiohttp.ClientSession() as session:
-                for q in queries:
-                    encoded_q = urllib.parse.quote(q)
-                    search_url = (
-                        f"https://www.jiosaavn.com/api.php?"
-                        f"__call=search.getResults&_format=json&p=1&n=15&q={encoded_q}"
-                        f"&_marker=0&api_version=4&ctx=web6dot0&cc=in"
-                    )
-                    try:
-                        async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as resp:
-                            if resp.status == 200:
-                                data = await resp.json(content_type=None)
-                                results = data.get("results", [])
-                                for song in results:
-                                    s_title = song.get("title") or song.get("song") or ""
-                                    cand_norm = normalize_history_title(s_title)
-                                    if not cand_norm or cand_norm in played_history or cand_norm == norm_curr_title:
-                                        continue
-
-                                    trk = NativeExtractor._build_saavn_track(song, requester="⚡ Smart Autoplay Radio", is_autoplay=True, query=q)
-                                    if trk and getattr(trk, "stream_url", None):
-                                        played_history.add(cand_norm)
-                                        return trk
-                    except Exception as e:
-                        logger.debug(f"Autoplay candidate search notice for '{q}': {e}")
-        except Exception as e:
-            logger.debug(f"Autoplay candidate pool notice: {e}")
-
-        # Strategy 2: Multi-Query Recommendations (NativeExtractor first, then Wavelink fallback)
         import wavelink
+
+        # Strategy 1: YouTube Music Candidate Recommendations (High Audio Fidelity)
         for q in queries:
             try:
-                cand_trk = await NativeExtractor.extract(q, requester="⚡ Smart Autoplay Radio", is_autoplay=True)
-                if cand_trk and getattr(cand_trk, "stream_url", None):
-                    top_norm = normalize_history_title(cand_trk.title or "")
-                    if top_norm and top_norm not in played_history and top_norm != norm_curr_title:
-                        played_history.add(top_norm)
-                        return cand_trk
-            except Exception as e:
-                logger.debug(f"Autoplay NativeExtractor query notice: {e}")
-
-            try:
-                res = await wavelink.Playable.search(q, source=wavelink.TrackSource.YouTubeMusic)
+                res = await asyncio.wait_for(
+                    wavelink.Playable.search(q, source=wavelink.TrackSource.YouTubeMusic),
+                    timeout=3.5,
+                )
                 if res:
-                    for top in res[:5]:
+                    tracks = res if isinstance(res, list) else getattr(res, "tracks", [])
+                    for top in tracks[:5]:
                         top_norm = normalize_history_title(top.title or "")
                         if top_norm and top_norm not in played_history and top_norm != norm_curr_title:
                             trk = Track(
@@ -250,6 +208,36 @@ class NativeSmartAutoplay:
                             played_history.add(top_norm)
                             return trk
             except Exception as e:
-                logger.debug(f"Wavelink autoplay query notice for '{q}': {e}")
+                logger.debug(f"YouTube Music autoplay search notice for '{q}': {e}")
+
+        # Strategy 2: Standard YouTube Search Fallback
+        for q in queries:
+            try:
+                res = await asyncio.wait_for(
+                    wavelink.Playable.search(q, source=wavelink.TrackSource.YouTube),
+                    timeout=3.5,
+                )
+                if res:
+                    tracks = res if isinstance(res, list) else getattr(res, "tracks", [])
+                    for top in tracks[:5]:
+                        top_norm = normalize_history_title(top.title or "")
+                        if top_norm and top_norm not in played_history and top_norm != norm_curr_title:
+                            trk = Track(
+                                title=top.title or q,
+                                author=top.author or "Artist",
+                                url=top.uri or "",
+                                stream_url="",
+                                duration=int((top.length or 0) / 1000),
+                                thumbnail=top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None),
+                                requester="⚡ Smart Autoplay Radio",
+                                is_autoplay=True,
+                                query=q,
+                            )
+                            trk._playable = top
+                            played_history.add(top_norm)
+                            return trk
+            except Exception as e:
+                logger.debug(f"Standard YouTube autoplay search notice for '{q}': {e}")
 
         return None
+

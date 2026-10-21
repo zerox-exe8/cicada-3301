@@ -247,6 +247,15 @@ class ErrorHandler(commands.Cog):
             )
             return
 
+        # Real-time SecurityAgent interception for Moderation & Antinuke commands
+        cog_name = getattr(ctx.command.cog, "qualified_name", "") if ctx.command and ctx.command.cog else ""
+        if any(sec in cog_name.lower() for sec in ("mod", "antinuke", "ban", "kick", "role", "channel", "security", "warn", "timeout")):
+            sec_agent = getattr(self.bot, "security_agent", None)
+            if sec_agent:
+                handled = await sec_agent.handle_moderation_error(ctx, error)
+                if handled:
+                    return
+
         else:
             import traceback
             tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
@@ -379,6 +388,15 @@ class ErrorHandler(commands.Cog):
                 f"Discord REST API 429 Rate Limit active during slash command '{interaction.command}': {error}."
             )
             return
+
+        # Real-time SecurityAgent interception for slash Moderation & Antinuke commands
+        cmd_name = interaction.command.qualified_name if interaction.command else ""
+        if any(sec in cmd_name.lower() for sec in ("ban", "kick", "timeout", "purge", "role", "warn", "lock", "antinuke", "mod")):
+            sec_agent = getattr(self.bot, "security_agent", None)
+            if sec_agent:
+                handled = await sec_agent.handle_moderation_error(interaction, error)
+                if handled:
+                    return
 
         else:
             import traceback

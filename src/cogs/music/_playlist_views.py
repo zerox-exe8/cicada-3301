@@ -107,7 +107,7 @@ async def execute_saved_playlist_playback(
     first_query = resolve_track_query(first_row)
     first_track: Optional[Track] = None
 
-    # Priority 1: NativeExtractor (Unblocked JioSaavn CDN / yt-dlp Mobile / SoundCloud)
+    # Priority 1: NativeExtractor (Lavalink YouTube/Spotify Engine)
     try:
         first_track = await NativeExtractor.extract(first_query, requester=user.display_name)
         if first_track and first_track.stream_url and player._is_direct_stream_url(first_track.stream_url):
@@ -184,6 +184,7 @@ async def execute_saved_playlist_playback(
     was_idle = not player.is_playing and not player.is_paused
     insert_start_idx = len(player.queue)
 
+    rem_tracks = []
     for row in play_order[1:]:
         q = resolve_track_query(row)
         t = Track(
@@ -196,13 +197,19 @@ async def execute_saved_playlist_playback(
             requester_id=user.id,
             query=q,
         )
-        player.queue.append(t)
+        rem_tracks.append(t)
+
+    async with player._queue_lock:
+        if was_idle:
+            player.queue.extend(rem_tracks)
+        else:
+            player.queue.insert(insert_start_idx, first_track)
+            for offset, r_trk in enumerate(rem_tracks):
+                player.queue.insert(insert_start_idx + 1 + offset, r_trk)
 
     # Start playback
     if was_idle:
         await player.play_track(first_track)
-    else:
-        player.queue.insert(insert_start_idx, first_track)
 
     # build preview of upcoming tracks
     if was_idle:

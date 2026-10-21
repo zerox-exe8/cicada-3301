@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import time
 from typing import TYPE_CHECKING, Optional
 from discord.ext import commands
 
@@ -8,6 +9,11 @@ from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.cogs.music.music import Music
+
+# Per-guild 247 toggle debounce: prevents duplicate responses from hybrid
+# commands firing twice (prefix + slash) or rapid double-clicks.
+_247_last_toggle: dict[int, float] = {}
+_247_DEBOUNCE_SECONDS: float = 3.0
 
 
 def check_voice_channel(ctx: commands.Context) -> tuple[bool, str | None]:
@@ -79,9 +85,9 @@ async def execute_shuffle(cog: Music, ctx: commands.Context) -> None:
         await send_container_response(ctx, container)
         return
 
-    random.shuffle(player.queue)
+    shuffled_count = await player.shuffle_queue()
     container = KyroContainer(accent_color=None)
-    container.add_text(f"**Shuffled {len(player.queue)} tracks in queue.**")
+    container.add_text(f"**Shuffled {shuffled_count} tracks in queue.**")
     await send_container_response(ctx, container)
 
 
@@ -100,8 +106,7 @@ async def execute_clear(cog: Music, ctx: commands.Context) -> None:
         await send_container_response(ctx, container)
         return
 
-    cleared_count = len(player.queue)
-    player.queue.clear()
+    cleared_count = await player.clear_queue()
     container = KyroContainer(accent_color=None)
     container.add_text(f"**Cleared {cleared_count} tracks from the queue.**")
     await send_container_response(ctx, container)
@@ -129,7 +134,13 @@ async def execute_remove(cog: Music, ctx: commands.Context, index: int) -> None:
         await send_container_response(ctx, container)
         return
 
-    removed_track = player.queue.pop(index - 1)
+    removed_track = await player.remove_track_at(index - 1)
+    if not removed_track:
+        container = KyroContainer(accent_color=None)
+        container.add_text(f"**Invalid track index.**")
+        await send_container_response(ctx, container)
+        return
+
     container = KyroContainer(accent_color=None)
     container.add_text(f"**Removed #{index}:** `{removed_track.title}`")
     await send_container_response(ctx, container)
@@ -161,9 +172,11 @@ async def execute_jump(cog: Music, ctx: commands.Context, index: int) -> None:
     if player.loop_mode == "track":
         player.loop_mode = "off"
 
-    # Keep target track at index 0 and clear preceding tracks
-    del player.queue[:index - 1]
-    target_track = player.queue[0]
+    # Thread-safely keep target track at index 0 and clear preceding tracks
+    async with player._queue_lock:
+        del player.queue[:index - 1]
+        target_track = player.queue[0]
+
     await player.skip()
     container = KyroContainer(accent_color=None)
     container.add_text(f"**Jumping to:** `{target_track.title}`")
@@ -178,6 +191,15 @@ async def execute_stay(cog: Music, ctx: commands.Context) -> None:
         container.add_text(f"**{err}**")
         await send_container_response(ctx, container)
         return
+
+    # Debounce: hybrid commands can fire twice (prefix + slash invocation) or
+    # users double-click the slash command. Ignore repeated calls within 3s.
+    guild_id = ctx.guild.id
+    now = time.monotonic()
+    last = _247_last_toggle.get(guild_id, 0.0)
+    if now - last < _247_DEBOUNCE_SECONDS:
+        return
+    _247_last_toggle[guild_id] = now
 
     player = cog.controller.get_or_create_player(ctx.guild)
     player.is_247 = not getattr(player, "is_247", False)

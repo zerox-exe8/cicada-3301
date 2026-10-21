@@ -87,8 +87,9 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await send_container_response(ctx, container)
             return
         elif player.queue and not player.is_playing:
-            next_track = player.queue.pop(0)
-            await player.play_track(next_track)
+            next_track = await player.pop_next_track()
+            if next_track:
+                await player.play_track(next_track)
             return
         else:
             container = KyroContainer(accent_color=None)
@@ -114,9 +115,10 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 pl = await asyncio.wait_for(
                     NativeExtractor.extract_playlist(clean_q, requester=ctx.author.display_name),
-                    timeout=10.0
+                    timeout=25.0
                 )
-            except Exception:
+            except Exception as pl_err:
+                logger.debug(f"Playlist extraction notice: {pl_err}")
                 pl = None
 
             if pl and pl.tracks:
@@ -133,36 +135,30 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     requester_id=ctx.author.id,
                     query=first_item.query or f"{first_item.title} {first_item.author}",
                 )
+
+                remaining_tracks = [
+                    Track(
+                        title=it.title,
+                        author=it.author,
+                        url=it.url or clean_q,
+                        stream_url="",
+                        duration=it.duration,
+                        thumbnail=pl.thumbnail,
+                        requester=ctx.author.display_name,
+                        requester_id=ctx.author.id,
+                        query=it.query or f"{it.title} {it.author}",
+                    )
+                    for it in pl.tracks[1:]
+                ]
+
+                # 1. Thread-safe queue update
                 if was_idle:
-                    for it in pl.tracks[1:]:
-                        t = Track(
-                            title=it.title,
-                            author=it.author,
-                            url=it.url or clean_q,
-                            stream_url="",
-                            duration=it.duration,
-                            thumbnail=pl.thumbnail,
-                            requester=ctx.author.display_name,
-                            requester_id=ctx.author.id,
-                            query=it.query or f"{it.title} {it.author}",
-                        )
-                        player.queue.append(t)
-                    await player.play_track(first_track, message_to_edit=search_msg)
+                    await player.add_tracks(remaining_tracks)
                 else:
-                    player.queue.append(first_track)
-                    for it in pl.tracks[1:]:
-                        t = Track(
-                            title=it.title,
-                            author=it.author,
-                            url=it.url or clean_q,
-                            stream_url="",
-                            duration=it.duration,
-                            thumbnail=pl.thumbnail,
-                            requester=ctx.author.display_name,
-                            requester_id=ctx.author.id,
-                            query=it.query or f"{it.title} {it.author}",
-                        )
-                        player.queue.append(t)
+                    await player.add_track(first_track)
+                    await player.add_tracks(remaining_tracks)
+
+                # 2. Immediately send/edit the Queued Playlist confirmation card!
                 pl_card = KyroContainer(accent_color=None)
                 pl_card.add_section(
                     content=(
@@ -176,9 +172,20 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         f"> **Requested By:** `{ctx.author.display_name}`"
                     )
                 )
-                await send_container_response(ctx, pl_card)
+                if search_msg:
+                    try:
+                        await edit_container_response(search_msg, pl_card)
+                    except Exception:
+                        await send_container_response(ctx, pl_card)
+                else:
+                    await send_container_response(ctx, pl_card)
+
+                # 3. If player was idle, start playing first track (posts brand new Now Playing controller)
+                if was_idle:
+                    await player.play_track(first_track, message_to_edit=None)
+
                 return
-            elif "spotify.com" in clean_q:
+            elif any(sp in clean_q for sp in ("spotify.com", "spotify.link", "spoti.fi", "spotify.app.link")):
                 err_c = KyroContainer(accent_color=None)
                 err_c.add_section(
                     content=(
@@ -195,6 +202,24 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         pass
                 await send_container_response(ctx, err_c)
                 return
+            else:
+                err_c = KyroContainer(accent_color=None)
+                err_c.add_section(
+                    content=(
+                        "**Playlist Unavailable / Private**\n"
+                        "> Kyro could not load tracks from this playlist URL.\n"
+                        "> Please verify that the playlist is **Public** or **Unlisted** and contains accessible tracks."
+                    )
+                )
+                if search_msg:
+                    try:
+                        await edit_container_response(search_msg, err_c)
+                        return
+                    except Exception:
+                        pass
+                await send_container_response(ctx, err_c)
+                return
+
 
         # ── Step 1: Track Search & Resolution ──
         track: Optional[Track] = None
@@ -235,40 +260,29 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         query=query,
                     )
                     first_track._playable = first_p
+                    remaining_tracks = [
+                        Track(
+                            title=p.title or "Unknown Track",
+                            author=p.author or "Unknown Artist",
+                            url=p.uri or query,
+                            stream_url="",
+                            duration=int((p.length or 0) / 1000),
+                            thumbnail=p.artwork or (f"https://i.ytimg.com/vi/{p.identifier}/hqdefault.jpg" if getattr(p, "identifier", None) else None),
+                            requester=ctx.author.display_name,
+                            requester_id=ctx.author.id,
+                            query=query,
+                        )
+                        for p in pl.tracks[1:]
+                    ]
+                    for idx, p in enumerate(pl.tracks[1:]):
+                        remaining_tracks[idx]._playable = p
+
                     if was_idle:
-                        for p in pl.tracks[1:]:
-                            p_thumb = p.artwork or (f"https://i.ytimg.com/vi/{p.identifier}/hqdefault.jpg" if getattr(p, "identifier", None) else None)
-                            t = Track(
-                                title=p.title or "Unknown Track",
-                                author=p.author or "Unknown Artist",
-                                url=p.uri or query,
-                                stream_url="",
-                                duration=int((p.length or 0) / 1000),
-                                thumbnail=p_thumb,
-                                requester=ctx.author.display_name,
-                                requester_id=ctx.author.id,
-                                query=query,
-                            )
-                            t._playable = p
-                            player.queue.append(t)
-                        await player.play_track(first_track, message_to_edit=search_msg)
+                        await player.add_tracks(remaining_tracks)
                     else:
-                        player.queue.append(first_track)
-                        for p in pl.tracks[1:]:
-                            p_thumb = p.artwork or (f"https://i.ytimg.com/vi/{p.identifier}/hqdefault.jpg" if getattr(p, "identifier", None) else None)
-                            t = Track(
-                                title=p.title or "Unknown Track",
-                                author=p.author or "Unknown Artist",
-                                url=p.uri or query,
-                                stream_url="",
-                                duration=int((p.length or 0) / 1000),
-                                thumbnail=p_thumb,
-                                requester=ctx.author.display_name,
-                                requester_id=ctx.author.id,
-                                query=query,
-                            )
-                            t._playable = p
-                            player.queue.append(t)
+                        await player.add_track(first_track)
+                        await player.add_tracks(remaining_tracks)
+
                     pl_card = KyroContainer(accent_color=None)
                     pl_card.add_section(
                         content=(
@@ -282,7 +296,16 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                             f"> **Requested By:** `{ctx.author.display_name}`"
                         )
                     )
-                    await send_container_response(ctx, pl_card)
+                    if search_msg:
+                        try:
+                            await edit_container_response(search_msg, pl_card)
+                        except Exception:
+                            await send_container_response(ctx, pl_card)
+                    else:
+                        await send_container_response(ctx, pl_card)
+
+                    if was_idle:
+                        await player.play_track(first_track, message_to_edit=None)
                     return
                 elif results and not isinstance(results, wavelink.Playlist):
                     top_p = results[0]
@@ -302,7 +325,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             except Exception as e:
                 logger.debug(f"Direct URL search notice: {e}")
 
-        # Case B: Unblocked NativeExtractor (YouTube URL, Plain Text, JioSaavn, SoundCloud)
+        # Case B: NativeExtractor (Lavalink YouTube/Spotify Engine)
         if not track:
             try:
                 track = await asyncio.wait_for(
@@ -430,7 +453,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             player._was_paused_for_empty_vc = False
             await player.play_track(track, message_to_edit=search_msg)
         else:
-            player.queue.append(track)
+            await player.add_track(track)
             pos = len(player.queue)
             queue_container = KyroContainer(accent_color=None)
             queue_container.add_section(

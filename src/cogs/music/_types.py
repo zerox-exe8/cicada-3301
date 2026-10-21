@@ -5,7 +5,7 @@ from typing import Literal, Optional
 
 
 LoopMode = Literal["off", "track", "queue"]
-TrackSourceType = Literal["youtube", "youtube_music", "jiosaavn", "spotify", "soundcloud"]
+TrackSourceType = Literal["youtube", "youtube_music", "spotify"]
 
 
 @dataclass

@@ -235,22 +235,42 @@ class MeetingAudioSink(AudioSinkBase):
         self._last_dave_err: str = "none"
         self._ssrc_counts: dict[int, int] = {}
         self._first_hex: str = ""
+        # Per-SSRC Opus decoders: manual decode after DAVE gives us full control
+        # over the Opus -> PCM pipeline regardless of DAVE encryption variant.
+        self._opus_decoders: dict[int, Any] = {}
 
     def wants_opus(self) -> bool:
-        """Request decoded 48kHz 16-bit stereo PCM from voice_recv."""
-        return False
+        """Request raw Opus frames from voice_recv for manual per-SSRC decoding.
+        Returns True so voice_recv delivers decrypted Opus bytes in data.opus
+        instead of attempting its own PCM decode — which silently fails for
+        many DAVE v1 encrypted packets (especially from mobile clients).
+        """
+        return True
 
     def write(self, user: Optional[discord.Member | discord.User], data: voice_recv.VoiceData) -> None:
-        """Receive audio frame, downsample to 16kHz mono, and buffer with SSRC tracking."""
+        """Receive raw Opus frame, manually decode to PCM, downsample to 16kHz mono, and buffer per speaker.
+
+        Since wants_opus()=True, voice_recv delivers data.opus (decrypted Opus bytes) instead of
+        attempting its own PCM decode. We then run per-SSRC discord.opus.Decoder manually,
+        which correctly handles all DAVE v1 encryption variants including mobile clients.
+        """
         try:
             self.packet_count += 1
             ssrc = getattr(data.packet, "ssrc", None) if hasattr(data, "packet") else 0
             if ssrc:
                 self._ssrc_counts[ssrc] = self._ssrc_counts.get(ssrc, 0) + 1
 
-            raw_bytes = getattr(data.packet, "decrypted_data", b"") if hasattr(data, "packet") else b""
-            if not self._first_hex and raw_bytes:
-                self._first_hex = raw_bytes[:8].hex()
+            # --- Get decrypted Opus bytes ---
+            # With wants_opus()=True, voice_recv sets data.opus to decrypted Opus frame bytes.
+            # Fallback to packet.decrypted_data directly if data.opus is absent.
+            opus_bytes: Optional[bytes] = getattr(data, "opus", None)
+            if not opus_bytes:
+                raw = getattr(data.packet, "decrypted_data", b"") if hasattr(data, "packet") else b""
+                if raw:
+                    opus_bytes = bytes(raw)
+
+            if not self._first_hex and opus_bytes:
+                self._first_hex = opus_bytes[:3].hex()
 
             if self.packet_count == 1:
                 vc = getattr(self, "voice_client", None) or getattr(self, "_voice_client", None)
@@ -259,40 +279,63 @@ class MeetingAudioSink(AudioSinkBase):
                 dave_sess = getattr(conn, "dave_session", None)
                 dave_ready = getattr(dave_sess, "ready", False) if dave_sess else False
                 logger.info(
-                    f"MeetingAudioSink FIRST packet: ssrc={ssrc}, raw_len={len(raw_bytes)}, "
-                    f"hex={self._first_hex if self._first_hex else 'empty'}, DAVE_ver={dave_ver}, session_ready={dave_ready}, "
-                    f"pcm_len={len(data.pcm) if data.pcm else 0}"
+                    f"MeetingAudioSink FIRST packet: ssrc={ssrc}, opus_len={len(opus_bytes) if opus_bytes else 0}, "
+                    f"hex={self._first_hex or 'empty'}, DAVE_ver={dave_ver}, session_ready={dave_ready}"
                 )
             elif self.packet_count % 500 == 0:
-                logger.debug(f"MeetingAudioSink captured {self.packet_count} packets (decoded PCM frames: {self.decoded_frames}).")
-            if not data or not data.pcm:
+                logger.debug(
+                    f"MeetingAudioSink captured {self.packet_count} packets (decoded PCM frames: {self.decoded_frames})."
+                )
+
+            if not opus_bytes or len(opus_bytes) < 4:
                 return
 
-            pcm = data.pcm
-            if len(pcm) < 12:
+            # --- Manual per-SSRC Opus Decode ---
+            # Using discord.opus.Decoder per SSRC so each speaker's Opus stream
+            # maintains independent codec state (sequence numbers, PLC, DTX).
+            ssrc_key: int = ssrc or 0
+            if ssrc_key not in self._opus_decoders:
+                try:
+                    import discord.opus as _dopus
+                    self._opus_decoders[ssrc_key] = _dopus.Decoder()
+                except Exception as _de:
+                    logger.debug(f"[MeetingAudioSink] Cannot create Opus decoder for SSRC {ssrc_key}: {_de}")
+                    return
+
+            try:
+                pcm: bytes = self._opus_decoders[ssrc_key].decode(opus_bytes, fec=False)
+            except Exception as _oe:
+                logger.debug(f"[MeetingAudioSink] Opus decode error SSRC {ssrc_key}: {_oe}")
                 return
 
-            # Ensure even byte count for 16-bit array
+            if not pcm or len(pcm) < 12:
+                return
+
+            # Ensure even byte count for int16 array
             if len(pcm) % 2 != 0:
                 pcm = pcm[: len(pcm) - 1]
 
-            # Downsample 48kHz stereo 16-bit -> 16kHz mono without phase cancellation
+            # --- Downsample 48kHz stereo 16-bit → 16kHz mono ---
+            # Take every 3rd stereo sample pair (48000/16000=3), select the louder channel
+            # to prevent (L+R)//2 phase cancellation on mono mics.
             try:
                 pcm_array = array.array("h", pcm)
                 left_samples = pcm_array[0::6]
                 right_samples = pcm_array[1::6]
                 left_peak = max((abs(s) for s in left_samples), default=0)
                 right_peak = max((abs(s) for s in right_samples), default=0)
-                # Select channel with higher speech signal energy (prevents (L+R)//2 phase cancellation)
                 selected_samples = left_samples if left_peak >= right_peak else right_samples
                 downsampled = selected_samples.tobytes()
             except Exception:
                 try:
-                    downsampled = pcm_array[0::6].tobytes()
+                    downsampled = array.array("h", pcm)[0::6].tobytes()
                 except Exception:
                     return
 
-            # Resolve speaker identification
+            if not downsampled:
+                return
+
+            # --- Resolve speaker identity ---
             uid: Any = None
             name: str = "Unknown Speaker"
 
@@ -304,12 +347,11 @@ class MeetingAudioSink(AudioSinkBase):
                 if ssrc:
                     self._ssrc_to_uid[ssrc] = uid
             elif ssrc:
-                # Check if SSRC was mapped before
                 if ssrc in self._ssrc_to_uid:
                     uid = self._ssrc_to_uid[ssrc]
                     name = self.speaker_names.get(uid, f"Speaker-{ssrc}")
                 else:
-                    # Try resolving via voice_client SSRC table
+                    # Resolve via voice_client SSRC table
                     vc = getattr(self, "voice_client", None) or getattr(self, "_voice_client", None)
                     if vc:
                         resolved_id = getattr(vc, "_get_id_from_ssrc", lambda s: None)(ssrc)
@@ -332,7 +374,7 @@ class MeetingAudioSink(AudioSinkBase):
             else:
                 return
 
-            # If audio was previously recorded under provisional 'ssrc_{ssrc}', merge into resolved uid
+            # Merge any provisional ssrc_* buffer into resolved uid buffer
             if ssrc:
                 provisional_key = f"ssrc_{ssrc}"
                 if provisional_key in self.speaker_buffers and uid != provisional_key:
@@ -426,11 +468,12 @@ class MeetingAudioSink(AudioSinkBase):
         return chunks[0] if chunks else None
 
     def cleanup(self) -> None:
-        """Clear memory buffers."""
+        """Clear memory buffers and per-SSRC Opus decoders."""
         self.speaker_buffers.clear()
         self.speaker_names.clear()
         self.speaker_chunks.clear()
         self._ssrc_to_uid.clear()
+        self._opus_decoders.clear()
 
 
 @dataclass

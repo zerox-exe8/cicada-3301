@@ -112,6 +112,12 @@ class MusicControlView(discord.ui.View):
             await send_container_response(interaction, c, ephemeral=True)
             return
 
+        if not player or not player.is_connected or not player.current:
+            c = KyroContainer()
+            c.add_section(content="**Playback Notice**\n> No active track is currently playing or paused.")
+            await send_container_response(interaction, c, ephemeral=True)
+            return
+
         e_reg = getattr(self.bot, "custom_emojis", None)
         if player.is_paused:
             player.resume()
@@ -143,6 +149,12 @@ class MusicControlView(discord.ui.View):
         if err:
             c = KyroContainer()
             c.add_section(content=f"**Voice Error**\n> {err}")
+            await send_container_response(interaction, c, ephemeral=True)
+            return
+
+        if not player or not player.is_connected or not player.current:
+            c = KyroContainer()
+            c.add_section(content="**Skip Notice**\n> Nothing is currently playing to skip.")
             await send_container_response(interaction, c, ephemeral=True)
             return
 

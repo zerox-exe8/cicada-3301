@@ -29,7 +29,10 @@ async def execute_queue(cog: Music, ctx: commands.Context, page: int = 1) -> Non
         container.add_text(f"**Live Player Queue — {ctx.guild.name}**")
     container.add_separator(divider=True)
 
-    if not player.queue:
+    async with player._queue_lock:
+        queue_snapshot = list(player.queue)
+
+    if not queue_snapshot:
         ap_status = "ON" if player.smart_autoplay else "OFF"
         container.add_text(
             f"Queue is empty.\n"
@@ -37,11 +40,11 @@ async def execute_queue(cog: Music, ctx: commands.Context, page: int = 1) -> Non
         )
     else:
         per_page = 10
-        total_pages = (len(player.queue) + per_page - 1) // per_page
+        total_pages = (len(queue_snapshot) + per_page - 1) // per_page
         clamped_page = max(1, min(page, total_pages))
         start_idx = (clamped_page - 1) * per_page
         end_idx = start_idx + per_page
-        page_tracks = player.queue[start_idx:end_idx]
+        page_tracks = queue_snapshot[start_idx:end_idx]
 
         lines = []
         for i, track in enumerate(page_tracks, start=start_idx + 1):
@@ -52,7 +55,7 @@ async def execute_queue(cog: Music, ctx: commands.Context, page: int = 1) -> Non
         container.add_text("\n".join(lines))
         container.add_separator(divider=True)
         container.add_text(
-            f"-# Page {clamped_page}/{total_pages} • Total Songs: {len(player.queue)} • Autoplay: {'ON' if player.smart_autoplay else 'OFF'}"
+            f"-# Page {clamped_page}/{total_pages} • Total Songs: {len(queue_snapshot)} • Autoplay: {'ON' if player.smart_autoplay else 'OFF'}"
         )
 
     await send_container_response(ctx, container)

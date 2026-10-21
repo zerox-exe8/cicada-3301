@@ -1042,7 +1042,12 @@ class MeetingCog(commands.Cog):
             try:
                 session.voice_client.stop_listening()
                 await session.voice_client.disconnect(force=True)
+                session.voice_client.cleanup()
                 session.sink.cleanup()
+            except Exception:
+                pass
+            try:
+                self.bot._connection._remove_voice_client(ctx.guild.id)
             except Exception:
                 pass
 
@@ -1193,17 +1198,32 @@ class MeetingCog(commands.Cog):
             pass
 
         # Cleanly disconnect any idle, stale, or existing voice connection before attaching VoiceRecvClient
-        existing_vc = guild.voice_client
-        if existing_vc:
+        had_previous_voice = bool(guild.voice_client or (guild.me.voice and guild.me.voice.channel))
+        if had_previous_voice:
+            existing_vc = guild.voice_client
+            if existing_vc:
+                try:
+                    if hasattr(existing_vc, "stop_listening"):
+                        existing_vc.stop_listening()
+                except Exception:
+                    pass
+                try:
+                    await existing_vc.disconnect(force=True)
+                except Exception:
+                    pass
+                try:
+                    existing_vc.cleanup()
+                except Exception:
+                    pass
             try:
-                await existing_vc.disconnect(force=True)
+                self.bot._connection._remove_voice_client(guild.id)
             except Exception:
                 pass
             try:
-                existing_vc.cleanup()
+                await guild.change_voice_state(channel=None)
             except Exception:
                 pass
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(1.0)
 
         # Auto-ensure meeting channel if not yet created
         settings = await self._get_meeting_settings(guild.id)
@@ -1228,14 +1248,38 @@ class MeetingCog(commands.Cog):
             )
             return
 
-        # Connect with VoiceRecvClient (reconnect=False prevents reconnection oscillation)
-        try:
-            voice_client: voice_recv.VoiceRecvClient = await vc.connect(
-                cls=voice_recv.VoiceRecvClient, timeout=20.0, reconnect=False, self_deaf=False, self_mute=False
-            )
-        except Exception as e:
-            logger.error(f"Failed to connect to VC for meeting in guild {guild.id}: {e}", exc_info=True)
-            await ctx.send_error(f"Could not connect to voice channel: `{e}`", ephemeral=False)
+        # Connect with VoiceRecvClient (automated retry & reconnect=True for Discord 4006 session recovery)
+        voice_client: Optional[voice_recv.VoiceRecvClient] = None
+        last_conn_err: Optional[Exception] = None
+
+        for attempt in range(3):
+            try:
+                if hasattr(self.bot._connection, "_voice_clients"):
+                    self.bot._connection._remove_voice_client(guild.id)
+
+                voice_client = await vc.connect(
+                    cls=voice_recv.VoiceRecvClient, timeout=20.0, reconnect=True, self_deaf=False, self_mute=False
+                )
+                if voice_client and voice_client.is_connected():
+                    break
+            except Exception as e:
+                last_conn_err = e
+                logger.warning(f"Guild {guild.id}: VoiceRecvClient connect attempt {attempt + 1} notice: {e}")
+                try:
+                    if guild.voice_client:
+                        await guild.voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                try:
+                    self.bot._connection._remove_voice_client(guild.id)
+                    await guild.change_voice_state(channel=None)
+                except Exception:
+                    pass
+                await asyncio.sleep(1.2 + attempt * 0.5)
+
+        if not voice_client or not voice_client.is_connected():
+            logger.error(f"Failed to connect to VC for meeting in guild {guild.id}: {last_conn_err}", exc_info=True)
+            await ctx.send_error(f"Could not connect to voice channel: `{last_conn_err}`", ephemeral=False)
             return
 
         # Proactively ensure DAVE session is initialized and MLS Key Package is transmitted
@@ -1353,8 +1397,13 @@ class MeetingCog(commands.Cog):
         try:
             session.voice_client.stop_listening()
             await session.voice_client.disconnect(force=True)
+            session.voice_client.cleanup()
         except Exception as e:
             logger.debug(f"Notice during meeting disconnect: {e}")
+        try:
+            self.bot._connection._remove_voice_client(guild.id)
+        except Exception:
+            pass
 
         # Inform channel that AI processing is underway
         toast = await ctx.send(f"-# {dot} Finalizing meeting audio and synthesizing executive report...")
@@ -1400,6 +1449,11 @@ class MeetingCog(commands.Cog):
                     try:
                         active_s.voice_client.stop_listening()
                         await active_s.voice_client.disconnect(force=True)
+                        active_s.voice_client.cleanup()
+                    except Exception:
+                        pass
+                    try:
+                        self.bot._connection._remove_voice_client(guild.id)
                     except Exception:
                         pass
                     asyncio.create_task(self._process_meeting_completion(active_s))

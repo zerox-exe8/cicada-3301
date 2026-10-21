@@ -18,3 +18,7 @@ services:
         sync: false
       - key: LAVALINK_PASSWORD
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+

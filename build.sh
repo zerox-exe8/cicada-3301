@@ -11,6 +11,6 @@ fi
 
 # Install python requirements
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install --no-cache-dir -r requirements.txt
 
 echo "=== Build completed successfully ==="

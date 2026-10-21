@@ -421,7 +421,7 @@ class NativeExtractor:
             video_id = yt_match.group(1)
             orig_yt_url = f"https://www.youtube.com/watch?v={video_id}"
             try:
-                results = await asyncio.wait_for(wavelink.Playable.search(orig_yt_url), timeout=5.0)
+                results = await asyncio.wait_for(wavelink.Playable.search(orig_yt_url), timeout=8.0)
                 if results:
                     top = results[0] if isinstance(results, list) else results.tracks[0]
                     thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
@@ -453,7 +453,7 @@ class NativeExtractor:
                 sp_url = f"https://open.spotify.com/track/{sp_url.split(':')[-1]}"
             orig_spotify_url = sp_url
             try:
-                spotify_title = await asyncio.wait_for(cls._fetch_spotify_title(sp_url), timeout=5.0)
+                spotify_title = await asyncio.wait_for(cls._fetch_spotify_title(sp_url), timeout=6.0)
                 if spotify_title:
                     search_target = spotify_title
             except Exception as e:
@@ -473,7 +473,7 @@ class NativeExtractor:
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
-                timeout=4.5,
+                timeout=8.0,
             )
             if results:
                 top = results[0] if isinstance(results, list) else results.tracks[0]
@@ -499,7 +499,7 @@ class NativeExtractor:
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTube),
-                timeout=4.5,
+                timeout=8.0,
             )
             if results:
                 top = results[0] if isinstance(results, list) else results.tracks[0]
@@ -526,7 +526,7 @@ class NativeExtractor:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=4.0,
+                    timeout=8.0,
                 )
                 if results:
                     top = results[0] if isinstance(results, list) else results.tracks[0]

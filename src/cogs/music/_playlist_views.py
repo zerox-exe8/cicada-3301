@@ -112,7 +112,7 @@ async def execute_saved_playlist_playback(
         first_track = await NativeExtractor.extract(first_query, requester=user.display_name)
         if first_track and first_track.stream_url and player._is_direct_stream_url(first_track.stream_url):
             try:
-                direct_results = await asyncio.wait_for(wavelink.Playable.search(first_track.stream_url), timeout=4.0)
+                direct_results = await asyncio.wait_for(wavelink.Playable.search(first_track.stream_url), timeout=8.0)
                 if direct_results:
                     first_track._playable = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
             except Exception:
@@ -125,7 +125,7 @@ async def execute_saved_playlist_playback(
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(first_query, source=wavelink.TrackSource.YouTubeMusic),
-                timeout=4.0
+                timeout=8.0
             )
             if results and not isinstance(results, wavelink.Playlist):
                 top_p = results[0]
@@ -150,7 +150,7 @@ async def execute_saved_playlist_playback(
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(alt_q, source=wavelink.TrackSource.YouTube),
-                timeout=4.0
+                timeout=8.0
             )
             if results and not isinstance(results, wavelink.Playlist):
                 top_p = results[0]

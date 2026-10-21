@@ -186,7 +186,7 @@ class NativeSmartAutoplay:
             try:
                 res = await asyncio.wait_for(
                     wavelink.Playable.search(q, source=wavelink.TrackSource.YouTubeMusic),
-                    timeout=3.5,
+                    timeout=6.0,
                 )
                 if res:
                     tracks = res if isinstance(res, list) else getattr(res, "tracks", [])
@@ -215,7 +215,7 @@ class NativeSmartAutoplay:
             try:
                 res = await asyncio.wait_for(
                     wavelink.Playable.search(q, source=wavelink.TrackSource.YouTube),
-                    timeout=3.5,
+                    timeout=6.0,
                 )
                 if res:
                     tracks = res if isinstance(res, list) else getattr(res, "tracks", [])

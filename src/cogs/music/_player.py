@@ -63,6 +63,7 @@ class GuildPlayer:
         self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._queue_lock: asyncio.Lock = asyncio.Lock()
         self._last_advance_time: float = 0.0
+        self._is_prefetching: bool = False
 
     # ── State Properties ──
 
@@ -94,11 +95,13 @@ class GuildPlayer:
         """Thread-safely append a single track to the queue."""
         async with self._queue_lock:
             self.queue.append(track)
+        asyncio.create_task(self._prefetch_next_track())
 
     async def add_tracks(self, tracks: list[Track]) -> None:
         """Thread-safely append multiple tracks to the queue."""
         async with self._queue_lock:
             self.queue.extend(tracks)
+        asyncio.create_task(self._prefetch_next_track())
 
     async def pop_next_track(self) -> Optional[Track]:
         """Thread-safely pop the next track from the front of the queue."""
@@ -333,6 +336,7 @@ class GuildPlayer:
 
         # 4. Send or edit sleek Now Playing card with buttons
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
+        asyncio.create_task(self._prefetch_next_track())
 
     # Domains that are NOT direct audio streams — Lavalink can't play their page URLs
     _NON_STREAM_DOMAINS = (
@@ -352,65 +356,122 @@ class GuildPlayer:
             return True
         return False
 
+    async def _prefetch_next_track(self) -> None:
+        """Background pre-resolver: resolves upcoming track's Playable before current track ends."""
+        if getattr(self, "_is_prefetching", False):
+            return
+        self._is_prefetching = True
+        try:
+            target_track: Optional[Track] = None
+            async with self._queue_lock:
+                for t in self.queue[:2]:
+                    if not getattr(t, "_playable", None):
+                        target_track = t
+                        break
+            if target_track:
+                p = await self._resolve_playable(target_track)
+                if p:
+                    target_track._playable = p
+                    logger.debug(f"Pre-fetched playable for upcoming track '{target_track.title}'")
+        except Exception as e:
+            logger.debug(f"Background prefetch notice: {e}")
+        finally:
+            self._is_prefetching = False
+
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
-        """Resolve Lavalink Playable via attached playable, direct YouTube URL, or resilient YouTube search."""
-        # ── Priority 1: Attached Playable (already resolved by play.py) ──
+        """Resolve Lavalink Playable via attached playable, direct YouTube/Spotify URL, or resilient search cascade.
+
+        Each search strategy is retried once on TimeoutError with a short backoff.
+        Timeouts are set to 10s to survive transient Lavalink / YouTube 429 slowness.
+        """
+        # ── Priority 1: Attached Playable (already resolved) ──
         playable = getattr(track, "_playable", None)
         if playable:
             return playable
 
-        url = track.url or ""
-        # ── Priority 2: Direct URL if it's YouTube video ──
-        if url.startswith(("http://", "https://")) and any(yt in url for yt in ("youtube.com/watch", "youtu.be/", "music.youtube.com/watch")):
-            try:
-                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=4.0)
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"Direct YouTube URL resolve notice for '{url}': {e}")
+        # ── Node Health Pre-check: Ensure Lavalink node is alive ──
+        try:
+            node = wavelink.Pool.get_node()
+            if not node or node.status != wavelink.NodeStatus.CONNECTED:
+                if hasattr(self.bot, "_music_agent") and self.bot._music_agent:
+                    await self.bot._music_agent.heal_node()
+                await asyncio.sleep(0.4)
+        except Exception:
+            pass
 
-        # ── Priority 3: YouTube Search (Spotify bridged to YouTube or text query) ──
+        url = track.url or ""
+
+        # ── Priority 2: Direct URL (YouTube or Spotify track) ──
+        if url.startswith(("http://", "https://")):
+            is_yt = any(yt in url for yt in ("youtube.com/watch", "youtu.be/", "music.youtube.com/watch"))
+            is_sp = "open.spotify.com/track/" in url
+            if is_yt or is_sp:
+                for attempt in range(2):
+                    try:
+                        results = await asyncio.wait_for(
+                            wavelink.Playable.search(url), timeout=10.0
+                        )
+                        if results:
+                            return results[0] if isinstance(results, list) else results.tracks[0]
+                        break  # got empty response, no point retrying
+                    except asyncio.TimeoutError:
+                        logger.debug(f"Direct URL resolve timeout for '{url}' (attempt {attempt + 1})")
+                        if attempt == 0:
+                            await asyncio.sleep(0.5)
+                    except Exception as e:
+                        logger.debug(f"Direct URL resolve notice for '{url}': {e}")
+                        break
+
+        # ── Priority 3: Multi-strategy search cascade with retry ──
         from src.cogs.music._extractor import clean_track_title
         clean_title = clean_track_title(track.title) if track.title else ""
-        raw_author = track.author if (track.author and "spotify" not in track.author.lower()) else ""
-        search_target = f"{clean_title} {raw_author}".strip() or track.query or track.title
+        raw_author = track.author if (track.author and "spotify" not in track.author.lower() and "unknown" not in track.author.lower() and "artist" != track.author.lower()) else ""
+        full_query = f"{clean_title} {raw_author}".strip() or track.query or track.title or ""
 
-        if search_target:
-            # Step A: YouTube Music (highest audio fidelity & official track match)
-            try:
-                results = await asyncio.wait_for(
-                    wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTubeMusic),
-                    timeout=4.0
-                )
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"YouTube Music search notice for '{search_target}': {e}")
+        # Build ordered search strategies: (query, source)
+        strategies: list[tuple[str, object]] = []
+        if full_query:
+            strategies.append((full_query, wavelink.TrackSource.YouTubeMusic))
+            strategies.append((full_query, wavelink.TrackSource.YouTube))
+            strategies.append((full_query, "spsearch"))
+        if clean_title and clean_title != full_query:
+            strategies.append((clean_title, wavelink.TrackSource.YouTubeMusic))
+            strategies.append((clean_title, wavelink.TrackSource.YouTube))
+        if track.query and track.query not in (full_query, clean_title) and not track.query.startswith(("http://", "https://")):
+            strategies.append((track.query, wavelink.TrackSource.YouTubeMusic))
+            strategies.append((track.query, wavelink.TrackSource.YouTube))
+        if track.title and track.title not in (full_query, clean_title):
+            strategies.append((track.title, wavelink.TrackSource.YouTube))
 
-            # Step B: Standard YouTube search
-            try:
-                results = await asyncio.wait_for(
-                    wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=4.0
-                )
-                if results:
-                    return results[0] if isinstance(results, list) else results.tracks[0]
-            except Exception as e:
-                logger.debug(f"YouTube search notice for '{search_target}': {e}")
-
-            # Step C: Resilient fallback searching clean title only
-            if clean_title and clean_title != search_target:
+        for query, source in strategies:
+            if not query:
+                continue
+            for attempt in range(2):  # retry once per strategy on timeout
                 try:
                     results = await asyncio.wait_for(
-                        wavelink.Playable.search(clean_title, source=wavelink.TrackSource.YouTube),
-                        timeout=3.5
+                        wavelink.Playable.search(query, source=source),
+                        timeout=10.0,
                     )
                     if results:
-                        return results[0] if isinstance(results, list) else results.tracks[0]
+                        p = results[0] if isinstance(results, list) else results.tracks[0]
+                        logger.debug(
+                            f"Resolved '{track.title}' via strategy ({source}, query='{query}', attempt={attempt + 1})"
+                        )
+                        return p
+                    break  # empty result — no point retrying this strategy
+                except asyncio.TimeoutError:
+                    logger.debug(
+                        f"Search timeout for '{query}' source={source} (attempt {attempt + 1})"
+                    )
+                    if attempt == 0:
+                        await asyncio.sleep(0.5)
                 except Exception as e:
-                    logger.debug(f"Fallback YouTube clean title search notice for '{clean_title}': {e}")
+                    logger.debug(f"Search error for '{query}' source={source}: {e}")
+                    break  # non-timeout error — skip retry, try next strategy
 
+        logger.warning(f"All resolution strategies exhausted for '{track.title}' (queries tried: {[s[0] for s in strategies]})")
         return None
+
 
     # ── Controls ──
 

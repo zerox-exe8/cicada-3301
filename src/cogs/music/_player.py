@@ -92,6 +92,15 @@ class GuildPlayer:
     async def connect_voice(self, channel: discord.VoiceChannel | discord.StageChannel) -> None:
         """Connect or move to the specified voice channel using Wavelink with race-condition locking."""
         async with self._connect_lock:
+            # 1. Pre-flight permission and capacity verification
+            me = self.guild.me
+            perms = channel.permissions_for(me)
+            if not perms.connect:
+                raise RuntimeError(f"Kyro lacks 'Connect' permission to join {channel.name}.")
+            if channel.user_limit and channel.user_limit > 0:
+                if len(channel.members) >= channel.user_limit and not perms.move_members:
+                    raise RuntimeError(f"Voice channel {channel.name} is full ({len(channel.members)}/{channel.user_limit} members).")
+
             vc = self.guild.voice_client
             if vc and isinstance(vc, wavelink.Player) and vc.connected:
                 if vc.channel and vc.channel.id != channel.id:
@@ -110,21 +119,43 @@ class GuildPlayer:
                 except Exception:
                     pass
                 self.voice_client = None
-                await asyncio.sleep(0.2)
 
-            # Ensure Wavelink node is connected before connecting player
+            # Reset any lingering voice client cache or ghost gateway voice state
             try:
-                wavelink.Pool.get_node()
+                self.bot._connection._remove_voice_client(self.guild.id)
             except Exception:
+                pass
+            try:
+                await self.guild.change_voice_state(channel=None)
+                await asyncio.sleep(0.3)
+            except Exception:
+                pass
+
+            # Ensure Wavelink node is alive and connected before connecting player
+            node = None
+            try:
+                node = wavelink.Pool.get_node()
+            except Exception:
+                pass
+
+            if not node or node.status != wavelink.NodeStatus.CONNECTED:
                 from src.core.config import Config
+                logger.info("Wavelink node disconnected or missing. Re-establishing connection...")
                 try:
+                    for old_node in list(wavelink.Pool.nodes.values()):
+                        try:
+                            await old_node.close()
+                        except Exception:
+                            pass
+                    wavelink.Pool.nodes.clear()
+
                     node = wavelink.Node(
                         uri=Config.LAVALINK_URI,
                         password=Config.LAVALINK_PASSWORD,
                         inactive_player_timeout=300,
                     )
                     await wavelink.Pool.connect(nodes=[node], client=self.bot)
-                    for _ in range(10):
+                    for _ in range(12):
                         if node.status == wavelink.NodeStatus.CONNECTED:
                             break
                         await asyncio.sleep(0.5)
@@ -134,20 +165,32 @@ class GuildPlayer:
             # Connect as Wavelink Player with automatic retry on temporary Discord gateway blip
             for attempt in range(2):
                 try:
-                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=20.0)
+                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=12.0)
                     if self.voice_client:
                         self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
                     break
                 except (asyncio.TimeoutError, Exception) as e:
                     if attempt == 0:
-                        logger.warning(f"Guild {self.guild.id}: Voice connect attempt {attempt + 1} failed ({e}), retrying once...")
+                        logger.warning(f"Guild {self.guild.id}: Voice connect attempt {attempt + 1} failed ({e}), clearing voice state and retrying once...")
                         stale_vc = self.guild.voice_client
                         if stale_vc:
                             try:
                                 await stale_vc.disconnect(force=True)
                             except Exception:
                                 pass
-                        await asyncio.sleep(0.5)
+                            try:
+                                stale_vc.cleanup()
+                            except Exception:
+                                pass
+                        try:
+                            self.bot._connection._remove_voice_client(self.guild.id)
+                        except Exception:
+                            pass
+                        try:
+                            await self.guild.change_voice_state(channel=None)
+                        except Exception:
+                            pass
+                        await asyncio.sleep(1.0)
                     else:
                         logger.error(f"Guild {self.guild.id}: Wavelink connect error: {e}")
                         if hasattr(self.bot, "sentinel") and self.bot.sentinel:
@@ -157,7 +200,7 @@ class GuildPlayer:
                                 IncidentSeverity.CRITICAL,
                                 "Voice Gateway Connect Failure",
                                 f"Failed connecting to channel {channel.name} ({channel.id}): {e}",
-                                action_taken="Purged stale voice client",
+                                action_taken="Purged stale voice client & gateway state",
                                 resolved=False,
                                 guild_id=self.guild.id,
                             )

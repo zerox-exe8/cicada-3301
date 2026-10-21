@@ -510,6 +510,14 @@ class KyroSentinel:
                     vc.cleanup()
                 except Exception:
                     pass
+            try:
+                self.bot._connection._remove_voice_client(guild.id)
+            except Exception:
+                pass
+            try:
+                await guild.change_voice_state(channel=None)
+            except Exception:
+                pass
             music_cog = self.bot.get_cog("Music")
             if music_cog and hasattr(music_cog, "controller"):
                 player = music_cog.controller.get_player(guild.id)
@@ -520,7 +528,7 @@ class KyroSentinel:
                 IncidentSeverity.INFO,
                 "Zombie Voice Client Cleaned",
                 f"Cleaned stuck voice client in guild {guild.id}",
-                action_taken="Forcefully disconnected and cleaned VC state",
+                action_taken="Forcefully disconnected, purged cache and cleared gateway voice state",
                 resolved=True,
                 guild_id=guild.id,
             )

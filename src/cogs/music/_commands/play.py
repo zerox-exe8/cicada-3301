@@ -59,7 +59,20 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     try:
         await player.connect_voice(voice_channel)
     except Exception as e:
-        logger.error(f"Voice connect error: {e}")
+        logger.warning(f"Voice connect error in guild {ctx.guild.id}: {e}")
+        agent = getattr(cog, "agent", None)
+        if agent:
+            # Trigger autonomous self-heal
+            await agent.heal_voice_session(ctx.guild, reason=str(e))
+            card = agent.build_maintenance_card(
+                title="Voice Gateway Auto-Recovery",
+                issue_desc=f"`{e}`",
+                action_taken="Purged stale voice gateway state and refreshed connection pipeline.",
+                advice="Please try playing your track again in a moment.",
+            )
+            await send_container_response(ctx, card)
+            return
+
         container = KyroContainer(accent_color=None)
         container.add_text(f"**Failed to connect to voice channel:** `{e}`")
         await send_container_response(ctx, container)
@@ -441,8 +454,17 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     except Exception as e:
         logger.error(f"Guild {ctx.guild.id}: Uncaught error in execute_play for '{query}': {e}", exc_info=True)
-        err_card = KyroContainer(accent_color=None)
-        err_card.add_text(f"**Playback Error:** `{e}`")
+        agent = getattr(cog, "agent", None)
+        if agent:
+            err_card = agent.build_maintenance_card(
+                title="Playback Stream Error",
+                issue_desc=f"`{type(e).__name__}: {e}`",
+                action_taken="Protected audio pipeline and preserved active queue.",
+                advice="Please try again or try another song.",
+            )
+        else:
+            err_card = KyroContainer(accent_color=None)
+            err_card.add_text(f"**Playback Error:** `{e}`")
         if search_msg:
             try:
                 await edit_container_response(search_msg, err_card)

@@ -13,6 +13,7 @@ from src.utils.containers import KyroContainer, send_container_response
 from src.cogs.music._controller import MusicController
 from src.cogs.music._views import MusicControlView
 from src.cogs.music._analytics import MusicAnalytics
+from src.cogs.music._agent import MusicAgent
 from src.cogs.music._commands.play import execute_play
 from src.cogs.music._commands.pause import execute_pause, execute_resume
 from src.cogs.music._commands.skip import execute_skip
@@ -51,6 +52,8 @@ class Music(commands.Cog):
             bot._music_controller = self.controller
 
         self.analytics = MusicAnalytics(bot)
+        self.agent = MusicAgent(bot, self)
+        bot._music_agent = self.agent
         # Register persistent view for button interactions
         self.bot.add_view(MusicControlView(bot, None))
 
@@ -103,6 +106,8 @@ class Music(commands.Cog):
 
     async def cog_unload(self) -> None:
         """Close Lavalink node pool only on bot shutdown, preserving active streams during hot-reload."""
+        if hasattr(self, "agent") and self.agent:
+            self.agent.cog_unload()
         if getattr(self.bot, "_is_shutting_down", False):
             import wavelink
             try:
@@ -178,16 +183,8 @@ class Music(commands.Cog):
         """Invoked when Lavalink node drops connection."""
         node_id = getattr(node, "identifier", "default")
         logger.warning(f"Lavalink node closed: {node_id}")
-        if hasattr(self.bot, "sentinel") and self.bot.sentinel:
-            from src.sentinel.models import SubsystemType, IncidentSeverity
-            self.bot.sentinel.record_incident(
-                SubsystemType.MUSIC,
-                IncidentSeverity.CRITICAL,
-                "Lavalink Node Closed",
-                f"Node '{node_id}' closed connection unexpectedly",
-                action_taken="Watchdog scheduled auto-reconnect",
-                resolved=False,
-            )
+        if hasattr(self, "agent") and self.agent:
+            asyncio.create_task(self.agent.heal_node())
 
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: Any) -> None:
@@ -559,6 +556,33 @@ class Music(commands.Cog):
     async def stay_247(self, ctx: CustomContext) -> None:
         """Toggle 24/7 voice stay mode."""
         await execute_stay(self, ctx)
+
+    # ── Universal Music Cog Error Shield ──
+
+    async def cog_command_error(self, ctx: CustomContext, error: Exception) -> None:
+        """Universal shield for all prefix & hybrid music commands across all servers."""
+        orig_err = getattr(error, "original", error)
+        # Skip standard checks/cooldowns so global error handler formats them normally
+        if isinstance(orig_err, (commands.CommandOnCooldown, commands.MissingPermissions, commands.MissingRequiredArgument, commands.CheckFailure)):
+            raise error
+
+        handled = False
+        if hasattr(self, "agent") and self.agent:
+            handled = await self.agent.handle_command_error(ctx, orig_err)
+        if not handled:
+            raise error
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Universal shield for all slash music commands across all servers."""
+        orig_err = getattr(error, "original", error)
+        if isinstance(orig_err, (app_commands.CommandOnCooldown, app_commands.MissingPermissions, app_commands.CheckFailure)):
+            raise error
+
+        handled = False
+        if hasattr(self, "agent") and self.agent:
+            handled = await self.agent.handle_command_error(interaction, orig_err)
+        if not handled:
+            raise error
 
 
 async def setup(bot: KyroBot) -> None:

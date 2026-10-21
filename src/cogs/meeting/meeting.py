@@ -116,14 +116,16 @@ class MeetingAudioSink(AudioSinkBase):
             if len(pcm) % 2 != 0:
                 pcm = pcm[: len(pcm) - 1]
 
-            # Downsample 48kHz stereo 16-bit -> 16kHz mono (averaging left + right channels, step by 3 frames)
+            # Downsample 48kHz stereo 16-bit -> 16kHz mono without phase cancellation
             try:
                 pcm_array = array.array("h", pcm)
-                downsampled_samples = array.array(
-                    "h",
-                    ((pcm_array[i] + pcm_array[i + 1]) // 2 for i in range(0, len(pcm_array) - 1, 6))
-                )
-                downsampled = downsampled_samples.tobytes()
+                left_samples = pcm_array[0::6]
+                right_samples = pcm_array[1::6]
+                left_peak = max((abs(s) for s in left_samples), default=0)
+                right_peak = max((abs(s) for s in right_samples), default=0)
+                # Select channel with higher speech signal energy (prevents (L+R)//2 phase cancellation)
+                selected_samples = left_samples if left_peak >= right_peak else right_samples
+                downsampled = selected_samples.tobytes()
             except Exception:
                 try:
                     downsampled = pcm_array[0::6].tobytes()
@@ -211,14 +213,14 @@ class MeetingAudioSink(AudioSinkBase):
                 return pcm_bytes
 
             max_amp = max(abs(s) for s in samples)
-            if max_amp < 15:  # Pure absolute silence / line noise
+            if max_amp <= 2:  # Pure absolute silence
                 return pcm_bytes
 
             # If audio is already loud enough, do not over-boost
             if max_amp >= 22000:
                 return pcm_bytes
 
-            gain = min(20.0, float(target_peak) / float(max(max_amp, 1)))
+            gain = min(25.0, float(target_peak) / float(max(max_amp, 1)))
             if gain <= 1.05:
                 return pcm_bytes
 
@@ -365,64 +367,64 @@ class MeetingCog(commands.Cog):
         gemini_key = self._get_gemini_key()
         if gemini_key:
             b64_audio = base64.b64encode(wav_data).decode("utf-8")
-            models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
-
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
+            headers = {"Content-Type": "application/json", "x-goog-api-key": gemini_key}
             prompt = (
                 "You are an expert audio transcription system specializing in Indian speech and multilingual meetings. "
                 "Transcribe the spoken audio verbatim in its original language (Hindi, Hinglish, Marathi, Bengali, Tamil, Telugu, Gujarati, Punjabi, or Indian English). "
                 "Output ONLY the transcribed words. Do not add timestamps (e.g. 00:00), speaker tags, commentary, or non-speech labels like <noise> or [silence]. "
                 "If no human speech is spoken, output an empty response."
             )
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"inline_data": {"mime_type": "audio/wav", "data": b64_audio}},
+                        {"text": prompt}
+                    ]
+                }],
+                "generationConfig": {"temperature": 0.0},
+            }
 
-            for model_name in models:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-                headers = {"Content-Type": "application/json", "x-goog-api-key": gemini_key}
-                payload = {
-                    "contents": [{
-                        "parts": [
-                            {"inline_data": {"mime_type": "audio/wav", "data": b64_audio}},
-                            {"text": prompt}
-                        ]
-                    }],
-                    "generationConfig": {"temperature": 0.0},
-                }
-
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            url,
-                            headers=headers,
-                            json=payload,
-                            timeout=aiohttp.ClientTimeout(total=20.0),
-                        ) as resp:
-                            if resp.status == 200:
-                                g_data = await resp.json()
-                                candidates = g_data.get("candidates") or []
-                                if candidates:
-                                    content = candidates[0].get("content") or {}
-                                    parts = content.get("parts") or []
-                                    if parts:
-                                        g_text = parts[0].get("text", "").strip()
-                                        clean_text = (
-                                            g_text.replace("<noise>", "")
-                                            .replace("00:00", "")
-                                            .replace("[silence]", "")
-                                            .replace("[blank_audio]", "")
-                                            .replace("EMPTY", "")
-                                            .strip()
-                                        )
-                                        if clean_text and len(clean_text) >= 2:
-                                            self._last_transcribe_diag = "Transcribed by Gemini"
-                                            return clean_text
-                                        else:
-                                            self._last_transcribe_diag = "Gemini returned empty/inaudible"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=8.0),
+                    ) as resp:
+                        if resp.status == 200:
+                            g_data = await resp.json()
+                            candidates = g_data.get("candidates") or []
+                            if candidates:
+                                content = candidates[0].get("content") or {}
+                                parts = content.get("parts") or []
+                                if parts:
+                                    g_text = parts[0].get("text", "").strip()
+                                    clean_text = (
+                                        g_text.replace("<noise>", "")
+                                        .replace("00:00", "")
+                                        .replace("[silence]", "")
+                                        .replace("[blank_audio]", "")
+                                        .replace("EMPTY", "")
+                                        .strip()
+                                    )
+                                    if clean_text and len(clean_text) >= 2:
+                                        self._last_transcribe_diag = "Transcribed by Gemini"
+                                        return clean_text
+                                    else:
+                                        self._last_transcribe_diag = "Gemini: inaudible speech"
+                                else:
+                                    self._last_transcribe_diag = "Gemini: no speech detected in audio"
                             else:
-                                err_txt = await resp.text()
-                                self._last_transcribe_diag = f"Gemini HTTP {resp.status}: {err_txt[:60]}"
-                                logger.debug(f"Gemini {model_name} HTTP {resp.status}: {err_txt[:150]}")
-                except Exception as e:
-                    self._last_transcribe_diag = f"Gemini exception: {e}"
-                    logger.debug(f"Gemini model {model_name} failed: {e}")
+                                self._last_transcribe_diag = "Gemini: empty response"
+                        else:
+                            err_txt = await resp.text()
+                            self._last_transcribe_diag = f"Gemini HTTP {resp.status}"
+                            logger.debug(f"Gemini HTTP {resp.status}: {err_txt[:150]}")
+            except Exception as e:
+                self._last_transcribe_diag = f"Gemini timeout/error: {e}"
+                logger.debug(f"Gemini transcription failed: {e}")
 
         # Tier 2: Google Speech Recognition (Free fallback, specialized for Indian dialects)
         if SPEECH_RECOGNITION_AVAILABLE and sr is not None:
@@ -430,39 +432,28 @@ class MeetingCog(commands.Cog):
                 def _run_google_sr() -> str:
                     recognizer = sr.Recognizer()
                     recognizer.dynamic_energy_threshold = True
-                    recognizer.energy_threshold = 30
+                    recognizer.energy_threshold = 20
                     recognizer.pause_threshold = 0.5
                     with sr.AudioFile(io.BytesIO(wav_data)) as source:
                         audio = recognizer.record(source)
-                    # Try hi-IN (Hindi + Hinglish) first
-                    try:
-                        res = recognizer.recognize_google(audio, language="hi-IN")
-                        if res and len(res.strip()) >= 2:
-                            return res.strip()
-                    except Exception:
-                        pass
-                    # Fallback to en-IN (Indian English / Mixed)
-                    try:
-                        res = recognizer.recognize_google(audio, language="en-IN")
-                        if res and len(res.strip()) >= 2:
-                            return res.strip()
-                    except Exception:
-                        pass
-                    # Fallback to mr-IN (Marathi)
-                    try:
-                        res = recognizer.recognize_google(audio, language="mr-IN")
-                        if res and len(res.strip()) >= 2:
-                            return res.strip()
-                    except Exception:
-                        pass
+                    # Try hi-IN, en-IN, mr-IN in sequence
+                    for lang in ["hi-IN", "en-IN", "mr-IN"]:
+                        try:
+                            res = recognizer.recognize_google(audio, language=lang)
+                            if res and len(res.strip()) >= 2:
+                                return res.strip()
+                        except sr.UnknownValueError:
+                            continue
+                        except Exception:
+                            continue
                     return ""
 
                 sr_result = await asyncio.to_thread(_run_google_sr)
                 if sr_result:
                     self._last_transcribe_diag = "Transcribed by Google SR"
                     return sr_result
-                else:
-                    self._last_transcribe_diag = "Google SR: inaudible"
+                elif not getattr(self, "_last_transcribe_diag", None):
+                    self._last_transcribe_diag = "Google SR: inaudible speech"
             except Exception as e:
                 self._last_transcribe_diag = f"Google SR error: {e}"
                 logger.debug(f"Notice from Google Speech Recognition: {e}")
@@ -650,6 +641,17 @@ class MeetingCog(commands.Cog):
             if full_speaker_text and len(full_speaker_text) >= 2:
                 speaker_transcripts.append((name, full_speaker_text))
 
+        # Measure peak mic amplitude across recorded buffers before cleanup
+        max_level = 0
+        for b in sink.speaker_buffers.values():
+            if b:
+                try:
+                    arr = array.array("h", b)
+                    if arr:
+                        max_level = max(max_level, max(abs(s) for s in arr))
+                except Exception:
+                    pass
+
         captured_packets = getattr(sink, "packet_count", 0)
         decoded_frames = getattr(sink, "decoded_frames", 0)
         sink.cleanup()
@@ -667,8 +669,10 @@ class MeetingCog(commands.Cog):
                 elif decoded_frames == 0:
                     diag_msg = f"Received {captured_packets} packets, but audio frames could not be decoded. Check voice encryption."
                 else:
-                    detail = getattr(self, "_last_transcribe_diag", "Audio below speech threshold")
-                    diag_msg = f"Captured {captured_packets} packets ({decoded_frames} decoded frames). Engine status: `{detail}`."
+                    detail = getattr(self, "_last_transcribe_diag", None)
+                    if not detail:
+                        detail = "No human speech recognized"
+                    diag_msg = f"Captured {captured_packets} packets ({decoded_frames} decoded, peak amp: {max_level}/32767). Engine: `{detail}`."
                 c.add_text(
                     f"> {dot} **Duration:** `{duration_fmt}`\n"
                     f"> {dot} **Status:** `No Speech Detected`\n"

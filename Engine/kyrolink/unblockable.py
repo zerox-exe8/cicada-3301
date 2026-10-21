@@ -82,7 +82,7 @@ class UnblockableResolver:
         try:
             from pytubefix import YouTube, Search
             if "youtube.com/" in clean_q or "youtu.be/" in clean_q:
-                yt = YouTube(clean_q)
+                yt = YouTube(clean_q, client="ANDROID")
                 audio = yt.streams.get_audio_only()
                 if audio and audio.url:
                     return {
@@ -97,7 +97,7 @@ class UnblockableResolver:
                         "ext": getattr(audio, "subtype", "m4a"),
                     }
             else:
-                s = Search(clean_q)
+                s = Search(clean_q, client="ANDROID")
                 if s.results:
                     top = s.results[0]
                     audio = top.streams.get_audio_only()
@@ -131,7 +131,7 @@ class UnblockableResolver:
             "prefer_free_formats": True,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android_vr", "android_creator", "web"],
+                    "player_client": ["android", "tvhtml5", "android_creator"],
                 }
             },
         }

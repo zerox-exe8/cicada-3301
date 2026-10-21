@@ -35,6 +35,12 @@ try:
 
     _vs.SocketReader.register = _fixed_socket_reader_register
 
+    # Force max_dave_protocol_version to 0 to prevent DAVE E2EE negotiation.
+    # discord-ext-voice-recv operates on standard transport encrypted RTP with clean Opus payloads.
+    # When DAVE protocol version > 0 is negotiated, Discord encrypts voice with MLS ciphertext,
+    # causing libopus to fail with OPUS_INVALID_PACKET and dropping all participant audio to silence.
+    _vs.VoiceConnectionState.max_dave_protocol_version = property(lambda self: 0)
+
     # 2. Crash-proof PacketRouter and DAVE E2EE packet decryption.
     # When Discord negotiates DAVE E2EE, decrypt payload with dave_session before passing to Opus decoder.
     # Any jitter or decode anomaly gracefully returns (packet, b"") instead of crashing the thread.
@@ -70,12 +76,13 @@ try:
                             decrypted = dave_session.decrypt(user_id, _davey.MediaType.audio, opus_data)
                             if decrypted:
                                 opus_data = decrypted
-                        except Exception:
-                            pass
+                        except Exception as _de_err:
+                            logger.debug(f"DAVE decrypt error for user {user_id}: {_de_err}")
 
             pcm = self._decoder.decode(opus_data, fec=False)
             return packet, pcm
-        except Exception:
+        except Exception as _dec_err:
+            logger.debug(f"Packet decode exception (ssrc={getattr(packet, 'ssrc', None)}): {_dec_err}")
             return packet, b""
 
     _vr_router.PacketDecoder._decode_packet = _safe_decode_packet
@@ -99,6 +106,22 @@ except (ImportError, Exception):
     voice_recv = None
     VOICE_RECV_AVAILABLE = False
     AudioSinkBase = object
+
+try:
+    from faster_whisper import WhisperModel
+    _whisper_model: Optional[WhisperModel] = None
+
+    def _get_whisper_model() -> WhisperModel:
+        global _whisper_model
+        if _whisper_model is None:
+            # Load tiny model with int8 quantization on CPU for instant sub-second inference and low memory footprint (<150MB)
+            _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        return _whisper_model
+
+    FASTER_WHISPER_AVAILABLE = True
+except Exception:
+    _whisper_model = None
+    FASTER_WHISPER_AVAILABLE = False
 
 try:
     import speech_recognition as sr
@@ -134,6 +157,8 @@ class MeetingAudioSink(AudioSinkBase):
         self._ssrc_to_uid: dict[int, Any] = {}
         self._voice_client: Optional[Any] = None
         self.packet_count: int = 0
+        self.decoded_frames: int = 0
+        self.total_pcm_bytes: int = 0
 
     def wants_opus(self) -> bool:
         """Request decoded 48kHz 16-bit stereo PCM from voice_recv."""
@@ -146,7 +171,7 @@ class MeetingAudioSink(AudioSinkBase):
             if self.packet_count == 1:
                 logger.info("MeetingAudioSink received first incoming voice packet from Discord.")
             elif self.packet_count % 1000 == 0:
-                logger.debug(f"MeetingAudioSink captured {self.packet_count} packets so far.")
+                logger.debug(f"MeetingAudioSink captured {self.packet_count} packets (decoded PCM frames: {self.decoded_frames}).")
             if not data or not data.pcm:
                 return
 
@@ -225,6 +250,8 @@ class MeetingAudioSink(AudioSinkBase):
 
             self.speaker_buffers[uid].extend(downsampled)
             self.speaker_chunks[uid] += 1
+            self.decoded_frames += 1
+            self.total_pcm_bytes += len(downsampled)
         except Exception:
             return
 
@@ -371,15 +398,35 @@ class MeetingCog(commands.Cog):
     async def _transcribe_audio(self, wav_io: io.BytesIO) -> str:
         """
         State-of-the-art multilingual and Indian regional speech-to-text pipeline.
-        Tier 1: Google Speech Recognition (free, specialized in hi-IN, mr-IN, en-IN conversational speech).
-        Tier 2: Google Gemini Multimodal (gemini-3.5-transcribe & gemini-3.5-flash-lite) for deep multilingual context.
-        Tier 3: Groq Whisper-large-v3-turbo (if configured).
+        Tier 1: Local faster-whisper (CTranslate2 INT8, zero-key, ultra-fast, local offline).
+        Tier 2: Google Speech Recognition (free, specialized in hi-IN, mr-IN, en-IN).
+        Tier 3: Google Gemini Multimodal Audio (gemini-3.5-flash & gemini-3.5-flash-lite).
+        Tier 4: Groq Whisper-large-v3-turbo (if configured).
         """
         wav_data = wav_io.read()
         if not wav_data or len(wav_data) < 1000:
             return ""
 
-        # Tier 1: Google Speech Recognition (Free, zero-key, optimized for Indian dialects: Hindi, Hinglish, Marathi, etc.)
+        # Tier 1: Local faster-whisper (High accuracy, multilingual Hindi/English/Hinglish, offline)
+        if FASTER_WHISPER_AVAILABLE:
+            try:
+                def _run_faster_whisper() -> str:
+                    model = _get_whisper_model()
+                    segments, _ = model.transcribe(
+                        io.BytesIO(wav_data),
+                        beam_size=1,
+                        vad_filter=True,
+                    )
+                    text = " ".join(s.text.strip() for s in segments if s.text.strip())
+                    return text.strip()
+
+                whisper_text = await asyncio.to_thread(_run_faster_whisper)
+                if whisper_text and len(whisper_text) > 1:
+                    return whisper_text
+            except Exception as e:
+                logger.debug(f"faster-whisper transcription error: {e}")
+
+        # Tier 2: Google Speech Recognition (Free fallback, specialized for Indian dialects)
         if SPEECH_RECOGNITION_AVAILABLE and sr is not None:
             try:
                 def _run_google_sr() -> str:
@@ -418,11 +465,11 @@ class MeetingCog(commands.Cog):
             except Exception as e:
                 logger.debug(f"Notice from Google Speech Recognition: {e}")
 
-        # Tier 2: Google Gemini Multimodal Audio (gemini-2.5-flash) - 100% Free Tier (1,500 req/day)
+        # Tier 3: Google Gemini Multimodal Audio (gemini-3.5-flash & gemini-3.5-flash-lite)
         gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
         if gemini_key:
             b64_audio = base64.b64encode(wav_data).decode("utf-8")
-            models = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+            models = ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
 
             prompt = (
                 "You are an expert audio transcription system specializing in Indian speech and multilingual meetings. "
@@ -460,7 +507,6 @@ class MeetingCog(commands.Cog):
                                     parts = content.get("parts") or []
                                     if parts:
                                         g_text = parts[0].get("text", "").strip()
-                                        # Filter out non-speech hallucination artifacts
                                         clean_text = g_text.replace("<noise>", "").replace("00:00", "").replace("[silence]", "").replace("[blank_audio]", "").strip()
                                         if clean_text and len(clean_text) > 1:
                                             return clean_text
@@ -536,7 +582,7 @@ class MeetingCog(commands.Cog):
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
         }
 
-        models = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite"]
+        models = ["gemini-3.5-flash-lite", "gemini-3.5-flash"]
         for m in models:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
             try:
@@ -635,6 +681,7 @@ class MeetingCog(commands.Cog):
                 speaker_transcripts.append((name, full_speaker_text))
 
         captured_packets = getattr(sink, "packet_count", 0)
+        decoded_frames = getattr(sink, "decoded_frames", 0)
         sink.cleanup()
         dot = self.bot.custom_emojis.get("heart_dot", "•")
 
@@ -645,15 +692,16 @@ class MeetingCog(commands.Cog):
                     content="**Kyro Meeting Intelligence**\n> *Session ended without audible speech.*"
                 )
                 c.add_separator(divider=True)
-                diag_msg = (
-                    "No voice packets received from Discord (all members were muted or channel was silent)."
-                    if captured_packets == 0
-                    else "Voice packets were received, but audio was below speech recognition threshold."
-                )
+                if captured_packets == 0:
+                    diag_msg = "No voice packets received from Discord (all members were muted or channel was silent)."
+                elif decoded_frames == 0:
+                    diag_msg = f"Received {captured_packets} packets, but audio frames could not be decoded. Check voice encryption."
+                else:
+                    diag_msg = f"Captured {captured_packets} packets ({decoded_frames} decoded frames), but audio volume was below speech recognition threshold."
                 c.add_text(
                     f"> {dot} **Duration:** `{duration_fmt}`\n"
                     f"> {dot} **Status:** `No Speech Detected`\n"
-                    f"> {dot} **Audio Packets Captured:** `{captured_packets}`\n"
+                    f"> {dot} **Audio Packets Captured:** `{captured_packets}` (Decoded: `{decoded_frames}`)\n"
                     f"> {dot} **Notice:** {diag_msg}"
                 )
                 c.add_separator(divider=True)

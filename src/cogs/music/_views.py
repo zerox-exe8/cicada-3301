@@ -158,7 +158,14 @@ class MusicControlView(discord.ui.View):
             await send_container_response(interaction, c, ephemeral=True)
             return
 
-        await player.skip()
+        try:
+            await player.skip()
+        except Exception as e:
+            logger.warning(f"Skip button failed in guild {interaction.guild_id}: {type(e).__name__}: {e}")
+            c = KyroContainer()
+            c.add_section(content=f"**Skip Notice**\n> Could not skip right now: `{e}`")
+            await send_container_response(interaction, c, ephemeral=True)
+            return
 
     @discord.ui.button(
         label="Vol -",

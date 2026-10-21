@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import random
 import time
 from typing import TYPE_CHECKING, Optional
@@ -9,6 +10,8 @@ from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.cogs.music.music import Music
+
+logger = logging.getLogger("Kyro.Music.Controls")
 
 # Per-guild 247 toggle debounce: prevents duplicate responses from hybrid
 # commands firing twice (prefix + slash) or rapid double-clicks.
@@ -177,7 +180,15 @@ async def execute_jump(cog: Music, ctx: commands.Context, index: int) -> None:
         del player.queue[:index - 1]
         target_track = player.queue[0]
 
-    await player.skip()
+    try:
+        await player.skip()
+    except Exception as e:
+        logger.warning(f"Guild {ctx.guild.id}: jump failed: {type(e).__name__}: {e}")
+        container = KyroContainer(accent_color=None)
+        container.add_text(f"**Could not jump:** `{e}`\n> Please try again in a moment.")
+        await send_container_response(ctx, container)
+        return
+
     container = KyroContainer(accent_color=None)
     container.add_text(f"**Jumping to:** `{target_track.title}`")
     await send_container_response(ctx, container)

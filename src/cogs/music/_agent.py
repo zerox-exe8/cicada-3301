@@ -76,6 +76,9 @@ class MusicAgent:
         """
         Surgically purge ghost voice sessions with debounced per-guild rate limiting.
         Prevents Discord Opcode 4 voice state update rate limits.
+
+        The queued tracks are PRESERVED — a self-heal must never wipe the user's
+        playlist, otherwise one transient error invalidates the whole session.
         """
         guild_id = guild.id
         now = time.time()
@@ -89,7 +92,12 @@ class MusicAgent:
         async with lock:
             try:
                 logger.info(f"MusicAgent: Healing voice session for guild '{guild.name}' ({guild_id}) - Reason: {reason}")
-                
+
+                # 0. Mark the player so the disconnect handler keeps the queue intact
+                player = self.music.controller.get_player(guild_id)
+                if player:
+                    player.preserve_queue_on_disconnect = True
+
                 # 1. Clean local voice client
                 vc = guild.voice_client
                 if vc:
@@ -116,7 +124,6 @@ class MusicAgent:
                     pass
 
                 # 4. Reset GuildPlayer voice reference
-                player = self.music.controller.get_player(guild_id)
                 if player:
                     player.voice_client = None
 
@@ -232,48 +239,82 @@ class MusicAgent:
         Universal circuit breaker for ALL music commands (prefix and slash).
         Catches transient connection timeouts, node drops, and stream errors,
         triggers autonomous self-healing, and displays a polished Kyro container.
+
+        Classification is done on the EXCEPTION TYPE, not on the message text.
+        Many transport exceptions (TimeoutError, ClientOSError, ...) carry an
+        EMPTY message, so substring matching silently classified them as
+        "unknown" and skipped every self-healing branch.
         """
+        from discord.ext import commands as dpy_commands
+
         self._metrics["shielded_errors"] += 1
         guild = getattr(ctx_or_interaction, "guild", None)
-        err_str = str(error)
         err_type = type(error).__name__
+        err_str = str(error) or err_type
+        err_low = err_str.lower()
 
         logger.warning(
             f"MusicAgent: Intercepted music error in guild '{guild.name if guild else 'None'}' "
             f"({err_type}): {err_str}"
         )
 
+        # ── User input / permission problems are NOT subsystem faults ──
+        # Let the global error handler render the proper usage message instead
+        # of a "maintenance" card that hides the real reason.
+        if isinstance(
+            error,
+            (
+                dpy_commands.UserInputError,
+                dpy_commands.CheckFailure,
+                dpy_commands.MissingPermissions,
+                dpy_commands.BotMissingPermissions,
+                dpy_commands.NoPrivateMessage,
+                dpy_commands.DisabledCommand,
+            ),
+        ):
+            raise error
+
+        from wavelink.exceptions import (
+            ChannelTimeoutException,
+            LavalinkException,
+            NodeException,
+        )
+
+        # Voice gateway handshake failure (Discord voice servers).
+        is_voice_fault = isinstance(error, (discord.ConnectionClosed, ChannelTimeoutException)) or (
+            "unable to connect to" in err_low
+            or "voice gateway" in err_low
+            or "exceeded the timeout" in err_low
+        )
+
+        # Audio engine (Lavalink node) transport failure.
+        is_node_fault = isinstance(error, (LavalinkException, NodeException)) or (
+            "lavalink" in err_low
+            or "node" in err_low
+            or (isinstance(error, (asyncio.TimeoutError, TimeoutError)) and not is_voice_fault)
+        )
+
         title = "Music Subsystem Diagnostics"
         action = "Logged diagnostics and secured audio pipeline."
         advice = "Please try executing the command again."
 
-        # Case 1: Voice Gateway Connect / Timeout / Channel State Failure
-        if (
-            "timeout" in err_str.lower()
-            or "voice" in err_str.lower()
-            or "ChannelTimeoutException" in err_type
-            or "ClientException" in err_type
-        ):
-            title = "Voice Gateway Auto-Recovery"
-            if guild:
-                await self.heal_voice_session(guild, reason=f"Command error: {err_type}")
-            action = "Purged stale voice gateway state and refreshed connection pipeline."
-            advice = "Please try joining the voice channel or re-running the command."
-
-        # Case 2: Lavalink Node Disconnected or Unreachable
-        elif (
-            "node" in err_str.lower()
-            or "lavalink" in err_str.lower()
-            or "LavalinkException" in err_type
-            or "NodeException" in err_type
-        ):
+        # Case 1: Audio engine (Lavalink node) unreachable / slow REST transport.
+        if is_node_fault:
             title = "Audio Engine Auto-Recovery"
             action = "Triggered single-flight Lavalink node pool re-establishment."
             advice = "The audio engine is reconnecting. Please retry in a few seconds."
             asyncio.create_task(self.heal_node())
 
+        # Case 2: Voice Gateway Connect / Timeout / Channel State Failure.
+        elif is_voice_fault:
+            title = "Voice Gateway Auto-Recovery"
+            if guild:
+                await self.heal_voice_session(guild, reason=f"Command error: {err_type}")
+            action = "Purged stale voice gateway state (your queue was kept intact)."
+            advice = "Please try joining the voice channel or re-running the command."
+
         # Case 3: Permission or Capacity Constraints
-        elif "permission" in err_str.lower() or "full" in err_str.lower():
+        elif isinstance(error, discord.Forbidden) or "permission" in err_low or "is full" in err_low:
             title = "Voice Channel Constraint"
             action = "Verified channel capacity and permission boundaries."
             advice = f"Notice: `{err_str}`"

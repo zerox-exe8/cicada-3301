@@ -232,8 +232,18 @@ class Music(commands.Cog):
                             pass
                 player._disconnect_announced = False
                 player._was_paused_for_empty_vc = False
-                player.queue.clear()
-                player.current = None
+                # A self-heal disconnect (MusicAgent) must NOT wipe the playlist —
+                # otherwise one transient error invalidates the whole music session.
+                if getattr(player, "preserve_queue_on_disconnect", False):
+                    player.preserve_queue_on_disconnect = False
+                    player.current = None
+                    logger.info(
+                        f"Guild {member.guild.id}: Self-heal voice disconnect — "
+                        f"queue preserved ({len(player.queue)} track(s))."
+                    )
+                else:
+                    player.queue.clear()
+                    player.current = None
                 if player.voice_client:
                     try:
                         player.voice_client.cleanup()
@@ -565,6 +575,10 @@ class Music(commands.Cog):
         # Skip standard checks/cooldowns so global error handler formats them normally
         if isinstance(orig_err, (commands.CommandOnCooldown, commands.MissingPermissions, commands.MissingRequiredArgument, commands.CheckFailure)):
             raise error
+        # User input errors are NOT subsystem faults — let the global handler
+        # render the proper usage message instead of a maintenance card.
+        if isinstance(orig_err, commands.UserInputError):
+            raise error
 
         handled = False
         if hasattr(self, "agent") and self.agent:
@@ -576,6 +590,9 @@ class Music(commands.Cog):
         """Universal shield for all slash music commands across all servers."""
         orig_err = getattr(error, "original", error)
         if isinstance(orig_err, (app_commands.CommandOnCooldown, app_commands.MissingPermissions, app_commands.CheckFailure)):
+            raise error
+        # Bad/missing parameter input is not a subsystem fault.
+        if isinstance(orig_err, (app_commands.TransformerError, app_commands.MissingRole, app_commands.MissingAnyRole)):
             raise error
 
         handled = False

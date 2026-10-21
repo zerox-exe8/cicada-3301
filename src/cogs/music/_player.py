@@ -11,7 +11,7 @@ import asyncio
 import logging
 import random
 import time
-from typing import TYPE_CHECKING, List, Optional, Set
+from typing import TYPE_CHECKING, Any, List, Optional, Set
 import discord
 import wavelink
 
@@ -63,7 +63,11 @@ class GuildPlayer:
         self._connect_lock: asyncio.Lock = asyncio.Lock()
         self._queue_lock: asyncio.Lock = asyncio.Lock()
         self._last_advance_time: float = 0.0
+        self._last_manual_advance: float = 0.0
+        self._advance_gen: int = 0
         self._is_prefetching: bool = False
+        # Set by the MusicAgent before a self-heal disconnect so the queue survives.
+        self.preserve_queue_on_disconnect: bool = False
 
     # ── State Properties ──
 
@@ -206,49 +210,113 @@ class GuildPlayer:
                 except Exception as e:
                     logger.error(f"On-demand Lavalink node connect error: {e}")
 
-            # Connect as Wavelink Player with automatic retry on temporary Discord gateway blip
-            for attempt in range(2):
+            # ── Node REST health probe ──
+            # The Wavelink voice handshake only completes once the node answers the
+            # REST "update player" call. A node whose websocket is up but whose REST
+            # API is slow/unreachable makes every voice connect time out, which used
+            # to be misdiagnosed as a Discord voice gateway fault.
+            if node is not None and not await self._probe_lavalink_node(node):
+                logger.warning(
+                    f"Guild {self.guild.id}: Lavalink REST API is not responsive, "
+                    "re-establishing the node before connecting."
+                )
+                agent = getattr(self.bot, "_music_agent", None)
+                if agent is not None:
+                    try:
+                        await agent.heal_node(force=True)
+                    except Exception as heal_err:
+                        logger.error(f"Guild {self.guild.id}: Lavalink node heal failed: {heal_err}")
                 try:
-                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=12.0)
+                    node = wavelink.Pool.get_node()
+                except Exception:
+                    node = None
+
+            # Connect as Wavelink Player with automatic retry on temporary Discord gateway blip
+            last_error: Optional[BaseException] = None
+            for attempt in range(3):
+                try:
+                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=20.0)
                     if self.voice_client:
                         self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
+                    last_error = None
                     break
-                except (asyncio.TimeoutError, Exception) as e:
+                except Exception as e:
+                    last_error = e
+                    logger.warning(
+                        f"Guild {self.guild.id}: Voice connect attempt {attempt + 1}/3 failed "
+                        f"({type(e).__name__}: {e}), clearing voice state and retrying..."
+                    )
+                    stale_vc = self.guild.voice_client
+                    if stale_vc:
+                        try:
+                            await stale_vc.disconnect(force=True)
+                        except Exception:
+                            pass
+                        try:
+                            stale_vc.cleanup()
+                        except Exception:
+                            pass
+                    try:
+                        self.bot._connection._remove_voice_client(self.guild.id)
+                    except Exception:
+                        pass
+                    try:
+                        await self.guild.change_voice_state(channel=None)
+                    except Exception:
+                        pass
+                    self.voice_client = None
+
+                    # After the first failure, force a node re-sync: the handshake
+                    # waits on the node REST call, so a stale node stalls every retry.
                     if attempt == 0:
-                        logger.warning(f"Guild {self.guild.id}: Voice connect attempt {attempt + 1} failed ({e}), clearing voice state and retrying once...")
-                        stale_vc = self.guild.voice_client
-                        if stale_vc:
+                        agent = getattr(self.bot, "_music_agent", None)
+                        if agent is not None:
                             try:
-                                await stale_vc.disconnect(force=True)
-                            except Exception:
-                                pass
-                            try:
-                                stale_vc.cleanup()
-                            except Exception:
-                                pass
-                        try:
-                            self.bot._connection._remove_voice_client(self.guild.id)
-                        except Exception:
-                            pass
-                        try:
-                            await self.guild.change_voice_state(channel=None)
-                        except Exception:
-                            pass
-                        await asyncio.sleep(1.0)
-                    else:
-                        logger.error(f"Guild {self.guild.id}: Wavelink connect error: {e}")
-                        if hasattr(self.bot, "sentinel") and self.bot.sentinel:
-                            from src.sentinel.models import SubsystemType, IncidentSeverity
-                            self.bot.sentinel.record_incident(
-                                SubsystemType.VOICE,
-                                IncidentSeverity.CRITICAL,
-                                "Voice Gateway Connect Failure",
-                                f"Failed connecting to channel {channel.name} ({channel.id}): {e}",
-                                action_taken="Purged stale voice client & gateway state",
-                                resolved=False,
-                                guild_id=self.guild.id,
-                            )
-                        raise
+                                await agent.heal_node(force=True)
+                            except Exception as heal_err:
+                                logger.error(f"Guild {self.guild.id}: Lavalink node heal failed: {heal_err}")
+                    await asyncio.sleep(1.5 * (attempt + 1))
+
+            if last_error is not None:
+                logger.error(f"Guild {self.guild.id}: Wavelink connect error: {last_error}")
+                if hasattr(self.bot, "sentinel") and self.bot.sentinel:
+                    from src.sentinel.models import SubsystemType, IncidentSeverity
+                    self.bot.sentinel.record_incident(
+                        SubsystemType.VOICE,
+                        IncidentSeverity.WARNING,
+                        "Voice Gateway Connect Failure",
+                        f"Failed connecting to channel {channel.name} ({channel.id}): "
+                        f"{type(last_error).__name__}: {last_error}",
+                        action_taken="Purged stale voice client & gateway state (queue preserved)",
+                        resolved=True,
+                        guild_id=self.guild.id,
+                    )
+                raise last_error
+
+    async def _probe_lavalink_node(self, node: Any, timeout: float = 4.0) -> bool:
+        """
+        Verify the Lavalink node REST API is actually responsive.
+
+        The websocket can be alive while the REST API is slow or unreachable —
+        and the Wavelink voice handshake only completes after a successful REST
+        call, so a dead REST API silently turns into a voice connect timeout.
+        """
+        session = getattr(node, "_session", None)
+        if session is None or getattr(session, "closed", False):
+            return False
+
+        uri = f"{node.uri}/v4/version"
+        headers = getattr(node, "headers", None) or {}
+
+        async def _probe() -> None:
+            async with session.get(uri, headers=headers) as resp:
+                await resp.read()
+
+        try:
+            await asyncio.wait_for(_probe(), timeout=timeout)
+            return True
+        except Exception:
+            return False
 
     # ── Playback Engine ──
 
@@ -499,11 +567,37 @@ class GuildPlayer:
         return False
 
     async def skip(self) -> None:
-        """Skip currently playing track."""
+        """
+        Skip the currently playing track.
+
+        Never raises: a failing transport call (Lavalink REST timeout, closed
+        websocket, ...) must not kill the command. When the node never received
+        the stop request the queue would freeze forever, so in that case the
+        playlist is advanced locally (the next track replaces the still playing
+        one on the node).
+        """
         if self.loop_mode == "track":
             self.loop_mode = "off"
+
+        # Snapshot the advance generation so we can detect a TrackEnd event that
+        # already advanced the queue for this very skip.
+        advance_gen = self._advance_gen
+
+        failed = False
         if self.voice_client:
-            await self.voice_client.skip(force=True)
+            try:
+                await self.voice_client.skip(force=True)
+            except Exception as e:
+                failed = True
+                logger.warning(
+                    f"Guild {self.guild.id}: voice skip request failed "
+                    f"({type(e).__name__}: {e}); advancing the queue locally."
+                )
+
+        if failed:
+            # Lavalink never stopped the track — advance manually so the
+            # playlist keeps moving instead of freezing on the current track.
+            await self.on_track_end(reason="finished", manual=True, expected_gen=advance_gen)
 
     async def stop(self) -> None:
         """Stop playback and disconnect."""
@@ -553,8 +647,20 @@ class GuildPlayer:
 
     # ── Track End & Autoplay Transition ──
 
-    async def on_track_end(self, reason: Optional[str] = None) -> None:
-        """Invoked when Lavalink finishes playing a track."""
+    async def on_track_end(
+        self,
+        reason: Optional[str] = None,
+        *,
+        manual: bool = False,
+        expected_gen: Optional[int] = None,
+    ) -> None:
+        """
+        Invoked when Lavalink finishes playing a track.
+
+        `manual=True` is used by explicit user actions (skip/jump) which must
+        ALWAYS advance, while event driven advances are debounced so a duplicate
+        `TrackEndEvent` cannot skip two tracks at once.
+        """
         if reason and str(reason).lower() in ("replaced", "cleanup"):
             return
 
@@ -569,13 +675,37 @@ class GuildPlayer:
                 self.schedule_empty_vc_timer()
             return
 
-        now = time.time()
-        if now - self._last_advance_time < 0.8:
-            logger.debug(f"Guild {self.guild.id}: Duplicate on_track_end call debounced")
-            return
-
         async with self._advance_lock:
-            self._last_advance_time = time.time()
+            now = time.time()
+
+            if manual:
+                # A TrackEnd event already advanced the queue for this skip.
+                if expected_gen is not None and self._advance_gen != expected_gen:
+                    logger.debug(
+                        f"Guild {self.guild.id}: skip advance skipped, "
+                        "queue was already advanced by a TrackEnd event."
+                    )
+                    return
+            else:
+                # Debounce duplicate TrackEnd events (Lavalink emits one per skip).
+                if now - self._last_advance_time < 0.8:
+                    logger.debug(f"Guild {self.guild.id}: Duplicate on_track_end call debounced")
+                    return
+                # A locally advanced skip may still be followed by the node's own
+                # TrackEnd event — ignore it instead of skipping a second track.
+                if self._last_manual_advance and (now - self._last_manual_advance) < 2.0:
+                    logger.debug(
+                        f"Guild {self.guild.id}: Redundant TrackEnd event after a locally "
+                        "advanced skip ignored"
+                    )
+                    self._last_advance_time = now
+                    return
+
+            self._last_advance_time = now
+            self._advance_gen += 1
+            if manual:
+                self._last_manual_advance = now
+
             if self.loop_mode == "track" and self.current:
                 await self.play_track(self.current)
                 return

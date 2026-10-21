@@ -256,11 +256,19 @@ class ErrorHandler(commands.Cog):
                 if handled:
                     return
 
-        else:
+        # ── Unhandled exceptions ONLY ──
+        # Every branch above produces a user-facing message for an EXPECTED error
+        # (missing argument, bad input, permissions, ...). Those must never be
+        # escalated to the Sentinel, otherwise a single typo (e.g. `?jump` without
+        # an index) is reported as a subsystem incident and the whole music engine
+        # looks "critical".
+        if not container.components:
             import traceback
             tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
             cmd_name = ctx.command.qualified_name if ctx.command else "Unknown"
-            logger.error(f"Unhandled error in '{cmd_name}': {error}\n{tb}")
+            err_type = type(error).__name__
+            err_details = str(error) or err_type
+            logger.error(f"Unhandled error in '{cmd_name}': {err_type}: {err_details}\n{tb}")
 
             if hasattr(self.bot, "sentinel") and self.bot.sentinel:
                 from src.sentinel.models import SubsystemType, IncidentSeverity
@@ -268,7 +276,7 @@ class ErrorHandler(commands.Cog):
                     SubsystemType.COMMAND,
                     IncidentSeverity.WARNING,
                     f"Command Exception: {cmd_name}",
-                    str(error),
+                    f"{err_type}: {err_details}",
                     action_taken="Handled via maintenance responder; pending developer review",
                     resolved=False,
                     guild_id=ctx.guild.id if ctx.guild else None,
@@ -398,18 +406,21 @@ class ErrorHandler(commands.Cog):
                 if handled:
                     return
 
-        else:
+        # ── Unhandled exceptions ONLY ── (see note in on_command_error)
+        if not container.components:
             import traceback
             tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
             cmd_name = interaction.command.qualified_name if interaction.command else "Unknown"
-            logger.error(f"Unhandled slash error in '{cmd_name}': {error}\n{tb}")
+            err_type = type(error).__name__
+            err_details = str(error) or err_type
+            logger.error(f"Unhandled slash error in '{cmd_name}': {err_type}: {err_details}\n{tb}")
             if hasattr(self.bot, "sentinel") and self.bot.sentinel:
                 from src.sentinel.models import SubsystemType, IncidentSeverity
                 self.bot.sentinel.record_incident(
                     SubsystemType.COMMAND,
                     IncidentSeverity.WARNING,
                     f"Slash Command Exception: {cmd_name}",
-                    str(error),
+                    f"{err_type}: {err_details}",
                     action_taken="Sent error container to user; pending root cause resolution",
                     resolved=False,
                     guild_id=interaction.guild_id,

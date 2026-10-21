@@ -35,12 +35,6 @@ try:
 
     _vs.SocketReader.register = _fixed_socket_reader_register
 
-    # Force max_dave_protocol_version to 0 to prevent DAVE E2EE negotiation.
-    # discord-ext-voice-recv operates on standard transport encrypted RTP with clean Opus payloads.
-    # When DAVE protocol version > 0 is negotiated, Discord encrypts voice with MLS ciphertext,
-    # causing libopus to fail with OPUS_INVALID_PACKET and dropping all participant audio to silence.
-    _vs.VoiceConnectionState.max_dave_protocol_version = property(lambda self: 0)
-
     # 2. Crash-proof PacketRouter and DAVE E2EE packet decryption.
     # When Discord negotiates DAVE E2EE, decrypt payload with dave_session before passing to Opus decoder.
     # Any jitter or decode anomaly gracefully returns (packet, b"") instead of crashing the thread.
@@ -70,7 +64,16 @@ try:
                 dave_session = getattr(conn, "dave_session", None) if conn else None
 
                 if dave_session and getattr(dave_session, "ready", False):
-                    user_id = getattr(self, "_cached_id", None) or (vc._get_id_from_ssrc(self.ssrc) if vc else None)
+                    user_id = (
+                        getattr(self, "_cached_id", None)
+                        or (vc._get_id_from_ssrc(self.ssrc) if vc else None)
+                        or getattr(self.sink, "_ssrc_to_uid", {}).get(self.ssrc)
+                    )
+                    if not user_id and vc and getattr(vc, "channel", None):
+                        non_bots = [m for m in vc.channel.members if not m.bot]
+                        if len(non_bots) == 1:
+                            user_id = non_bots[0].id
+
                     if user_id:
                         try:
                             decrypted = dave_session.decrypt(user_id, _davey.MediaType.audio, opus_data)
@@ -1048,12 +1051,15 @@ class MeetingCog(commands.Cog):
             await ctx.send_error(f"Could not connect to voice channel: `{e}`", ephemeral=False)
             return
 
-        # Wait up to 5 seconds for Discord voice gateway encryption handshake and secret key to populate
+        # Wait up to 5 seconds for Discord voice gateway encryption handshake and DAVE session transition
         handshake_ok = False
         for _ in range(50):
             if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
-                handshake_ok = True
-                break
+                conn = getattr(voice_client, "_connection", None)
+                dave = getattr(conn, "dave_session", None)
+                if dave is None or getattr(dave, "ready", False):
+                    handshake_ok = True
+                    break
             await asyncio.sleep(0.1)
 
         if not handshake_ok:

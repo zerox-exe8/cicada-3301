@@ -111,10 +111,13 @@ try:
     _orig_dave_decrypt_inner = _vropus.PacketDecoder._dave_decrypt_inner
 
     def _patched_dave_decrypt_inner(self: _vropus.PacketDecoder, packet: Any) -> bool:
+        sink = getattr(self, "sink", None)
         if packet.is_silence():
+            if sink:
+                sink._silence_pkts = getattr(sink, "_silence_pkts", 0) + 1
             return True
 
-        vc = self.sink.voice_client
+        vc = getattr(self.sink, "voice_client", None) if self.sink else None
         state = getattr(vc, "_connection", None)
         session = getattr(state, "dave_session", None)
         dave_ver = getattr(state, "dave_protocol_version", 0)
@@ -122,9 +125,12 @@ try:
         # If DAVE session is ready, ALWAYS decrypt with MLS key
         if session is not None and getattr(session, "ready", False):
             user_id = self._cached_id
-            if user_id is None:
+            if user_id is None and vc:
                 user_id = self._cached_id = vc._get_id_from_ssrc(self.ssrc)
             if user_id is None:
+                if sink:
+                    sink._dave_fail = getattr(sink, "_dave_fail", 0) + 1
+                    sink._last_dave_err = f"ssrc {self.ssrc} unmapped"
                 self._dave_log_drop("ssrc not mapped to a user yet")
                 return False
 
@@ -132,18 +138,30 @@ try:
                 packet.decrypted_data = session.decrypt(
                     int(user_id), davey.MediaType.audio, bytes(packet.decrypted_data)
                 )
+                if sink:
+                    sink._dave_succ = getattr(sink, "_dave_succ", 0) + 1
                 return True
             except BaseException as e:
                 if isinstance(e, (KeyboardInterrupt, SystemExit)):
                     raise
                 err_msg = str(e) or repr(e)
+                if sink:
+                    sink._last_dave_err = err_msg
+                    sink._dave_fail = getattr(sink, "_dave_fail", 0) + 1
                 if "UnencryptedWhenPassthroughDisabled" in err_msg:
-                    return True
+                    if sink:
+                        sink._dave_pass = getattr(sink, "_dave_pass", 0) + 1
+                    # DO NOT pass raw ciphertext to Opus! Drop packet to avoid zero-fill corruption!
+                    self._dave_log_drop(f"DAVE passthrough error: {err_msg}")
+                    return False
                 self._dave_log_drop(f"DAVE decrypt error: {err_msg}")
                 return False
 
         if dave_ver > 0:
             # Session not ready yet in an E2EE room: drop frame so ciphertext never touches Opus
+            if sink:
+                sink._dave_fail = getattr(sink, "_dave_fail", 0) + 1
+                sink._last_dave_err = "session not ready"
             self._dave_log_drop(
                 f"DAVE v{dave_ver} awaiting MLS session ready (ready={getattr(session, 'ready', False) if session else 'None'})"
             )
@@ -210,6 +228,13 @@ class MeetingAudioSink(AudioSinkBase):
         self.packet_count: int = 0
         self.decoded_frames: int = 0
         self.total_pcm_bytes: int = 0
+        self._silence_pkts: int = 0
+        self._dave_succ: int = 0
+        self._dave_fail: int = 0
+        self._dave_pass: int = 0
+        self._last_dave_err: str = "none"
+        self._ssrc_counts: dict[int, int] = {}
+        self._first_hex: str = ""
 
     def wants_opus(self) -> bool:
         """Request decoded 48kHz 16-bit stereo PCM from voice_recv."""
@@ -219,16 +244,23 @@ class MeetingAudioSink(AudioSinkBase):
         """Receive audio frame, downsample to 16kHz mono, and buffer with SSRC tracking."""
         try:
             self.packet_count += 1
+            ssrc = getattr(data.packet, "ssrc", None) if hasattr(data, "packet") else 0
+            if ssrc:
+                self._ssrc_counts[ssrc] = self._ssrc_counts.get(ssrc, 0) + 1
+
+            raw_bytes = getattr(data.packet, "decrypted_data", b"") if hasattr(data, "packet") else b""
+            if not self._first_hex and raw_bytes:
+                self._first_hex = raw_bytes[:8].hex()
+
             if self.packet_count == 1:
                 vc = getattr(self, "voice_client", None) or getattr(self, "_voice_client", None)
                 conn = getattr(vc, "_connection", None)
                 dave_ver = getattr(conn, "dave_protocol_version", 0)
                 dave_sess = getattr(conn, "dave_session", None)
                 dave_ready = getattr(dave_sess, "ready", False) if dave_sess else False
-                raw_bytes = getattr(data.packet, "decrypted_data", b"") if hasattr(data, "packet") else b""
                 logger.info(
-                    f"MeetingAudioSink FIRST packet: ssrc={getattr(data.packet, 'ssrc', None)}, raw_len={len(raw_bytes)}, "
-                    f"hex={raw_bytes[:8].hex() if raw_bytes else 'empty'}, DAVE_ver={dave_ver}, session_ready={dave_ready}, "
+                    f"MeetingAudioSink FIRST packet: ssrc={ssrc}, raw_len={len(raw_bytes)}, "
+                    f"hex={self._first_hex if self._first_hex else 'empty'}, DAVE_ver={dave_ver}, session_ready={dave_ready}, "
                     f"pcm_len={len(data.pcm) if data.pcm else 0}"
                 )
             elif self.packet_count % 500 == 0:
@@ -782,6 +814,13 @@ class MeetingCog(commands.Cog):
 
         captured_packets = getattr(sink, "packet_count", 0)
         decoded_frames = getattr(sink, "decoded_frames", 0)
+        silence_pkts = getattr(sink, "_silence_pkts", 0)
+        dave_succ = getattr(sink, "_dave_succ", 0)
+        dave_fail = getattr(sink, "_dave_fail", 0)
+        dave_pass = getattr(sink, "_dave_pass", 0)
+        last_dave_err = getattr(sink, "_last_dave_err", "none")
+        first_hex = getattr(sink, "_first_hex", "empty")
+        ssrc_summary = ", ".join(f"{s}:{c}" for s, c in getattr(sink, "_ssrc_counts", {}).items()) if getattr(sink, "_ssrc_counts", None) else "none"
         sink.cleanup()
         dot = self.bot.custom_emojis.get("heart_dot", "•")
 
@@ -799,12 +838,13 @@ class MeetingCog(commands.Cog):
                 if captured_packets == 0:
                     diag_msg = "No voice packets received from Discord (all members were muted or channel was silent)."
                 elif decoded_frames == 0:
-                    diag_msg = f"Received {captured_packets} packets, but frames were dropped awaiting DAVE MLS key exchange (DAVE v{dave_ver}, session_ready={dave_ready})."
+                    diag_msg = f"Received {captured_packets} packets (silence={silence_pkts}, fail={dave_fail}), but frames were dropped (DAVE v{dave_ver} [ready={dave_ready}], err={last_dave_err[:35]})."
                 else:
                     detail = getattr(self, "_last_transcribe_diag", None)
                     if not detail:
                         detail = "No human speech recognized"
-                    diag_msg = f"Captured {captured_packets} packets ({decoded_frames} decoded, DAVE v{dave_ver} [ready={dave_ready}], peak amp: {max_level}/32767). Engine: `{detail}`."
+                    dave_info = f"v{dave_ver} [ready={dave_ready}, succ={dave_succ}, fail={dave_fail}, pass={dave_pass}, sil={silence_pkts}]"
+                    diag_msg = f"Captured {captured_packets} pkts (Decoded: {decoded_frames}, DAVE {dave_info}, SSRC: [{ssrc_summary}], hex: {first_hex}, peak amp: {max_level}/32767). Engine: `{detail}`."
                 c.add_text(
                     f"> {dot} **Duration:** `{duration_fmt}`\n"
                     f"> {dot} **Status:** `No Speech Detected`\n"

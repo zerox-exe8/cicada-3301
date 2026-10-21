@@ -35,76 +35,6 @@ try:
 
     _vs.SocketReader.register = _fixed_socket_reader_register
 
-    # 2. Crash-proof PacketRouter and DAVE E2EE packet decryption.
-    # When Discord negotiates DAVE E2EE, decrypt payload with dave_session before passing to Opus decoder.
-    # Any jitter or decode anomaly gracefully returns (packet, b"") instead of crashing the thread.
-    import discord.ext.voice_recv.router as _vr_router
-
-    try:
-        import davey as _davey
-    except ImportError:
-        _davey = None
-
-    _orig_decoder_decode = _vr_router.PacketDecoder._decode_packet
-
-    def _safe_decode_packet(self, packet):
-        assert self._decoder is not None
-        try:
-            if not packet:
-                return _orig_decoder_decode(self, packet)
-
-            opus_data = packet.decrypted_data
-            if not opus_data:
-                return packet, b""
-
-            # If voice connection is encrypted with DAVE, decrypt payload via dave_session
-            if _davey:
-                vc = getattr(self.sink, "voice_client", None)
-                conn = getattr(vc, "_connection", None) if vc else None
-                dave_session = getattr(conn, "dave_session", None) if conn else None
-
-                if dave_session and getattr(dave_session, "ready", False):
-                    user_id = (
-                        getattr(self, "_cached_id", None)
-                        or (vc._get_id_from_ssrc(self.ssrc) if vc else None)
-                        or getattr(self.sink, "_ssrc_to_uid", {}).get(self.ssrc)
-                    )
-                    if not user_id and vc and getattr(vc, "channel", None):
-                        non_bots = [m for m in vc.channel.members if not m.bot]
-                        if len(non_bots) == 1:
-                            user_id = non_bots[0].id
-
-                    if user_id:
-                        try:
-                            decrypted = dave_session.decrypt(user_id, _davey.MediaType.audio, opus_data)
-                            if decrypted:
-                                opus_data = decrypted
-                        except Exception as _de_err:
-                            logger.debug(f"DAVE decrypt error for user {user_id}: {_de_err}")
-
-            pcm = self._decoder.decode(opus_data, fec=False)
-            return packet, pcm
-        except Exception as _dec_err:
-            logger.debug(f"Packet decode exception (ssrc={getattr(packet, 'ssrc', None)}): {_dec_err}")
-            return packet, b""
-
-    _vr_router.PacketDecoder._decode_packet = _safe_decode_packet
-
-    _orig_router_do_run = _vr_router.PacketRouter._do_run
-
-    def _safe_router_do_run(self):
-        while not self._end_thread.is_set():
-            self.waiter.wait()
-            with self._lock:
-                for decoder in self.waiter.items:
-                    try:
-                        data = decoder.pop_data()
-                        if data is not None:
-                            self.sink.write(data.source, data)
-                    except Exception:
-                        pass
-
-    _vr_router.PacketRouter._do_run = _safe_router_do_run
 except (ImportError, Exception):
     voice_recv = None
     VOICE_RECV_AVAILABLE = False
@@ -482,11 +412,16 @@ class MeetingCog(commands.Cog):
                                             .strip()
                                         )
                                         if clean_text and len(clean_text) >= 2:
+                                            self._last_transcribe_diag = "Transcribed by Gemini"
                                             return clean_text
+                                        else:
+                                            self._last_transcribe_diag = "Gemini returned empty/inaudible"
                             else:
                                 err_txt = await resp.text()
+                                self._last_transcribe_diag = f"Gemini HTTP {resp.status}: {err_txt[:60]}"
                                 logger.debug(f"Gemini {model_name} HTTP {resp.status}: {err_txt[:150]}")
                 except Exception as e:
+                    self._last_transcribe_diag = f"Gemini exception: {e}"
                     logger.debug(f"Gemini model {model_name} failed: {e}")
 
         # Tier 2: Google Speech Recognition (Free fallback, specialized for Indian dialects)
@@ -524,8 +459,12 @@ class MeetingCog(commands.Cog):
 
                 sr_result = await asyncio.to_thread(_run_google_sr)
                 if sr_result:
+                    self._last_transcribe_diag = "Transcribed by Google SR"
                     return sr_result
+                else:
+                    self._last_transcribe_diag = "Google SR: inaudible"
             except Exception as e:
+                self._last_transcribe_diag = f"Google SR error: {e}"
                 logger.debug(f"Notice from Google Speech Recognition: {e}")
 
         # Tier 3: Groq Whisper-large-v3-turbo (if GROQ_API_KEY is configured)
@@ -728,7 +667,8 @@ class MeetingCog(commands.Cog):
                 elif decoded_frames == 0:
                     diag_msg = f"Received {captured_packets} packets, but audio frames could not be decoded. Check voice encryption."
                 else:
-                    diag_msg = f"Captured {captured_packets} packets ({decoded_frames} decoded frames), but audio volume was below speech recognition threshold."
+                    detail = getattr(self, "_last_transcribe_diag", "Audio below speech threshold")
+                    diag_msg = f"Captured {captured_packets} packets ({decoded_frames} decoded frames). Engine status: `{detail}`."
                 c.add_text(
                     f"> {dot} **Duration:** `{duration_fmt}`\n"
                     f"> {dot} **Status:** `No Speech Detected`\n"
@@ -1079,13 +1019,18 @@ class MeetingCog(commands.Cog):
             await ctx.send_error(f"Could not connect to voice channel: `{e}`", ephemeral=False)
             return
 
-        # Wait up to 5 seconds for Discord voice gateway encryption handshake and DAVE session transition
+        # Wait up to 6 seconds for Discord voice gateway encryption handshake and DAVE session transition
         handshake_ok = False
-        for _ in range(50):
+        for _ in range(60):
             if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
                 conn = getattr(voice_client, "_connection", None)
-                dave = getattr(conn, "dave_session", None)
-                if dave is None or getattr(dave, "ready", False):
+                dave_ver = getattr(conn, "dave_protocol_version", 0)
+                if dave_ver > 0:
+                    dave = getattr(conn, "dave_session", None)
+                    if dave and getattr(dave, "ready", False):
+                        handshake_ok = True
+                        break
+                else:
                     handshake_ok = True
                     break
             await asyncio.sleep(0.1)

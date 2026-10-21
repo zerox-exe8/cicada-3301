@@ -9,7 +9,6 @@ wavelink>=3.5.2
 
 # Audio & Extraction
 yt-dlp>=2025.01.01
-pytubefix>=11.2.1
 pyDes>=2.0.1
 static-ffmpeg>=2.5
 imageio-ffmpeg>=0.4.9

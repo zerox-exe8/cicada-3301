@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 import aiohttp
 import discord
@@ -164,19 +163,6 @@ class KyroBot(commands.Bot):
         if self.user and clean_content in [f"<@{self.user.id}>", f"<@!{self.user.id}>"]:
             from src.core.greetings import send_bot_mention_card
             await send_bot_mention_card(self, message)
-        # Asynchronously forward message telemetry to standalone engine (non-blocking)
-        if hasattr(self, "engine") and self.engine and self.engine.is_connected and message.guild:
-            import asyncio
-            asyncio.create_task(
-                self.engine.dispatch_message_event(
-                    guild_id=message.guild.id,
-                    channel_id=message.channel.id,
-                    author_id=message.author.id,
-                    author_name=message.author.name,
-                    content=message.content,
-                    is_bot=message.author.bot,
-                )
-            )
 
         await self.process_commands(message)
 
@@ -235,18 +221,6 @@ class KyroBot(commands.Bot):
         # Start Autonomous Sentinel SRE Agent
         self.sentinel.start()
 
-        # Check connection to Kyro Standalone Engine
-        from src.core.engine_client import EngineClient
-        self.engine: EngineClient = EngineClient(base_url=os.getenv("KYRO_ENGINE_URL", "http://127.0.0.1:8000"))
-        try:
-            is_engine_up = await self.engine.check_health()
-            if is_engine_up:
-                logger.info("⚡ Kyro Standalone Engine is connected and operational!")
-            else:
-                logger.info("ℹ️ Kyro Standalone Engine is offline (Kyro running in standalone bot mode).")
-        except Exception:
-            logger.info("ℹ️ Kyro Standalone Engine is offline (Kyro running in standalone bot mode).")
-
         logger.info("Setup hook completed successfully.")
 
     async def _load_all_extensions(self) -> None:
@@ -268,15 +242,12 @@ class KyroBot(commands.Bot):
                 logger.error(f"Failed to load extension {module_name}: {e}", exc_info=e)
 
     async def close(self) -> None:
-        """Gracefully release database pools, network sessions, and engine connections."""
+        """Gracefully release database pools and network sessions."""
         logger.info("Shutting down Kyro Bot gracefully...")
         self._is_shutting_down = True
 
         if hasattr(self, "sentinel") and self.sentinel:
             self.sentinel.stop()
-
-        if hasattr(self, "engine") and self.engine:
-            await self.engine.close()
 
         if self.session:
             await self.session.close()

@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING, Any, Optional
 import discord
 from discord.ext import tasks
 
+from src.core.lavalink import (
+    LAVALINK_CONNECT_TIMEOUT,
+    LAVALINK_OP_TIMEOUT,
+    create_lavalink_node,
+)
 from src.utils.containers import KyroContainer
 
 if TYPE_CHECKING:
@@ -105,7 +110,14 @@ class MusicAgent:
                 vc = guild.voice_client
                 if vc:
                     try:
-                        await vc.disconnect(force=True)
+                        # Bounded: this talks to the Lavalink REST API. Without a
+                        # bound it could hold the per-guild heal lock for the
+                        # session's 300s default timeout, blocking every later
+                        # error handling path for this guild.
+                        await asyncio.wait_for(
+                            vc.disconnect(force=True),
+                            timeout=LAVALINK_OP_TIMEOUT,
+                        )
                     except Exception:
                         pass
                     try:
@@ -179,17 +191,23 @@ class MusicAgent:
                 if hasattr(wavelink.Pool, "nodes"):
                     for old_node in list(wavelink.Pool.nodes.values()):
                         try:
-                            await old_node.close()
+                            await asyncio.wait_for(
+                                old_node.close(),
+                                timeout=LAVALINK_OP_TIMEOUT,
+                            )
                         except Exception:
                             pass
                     wavelink.Pool.nodes.clear()
 
-                new_node = wavelink.Node(
+                new_node = create_lavalink_node(
                     uri=Config.LAVALINK_URI,
                     password=Config.LAVALINK_PASSWORD,
                     inactive_player_timeout=300,
                 )
-                await wavelink.Pool.connect(nodes=[new_node], client=self.bot)
+                await asyncio.wait_for(
+                    wavelink.Pool.connect(nodes=[new_node], client=self.bot),
+                    timeout=LAVALINK_CONNECT_TIMEOUT,
+                )
 
                 # Poll status for up to 6 seconds
                 connected = False

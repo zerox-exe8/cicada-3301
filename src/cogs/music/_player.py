@@ -18,6 +18,13 @@ import wavelink
 from src.cogs.music._models import Track
 from src.cogs.music._autoplay import NativeSmartAutoplay
 from src.cogs.music._extractor import NativeExtractor
+from src.core.lavalink import (
+    LAVALINK_CONNECT_TIMEOUT,
+    LAVALINK_OP_TIMEOUT,
+    LAVALINK_PLAY_TIMEOUT,
+    LAVALINK_RESOLVE_TIMEOUT,
+    create_lavalink_node,
+)
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 from src.cogs.music._views import MusicControlView
 
@@ -156,7 +163,17 @@ class GuildPlayer:
             vc = self.guild.voice_client
             if vc and isinstance(vc, wavelink.Player) and vc.connected:
                 if vc.channel and vc.channel.id != channel.id:
-                    await vc.move_to(channel)
+                    try:
+                        # Bounded: move_to talks to the Lavalink REST API.
+                        await asyncio.wait_for(
+                            vc.move_to(channel),
+                            timeout=LAVALINK_OP_TIMEOUT,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Guild {self.guild.id}: move_to {channel.name} failed: "
+                            f"{type(e).__name__}: {e}"
+                        )
                 self.voice_client = vc
                 return
 
@@ -167,7 +184,11 @@ class GuildPlayer:
                 # to establish.
                 self._disconnect_expected_until = time.monotonic() + 5.0
                 try:
-                    await vc.disconnect(force=True)
+                    # Bounded: this talks to the Lavalink REST API.
+                    await asyncio.wait_for(
+                        vc.disconnect(force=True),
+                        timeout=LAVALINK_OP_TIMEOUT,
+                    )
                 except Exception:
                     pass
                 try:
@@ -204,17 +225,23 @@ class GuildPlayer:
                 try:
                     for old_node in list(wavelink.Pool.nodes.values()):
                         try:
-                            await old_node.close()
+                            await asyncio.wait_for(
+                                old_node.close(),
+                                timeout=LAVALINK_OP_TIMEOUT,
+                            )
                         except Exception:
                             pass
                     wavelink.Pool.nodes.clear()
 
-                    node = wavelink.Node(
+                    node = create_lavalink_node(
                         uri=Config.LAVALINK_URI,
                         password=Config.LAVALINK_PASSWORD,
                         inactive_player_timeout=300,
                     )
-                    await wavelink.Pool.connect(nodes=[node], client=self.bot)
+                    await asyncio.wait_for(
+                        wavelink.Pool.connect(nodes=[node], client=self.bot),
+                        timeout=LAVALINK_CONNECT_TIMEOUT,
+                    )
                     for _ in range(12):
                         if node.status == wavelink.NodeStatus.CONNECTED:
                             break
@@ -262,7 +289,11 @@ class GuildPlayer:
                     if stale_vc:
                         self._disconnect_expected_until = time.monotonic() + 5.0
                         try:
-                            await stale_vc.disconnect(force=True)
+                            # Bounded: this talks to the Lavalink REST API.
+                            await asyncio.wait_for(
+                                stale_vc.disconnect(force=True),
+                                timeout=LAVALINK_OP_TIMEOUT,
+                            )
                         except Exception:
                             pass
                         try:
@@ -406,7 +437,13 @@ class GuildPlayer:
         # 3. Start playback on Lavalink node with volume (explicitly unpaused)
         vol_int = int(self.volume * 100)
         try:
-            await self.voice_client.play(playable, volume=vol_int, paused=False)
+            # Bounded: this call talks to the Lavalink REST API. Without a bound it
+            # could block for the session's 300s default timeout and freeze the
+            # command (and any lock it holds) for five minutes.
+            await asyncio.wait_for(
+                self.voice_client.play(playable, volume=vol_int, paused=False),
+                timeout=LAVALINK_PLAY_TIMEOUT,
+            )
         except Exception as play_err:
             logger.error(f"Guild {self.guild.id}: voice_client.play error for '{track.title}': {play_err}")
             if message_to_edit:
@@ -463,6 +500,33 @@ class GuildPlayer:
             self._is_prefetching = False
 
     async def _resolve_playable(self, track: Track) -> Optional[wavelink.Playable]:
+        """Resolve a Lavalink Playable for a track with a hard overall deadline.
+
+        The inner cascade can try up to five strategies twice each, so without an
+        overall budget a single unresolvable track could keep the caller waiting
+        for well over a minute. The whole resolution is capped here instead.
+        """
+        try:
+            return await asyncio.wait_for(
+                self._resolve_playable_cascade(track),
+                timeout=LAVALINK_RESOLVE_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Guild {self.guild.id}: playable resolution timed out after "
+                f"{LAVALINK_RESOLVE_TIMEOUT:.0f}s for '{track.title}'."
+            )
+            return None
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Guild {self.guild.id}: playable resolution failed for '{track.title}': "
+                f"{type(e).__name__}: {e}"
+            )
+            return None
+
+    async def _resolve_playable_cascade(self, track: Track) -> Optional[wavelink.Playable]:
         """Resolve Lavalink Playable via attached playable, direct YouTube/Spotify URL, or resilient search cascade.
 
         Each search strategy is retried once on TimeoutError with a short backoff.
@@ -559,6 +623,21 @@ class GuildPlayer:
 
     # ── Controls ──
 
+    @staticmethod
+    async def _bounded_node_call(coro: Any, timeout: float = LAVALINK_OP_TIMEOUT) -> None:
+        """
+        Run a Lavalink REST call with a hard deadline.
+
+        Wavelink's aiohttp session uses the library default timeout of 300s, so a
+        single unreachable node can keep a background task alive for five minutes.
+        """
+        try:
+            await asyncio.wait_for(coro, timeout=timeout)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.debug(f"Bounded Lavalink call failed: {type(e).__name__}: {e}")
+
     def pause(self) -> bool:
         """Pause playback."""
         if self.voice_client and self.voice_client.playing and not self.voice_client.paused:
@@ -566,7 +645,7 @@ class GuildPlayer:
                 self.voice_client._paused = True
             except Exception:
                 pass
-            asyncio.create_task(self.voice_client.pause(True))
+            asyncio.create_task(self._bounded_node_call(self.voice_client.pause(True)))
             return True
         return False
 
@@ -577,7 +656,7 @@ class GuildPlayer:
                 self.voice_client._paused = False
             except Exception:
                 pass
-            asyncio.create_task(self.voice_client.pause(False))
+            asyncio.create_task(self._bounded_node_call(self.voice_client.pause(False)))
             self._was_paused_for_empty_vc = False
             return True
         return False
@@ -602,7 +681,12 @@ class GuildPlayer:
         failed = False
         if self.voice_client:
             try:
-                await self.voice_client.skip(force=True)
+                # Bounded: a dead Lavalink node must never hold this command (and the
+                # advance lock behind it) for the session's default 300s HTTP timeout.
+                await asyncio.wait_for(
+                    self.voice_client.skip(force=True),
+                    timeout=LAVALINK_OP_TIMEOUT,
+                )
             except Exception as e:
                 failed = True
                 logger.warning(
@@ -628,9 +712,15 @@ class GuildPlayer:
             # VOICE_STATE_UPDATE(channel=None) does not run the teardown twice.
             self._disconnect_expected_until = time.monotonic() + 5.0
             try:
-                await self.voice_client.disconnect(force=True)
-            except Exception:
-                pass
+                # Bounded: an unreachable node must not hang ?stop for minutes.
+                await asyncio.wait_for(
+                    self.voice_client.disconnect(force=True),
+                    timeout=LAVALINK_OP_TIMEOUT,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Guild {self.guild.id}: voice disconnect failed: {type(e).__name__}: {e}"
+                )
             self.voice_client = None
 
         # Clear reference without deleting card from chat
@@ -641,7 +731,7 @@ class GuildPlayer:
         clamped = max(0, min(150, volume_percent))
         self.volume = clamped / 100.0
         if self.voice_client:
-            asyncio.create_task(self.voice_client.set_volume(clamped))
+            asyncio.create_task(self._bounded_node_call(self.voice_client.set_volume(clamped)))
         return clamped
 
     def set_loop_mode(self, mode: Optional[str] = None) -> str:
@@ -725,37 +815,45 @@ class GuildPlayer:
             if manual:
                 self._last_manual_advance = now
 
+            # ── Critical section: only in-memory state decisions ──
+            # The lock must NOT be held while a track is resolved or dispatched:
+            # both talk to the Lavalink node and can take many seconds. Holding it
+            # here meant one slow advance blocked every later ?skip / ?jump /
+            # track-end for the whole duration.
             if self.loop_mode == "track" and self.current:
-                await self.play_track(self.current)
-                return
-            elif self.loop_mode == "queue" and self.current:
-                await self.add_track(self.current)
+                target: Optional[Track] = self.current
+            else:
+                if self.loop_mode == "queue" and self.current:
+                    await self.add_track(self.current)
+                target = await self.pop_next_track()
 
-            next_track = await self.pop_next_track()
-            if next_track:
-                await self.play_track(next_track)
-            elif self.smart_autoplay and self.current:
-                # Smart Autoplay AI recommendation
-                try:
-                    rec = await NativeSmartAutoplay.get_next_recommendation(
-                        self.current, self.autoplay_history, self.bot.db
-                    )
-                    if rec:
-                        rec.requester = "⚡ Smart Autoplay"
-                        await self.play_track(rec)
-                    else:
-                        self.current = None
-                        await self.send_queue_ended_card()
-                        self.schedule_empty_vc_timer()
-                except Exception as e:
-                    logger.error(f"Guild {self.guild.id}: Smart autoplay error: {e}", exc_info=True)
+        # ── Slow work happens OUTSIDE the advance lock ──
+        if target is not None:
+            await self.play_track(target)
+            return
+
+        if self.smart_autoplay and self.current:
+            # Smart Autoplay AI recommendation
+            try:
+                rec = await NativeSmartAutoplay.get_next_recommendation(
+                    self.current, self.autoplay_history, self.bot.db
+                )
+                if rec:
+                    rec.requester = "⚡ Smart Autoplay"
+                    await self.play_track(rec)
+                else:
                     self.current = None
                     await self.send_queue_ended_card()
                     self.schedule_empty_vc_timer()
-            else:
+            except Exception as e:
+                logger.error(f"Guild {self.guild.id}: Smart autoplay error: {e}", exc_info=True)
                 self.current = None
                 await self.send_queue_ended_card()
                 self.schedule_empty_vc_timer()
+        else:
+            self.current = None
+            await self.send_queue_ended_card()
+            self.schedule_empty_vc_timer()
 
     # ── Components V2 Controller Card ──
 

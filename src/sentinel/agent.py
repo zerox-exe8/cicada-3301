@@ -16,6 +16,11 @@ import discord
 from discord.ext import tasks
 
 from src.core.config import Config
+from src.core.lavalink import (
+    LAVALINK_CONNECT_TIMEOUT,
+    LAVALINK_OP_TIMEOUT,
+    create_lavalink_node,
+)
 from src.sentinel.models import Incident, IncidentSeverity, SubsystemType
 from src.utils.containers import KyroContainer, send_container_response
 
@@ -476,17 +481,23 @@ class KyroSentinel:
                     if getattr(old_node, "status", None) == wavelink.NodeStatus.CONNECTED:
                         return  # Node is actually healthy and connected
                     try:
-                        await old_node.close()
+                        await asyncio.wait_for(
+                            old_node.close(),
+                            timeout=LAVALINK_OP_TIMEOUT,
+                        )
                     except Exception:
                         pass
                 wavelink.Pool.nodes.clear()
 
-            node = wavelink.Node(
+            node = create_lavalink_node(
                 uri=Config.LAVALINK_URI,
                 password=Config.LAVALINK_PASSWORD,
                 inactive_player_timeout=300,
             )
-            await wavelink.Pool.connect(nodes=[node], client=self.bot)
+            await asyncio.wait_for(
+                wavelink.Pool.connect(nodes=[node], client=self.bot),
+                timeout=LAVALINK_CONNECT_TIMEOUT,
+            )
             for _ in range(10):
                 if node.status == wavelink.NodeStatus.CONNECTED:
                     # Reset failure count on success
@@ -503,7 +514,12 @@ class KyroSentinel:
             vc = guild.voice_client
             if vc:
                 try:
-                    await vc.disconnect(force=True)
+                    # Bounded: this talks to the Lavalink REST API and must never
+                    # stall the sentinel watchdog loop.
+                    await asyncio.wait_for(
+                        vc.disconnect(force=True),
+                        timeout=LAVALINK_OP_TIMEOUT,
+                    )
                 except Exception:
                     pass
                 try:

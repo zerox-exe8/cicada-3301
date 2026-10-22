@@ -542,6 +542,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
         if row:
             modules_raw = row.get("modules") or ""
             modules_set = {m.strip() for m in modules_raw.split(",") if m.strip()}
+            if not modules_set:
+                modules_set = {"summary", "decisions", "action_items", "topics", "auto_leave"}
             return {
                 "enabled": bool(row.get("enabled", True)),
                 "channel_id": row.get("channel_id"),
@@ -784,11 +786,20 @@ class MeetingCog(commands.Cog, name="Meeting"):
                                 elif "```" in raw_text:
                                     raw_text = raw_text.split("```")[1].split("```")[0].strip()
                                 parsed = json.loads(raw_text)
+
+                                def _norm_field(key: str, default: str) -> str:
+                                    val = parsed.get(key)
+                                    if isinstance(val, list):
+                                        return "\n".join(f"• {str(item).lstrip('•- ')}" for item in val if str(item).strip()) or default
+                                    elif isinstance(val, str) and val.strip():
+                                        return val.strip()
+                                    return default
+
                                 return {
-                                    "summary": parsed.get("summary", "Summary synthesized successfully."),
-                                    "decisions": parsed.get("decisions", "• No explicit decisions recorded."),
-                                    "action_items": parsed.get("action_items", "• No pending action items."),
-                                    "topics": parsed.get("topics", "General discussion"),
+                                    "summary": _norm_field("summary", "Summary synthesized successfully."),
+                                    "decisions": _norm_field("decisions", "• No explicit decisions recorded."),
+                                    "action_items": _norm_field("action_items", "• No pending action items."),
+                                    "topics": _norm_field("topics", "General discussion"),
                                 }
             except Exception as e:
                 logger.error(f"Error calling Gemini intelligence ({m}) for meeting: {e}", exc_info=True)
@@ -820,6 +831,11 @@ class MeetingCog(commands.Cog, name="Meeting"):
             ch_fallback = guild.get_channel(session.text_channel_id)
             if isinstance(ch_fallback, discord.TextChannel):
                 target_ch = ch_fallback
+
+        if not target_ch:
+            target_ch, _ = await ensure_meeting_channel(
+                self.bot, guild, self.bot.user, privacy_mode=settings.get("privacy_mode", "locked")
+            )
 
         duration = int(time.time() - session.start_time)
         duration_fmt = f"{duration // 60}m {duration % 60}s"
@@ -1012,14 +1028,18 @@ class MeetingCog(commands.Cog, name="Meeting"):
         dot = self.bot.custom_emojis.get("heart_dot", "•")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Meeting Commands**")
+        container.add_section(
+            content="**Meeting Commands**\n> *Autonomous voice meeting intelligence, diarization & summaries.*"
+        )
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} `{prefix}meeting setup`\n"
-            f"{dot} `{prefix}meeting disable`\n"
-            f"{dot} `{prefix}meeting show`\n"
-            f"{dot} `{prefix}meeting start`\n"
-            f"{dot} `{prefix}meeting stop`"
+            f"> {dot} `{prefix}meeting start`\n"
+            f"> {dot} `{prefix}meeting stop`\n"
+            f"> {dot} `{prefix}meeting show`\n"
+            f"> {dot} `{prefix}meeting setup`\n"
+            f"> {dot} `{prefix}meeting channel <#channel|reset>`\n"
+            f"> {dot} `{prefix}meeting enable`\n"
+            f"> {dot} `{prefix}meeting disable`"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -1049,6 +1069,31 @@ class MeetingCog(commands.Cog, name="Meeting"):
         wizard = MeetingSetupWizard(self.bot, ctx.guild, ctx.author)
         container = wizard.get_dashboard_container()
         await send_container_response(ctx, container, view=wizard)
+
+    @meeting_group.command(name="enable", description="Enable Meeting Intelligence on this server.")
+    async def meeting_enable(self, ctx: CustomContext) -> None:
+        """Turn on meeting recording and summary generation."""
+        if not (ctx.author.guild_permissions.administrator or ctx.author.id == ctx.guild.owner_id):
+            await ctx.send_warning("Only administrators can enable Meeting Intelligence.")
+            return
+
+        await self.repo.set_enabled(ctx.guild.id, True)
+
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content="**Kyro Meeting Intelligence**\n> Meeting recording and intelligence are now enabled on this server."
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"> {dot} **Status:** {sw_on} `Enabled`\n"
+            f"> {dot} **Quick Start:** Connect to any voice channel and run `{ctx.clean_prefix}meeting start`."
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Enabled by {ctx.author.display_name} • <t:{int(time.time())}:f>")
+        await send_container_response(ctx, container)
 
     @meeting_group.command(name="disable", description="Disable Meeting Intelligence on this server.")
     async def meeting_disable(self, ctx: CustomContext) -> None:
@@ -1081,10 +1126,64 @@ class MeetingCog(commands.Cog, name="Meeting"):
         container.add_separator(divider=True)
         container.add_text(
             f"> {dot} **Status:** {sw_off} `Disabled`\n"
-            f"> {dot} **Notice:** Use `{ctx.clean_prefix}meeting setup` or `,meeting start` to re-enable."
+            f"> {dot} **Notice:** Use `{ctx.clean_prefix}meeting enable` or `{ctx.clean_prefix}meeting setup` to re-enable."
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Disabled by {ctx.author.display_name} • <t:{int(time.time())}:f>")
+        await send_container_response(ctx, container)
+
+    @meeting_group.command(
+        name="channel",
+        aliases=["setchannel", "feed"],
+        description="Set or reset the meeting reports channel.",
+    )
+    async def meeting_channel(
+        self, ctx: CustomContext, channel: Optional[discord.TextChannel] = None
+    ) -> None:
+        """Set designated meeting feed channel, or reset to auto-create."""
+        if not (ctx.author.guild_permissions.administrator or ctx.author.id == ctx.guild.owner_id):
+            await ctx.send_warning("Only administrators can configure the meeting channel.")
+            return
+
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+
+        if channel is None:
+            await self.repo.set_channel(ctx.guild.id, None)
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content="**Meeting Feed Channel Reset**\n> Summary destination has been reset to auto-create `#kyro-meetings`."
+            )
+            container.add_separator(divider=True)
+            container.add_text(
+                f"> {dot} **Destination:** `Auto-create (#kyro-meetings)`\n"
+                f"> {dot} **Tip:** Specify a channel with `{ctx.clean_prefix}meeting channel #channel` to customize."
+            )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Configured by {ctx.author.display_name} • <t:{int(time.time())}:f>")
+            await send_container_response(ctx, container)
+            return
+
+        perms = channel.permissions_for(ctx.guild.me)
+        if not (perms.view_channel and perms.send_messages and perms.embed_links):
+            await ctx.send_warning(
+                f"Kyro lacks permissions (`View Channel`, `Send Messages`, `Embed Links`) in {channel.mention}."
+            )
+            return
+
+        await self.repo.set_channel(ctx.guild.id, channel.id)
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=f"**Meeting Feed Channel Configured**\n> Meeting executive reports will now be delivered to {channel.mention}."
+        )
+        container.add_separator(divider=True)
+        container.add_text(
+            f"> {dot} **Feed Channel:** {channel.mention}\n"
+            f"> {dot} **Channel ID:** `{channel.id}`\n"
+            f"> {dot} **How to reset:** Use `{ctx.clean_prefix}meeting channel` without arguments."
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Configured by {ctx.author.display_name} • <t:{int(time.time())}:f>")
         await send_container_response(ctx, container)
 
     @meeting_group.command(name="show", aliases=["status", "info", "config"], description="Show Meeting status, feed channel, and metrics.")
@@ -1109,7 +1208,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         # Channel display
         if ch_id:
             ch_obj = guild.get_channel(ch_id)
-            ch_disp = ch_obj.mention if ch_obj else f"<#{ch_id}>"
+            ch_disp = ch_obj.mention if ch_obj else f"`#deleted-channel` (ID: `{ch_id}`)"
         else:
             ch_disp = "`Auto-create (#kyro-meetings)`"
 
@@ -1141,6 +1240,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
             vc = guild.get_channel(active_session.voice_channel_id)
             vc_name = vc.name if vc else "Voice"
             session_line = f"`Recording in {vc_name} ({elapsed // 60}m {elapsed % 60}s)`"
+        elif guild.id in self._connecting_guilds:
+            session_line = "`Connecting to Voice Channel...`"
         else:
             session_line = "`Standby (No Active Meeting)`"
 
@@ -1162,8 +1263,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"> **Quick Start:** Connect to any VC and type `,meeting start`.\n"
-            f"> **Reconfigure:** Use `,meeting setup` to change channel, privacy, or modules."
+            f"> **Quick Start:** Connect to any VC and type `{ctx.clean_prefix}meeting start`.\n"
+            f"> **Reconfigure:** Use `{ctx.clean_prefix}meeting setup` or `{ctx.clean_prefix}meeting channel`."
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Kyro Voice Intelligence • <t:{int(time.time())}:f>")
@@ -1179,7 +1280,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         settings = await self._get_meeting_settings(guild.id)
         if not settings.get("enabled", True):
             await ctx.send_warning(
-                f"Meeting Intelligence is currently **disabled** on this server. Use `{ctx.clean_prefix}meeting setup` to enable."
+                f"Meeting Intelligence is currently **disabled** on this server. Use `{ctx.clean_prefix}meeting enable` or `{ctx.clean_prefix}meeting setup` to enable."
             )
             return
 
@@ -1189,6 +1290,17 @@ class MeetingCog(commands.Cog, name="Meeting"):
             return
 
         vc = author.voice.channel
+
+        # Pre-flight voice channel permissions and capacity checks
+        me = guild.me
+        perms = vc.permissions_for(me)
+        if not perms.connect:
+            await ctx.send_warning(f"Kyro lacks **Connect** permission to join {vc.mention}.")
+            return
+        if vc.user_limit and vc.user_limit > 0:
+            if len(vc.members) >= vc.user_limit and not perms.move_members:
+                await ctx.send_warning(f"Voice channel {vc.mention} is full (`{len(vc.members)}/{vc.user_limit}`).")
+                return
 
         # Check if meeting already active
         if guild.id in self._sessions:
@@ -1452,13 +1564,32 @@ class MeetingCog(commands.Cog, name="Meeting"):
     async def meeting_stop(self, ctx: CustomContext) -> None:
         """Stop voice listening, disconnect VC, and generate executive summary."""
         guild = ctx.guild
-        session = self._sessions.pop(guild.id, None)
+        session = self._sessions.get(guild.id)
 
         if not session:
             await ctx.send_warning("There is no active meeting session in this server.")
             return
 
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
+        # Restrict stop command to host, administrators, or current VC participants
+        is_host = ctx.author.id == session.host_id
+        is_admin = (
+            ctx.author.guild_permissions.administrator
+            or ctx.author.guild_permissions.manage_guild
+            or ctx.author.id == guild.owner_id
+        )
+        in_vc = (
+            isinstance(ctx.author, discord.Member)
+            and ctx.author.voice
+            and ctx.author.voice.channel
+            and ctx.author.voice.channel.id == session.voice_channel_id
+        )
+        if not (is_host or is_admin or in_vc):
+            await ctx.send_warning(
+                "Only the meeting host, an administrator, or members in the meeting VC can stop this session."
+            )
+            return
+
+        self._sessions.pop(guild.id, None)
 
         # Disconnect gracefully
         try:
@@ -1471,6 +1602,20 @@ class MeetingCog(commands.Cog, name="Meeting"):
             self.bot._connection._remove_voice_client(guild.id)
         except Exception:
             pass
+
+        duration = int(time.time() - session.start_time)
+        if duration < 10:
+            session.sink.cleanup()
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content="**Meeting Concluded**\n> The meeting was stopped after less than 10 seconds. Session discarded without generating a summary."
+            )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Stopped by {ctx.author.display_name} • Duration: `{duration}s`")
+            await send_container_response(ctx, container)
+            return
+
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
 
         # Inform channel that AI processing is underway
         toast = await ctx.send(f"-# {dot} Finalizing meeting audio and synthesizing executive report...")

@@ -40,12 +40,14 @@ class MeetingRepository(BaseRepository):
         """
         await self.execute(query, guild_id, enabled)
 
-    async def set_channel(self, guild_id: int, channel_id: int, privacy_mode: str = "locked") -> None:
+    async def set_channel(self, guild_id: int, channel_id: int | None, privacy_mode: str = "locked") -> None:
         """Ensure designated executive report channel for a guild."""
         query = """
         INSERT INTO meeting_settings (guild_id, enabled, channel_id, privacy_mode)
         VALUES ($1, $2, $3, $4)
-        ON CONFLICT(guild_id) DO UPDATE SET channel_id = EXCLUDED.channel_id;
+        ON CONFLICT(guild_id) DO UPDATE SET
+            channel_id = EXCLUDED.channel_id,
+            privacy_mode = EXCLUDED.privacy_mode;
         """
         await self.execute(query, guild_id, True, channel_id, privacy_mode)
 

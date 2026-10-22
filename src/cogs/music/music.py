@@ -484,12 +484,12 @@ class Music(commands.Cog):
     @commands.hybrid_command(
         name="queue",
         aliases=["q"],
-        description="Display the upcoming server music playlist.",
+        description="Display the upcoming server music playlist or clear it.",
     )
-    @app_commands.describe(page="Queue page number")
-    async def queue(self, ctx: CustomContext, page: int = 1) -> None:
-        """Show current song queue."""
-        await execute_queue(self, ctx, page)
+    @app_commands.describe(page="Queue page number (e.g. 1) or 'clear' to empty upcoming tracks")
+    async def queue(self, ctx: CustomContext, page: Optional[str] = "1") -> None:
+        """Show current song queue or clear it with 'queue clear'."""
+        await execute_queue(self, ctx, page or "1")
 
     @commands.hybrid_command(
         name="nowplaying",
@@ -519,6 +519,7 @@ class Music(commands.Cog):
 
     @commands.hybrid_command(
         name="clear",
+        aliases=["clearqueue", "cq", "queueclear", "qc"],
         description="Clear all upcoming tracks from the queue.",
     )
     async def clear(self, ctx: CustomContext) -> None:

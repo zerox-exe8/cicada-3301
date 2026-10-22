@@ -109,9 +109,15 @@ async def execute_clear(cog: Music, ctx: commands.Context) -> None:
         await send_container_response(ctx, container)
         return
 
+    if not player.queue:
+        container = KyroContainer(accent_color=None)
+        container.add_text("**The queue is already empty.**")
+        await send_container_response(ctx, container)
+        return
+
     cleared_count = await player.clear_queue()
     container = KyroContainer(accent_color=None)
-    container.add_text(f"**Cleared {cleared_count} tracks from the queue.**")
+    container.add_text(f"**Cleared {cleared_count} track{'s' if cleared_count != 1 else ''} from the queue.**")
     await send_container_response(ctx, container)
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 from discord.ext import commands
 
 from src.utils.containers import KyroContainer, send_container_response
@@ -9,7 +9,18 @@ if TYPE_CHECKING:
     from src.cogs.music.music import Music
 
 
-async def execute_queue(cog: Music, ctx: commands.Context, page: int = 1) -> None:
+async def execute_queue(cog: Music, ctx: commands.Context, page: Union[int, str] = 1) -> None:
+    if isinstance(page, str):
+        cleaned = page.strip().lower()
+        if cleaned in ("clear", "clean", "empty", "c", "cls"):
+            from src.cogs.music._commands.controls import execute_clear
+            await execute_clear(cog, ctx)
+            return
+        try:
+            page = max(1, int(cleaned))
+        except ValueError:
+            page = 1
+
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected or (not player.current and not player.queue):
         container = KyroContainer(accent_color=None)

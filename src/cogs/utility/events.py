@@ -305,7 +305,7 @@ class AutoEvents(commands.Cog):
         container.add_text(
             f"{dot} `{prefix}autorole human <role> | remove`\n"
             f"{dot} `{prefix}autorole bot <role> | remove`\n"
-            f"{dot} `{prefix}autorole config`\n"
+            f"{dot} `{prefix}autorole show`\n"
             f"{dot} `{prefix}autorole reset`"
         )
         container.add_separator(divider=True)
@@ -313,12 +313,12 @@ class AutoEvents(commands.Cog):
         await send_container_response(ctx, container)
 
     @autorole_group.command(
-        name="config",
-        aliases=["status", "show"],
+        name="show",
+        aliases=["config", "status", "list"],
         description="View current auto-role configuration for this server.",
     )
     @commands.has_permissions(manage_roles=True)
-    async def autorole_config(self, ctx: CustomContext) -> None:
+    async def autorole_show(self, ctx: CustomContext) -> None:
         """View configured human and bot auto-roles."""
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "❤")
@@ -333,7 +333,7 @@ class AutoEvents(commands.Cog):
         bot_str = f"@{bot_role.name} `「{bot_role.id}」`" if bot_role else "`Disabled`"
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Auto-Role Configuration**")
+        container.add_section(content="**Auto-Role Show**")
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Human Role:** {human_str}\n"
@@ -428,12 +428,12 @@ class AutoEvents(commands.Cog):
         self.bot.cache.set_autorole(ctx.guild.id, role.id, target="human")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Human Auto-Role Configured**")
+        container.add_section(content="**Human Auto-Role Command**")
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Target:** `Humans Only`\n"
             f"{dot} **Assigned Role:** @{role.name} `「{role.id}」`\n"
-            f"{dot} **Configured By:** **{ctx.author.display_name}**"
+            f"{dot} **Moderator:** **{ctx.author.display_name}**"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
@@ -522,12 +522,12 @@ class AutoEvents(commands.Cog):
         self.bot.cache.set_autorole(ctx.guild.id, role.id, target="bot")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content="**Bot Auto-Role Configured**")
+        container.add_section(content="**Bot Auto-Role Command**")
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Target:** `Bots Only`\n"
             f"{dot} **Assigned Role:** @{role.name} `「{role.id}」`\n"
-            f"{dot} **Configured By:** **{ctx.author.display_name}**"
+            f"{dot} **Moderator:** **{ctx.author.display_name}**"
         )
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")

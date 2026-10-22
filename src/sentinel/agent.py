@@ -15,11 +15,12 @@ import aiohttp
 import discord
 from discord.ext import tasks
 
-from src.core.config import Config
 from src.core.lavalink import (
-    LAVALINK_CONNECT_TIMEOUT,
     LAVALINK_OP_TIMEOUT,
-    create_lavalink_node,
+    LavalinkUnavailable,
+    close_pool_nodes,
+    connect_lavalink_node,
+    err_text,
 )
 from src.sentinel.models import Incident, IncidentSeverity, SubsystemType
 from src.utils.containers import KyroContainer, send_container_response
@@ -51,6 +52,7 @@ class KyroSentinel:
         self._circuit_breakers: dict[str, int] = {}
         self._last_circuit_reset: float = time.time()
         self._last_alert_time: dict[str, float] = {}
+        self._lavalink_breaker_open: bool = False
         self._event_loop_lag_ms: float = 0.0
         self._session: Optional[aiohttp.ClientSession] = None
         self._healed_counts: dict[str, int] = {
@@ -95,7 +97,9 @@ class KyroSentinel:
             subsystem=subsystem,
             severity=severity,
             title=title,
-            details=details,
+            # Never allow an empty incident report: many transport exceptions carry
+            # an empty message, which used to produce a completely useless alert.
+            details=(details or "").strip() or "no error message (empty exception text)",
             guild_id=guild_id,
             action_taken=action_taken,
             resolved=resolved,
@@ -279,6 +283,7 @@ class KyroSentinel:
         if now - self._last_circuit_reset > 300:
             self._circuit_breakers.clear()
             self._last_circuit_reset = now
+            self._lavalink_breaker_open = False
 
         # 2. Database Health Check
         await self._check_database_health()
@@ -330,7 +335,7 @@ class KyroSentinel:
                         SubsystemType.DATABASE,
                         IncidentSeverity.WARNING,
                         "Database Pool Disconnected",
-                        str(e),
+                        err_text(e),
                         action_taken="Auto-healed connection pool via exponential backoff",
                         resolved=True,
                     )
@@ -373,6 +378,8 @@ class KyroSentinel:
             logger.warning(f"Sentinel: Lavalink node offline ({reason}), auto-reconnecting...")
             try:
                 await self.heal_lavalink()
+                self._circuit_breakers.pop(cb_key, None)
+                self._lavalink_breaker_open = False
                 self.record_incident(
                     SubsystemType.MUSIC,
                     IncidentSeverity.WARNING,
@@ -386,19 +393,23 @@ class KyroSentinel:
                     SubsystemType.MUSIC,
                     IncidentSeverity.CRITICAL,
                     "Lavalink Reconnect Failed",
-                    str(e),
+                    err_text(e),
                     action_taken="Retrying on next cycle",
                     resolved=False,
                 )
         else:
-            self.record_incident(
-                SubsystemType.MUSIC,
-                IncidentSeverity.CRITICAL,
-                "Lavalink Circuit Breaker Tripped",
-                f"Lavalink reconnect failed {fails} times",
-                action_taken="Circuit breaker open, awaiting server restore",
-                resolved=False,
-            )
+            # Only report the tripped breaker once per open window, otherwise the
+            # 30s watchdog loop floods the incident buffer and the health report.
+            if not self._lavalink_breaker_open:
+                self._lavalink_breaker_open = True
+                self.record_incident(
+                    SubsystemType.MUSIC,
+                    IncidentSeverity.CRITICAL,
+                    "Lavalink Circuit Breaker Tripped",
+                    f"Lavalink reconnect failed {fails} times ({reason})",
+                    action_taken="Circuit breaker open, awaiting server restore",
+                    resolved=False,
+                )
 
     def _check_gateway_health(self) -> None:
         """Monitor Discord WebSocket latency."""
@@ -471,41 +482,32 @@ class KyroSentinel:
             await self.bot.db._heal_pool()
 
     async def heal_lavalink(self) -> None:
-        """Safely re-establish Wavelink node connection without duplicate node collisions."""
-        import wavelink
-        try:
-            # Clean up existing nodes if present
-            if hasattr(wavelink.Pool, "nodes"):
-                existing = list(wavelink.Pool.nodes.values())
-                for old_node in existing:
-                    if getattr(old_node, "status", None) == wavelink.NodeStatus.CONNECTED:
-                        return  # Node is actually healthy and connected
-                    try:
-                        await asyncio.wait_for(
-                            old_node.close(),
-                            timeout=LAVALINK_OP_TIMEOUT,
-                        )
-                    except Exception:
-                        pass
-                wavelink.Pool.nodes.clear()
+        """
+        Safely re-establish the Wavelink node connection.
 
-            node = create_lavalink_node(
-                uri=Config.LAVALINK_URI,
-                password=Config.LAVALINK_PASSWORD,
-                inactive_player_timeout=300,
-            )
-            await asyncio.wait_for(
-                wavelink.Pool.connect(nodes=[node], client=self.bot),
-                timeout=LAVALINK_CONNECT_TIMEOUT,
-            )
-            for _ in range(10):
-                if node.status == wavelink.NodeStatus.CONNECTED:
-                    # Reset failure count on success
-                    self._circuit_breakers.pop("lavalink_node", None)
-                    break
-                await asyncio.sleep(0.5)
+        The MusicAgent owns a single-flight lock around node reconnection, so the
+        heal is delegated to it. Without this the sentinel's 30s watchdog and the
+        agent's command-error heal could run at the same time and clobber each
+        other's node session.
+        """
+        music_cog = self.bot.get_cog("Music")
+        agent = getattr(music_cog, "agent", None) if music_cog else None
+
+        if agent is not None:
+            ok, message = await agent.heal_node(force=True)
+            if ok:
+                self._circuit_breakers.pop("lavalink_node", None)
+                return
+            raise LavalinkUnavailable(message)
+
+        # Fallback path (music cog not loaded yet): connect directly.
+        try:
+            await close_pool_nodes()
+            node = await connect_lavalink_node(self.bot, inactive_player_timeout=300)
+            self._circuit_breakers.pop("lavalink_node", None)
+            logger.info(f"Sentinel: Lavalink node reconnected ({node.uri}).")
         except Exception as e:
-            logger.error(f"Sentinel: Lavalink node heal error: {e}")
+            logger.error(f"Sentinel: Lavalink node heal error: {err_text(e)}")
             raise
 
     async def heal_stuck_voice_client(self, guild: discord.Guild) -> bool:

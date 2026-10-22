@@ -17,13 +17,13 @@ import wavelink
 
 from src.cogs.music._models import Track
 from src.cogs.music._autoplay import NativeSmartAutoplay
-from src.cogs.music._extractor import NativeExtractor
 from src.core.lavalink import (
-    LAVALINK_CONNECT_TIMEOUT,
     LAVALINK_OP_TIMEOUT,
     LAVALINK_PLAY_TIMEOUT,
     LAVALINK_RESOLVE_TIMEOUT,
-    create_lavalink_node,
+    close_pool_nodes,
+    connect_lavalink_node,
+    err_text,
 )
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 from src.cogs.music._views import MusicControlView
@@ -220,34 +220,15 @@ class GuildPlayer:
                 pass
 
             if not node or node.status != wavelink.NodeStatus.CONNECTED:
-                from src.core.config import Config
                 logger.info("Wavelink node disconnected or missing. Re-establishing connection...")
                 try:
-                    for old_node in list(wavelink.Pool.nodes.values()):
-                        try:
-                            await asyncio.wait_for(
-                                old_node.close(),
-                                timeout=LAVALINK_OP_TIMEOUT,
-                            )
-                        except Exception:
-                            pass
-                    wavelink.Pool.nodes.clear()
-
-                    node = create_lavalink_node(
-                        uri=Config.LAVALINK_URI,
-                        password=Config.LAVALINK_PASSWORD,
+                    await close_pool_nodes()
+                    node = await connect_lavalink_node(
+                        self.bot,
                         inactive_player_timeout=300,
                     )
-                    await asyncio.wait_for(
-                        wavelink.Pool.connect(nodes=[node], client=self.bot),
-                        timeout=LAVALINK_CONNECT_TIMEOUT,
-                    )
-                    for _ in range(12):
-                        if node.status == wavelink.NodeStatus.CONNECTED:
-                            break
-                        await asyncio.sleep(0.5)
                 except Exception as e:
-                    logger.error(f"On-demand Lavalink node connect error: {e}")
+                    logger.error(f"On-demand Lavalink node connect error: {err_text(e)}")
 
             # ── Node REST health probe ──
             # The Wavelink voice handshake only completes once the node answers the

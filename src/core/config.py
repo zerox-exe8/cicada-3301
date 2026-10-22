@@ -71,6 +71,9 @@ class Config:
     # Lavalink / Audio Settings
     LAVALINK_URI: str = os.getenv("LAVALINK_URI", "http://lava2.kasawa.pro:2334").strip()
     LAVALINK_PASSWORD: str = os.getenv("LAVALINK_PASSWORD", "youshallnotpass").strip()
+    # Optional comma separated fallback Lavalink URIs. When the primary node is
+    # unreachable the bot fails over to these instead of losing music entirely.
+    LAVALINK_FALLBACK_URIS: str = os.getenv("LAVALINK_FALLBACK_URIS", "").strip()
 
     # Aesthetics
     COLORS: ThemeColors = ThemeColors()

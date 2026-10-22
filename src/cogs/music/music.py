@@ -62,20 +62,10 @@ class Music(commands.Cog):
         """Wait for bot login and connect to Lavalink node."""
         while not self.bot.is_ready():
             await asyncio.sleep(1)
-        from src.core.config import Config
-        from src.core.lavalink import create_lavalink_node
+        from src.core.lavalink import connect_lavalink_node
         try:
-            node = create_lavalink_node(
-                uri=Config.LAVALINK_URI,
-                password=Config.LAVALINK_PASSWORD,
-                inactive_player_timeout=300,
-            )
-            await wavelink.Pool.connect(nodes=[node], client=self.bot)
-            for _ in range(10):
-                if node.status == wavelink.NodeStatus.CONNECTED:
-                    break
-                await asyncio.sleep(0.5)
-            logger.info(f"Connected to Lavalink Node at {Config.LAVALINK_URI} (status={node.status})")
+            node = await connect_lavalink_node(self.bot, inactive_player_timeout=300)
+            logger.info(f"Connected to Lavalink Node at {node.uri} (status={node.status})")
         except Exception as e:
             logger.error(f"Failed to connect to Lavalink node: {e}")
 
@@ -96,8 +86,13 @@ class Music(commands.Cog):
         import wavelink
         has_nodes = False
         try:
-            if hasattr(wavelink.Pool, "_nodes") and wavelink.Pool._nodes:
-                has_nodes = any(n.status == wavelink.NodeStatus.CONNECTED for n in wavelink.Pool._nodes.values())
+            # `Pool.nodes` is the public accessor. The internal mapping is name
+            # mangled (`_Pool__nodes`), so the previous `Pool._nodes` check never
+            # matched and a duplicate node was created on every cog load.
+            for node in wavelink.Pool.nodes.values():
+                if node.status == wavelink.NodeStatus.CONNECTED:
+                    has_nodes = True
+                    break
         except Exception:
             pass
 

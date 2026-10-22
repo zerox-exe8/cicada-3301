@@ -10,9 +10,10 @@ import discord
 from discord.ext import tasks
 
 from src.core.lavalink import (
-    LAVALINK_CONNECT_TIMEOUT,
     LAVALINK_OP_TIMEOUT,
-    create_lavalink_node,
+    close_pool_nodes,
+    connect_lavalink_node,
+    err_text,
 )
 from src.utils.containers import KyroContainer
 
@@ -156,7 +157,6 @@ class MusicAgent:
         while the other 999 wait on a shared asyncio.Event.
         """
         import wavelink
-        from src.core.config import Config
 
         # If already connected and not forced, return immediately
         try:
@@ -183,50 +183,32 @@ class MusicAgent:
 
             try:
                 logger.warning("MusicAgent: Initiating master single-flight Lavalink pool reconnect...")
-                
+
                 # Jittered brief delay to allow network socket to settle
                 await asyncio.sleep(random.uniform(0.1, 0.4))
 
-                # Cleanly close all dead sockets in pool
-                if hasattr(wavelink.Pool, "nodes"):
-                    for old_node in list(wavelink.Pool.nodes.values()):
-                        try:
-                            await asyncio.wait_for(
-                                old_node.close(),
-                                timeout=LAVALINK_OP_TIMEOUT,
-                            )
-                        except Exception:
-                            pass
-                    wavelink.Pool.nodes.clear()
+                # Close every dead socket in the pool. `Pool.nodes` returns a copy,
+                # so the pool is cleaned through close_pool_nodes() instead of the
+                # no-op `Pool.nodes.clear()`.
+                await close_pool_nodes()
 
-                new_node = create_lavalink_node(
-                    uri=Config.LAVALINK_URI,
-                    password=Config.LAVALINK_PASSWORD,
+                # Connect to the primary node, falling back to any configured
+                # alternatives when it is unreachable.
+                new_node = await connect_lavalink_node(
+                    self.bot,
                     inactive_player_timeout=300,
                 )
-                await asyncio.wait_for(
-                    wavelink.Pool.connect(nodes=[new_node], client=self.bot),
-                    timeout=LAVALINK_CONNECT_TIMEOUT,
-                )
 
-                # Poll status for up to 6 seconds
-                connected = False
-                for _ in range(12):
-                    if new_node.status == wavelink.NodeStatus.CONNECTED:
-                        connected = True
-                        break
-                    await asyncio.sleep(0.5)
-
-                if connected:
-                    self._metrics["node_reconnects"] += 1
-                    logger.info("MusicAgent: Lavalink node pool re-established successfully.")
-                    return True, "Lavalink node successfully reconnected."
-                else:
-                    return False, "Timed out waiting for Lavalink node to report CONNECTED status."
+                self._metrics["node_reconnects"] += 1
+                logger.info("MusicAgent: Lavalink node pool re-established successfully.")
+                return True, f"Lavalink node reconnected ({new_node.uri})."
 
             except Exception as e:
-                logger.error(f"MusicAgent: Failed during single-flight node heal: {e}", exc_info=True)
-                return False, str(e)
+                logger.error(
+                    f"MusicAgent: Failed during single-flight node heal: {err_text(e)}",
+                    exc_info=True,
+                )
+                return False, err_text(e)
 
             finally:
                 self._node_is_healing = False

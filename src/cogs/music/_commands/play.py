@@ -24,6 +24,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await ctx.interaction.response.defer()
         except Exception:
             pass
+    elif not ctx.interaction:
+        # Trigger typing indicator immediately for prefix commands so user sees instant response
+        try:
+            asyncio.create_task(ctx.typing())
+        except Exception:
+            pass
 
     if not ctx.author.voice or not ctx.author.voice.channel:
         container = KyroContainer(accent_color=None)
@@ -72,6 +78,39 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     player.home_channel = ctx.channel
     player.cancel_empty_vc_timer(auto_resume=False)
 
+    # Handle empty query immediately without voice connect delay
+    if not query or not query.strip():
+        if player.is_paused:
+            player.resume()
+            container = KyroContainer(accent_color=None)
+            container.add_text("**Resumed playback.**")
+            await send_container_response(ctx, container)
+            return
+        elif player.queue and not player.is_playing:
+            try:
+                await player.connect_voice(voice_channel)
+            except Exception as e:
+                container = KyroContainer(accent_color=None)
+                container.add_text(f"**Failed to connect to voice channel:** `{e}`")
+                await send_container_response(ctx, container)
+                return
+            next_track = await player.pop_next_track()
+            if next_track:
+                await player.play_track(next_track)
+            return
+        else:
+            container = KyroContainer(accent_color=None)
+            container.add_text("**Please provide a song title or URL.**\n> Usage: `?play <song title or URL>`")
+            await send_container_response(ctx, container)
+            return
+
+    import wavelink
+
+    # Send Searching Track card IMMEDIATELY (0ms feedback feel!)
+    search_container = KyroContainer(accent_color=None)
+    search_container.add_text(f"**Searching:** `{query}`...")
+    search_msg = await send_container_response(ctx, search_container)
+
     # Connect to voice
     try:
         await player.connect_voice(voice_channel)
@@ -79,10 +118,6 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         logger.warning(f"Voice connect error in guild {ctx.guild.id}: {e}")
         agent = getattr(cog, "agent", None)
         if agent:
-            # A dead audio engine is a different failure than a voice gateway
-            # problem: no amount of voice state purging will make the node serve
-            # audio. Tell the user the truth instead of a misleading "recovered"
-            # card, and try to bring the node back up.
             engine_ok, engine_reason = await agent.audio_engine_status()
             if not engine_ok:
                 try:
@@ -104,6 +139,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         "Please try again in a few minutes."
                     ),
                 )
+                if search_msg:
+                    try:
+                        await edit_container_response(search_msg, card)
+                        return
+                    except Exception:
+                        pass
                 await send_container_response(ctx, card)
                 return
 
@@ -115,39 +156,25 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 action_taken="Purged stale voice gateway state and refreshed connection pipeline.",
                 advice="Please try playing your track again in a moment.",
             )
+            if search_msg:
+                try:
+                    await edit_container_response(search_msg, card)
+                    return
+                except Exception:
+                    pass
             await send_container_response(ctx, card)
             return
 
         container = KyroContainer(accent_color=None)
         container.add_text(f"**Failed to connect to voice channel:** `{e}`")
+        if search_msg:
+            try:
+                await edit_container_response(search_msg, container)
+                return
+            except Exception:
+                pass
         await send_container_response(ctx, container)
         return
-
-    # Handle empty query
-    if not query or not query.strip():
-        if player.is_paused:
-            player.resume()
-            container = KyroContainer(accent_color=None)
-            container.add_text("**Resumed playback.**")
-            await send_container_response(ctx, container)
-            return
-        elif player.queue and not player.is_playing:
-            next_track = await player.pop_next_track()
-            if next_track:
-                await player.play_track(next_track)
-            return
-        else:
-            container = KyroContainer(accent_color=None)
-            container.add_text("**Please provide a song title or URL.**\n> Usage: `?play <song title or URL>`")
-            await send_container_response(ctx, container)
-            return
-
-    import wavelink
-
-    # Send Searching Track card
-    search_container = KyroContainer(accent_color=None)
-    search_container.add_text(f"**Searching:** `{query}`...")
-    search_msg = await send_container_response(ctx, search_container)
 
     # ── Step 0: Clean query & prepare execution wrapper ──
     clean_q = query.strip()

@@ -897,7 +897,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     sink.speaker_buffers[uid] = prev_buf + sink.speaker_buffers[uid]
                     sink.speaker_peaks[uid] = max(sink.speaker_peaks.get(uid, 0), prev_peak)
 
-        sem = asyncio.Semaphore(4)
+        sem = asyncio.Semaphore(2)
 
         async def _transcribe_chunk_safe(ch: bytes) -> str:
             async with sem:
@@ -906,7 +906,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
         all_uids = set(sink.speaker_names.keys()) | set(sink.speaker_buffers.keys())
         for uid in all_uids:
             name = sink.speaker_names.get(uid, f"Speaker-{uid}")
-            chunks = sink.get_speaker_wav_chunks(uid, chunk_seconds=30)
+            # Offload heavy PCM normalization and chunking off the asyncio event loop
+            chunks = await asyncio.to_thread(sink.get_speaker_wav_chunks, uid, 30)
             if not chunks:
                 continue
 
@@ -1634,12 +1635,16 @@ class MeetingCog(commands.Cog, name="Meeting"):
         # Disconnect gracefully
         try:
             session.voice_client.stop_listening()
-            await session.voice_client.disconnect(force=True)
+            await asyncio.wait_for(session.voice_client.disconnect(force=True), timeout=2.0)
             session.voice_client.cleanup()
         except Exception as e:
             logger.debug(f"Notice during meeting disconnect: {e}")
         try:
             self.bot._connection._remove_voice_client(guild.id)
+        except Exception:
+            pass
+        try:
+            await guild.change_voice_state(channel=None)
         except Exception:
             pass
 
@@ -1727,12 +1732,16 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 if active_s:
                     try:
                         active_s.voice_client.stop_listening()
-                        await active_s.voice_client.disconnect(force=True)
+                        await asyncio.wait_for(active_s.voice_client.disconnect(force=True), timeout=2.0)
                         active_s.voice_client.cleanup()
                     except Exception:
                         pass
                     try:
                         self.bot._connection._remove_voice_client(guild.id)
+                    except Exception:
+                        pass
+                    try:
+                        await guild.change_voice_state(channel=None)
                     except Exception:
                         pass
                     if time.time() - active_s.start_time >= 10.0:

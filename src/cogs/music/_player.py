@@ -202,10 +202,10 @@ class GuildPlayer:
                 # to establish.
                 self._disconnect_expected_until = time.monotonic() + 5.0
                 try:
-                    # Bounded: this talks to the Lavalink REST API.
+                    # Bounded: this talks to the Lavalink REST API or native voice client
                     await asyncio.wait_for(
                         vc.disconnect(force=True),
-                        timeout=LAVALINK_OP_TIMEOUT,
+                        timeout=2.0 if not isinstance(vc, wavelink.Player) else LAVALINK_OP_TIMEOUT,
                     )
                 except Exception:
                     pass
@@ -273,7 +273,7 @@ class GuildPlayer:
             last_error: Optional[BaseException] = None
             for attempt in range(3):
                 try:
-                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=20.0)
+                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=8.0)
                     if self.voice_client:
                         self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
                     last_error = None

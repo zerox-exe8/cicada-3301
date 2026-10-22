@@ -94,9 +94,12 @@ class MusicAgent:
                 logger.info(f"MusicAgent: Healing voice session for guild '{guild.name}' ({guild_id}) - Reason: {reason}")
 
                 # 0. Mark the player so the disconnect handler keeps the queue intact
+                #    and knows this disconnect was self-initiated (so the delayed
+                #    VOICE_STATE_UPDATE cannot kill a freshly established session).
                 player = self.music.controller.get_player(guild_id)
                 if player:
                     player.preserve_queue_on_disconnect = True
+                    player._disconnect_expected_until = time.monotonic() + 5.0
 
                 # 1. Clean local voice client
                 vc = guild.voice_client

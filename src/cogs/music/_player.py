@@ -68,6 +68,10 @@ class GuildPlayer:
         self._is_prefetching: bool = False
         # Set by the MusicAgent before a self-heal disconnect so the queue survives.
         self.preserve_queue_on_disconnect: bool = False
+        # Monotonic deadline until which a VOICE_STATE_UPDATE(channel=None) is treated as
+        # the delayed answer to a disconnect Kyro initiated itself (reconnect / stop /
+        # self-heal) instead of an external disconnect that must end the session.
+        self._disconnect_expected_until: float = 0.0
 
     # ── State Properties ──
 
@@ -158,6 +162,10 @@ class GuildPlayer:
 
             # If connected to an invalid, disconnected, or non-wavelink player, clean it up first
             if vc:
+                # Flag the disconnect as self-initiated so the VOICE_STATE_UPDATE that
+                # Discord sends back for it cannot tear down the session we are about
+                # to establish.
+                self._disconnect_expected_until = time.monotonic() + 5.0
                 try:
                     await vc.disconnect(force=True)
                 except Exception:
@@ -168,14 +176,18 @@ class GuildPlayer:
                     pass
                 self.voice_client = None
 
-            # Reset any lingering voice client cache or ghost gateway voice state
+            # Purge any lingering voice client cache so the next handshake starts clean.
+            #
+            # IMPORTANT: a raw `change_voice_state(channel=None)` must NOT be sent here.
+            # Discord answers it with a VOICE_STATE_UPDATE(channel_id=None) that can land
+            # AFTER the new connection is already live (gateway RTT is often >300ms),
+            # and discord.py then treats it as "we were externally disconnected from
+            # voice" and tears the fresh session down. The net effect is: the bot joins
+            # the channel and immediately disconnects itself.
+            # discord.py's own `VoiceClient.disconnect(wait=True)` already orders this
+            # correctly, so we only clear the local cache here.
             try:
                 self.bot._connection._remove_voice_client(self.guild.id)
-            except Exception:
-                pass
-            try:
-                await self.guild.change_voice_state(channel=None)
-                await asyncio.sleep(0.3)
             except Exception:
                 pass
 
@@ -248,6 +260,7 @@ class GuildPlayer:
                     )
                     stale_vc = self.guild.voice_client
                     if stale_vc:
+                        self._disconnect_expected_until = time.monotonic() + 5.0
                         try:
                             await stale_vc.disconnect(force=True)
                         except Exception:
@@ -261,6 +274,9 @@ class GuildPlayer:
                     except Exception:
                         pass
                     try:
+                        # Flagged as self-initiated: the VOICE_STATE_UPDATE this triggers
+                        # must not tear down the session created by the next attempt.
+                        self._disconnect_expected_until = time.monotonic() + 5.0
                         await self.guild.change_voice_state(channel=None)
                     except Exception:
                         pass
@@ -608,6 +624,9 @@ class GuildPlayer:
         self._was_paused_for_empty_vc = False
 
         if self.voice_client:
+            # Mark this as a self-initiated disconnect so the matching
+            # VOICE_STATE_UPDATE(channel=None) does not run the teardown twice.
+            self._disconnect_expected_until = time.monotonic() + 5.0
             try:
                 await self.voice_client.disconnect(force=True)
             except Exception:

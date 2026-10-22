@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Optional, Any
 
 import discord
@@ -215,6 +216,17 @@ class Music(commands.Cog):
         if member.id == self.bot.user.id and after.channel is None:
             player = self.controller.get_player(member.guild.id)
             if player:
+                # A null voice state is ALSO the delayed answer to a disconnect Kyro
+                # initiated itself (reconnect / stop / self-heal). Discord can deliver
+                # it after the new session is already live — tearing down here would
+                # make the bot join a channel and immediately disconnect itself.
+                if time.monotonic() < player._disconnect_expected_until:
+                    player._disconnect_expected_until = 0.0
+                    logger.debug(
+                        f"Guild {member.guild.id}: ignoring self-initiated voice disconnect event."
+                    )
+                    return
+
                 player.cancel_empty_vc_timer(auto_resume=False)
                 # Only announce disconnect if not already announced by empty timer or user command
                 if not getattr(player, "_disconnect_announced", False):
@@ -250,6 +262,17 @@ class Music(commands.Cog):
                     except Exception:
                         pass
                 player.voice_client = None
+            return
+
+        # bot itself was moved INTO a voice channel (added by a user, no ?join used)
+        if member.id == self.bot.user.id and after.channel is not None:
+            guild = after.channel.guild
+            vc = guild.voice_client
+            if vc is None or not getattr(vc, "connected", False):
+                # discord.py only opens a voice connection when connect() is called,
+                # so a bot that gets dragged into a channel would otherwise sit there
+                # silently forever. Establish the connection ourselves.
+                asyncio.create_task(self._auto_connect_voice(after.channel))
             return
 
         # non-bot member joined or moved into bot's voice channel
@@ -299,6 +322,26 @@ class Music(commands.Cog):
                     player._empty_vc_task = asyncio.create_task(
                         self._empty_vc_timeout_worker(player, before.channel, timeout=120)
                     )
+
+    async def _auto_connect_voice(self, channel: discord.VoiceChannel | discord.StageChannel) -> None:
+        """Connect to a voice channel the bot was added to without a ?join command."""
+        guild = channel.guild
+        try:
+            player = self.controller.get_or_create_player(guild)
+            if player.voice_client and player.voice_client.connected:
+                return
+            player.cancel_empty_vc_timer(auto_resume=False)
+            await player.connect_voice(channel)
+            logger.info(
+                f"Guild {guild.id}: Kyro joined {channel.name} (added by a user)."
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(
+                f"Guild {guild.id}: auto-connect to {getattr(channel, 'name', '?')} failed: "
+                f"{type(e).__name__}: {e}"
+            )
 
     async def _empty_vc_timeout_worker(
         self, player: Any, channel: discord.VoiceChannel, timeout: int = 120

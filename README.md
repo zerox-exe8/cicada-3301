@@ -34,6 +34,18 @@ Unlike traditional bots constrained by legacy Discord embeds and sluggish databa
 - Dedicated Lavalink streaming node powered by Wavelink.
 - Concurrency-locked voice connections to prevent gateway race conditions and handshake timeouts.
 - Dynamic queue management, track sanitization, and seamless 24/7 stay mode.
+- Hardened Lavalink transport: every node call is bounded by a timeout and the
+  node REST API is health-probed, so a single unresponsive node can never freeze
+  the music commands.
+- Automatic failover across `LAVALINK_FALLBACK_URIS` when the primary node is unreachable.
+
+### 4. Lavalink Node Deployment
+- The Lavalink node runs as its **own Render Background Worker** (`render.lavalink.yaml`),
+  separate from the bot's Web Service.
+- `lavalink-node/application.yml` ships the node configuration (Lavalink v4.2+, the
+  YouTube plugin, and the password read from `LAVALINK_PASSWORD`).
+- A Background Worker never spins down, so active audio streams are never cut
+  mid-song and there is no Render cold start after an outage.
 
 ### 4. Sub-Millisecond In-Memory Caching
 - Critical runtime states (prefixes, developer authorizations, maintenance status, global blacklists, and module configs) are cached in memory upon boot.
@@ -98,10 +110,17 @@ Kyro provides a modular suite of tools built for our community — keeping your 
 ```text
 Kyro/
 |-- .env.example          # Environment variables template
-|-- render.yaml           # Deployment blueprint
+|-- render.yaml           # Deployment blueprint (Discord bot Web Service)
+|-- render.lavalink.yaml  # Deployment blueprint (Lavalink Background Worker)
+|-- build.sh              # Bot build script
+|-- build-lavalink.sh     # Lavalink node build script
 |-- requirements.txt      # Python dependencies
 |-- README.md             # Project documentation
 |-- AGENTS.md             # Architectural guidelines and standards
+|
+|-- lavalink-node/        # Lavalink node deployment assets
+|   |-- application.yml   # Lavalink v4 node configuration
+|   `-- Dockerfile        # Lavalink node container image
 |
 |-- assets/               # Assets and custom application emojis
 |   |-- avatar/           # Bot avatar presets
@@ -204,6 +223,26 @@ To deploy on Render:
 1. Connect your repository to Render.
 2. Select Web Service and apply `render.yaml`.
 3. Configure the required environment variables in the Render dashboard.
+
+### Lavalink Audio Node
+
+The bot needs a Lavalink v4 node (4.2+ is mandatory: since March 2026 Discord
+only accepts end-to-end encrypted voice, and Lavalink 4.2.0 was the first release
+supporting it).
+
+Deploy it as a **Background Worker** from the same repository:
+1. Render dashboard → **New → Blueprint**.
+2. Select this repository and pick `render.lavalink.yaml`.
+3. Set the **same** `LAVALINK_PASSWORD` value here and on the bot service.
+4. Point the bot at the node: `LAVALINK_URI=https://kyro-lavalink.onrender.com`.
+
+The node's own `LAVALINK_SERVER_PORT` (default `2333`) is the port the bot
+connects to. `LAVALINK_FALLBACK_URIS` accepts a comma separated list of extra
+node URIs the bot fails over to when the primary is unreachable.
+
+> A Background Worker is used on purpose: Render's *free web services* spin down
+> after 15 minutes of inactivity, which kills every playing guild and makes the
+> bot believe the node is dead.
 
 ---
 

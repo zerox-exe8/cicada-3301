@@ -1,0 +1,37 @@
+# ==========================================
+# Kyro - dedicated Lavalink audio node
+# ==========================================
+# Render blueprint for the Background Worker that runs the Lavalink v4 node.
+# The Discord bot itself stays in its own Web Service (render.yaml) and points
+# at this node through LAVALINK_URI.
+#
+# Why a Background Worker and not a free web service:
+#   - Background Workers NEVER spin down, so active audio streams are never
+#     cut mid-song and there is no 30-60s Render cold start after an outage.
+#   - A free web service sleeps after 15 minutes of inactivity, which kills
+#     every playing guild and makes the bot see a dead node.
+#
+# Apply it in the Render dashboard:
+#   New -> Blueprint -> select this repository -> choose this file
+# (render.yaml stays untouched for the bot service.)
+
+services:
+  - type: worker
+    name: kyro-lavalink
+    runtime: docker
+    dockerfilePath: ./lavalink-node/Dockerfile
+    dockerContext: ./lavalink-node
+    plan: starter
+    # /version is Lavalink's public version endpoint - it needs no password,
+    # so the worker health check can never fail on auth.
+    healthCheckPath: /version
+    autoDeploy: true
+    envVars:
+      - key: LAVALINK_PASSWORD
+        sync: false
+      - key: LAVALINK_SERVER_ADDRESS
+        value: 0.0.0.0
+      - key: LAVALINK_SERVER_PORT
+        value: 2333
+      - key: SERVER_PORT
+        value: 2333

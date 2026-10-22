@@ -1,0 +1,51 @@
+# ==========================================
+# Lavalink v4 configuration for Kyro
+# ==========================================
+# Lavalink 4.2+ is REQUIRED: since March 2026 Discord only allows
+# end-to-end encrypted voice (DAVE) and Lavalink 4.2.0 was the first
+# release supporting it. Older servers can no longer play audio in Discord.
+#
+# The password is read from the LAVALINK_PASSWORD environment variable so
+# the bot (Config.LAVALINK_PASSWORD) and this node always share one secret.
+# The default matches Lavalink's own shipped default.
+
+server:
+  port: 2333
+  address: 0.0.0.0
+
+lavalink:
+  plugins:
+    # The built-in YouTube source is deprecated in v4 - the plugin replaces it
+    # and the built-in one has to be switched off below.
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
+      snapshot: false
+
+  server:
+    password: "${LAVALINK_PASSWORD:youshallnotpass}"
+    sources:
+      youtube: false
+      soundcloud: true
+      bandcamp: true
+      twitch: true
+      vimeo: true
+      http: true
+      local: false
+
+  plugins:
+    youtube:
+      enabled: true
+      allowSearch: true
+
+logging:
+  level:
+    root: INFO
+    lavalink: INFO
+  request:
+    enabled: false
+    includeClientInfo: false
+
+metrics:
+  enabled: true
+  endpoint:
+    enabled: true
+    path: /metrics

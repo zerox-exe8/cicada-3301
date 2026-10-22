@@ -460,19 +460,104 @@ class AntinukePanelCog(commands.Cog):
         total_count = len(all_keys)
         mod_disp = f"`All Modules Active ({active_count}/{total_count})`" if active_count == total_count else f"`{active_count}/{total_count} Modules Active`"
 
+        # Check permissions & hierarchy to alert user immediately
+        me = guild.me
+        roles_above = [
+            r for r in guild.roles
+            if r > me.top_role and not r.is_default() and not r.managed
+        ]
+        has_admin = me.guild_permissions.administrator
+
         container = KyroContainer(accent_color=None)
         container.add_section(
             content="**Kyro Antinuke**\n> Antinuke is now active and protecting your server."
         )
         container.add_separator(divider=True)
-        container.add_text(
-            f"> {dot} **Status:** {sw_on}\n"
-            f"> {dot} **Protection Modules:** {mod_disp}\n"
-            f"> {dot} **Punishment:** `Quarantine`\n"
-            f"> {dot} **Logs:** {log_str}"
-        )
+
+        overview_lines = [
+            f"> {dot} **Status:** {sw_on}",
+            f"> {dot} **Protection Modules:** {mod_disp}",
+            f"> {dot} **Punishment:** `Quarantine`",
+            f"> {dot} **Logs:** {log_str}",
+        ]
+        if roles_above:
+            overview_lines.append(
+                f"> ⚠️ **Notice:** Kyro's role `@{me.top_role.name}` is below `{len(roles_above)}` role(s). Move Kyro's role to the top in **Server Settings -> Roles** for 100% protection!"
+            )
+        elif not has_admin:
+            overview_lines.append(
+                "> 💡 **Tip:** Grant Kyro **Administrator** permission or use `,antinuke check` to verify all required permissions."
+            )
+
+        container.add_text("\n".join(overview_lines))
         container.add_separator(divider=True)
         container.add_text(f"-# Enabled by {ctx.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")
+        await send_container_response(ctx, container)
+
+    @antinuke.command(name="check", aliases=["perms", "permissions", "diagnostics"], description="Check bot permissions and role hierarchy for 100% Antinuke effectiveness.")
+    async def antinuke_check(self, ctx: CustomContext) -> None:
+        """Run deep permission and role hierarchy audit for Antinuke."""
+        guild = ctx.guild
+        me = guild.me
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
+
+        checks = [
+            ("Administrator", me.guild_permissions.administrator),
+            ("View Audit Log", me.guild_permissions.view_audit_log),
+            ("Manage Roles", me.guild_permissions.manage_roles),
+            ("Ban Members", me.guild_permissions.ban_members),
+            ("Kick Members", me.guild_permissions.kick_members),
+            ("Moderate Members (Timeout)", me.guild_permissions.moderate_members),
+            ("Manage Messages", me.guild_permissions.manage_messages),
+            ("Manage Channels", me.guild_permissions.manage_channels),
+            ("Manage Webhooks", me.guild_permissions.manage_webhooks),
+        ]
+
+        roles_above = [
+            r for r in guild.roles
+            if r > me.top_role and not r.is_default() and not r.managed
+        ]
+
+        perm_lines = []
+        all_passed = True
+        for name, passed in checks:
+            tag = "`[PASS]`" if passed else "`[FAIL]`"
+            if not passed:
+                all_passed = False
+            perm_lines.append(f"> {tag} **{name}**")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Kyro Antinuke — Permission Diagnostics**\n"
+                "> Audit of required Discord permissions and role hierarchy."
+            )
+        )
+        container.add_separator(divider=True)
+        container.add_text("\n".join(perm_lines))
+        container.add_separator(divider=True)
+
+        hierarchy_status = "`[Optimal]` Top of manageable hierarchy" if not roles_above else f"`[Warning]` Below {len(roles_above)} role(s) (highest: `@{roles_above[-1].name}`)"
+        summary_lines = [
+            f"> {dot} **Role Hierarchy:** {hierarchy_status}",
+            f"> {dot} **Bot Top Role:** `@{me.top_role.name}` (Pos: `{me.top_role.position}`)",
+        ]
+        if roles_above:
+            summary_lines.append(
+                f"> ⚠️ **Action Required:** Move Kyro's role `@{me.top_role.name}` above `@{roles_above[-1].name}` in **Server Settings -> Roles** to ensure full protection against attackers with those roles."
+            )
+        elif not all_passed and not me.guild_permissions.administrator:
+            summary_lines.append(
+                "> ⚠️ **Action Required:** Grant Kyro the missing permissions listed above or assign **Administrator** for full coverage."
+            )
+        else:
+            summary_lines.append(
+                "> ✅ **Status:** All permissions and role hierarchy are fully verified for complete server protection!"
+            )
+
+        container.add_text("\n".join(summary_lines))
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
     @antinuke.command(name="disable", description="Disable Antinuke protection on your server.")

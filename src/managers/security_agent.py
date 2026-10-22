@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Optional
@@ -124,12 +125,12 @@ class SecurityAgent:
             audit_reason = f"Kyro Antinuke Protocol | {action_name} — {reason}"
             member: Optional[discord.Member] = guild.get_member(offender_id)
 
-            # Step 1: Instantly strip dangerous manageable roles in <50ms
+            # Step 1: Instantly strip dangerous manageable roles in <50ms (exclude managed integration roles)
             if member and member.roles:
                 try:
                     strip_targets = [
                         r for r in member.roles
-                        if not r.is_default() and r < guild.me.top_role
+                        if not r.is_default() and not r.managed and r < guild.me.top_role
                     ]
                     if strip_targets:
                         await member.remove_roles(
@@ -139,44 +140,56 @@ class SecurityAgent:
                 except Exception as e:
                     logger.debug(f"Role strip notice in guild {guild_id}: {e}")
 
-            # Step 2: Auto-Quarantine: 28-day Communication Timeout
-            if member and guild.me.guild_permissions.moderate_members:
+            # Step 2: Auto-Quarantine: 28-day Communication Timeout (humans only, Discord forbids timing out bots)
+            if member and not member.bot and guild.me.guild_permissions.moderate_members:
                 try:
-                    until = discord.utils.utcnow() + discord.timedelta(days=28)
+                    until = discord.utils.utcnow() + datetime.timedelta(days=28)
                     await member.timeout(until, reason=audit_reason)
                 except Exception as e:
                     logger.debug(f"Quarantine timeout notice: {e}")
 
-            # Step 3: Execute Configured Punishment (Ban / Kick)
+            # Step 3: For rogue BOT perpetrators: Managed bot integration roles cannot be removed
+            # and bots cannot be timed out. Upgrade punishment to ban (with fallback to kick) so
+            # unauthorized bots are permanently removed!
+            effective_punishment = punishment
+            if member and member.bot and effective_punishment == "strip_roles":
+                effective_punishment = "ban"
+
+            # Step 4: Execute Configured Punishment (Ban / Kick / Quarantine)
             punished_action = "Roles Stripped & Quarantined"
-            if punishment == "ban":
+            if effective_punishment == "ban":
                 try:
-                    await guild.ban(offender, reason=audit_reason, delete_message_days=0)
-                    punished_action = "Banned & Quarantined"
+                    await guild.ban(offender, reason=audit_reason, delete_message_seconds=0)
+                    punished_action = "Banned"
+                except discord.Forbidden:
+                    logger.warning(f"Failed to ban perpetrator {offender_id} in {guild_id}: Forbidden (Hierarchy/Perms)")
+                    if member:
+                        try:
+                            await member.kick(reason=audit_reason)
+                            punished_action = "Kicked (Ban Failed - Hierarchy)"
+                        except Exception:
+                            punished_action = "Role-Stripped (Ban/Kick Failed - Hierarchy)"
+                    else:
+                        punished_action = "Role-Stripped (Ban Failed - Hierarchy)"
                 except Exception as e:
-                    logger.error(f"Failed to ban perpetrator {offender_id} in {guild_id}: {e}")
-                    punished_action = "Role-Stripped (Ban Failed - Hierarchy)"
-            elif punishment == "kick" and member:
+                    logger.error(f"Error banning offender {offender_id} in {guild_id}: {e}")
+                    if member:
+                        try:
+                            await member.kick(reason=audit_reason)
+                            punished_action = "Kicked (Ban Error Fallback)"
+                        except Exception:
+                            punished_action = f"Quarantined ({e})"
+
+            elif effective_punishment == "kick" and member:
                 try:
                     await member.kick(reason=audit_reason)
-                    punished_action = "Kicked & Quarantined"
+                    punished_action = "Kicked"
+                except discord.Forbidden:
+                    logger.warning(f"Failed to kick perpetrator {offender_id} in {guild_id}: Forbidden (Hierarchy/Perms)")
+                    punished_action = "Role-Stripped (Kick Failed - Hierarchy)"
                 except Exception as e:
                     logger.error(f"Failed to kick perpetrator {offender_id} in {guild_id}: {e}")
-                    punished_action = "Role-Stripped (Kick Failed - Hierarchy)"
-
-            # Step 4: Dispatch Security Mod Log
-            try:
-                from src.cogs.antinuke._helpers import send_antinuke_log
-                await send_antinuke_log(
-                    self.bot,
-                    guild,
-                    action_name,
-                    offender,
-                    punished_action,
-                    audit_reason,
-                )
-            except Exception as log_err:
-                logger.debug(f"Security log dispatch notice: {log_err}")
+                    punished_action = f"Quarantined ({e})"
 
             return punished_action
 

@@ -48,28 +48,28 @@ class AntiEveryoneCog(commands.Cog):
             return
 
         perpetrator = await resolve_audit_perpetrator(
-            guild, discord.AuditLogAction.role_update, target_id=after.id
+            guild, discord.AuditLogAction.role_update, target_id=after.id, retries=3, max_age_seconds=15.0
         )
 
-        if not perpetrator:
+        # If perpetrator is identified and is 100% immune (e.g. Server Owner):
+        if perpetrator and self.bot.antinuke_mgr.is_immune(guild, perpetrator.id, "everyone" if is_everyone else "role"):
             return
 
-        if self.bot.antinuke_mgr.is_immune(guild, perpetrator.id, "everyone" if is_everyone else "role"):
-            return
-
-        # Immediate disarm
+        # Immediate disarm of dangerous permissions
         disarmed = await disarm_dangerous_permissions(after)
 
         action_title = "Anti-Everyone" if is_everyone else "Anti-Role"
-        punish_res = await execute_punishment(
-            self.bot,
-            guild,
-            perpetrator,
-            action_title,
-            f"Escalated [{', '.join(escalated)}] on @{after.name}",
-        )
+        punish_res = "Permissions Disarmed (Perpetrator Unresolved)"
+        if perpetrator:
+            punish_res = await execute_punishment(
+                self.bot,
+                guild,
+                perpetrator,
+                action_title,
+                f"Escalated [{', '.join(escalated)}] on @{after.name}",
+            )
 
-        recovery_msg = f"Removed permissions: {', '.join(escalated)}" if disarmed else "Removal Failed"
+        recovery_msg = f"Disarmed permissions: {', '.join(escalated)}" if disarmed else "Disarm Failed"
 
         await dispatch_antinuke_log(
             self.bot,

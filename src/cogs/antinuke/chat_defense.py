@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Optional
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import dispatch_antinuke_log
+from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -113,9 +113,14 @@ class ChatDefenseCog(commands.Cog):
     async def _process_chat_defense(self, message: discord.Message) -> bool:
         """
         Evaluate message against active chat defense protections.
+        Intercepts both unauthorized bots and rogue human perpetrators.
         Returns True if message was deleted/mitigated, False otherwise.
         """
-        if not message.guild or message.author.bot:
+        if not message.guild:
+            return False
+
+        # Ignore messages sent by Kyro itself
+        if self.bot.user and message.author.id == self.bot.user.id:
             return False
 
         guild = message.guild
@@ -125,7 +130,7 @@ class ChatDefenseCog(commands.Cog):
         if not self.bot.antinuke_mgr.is_enabled(guild.id):
             return False
 
-        # Immunity Guard: Server Owner, Extra Owners, Whitelisted Admins & Roles are 100% immune
+        # Immunity Guard: Server Owner, Extra Owners, Whitelisted Admins & Roles (and whitelisted bots) are immune
         if self.bot.antinuke_mgr.is_immune(guild, author.id):
             return False
 
@@ -143,26 +148,23 @@ class ChatDefenseCog(commands.Cog):
                 except Exception:
                     pass
 
-                # Isolate compromised account: 10-minute timeout
-                punish_result = "Deleted"
-                if isinstance(author, discord.Member):
+                punish_result = await execute_punishment(
+                    self.bot,
+                    guild,
+                    author,
+                    "Anti-Scam Phishing Defense",
+                    "Phishing / token-grabber link detected",
+                )
+
+                # Silent DM advisory to user if human
+                if not author.bot:
                     try:
-                        await author.timeout(
-                            discord.utils.utcnow() + datetime.timedelta(minutes=10),
-                            reason="Kyro Antinuke: Suspected compromised account / phishing link",
+                        await author.send(
+                            f"⚠️ Your message in **{guild.name}** was automatically removed because it contained a suspected "
+                            f"phishing/scam URL. If your account was compromised, please change your Discord password immediately."
                         )
-                        punish_result = "10m Timeout + Deleted"
                     except Exception:
                         pass
-
-                # Silent DM advisory to user
-                try:
-                    await author.send(
-                        f"⚠️ Your message in **{guild.name}** was automatically removed because it contained a suspected "
-                        f"phishing/scam URL. If your account was compromised, please change your Discord password immediately."
-                    )
-                except Exception:
-                    pass
 
                 await dispatch_antinuke_log(
                     self.bot,
@@ -180,7 +182,6 @@ class ChatDefenseCog(commands.Cog):
             invite_match = INVITE_REGEX.search(content)
             if invite_match:
                 code = invite_match.group(1).lower()
-                # Allow server's legitimate vanity URL or known self-invites
                 current_vanity = (guild.vanity_url_code or "").lower()
                 is_self_invite = False
                 if current_vanity and code == current_vanity:
@@ -192,22 +193,32 @@ class ChatDefenseCog(commands.Cog):
                     except Exception:
                         pass
 
-                    # Non-intrusive 3.5s auto-deleting toast notice
-                    asyncio.create_task(
-                        self._send_silent_toast(
-                            message.channel,
-                            f"-# ⚠️ External Discord invites are not allowed in this server.",
-                            delete_after=3.5,
+                    # If author is an unwhitelisted bot, eliminate it immediately
+                    if author.bot:
+                        punish_result = await execute_punishment(
+                            self.bot,
+                            guild,
+                            author,
+                            "Anti-Invite Protection",
+                            f"Unauthorized bot advertising external invite code: {code}",
                         )
-                    )
+                    else:
+                        punish_result = "Message Deleted"
+                        asyncio.create_task(
+                            self._send_silent_toast(
+                                message.channel,
+                                "-# ⚠️ External Discord invites are not allowed in this server.",
+                                delete_after=3.5,
+                            )
+                        )
 
                     await dispatch_antinuke_log(
                         self.bot,
                         guild,
                         "Anti-Invite Protection",
                         author,
-                        "Message Deleted",
-                        "External Invite Blocked",
+                        punish_result,
+                        "External Invite Neutralized",
                         extra=f"Channel: {message.channel.mention}\nCode: `{code}`",
                     )
                     return True
@@ -223,13 +234,11 @@ class ChatDefenseCog(commands.Cog):
                 try:
                     parsed = urlparse(raw_url)
                     domain = (parsed.netloc or "").lower().split(":")[0]
-                    # Strip leading www.
                     if domain.startswith("www."):
                         clean_domain = domain[4:]
                     else:
                         clean_domain = domain
 
-                    # Check if domain belongs to Trusted Developer / Media Whitelist
                     is_trusted = (
                         clean_domain in TRUSTED_TECH_DOMAINS
                         or any(clean_domain.endswith("." + d) for d in TRUSTED_TECH_DOMAINS)
@@ -241,49 +250,66 @@ class ChatDefenseCog(commands.Cog):
                         except Exception:
                             pass
 
-                        # Non-intrusive 3.5s toast notice
-                        asyncio.create_task(
-                            self._send_silent_toast(
-                                message.channel,
-                                f"-# ⚠️ Links from unverified domains are restricted in this server.",
-                                delete_after=3.5,
+                        if author.bot:
+                            punish_result = await execute_punishment(
+                                self.bot,
+                                guild,
+                                author,
+                                "Anti-Link Protection",
+                                f"Unauthorized bot posting unverified link: {domain}",
                             )
-                        )
+                        else:
+                            punish_result = "Message Deleted"
+                            asyncio.create_task(
+                                self._send_silent_toast(
+                                    message.channel,
+                                    "-# ⚠️ Links from unverified domains are restricted in this server.",
+                                    delete_after=3.5,
+                                )
+                            )
 
                         await dispatch_antinuke_log(
                             self.bot,
                             guild,
                             "Anti-Link Protection",
                             author,
-                            "Message Deleted",
-                            "Unverified URL Blocked",
+                            punish_result,
+                            "Unverified URL Neutralized",
                             extra=f"Channel: {message.channel.mention}\nDomain: `{domain}`",
                         )
                         return True
                 except Exception as e:
                     logger.debug(f"Notice parsing URL in chat defense: {e}")
 
-        # ── 4. Anti-Mass-Mention (Ping Raid Guard) ──
+        # ── 4. Anti-Mass-Mention (Ping Raid Guard & Unauthorized @everyone/@here Killer) ──
         if self.bot.antinuke_mgr.is_module_enabled(guild.id, "anti_mass_mention"):
             total_mentions = len(message.mentions) + len(message.role_mentions)
-            has_raw_everyone = ("@everyone" in content or "@here" in content) and not message.channel.permissions_for(author).mention_everyone
+            has_raw_everyone = bool(
+                message.mention_everyone
+                or "@everyone" in content
+                or "@here" in content
+            )
 
-            if total_mentions >= 4 or has_raw_everyone:
+            # Trigger on unauthorized @everyone/@here or 3+ mentions
+            if has_raw_everyone or total_mentions >= 3:
                 try:
                     await message.delete()
                 except Exception:
                     pass
 
-                punish_result = "Deleted"
-                if isinstance(author, discord.Member):
-                    try:
-                        await author.timeout(
-                            discord.utils.utcnow() + datetime.timedelta(minutes=5),
-                            reason="Kyro Antinuke: Mass mention ping raid detected",
-                        )
-                        punish_result = "5m Timeout + Deleted"
-                    except Exception:
-                        pass
+                breach_reason = (
+                    "Unauthorized @everyone/@here ping abuse"
+                    if has_raw_everyone
+                    else f"Mass mention ping flood ({total_mentions} mentions)"
+                )
+
+                punish_result = await execute_punishment(
+                    self.bot,
+                    guild,
+                    author,
+                    "Anti-Mass Mention",
+                    breach_reason,
+                )
 
                 await dispatch_antinuke_log(
                     self.bot,
@@ -291,8 +317,8 @@ class ChatDefenseCog(commands.Cog):
                     "Anti-Mass Mention",
                     author,
                     punish_result,
-                    "Ping Flood Prevented",
-                    extra=f"Channel: {message.channel.mention}\nMentions: `{total_mentions}`",
+                    "Ping Raid Neutralized",
+                    extra=f"Channel: {message.channel.mention}\n> • **Breach:** {breach_reason}\n> • **Mentions Count:** `{total_mentions}`",
                 )
                 return True
 
@@ -301,10 +327,9 @@ class ChatDefenseCog(commands.Cog):
             now = time.time()
             tracker_key = (guild.id, author.id)
 
-            # Rapid message flood: 5 messages in < 3 seconds
+            # Rapid message flood: 5 messages in < 3.5 seconds
             times = self._flood_timestamps.setdefault(tracker_key, [])
             times.append(now)
-            # Retain only last 6 timestamps within 4-second window
             self._flood_timestamps[tracker_key] = [t for t in times if now - t <= 3.5]
 
             if len(self._flood_timestamps[tracker_key]) >= 5:
@@ -313,18 +338,15 @@ class ChatDefenseCog(commands.Cog):
                 except Exception:
                     pass
 
-                punish_result = "Deleted"
-                if isinstance(author, discord.Member):
-                    try:
-                        await author.timeout(
-                            discord.utils.utcnow() + datetime.timedelta(minutes=5),
-                            reason="Kyro Antinuke: Rapid message flood spam",
-                        )
-                        punish_result = "5m Timeout + Deleted"
-                    except Exception:
-                        pass
-
                 self._flood_timestamps[tracker_key].clear()
+
+                punish_result = await execute_punishment(
+                    self.bot,
+                    guild,
+                    author,
+                    "Anti-Spam Flooding",
+                    "Rapid message flood attack (5+ msgs / 3.5s)",
+                )
 
                 await dispatch_antinuke_log(
                     self.bot,
@@ -333,12 +355,12 @@ class ChatDefenseCog(commands.Cog):
                     author,
                     punish_result,
                     "Flood Attack Neutralized",
-                    extra=f"Channel: {message.channel.mention}\nRate: 5+ msgs / 3s",
+                    extra=f"Channel: {message.channel.mention}\nRate: 5+ msgs / 3.5s",
                 )
                 return True
 
-            # Cross-channel / Rapid duplicate spam: 3 identical messages > 12 chars in 6s
-            if len(clean_content) >= 12:
+            # Cross-channel / Rapid duplicate spam: 3 identical messages > 10 chars in 6s
+            if len(clean_content) >= 10:
                 last_txt, dup_count, last_t = self._duplicate_cache.get(tracker_key, ("", 0, 0))
                 if last_txt == clean_content and (now - last_t) <= 6.0:
                     dup_count += 1
@@ -353,18 +375,15 @@ class ChatDefenseCog(commands.Cog):
                     except Exception:
                         pass
 
-                    punish_result = "Deleted"
-                    if isinstance(author, discord.Member):
-                        try:
-                            await author.timeout(
-                                discord.utils.utcnow() + datetime.timedelta(minutes=5),
-                                reason="Kyro Antinuke: Repeated duplicate copy-paste spam",
-                            )
-                            punish_result = "5m Timeout + Deleted"
-                        except Exception:
-                            pass
-
                     self._duplicate_cache.pop(tracker_key, None)
+
+                    punish_result = await execute_punishment(
+                        self.bot,
+                        guild,
+                        author,
+                        "Anti-Spam Duplicate",
+                        "Repeated duplicate copy-paste spam",
+                    )
 
                     await dispatch_antinuke_log(
                         self.bot,

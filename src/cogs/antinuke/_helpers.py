@@ -41,6 +41,10 @@ async def resolve_audit_perpetrator(
     Resilient, latency-tolerant audit log resolver for antinuke triggers.
     Queries up to 8 recent entries with progressive retry backoff (0.25s, 0.5s, 0.85s) to survive Discord gateway lag.
     """
+    if guild.me and not guild.me.guild_permissions.view_audit_log:
+        logger.warning(f"Guild {guild.id}: Kyro is missing 'view_audit_log' permission! Cannot resolve perpetrators.")
+        return None
+
     client = getattr(getattr(guild, "_state", None), "_get_client", lambda: None)()
     sec_agent = getattr(client, "security_agent", None) if client else None
     if sec_agent:
@@ -109,12 +113,14 @@ async def execute_punishment(
 
     member: discord.Member | None = guild.get_member(offender.id)
 
-    # 1. Neutralize permissions by stripping roles if member is in guild
+    # 1. Neutralize permissions by stripping roles if member is in guild (exclude managed integration roles)
     stripped_count = 0
     if member and member.roles:
         try:
-            # Keep @everyone role, strip all manageable custom roles
-            strip_targets = [r for r in member.roles if not r.is_default() and r < guild.me.top_role]
+            strip_targets = [
+                r for r in member.roles
+                if not r.is_default() and not r.managed and r < guild.me.top_role
+            ]
             if strip_targets:
                 await member.remove_roles(*strip_targets, reason="Kyro Antinuke: Instant Permission Neutralization")
                 stripped_count = len(strip_targets)
@@ -122,8 +128,8 @@ async def execute_punishment(
         except (discord.Forbidden, discord.HTTPException) as e:
             logger.warning(f"Guild {guild.id}: Could not strip roles from perpetrator {offender.id}: {e}")
 
-    # 2. Auto-Quarantine: Apply maximum timeout (28 days) so offender is completely silenced
-    if member and guild.me.guild_permissions.moderate_members:
+    # 2. Auto-Quarantine: Apply maximum timeout (28 days) ONLY to human members (bots cannot be timed out)
+    if member and not member.bot and guild.me.guild_permissions.moderate_members:
         try:
             timeout_duration = discord.utils.utcnow() + datetime.timedelta(days=28)
             await member.timeout(timeout_duration, reason=audit_reason)
@@ -131,19 +137,38 @@ async def execute_punishment(
         except Exception as e:
             logger.debug(f"Guild {guild.id}: Could not apply quarantine timeout to {offender.id}: {e}")
 
-    # 3. Execute Ban / Kick / Quarantine
-    if punishment == "ban":
+    # 3. For rogue BOT perpetrators: Managed bot integration roles cannot be removed
+    # and bots cannot be timed out. Upgrade punishment to ban (with fallback to kick) so
+    # unauthorized bots are permanently removed!
+    effective_punishment = punishment
+    if member and member.bot and effective_punishment == "strip_roles":
+        effective_punishment = "ban"
+
+    # 4. Execute Ban / Kick / Quarantine
+    if effective_punishment == "ban":
         try:
             await guild.ban(offender, reason=audit_reason, delete_message_seconds=0)
             return "Banned"
         except discord.Forbidden:
             logger.warning(f"Guild {guild.id}: Missing permissions to ban offender {offender.id}")
+            if member:
+                try:
+                    await member.kick(reason=audit_reason)
+                    return "Kicked (Ban Failed - Hierarchy)"
+                except Exception:
+                    pass
             return "Quarantined (Role Too High to Ban)"
         except Exception as e:
             logger.error(f"Guild {guild.id}: Error banning offender {offender.id}: {e}")
+            if member:
+                try:
+                    await member.kick(reason=audit_reason)
+                    return "Kicked (Ban Error Fallback)"
+                except Exception:
+                    pass
             return f"Quarantined ({e})"
 
-    elif punishment == "kick":
+    elif effective_punishment == "kick":
         if member:
             try:
                 await member.kick(reason=audit_reason)

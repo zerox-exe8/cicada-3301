@@ -1292,28 +1292,58 @@ class MeetingCog(commands.Cog):
         except Exception as e:
             logger.warning(f"Notice during proactive DAVE init: {e}")
 
-        # Wait up to 5 seconds for Discord voice gateway encryption handshake and DAVE session transition
-        handshake_ok = False
-        for _ in range(50):
+        # Wait up to 3s for initial voice gateway secret_key (XSalsa20 session established)
+        for _ in range(30):
             if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
-                conn = getattr(voice_client, "_connection", None)
-                dave = getattr(conn, "dave_session", None)
-                if dave and getattr(dave, "ready", False):
-                    handshake_ok = True
-                    break
-                dave_ver = getattr(conn, "dave_protocol_version", 0)
-                if dave_ver == 0 and not getattr(conn, "dave_session", None):
-                    handshake_ok = True
-                    break
+                break
             await asyncio.sleep(0.1)
 
-        if not handshake_ok:
+        if not (voice_client.is_connected() and getattr(voice_client, "secret_key", None)):
             try:
                 await voice_client.disconnect(force=True)
             except Exception:
                 pass
             await ctx.send_error("Could not complete Discord voice encryption handshake. Please try again.", ephemeral=False)
             return
+
+        # Wait up to 4s for DAVE MLS session to become ready.
+        # Discord sends DAVE_PREPARE_EPOCH after SECRET_DESCRIPTION — dave_protocol_version
+        # starts at 0 and flips to 1+ only after the WS message is received.
+        # We MUST wait for dave_session.ready before starting listen() so that
+        # _dave_decrypt_inner does NOT drop packets due to "session not ready".
+        handshake_ok = False
+        for _ in range(40):
+            conn = getattr(voice_client, "_connection", None)
+            dave_ver = getattr(conn, "dave_protocol_version", 0)
+            dave = getattr(conn, "dave_session", None)
+            dave_ready = getattr(dave, "ready", False) if dave else False
+            if dave_ready:
+                # DAVE v1+ session fully negotiated — safe to record
+                handshake_ok = True
+                logger.info(f"DAVE session ready (v{dave_ver}), starting meeting sink.")
+                break
+            if dave_ver == 0 and dave is None:
+                # Give Discord at least 1.5s to send DAVE_PREPARE_EPOCH before concluding
+                # this is a non-DAVE voice channel (rare on new servers)
+                pass
+            await asyncio.sleep(0.1)
+
+        if not handshake_ok:
+            # Final check: if after 4s dave_ver is still 0 and no session, it's a
+            # non-E2EE channel — safe to proceed without DAVE.
+            conn = getattr(voice_client, "_connection", None)
+            dave_ver = getattr(conn, "dave_protocol_version", 0)
+            dave = getattr(conn, "dave_session", None)
+            if dave_ver == 0 and dave is None:
+                handshake_ok = True
+                logger.info("No DAVE session after 4s — non-E2EE channel, proceeding without DAVE.")
+            else:
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                await ctx.send_error("Could not complete Discord voice encryption handshake (DAVE). Please try again.", ephemeral=False)
+                return
 
         sink = MeetingAudioSink(noise_gate=0)
         sink._voice_client = voice_client
@@ -1332,7 +1362,10 @@ class MeetingCog(commands.Cog):
         try:
             sock_reader = getattr(voice_client._connection, "_socket_reader", None)
             if sock_reader:
-                sock_reader.resume(force=True)
+                # SocketReader.resume() takes no arguments — our monkey-patch in the
+                # imports section already cleared _idle_paused and set _running on register().
+                # Calling resume() here ensures it stays unblocked if it ever re-paused.
+                sock_reader.resume()
                 logger.info(f"Unblocked and force-resumed SocketReader (running={sock_reader._running.is_set()})")
         except Exception as _sr_err:
             logger.warning(f"Failed to force-resume SocketReader: {_sr_err}")

@@ -267,55 +267,14 @@ class SecurityAgent:
 
     async def handle_moderation_error(self, ctx_or_interaction: Any, error: Exception) -> bool:
         """
-        Universal circuit breaker for all Moderation commands across 1,000+ servers.
-        Handles 429 rate limits, Forbidden role hierarchy, and Discord blips cleanly.
+        Record telemetry for moderation exceptions. Returns False so that
+        the global ErrorHandler delivers clean, user-friendly KyroContainer cards.
         """
         self._metrics["mod_errors_shielded"] += 1
         err_str = str(error)
         err_type = type(error).__name__
-
         logger.warning(f"SecurityAgent: Moderation command shielded ({err_type}): {err_str}")
-
-        title = "Moderation Guard Diagnostics"
-        action = "Secured command execution pipeline."
-        advice = "Please check role hierarchy and permissions."
-
-        if isinstance(error, discord.Forbidden) or "hierarchy" in err_str.lower() or "Privilege" in err_str:
-            title = "Role Hierarchy / Permission Constraint"
-            action = "Discord API denied operation due to role hierarchy order."
-            advice = "Ensure Kyro's highest role is positioned above the target member in Server Settings -> Roles."
-
-        elif isinstance(error, discord.HTTPException) and getattr(error, "status", 0) == 429:
-            title = "Discord API Rate Limit Shield"
-            action = "Discord REST endpoint temporarily throttled bulk action."
-            advice = "Please wait 5 seconds before repeating mass moderation operations."
-
-        container = KyroContainer(accent_color=None)
-        e_reg = getattr(self.bot, "custom_emojis", None)
-        dot = e_reg.get("heart_dot", "•") if e_reg else "•"
-        shield_icon = e_reg.get("icons_shield", "🛡️") if e_reg else "🛡️"
-
-        container.add_section(
-            content=(
-                f"**{shield_icon} Kyro Security Agent • Protection Shield**\n"
-                f"> *{title}*"
-            )
-        )
-        container.add_separator(divider=True)
-        container.add_text(
-            f"> {dot} **Notice:** `{err_type}: {err_str[:120]}`\n"
-            f"> {dot} **Autonomous Diagnosis:** {action}\n"
-            f"> {dot} **Recommended Fix:** {advice}"
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Autonomous Security & Moderation Engine • Real-time Protection")
-
-        try:
-            from src.utils.containers import send_container_response
-            await send_container_response(ctx_or_interaction, container)
-            return True
-        except Exception:
-            return False
+        return False
 
     # ── Asynchronous Memory & State Pruner ──
 

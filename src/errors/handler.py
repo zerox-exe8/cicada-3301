@@ -48,6 +48,15 @@ class ErrorHandler(commands.Cog):
 
         container = KyroContainer(accent_color=None)
 
+        sig = ctx.command.signature if ctx.command else ""
+        if sig:
+            import re
+            sig = re.sub(r'="[^"]*"', '', sig)
+            sig = re.sub(r"='[^']*'", '', sig)
+            sig = re.sub(r'=\S+', '', sig)
+        cmd_name = ctx.command.qualified_name if ctx.command else "command"
+        clean_usage = f"`{ctx.prefix}{cmd_name} {sig}`".strip()
+
         if isinstance(error, commands.MissingPermissions):
             missing_perms = ", ".join(f"`{p}`" for p in error.missing_permissions)
             container.add_section(
@@ -75,10 +84,13 @@ class ErrorHandler(commands.Cog):
             )
 
         elif isinstance(error, (commands.NotOwner, commands.CheckFailure)):
+            err_msg = str(error).strip()
+            if not err_msg or "check functions for command" in err_msg.lower():
+                err_msg = "You do not have permission to use this command."
             container.add_section(
                 content=(
                     f"**{lock_icon}Access Denied**\n"
-                    f"> {str(error) or 'You do not have permission to use this command.'}"
+                    f"> {err_msg}"
                 )
             )
 
@@ -87,7 +99,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Invalid Command Usage**\n"
                     f"> Missing required parameter: `{error.param.name}`\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -98,7 +110,7 @@ class ErrorHandler(commands.Cog):
                     f"**{warn_icon}Member Not Found**\n"
                     f"> Could not find member `{arg}` in this server.\n"
                     f"> Please mention the member, use their username, or provide their User ID.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -109,7 +121,7 @@ class ErrorHandler(commands.Cog):
                     f"**{warn_icon}User Not Found**\n"
                     f"> Could not find user `{arg}`.\n"
                     f"> Please provide a valid User ID or mention.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -120,7 +132,7 @@ class ErrorHandler(commands.Cog):
                     f"**{warn_icon}Role Not Found**\n"
                     f"> Could not find role `{arg}` in this server.\n"
                     f"> Please mention the role or provide its exact name or ID.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -130,7 +142,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Channel Not Found**\n"
                     f"> Could not find or access channel `{arg}`.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -140,7 +152,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Message Not Found**\n"
                     f"> Could not find message `{arg}` in this channel.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -150,7 +162,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Thread Not Found**\n"
                     f"> Could not find thread `{arg}`.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -159,7 +171,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Invalid Parameter**\n"
                     f"> Could not convert parameter `{error.param.name}` to a valid target.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -169,7 +181,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Invalid Option**\n"
                     f"> Invalid choice for parameter `{error.param.name}`. Expected one of: {literals}.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -178,7 +190,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Value Out of Range**\n"
                     f"> Value `{error.value}` is outside the permitted range (`{error.minimum}` - `{error.maximum}`).\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -187,7 +199,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Invalid Argument**\n"
                     f"> {str(error)}\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -196,7 +208,7 @@ class ErrorHandler(commands.Cog):
                 content=(
                     f"**{warn_icon}Too Many Arguments**\n"
                     f"> You provided extra arguments that are not accepted.\n"
-                    f"> Usage: `{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`"
+                    f"> Usage: {clean_usage}"
                 )
             )
 
@@ -246,15 +258,6 @@ class ErrorHandler(commands.Cog):
                 "Suppressing error message response to avoid extending rate limit window."
             )
             return
-
-        # Real-time SecurityAgent interception for Moderation & Antinuke commands
-        cog_name = getattr(ctx.command.cog, "qualified_name", "") if ctx.command and ctx.command.cog else ""
-        if any(sec in cog_name.lower() for sec in ("mod", "antinuke", "ban", "kick", "role", "channel", "security", "warn", "timeout")):
-            sec_agent = getattr(self.bot, "security_agent", None)
-            if sec_agent:
-                handled = await sec_agent.handle_moderation_error(ctx, error)
-                if handled:
-                    return
 
         # ── Unhandled exceptions ONLY ──
         # Every branch above produces a user-facing message for an EXPECTED error
@@ -396,15 +399,6 @@ class ErrorHandler(commands.Cog):
                 f"Discord REST API 429 Rate Limit active during slash command '{interaction.command}': {error}."
             )
             return
-
-        # Real-time SecurityAgent interception for slash Moderation & Antinuke commands
-        cmd_name = interaction.command.qualified_name if interaction.command else ""
-        if any(sec in cmd_name.lower() for sec in ("ban", "kick", "timeout", "purge", "role", "warn", "lock", "antinuke", "mod")):
-            sec_agent = getattr(self.bot, "security_agent", None)
-            if sec_agent:
-                handled = await sec_agent.handle_moderation_error(interaction, error)
-                if handled:
-                    return
 
         # ── Unhandled exceptions ONLY ── (see note in on_command_error)
         if not container.components:

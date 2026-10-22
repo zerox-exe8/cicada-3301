@@ -173,7 +173,9 @@ async def probe_node(node: Any, timeout: float = 6.0) -> bool:
     if session is None or getattr(session, "closed", False):
         return False
 
-    uri = f"{node.uri}/v4/version"
+    # `/v4/info` is the Lavalink v4 information endpoint (`/v4/version` does not
+    # exist in v4 and answers 404).
+    uri = f"{node.uri}/v4/info"
 
     # `Node.headers` asserts that a client is attached, which is not the case for
     # a node that never finished connecting. Fall back to an empty header set:
@@ -193,6 +195,42 @@ async def probe_node(node: Any, timeout: float = 6.0) -> bool:
         return True
     except Exception:
         return False
+
+
+async def check_websocket(
+    uri: str,
+    password: str,
+    timeout: float = 8.0,
+) -> tuple[bool, str]:
+    """
+    Verify that a node accepts a WebSocket upgrade before we rely on it.
+
+    Wavelink swallows the handshake error and leaves the node in CONNECTING
+    forever, so without this pre-flight the only symptom is a vague timeout.
+    A reverse proxy that does not forward the Upgrade headers answers with
+    HTTP 400, a wrong password with 401/403 - both are actionable.
+    """
+    ws_url = uri.rstrip("/")
+    if ws_url.startswith("https://"):
+        ws_url = "wss://" + ws_url[len("https://"):]
+    elif ws_url.startswith("http://"):
+        ws_url = "ws://" + ws_url[len("http://"):]
+    ws_url += "/v4/websocket"
+
+    try:
+        timeout_cfg = aiohttp.ClientTimeout(total=timeout, connect=timeout)
+        async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
+            async with session.ws_connect(
+                ws_url,
+                headers={"Authorization": password},
+            ):
+                return True, "websocket handshake ok"
+    except aiohttp.WSServerHandshakeError as e:
+        return False, f"websocket rejected with HTTP {e.status}"
+    except asyncio.TimeoutError:
+        return False, "websocket handshake timed out"
+    except Exception as e:
+        return False, err_text(e)
 
 
 async def connect_lavalink_node(
@@ -218,37 +256,39 @@ async def connect_lavalink_node(
             password,
             inactive_player_timeout=inactive_player_timeout,
         )
+        reason: Optional[str] = None
         try:
             await asyncio.wait_for(
                 wavelink.Pool.connect(nodes=[node], client=bot),
                 timeout=LAVALINK_CONNECT_TIMEOUT,
             )
         except Exception as e:
-            failures.append(f"{uri} -> {err_text(e)}")
-            logger.warning(f"Lavalink node {uri} unreachable: {err_text(e)}")
-            await close_node(node)
-            continue
+            reason = err_text(e)
+        else:
+            # Pool.connect logs connection errors instead of raising them, so the
+            # real state has to be verified explicitly.
+            for _ in range(10):
+                if node.status == wavelink.NodeStatus.CONNECTED:
+                    break
+                await asyncio.sleep(0.5)
 
-        # Pool.connect logs connection errors instead of raising them.
-        for _ in range(10):
             if node.status == wavelink.NodeStatus.CONNECTED:
-                break
-            await asyncio.sleep(0.5)
+                if await probe_node(node):
+                    logger.info(f"Connected to Lavalink node {uri}")
+                    return node
+                reason = "REST API unresponsive"
+            else:
+                reason = f"status={getattr(node.status, 'name', node.status)}"
 
-        if node.status != wavelink.NodeStatus.CONNECTED:
-            failures.append(f"{uri} -> status={getattr(node.status, 'name', node.status)}")
-            logger.warning(f"Lavalink node {uri} did not reach CONNECTED state.")
-            await close_node(node)
-            continue
+        await close_node(node)
 
-        if not await probe_node(node):
-            failures.append(f"{uri} -> REST API unresponsive")
-            logger.warning(f"Lavalink node {uri} connected but its REST API does not answer.")
-            await close_node(node)
-            continue
-
-        logger.info(f"Connected to Lavalink node {uri}")
-        return node
+        # Wavelink swallows the websocket handshake error and leaves the node in
+        # CONNECTING forever, so the failure reason is unknown at this point.
+        # A handshake probe explains it exactly: HTTP 400 means the node's proxy
+        # does not forward WebSocket upgrades, 401/403 means a wrong password.
+        _, ws_reason = await check_websocket(uri, password)
+        failures.append(f"{uri} -> {ws_reason} ({reason})")
+        logger.warning(f"Lavalink node {uri} unusable: {ws_reason} ({reason})")
 
     detail = "; ".join(failures) if failures else "no URI configured"
     raise LavalinkUnavailable(f"No reachable Lavalink node ({detail})")

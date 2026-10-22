@@ -262,8 +262,24 @@ class Music(commands.Cog):
         # bot itself was moved INTO a voice channel (added by a user, no ?join used)
         if member.id == self.bot.user.id and after.channel is not None:
             guild = after.channel.guild
+
+            # Meeting Safety: Never hijack voice or auto-connect music if a Meeting is active or connecting
+            meeting_cog = self.bot.get_cog("Meeting")
+            if meeting_cog and (
+                guild.id in getattr(meeting_cog, "_sessions", {})
+                or guild.id in getattr(meeting_cog, "_connecting_guilds", set())
+            ):
+                return
+
             vc = guild.voice_client
-            if vc is None or not getattr(vc, "connected", False):
+            is_connected = False
+            if vc is not None:
+                if hasattr(vc, "is_connected"):
+                    is_connected = vc.is_connected()
+                else:
+                    is_connected = getattr(vc, "connected", False)
+
+            if not is_connected:
                 # discord.py only opens a voice connection when connect() is called,
                 # so a bot that gets dragged into a channel would otherwise sit there
                 # silently forever. Establish the connection ourselves.
@@ -321,9 +337,19 @@ class Music(commands.Cog):
     async def _auto_connect_voice(self, channel: discord.VoiceChannel | discord.StageChannel) -> None:
         """Connect to a voice channel the bot was added to without a ?join command."""
         guild = channel.guild
+
+        # Meeting Safety: Do not connect music if a Meeting is active or in-flight
+        meeting_cog = self.bot.get_cog("Meeting")
+        if meeting_cog and (
+            guild.id in getattr(meeting_cog, "_sessions", {})
+            or guild.id in getattr(meeting_cog, "_connecting_guilds", set())
+        ):
+            logger.debug(f"Guild {guild.id}: Skipping auto_connect_voice because Meeting is active/connecting.")
+            return
+
         try:
             player = self.controller.get_or_create_player(guild)
-            if player.voice_client and player.voice_client.connected:
+            if player.voice_client and getattr(player.voice_client, "connected", False):
                 return
             player.cancel_empty_vc_timer(auto_resume=False)
             await player.connect_voice(channel)
@@ -380,6 +406,24 @@ class Music(commands.Cog):
             return
 
         target_channel = ctx.author.voice.channel
+
+        # Mutual exclusion: check if Voice Meeting Intelligence is actively recording
+        meeting_cog = self.bot.get_cog("Meeting")
+        if meeting_cog and (
+            ctx.guild.id in getattr(meeting_cog, "_sessions", {})
+            or ctx.guild.id in getattr(meeting_cog, "_connecting_guilds", set())
+        ):
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=(
+                    "**Voice Session Conflict**\n"
+                    "> An active Voice Meeting session is currently recording in this server.\n"
+                    "> Please stop the meeting with `,meeting stop` before connecting music."
+                )
+            )
+            await send_container_response(ctx, container)
+            return
+
         player = self.controller.get_or_create_player(ctx.guild)
         player.home_channel = ctx.channel
 

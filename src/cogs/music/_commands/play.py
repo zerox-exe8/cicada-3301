@@ -51,9 +51,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await send_container_response(ctx, container)
             return
 
-    # Mutual exclusion: check if Voice Meeting Intelligence is actively recording
+    # Mutual exclusion: check if Voice Meeting Intelligence is actively recording or connecting
     meeting_cog = cog.bot.get_cog("Meeting")
-    if meeting_cog and hasattr(meeting_cog, "_sessions") and ctx.guild.id in meeting_cog._sessions:
+    if meeting_cog and (
+        (hasattr(meeting_cog, "_sessions") and ctx.guild.id in meeting_cog._sessions)
+        or (hasattr(meeting_cog, "_connecting_guilds") and ctx.guild.id in getattr(meeting_cog, "_connecting_guilds", set()))
+    ):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(

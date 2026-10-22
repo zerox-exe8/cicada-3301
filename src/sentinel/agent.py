@@ -470,8 +470,11 @@ class KyroSentinel:
                     self._zombie_voice_candidates.pop(guild.id, None)
                     continue
 
-                # 1. Never purge an active Meeting recording session
-                if meeting_cog and hasattr(meeting_cog, "_sessions") and guild.id in meeting_cog._sessions:
+                # 1. Never purge an active or connecting Meeting recording session
+                if meeting_cog and (
+                    (hasattr(meeting_cog, "_sessions") and guild.id in meeting_cog._sessions)
+                    or (hasattr(meeting_cog, "_connecting_guilds") and guild.id in getattr(meeting_cog, "_connecting_guilds", set()))
+                ):
                     self._zombie_voice_candidates.pop(guild.id, None)
                     continue
 

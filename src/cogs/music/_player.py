@@ -152,6 +152,16 @@ class GuildPlayer:
     async def connect_voice(self, channel: discord.VoiceChannel | discord.StageChannel) -> None:
         """Connect or move to the specified voice channel using Wavelink with race-condition locking."""
         async with self._connect_lock:
+            # Check if this guild has an active or in-flight Voice Meeting session
+            meeting_cog = self.bot.get_cog("Meeting")
+            if meeting_cog and (
+                self.guild.id in getattr(meeting_cog, "_sessions", {})
+                or self.guild.id in getattr(meeting_cog, "_connecting_guilds", set())
+            ):
+                raise RuntimeError(
+                    f"Cannot connect music player: Guild {self.guild.id} is currently running an active Voice Meeting."
+                )
+
             # 1. Pre-flight permission and capacity verification
             me = self.guild.me
             perms = channel.permissions_for(me)
@@ -180,6 +190,13 @@ class GuildPlayer:
 
             # If connected to an invalid, disconnected, or non-wavelink player, clean it up first
             if vc:
+                # Never disconnect an active Meeting VoiceRecvClient!
+                if meeting_cog and (
+                    self.guild.id in getattr(meeting_cog, "_sessions", {})
+                    or self.guild.id in getattr(meeting_cog, "_connecting_guilds", set())
+                ):
+                    return
+
                 # Flag the disconnect as self-initiated so the VOICE_STATE_UPDATE that
                 # Discord sends back for it cannot tear down the session we are about
                 # to establish.

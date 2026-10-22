@@ -505,7 +505,7 @@ class MeetingSession:
     is_processing: bool = False
 
 
-class MeetingCog(commands.Cog):
+class MeetingCog(commands.Cog, name="Meeting"):
     """
     Intelligent Autonomous Voice Meeting Recording & Executive Summarization Engine.
     Records multi-speaker meetings silently, transcribes audio via Groq Whisper,
@@ -519,9 +519,12 @@ class MeetingCog(commands.Cog):
         self.repo: MeetingRepository = MeetingRepository(bot.db)
         # guild_id -> MeetingSession
         self._sessions: dict[int, MeetingSession] = {}
+        # guild_id -> in-flight connection semaphore
+        self._connecting_guilds: set[int] = set()
 
     def cog_unload(self) -> None:
         """Clean up all active recording sessions when unloading cog."""
+        self._connecting_guilds.clear()
         for s in list(self._sessions.values()):
             try:
                 s.voice_client.stop_listening()
@@ -1202,226 +1205,248 @@ class MeetingCog(commands.Cog):
                 await ctx.send_warning(f"A meeting is already active in {vc_str}. Use `,meeting stop` first.")
                 return
 
-        # Concurrency safety: check if Lavalink music is playing
+        # Concurrency safety: check if Lavalink music is actively playing or queued
         try:
-            player = getattr(guild, "voice_client", None)
-            if player and hasattr(player, "playing") and player.playing:
-                await ctx.send_warning(
-                    "Music playback is currently active in this server. Please pause or stop music before starting a meeting session."
-                )
-                return
+            music_cog = self.bot.get_cog("Music")
+            if music_cog and hasattr(music_cog, "controller"):
+                m_player = music_cog.controller.get_player(guild.id)
+                if m_player and (m_player.is_playing or len(m_player.queue) > 0):
+                    await ctx.send_warning(
+                        "Music playback or queue is currently active in this server. Please stop music before starting a meeting session."
+                    )
+                    return
         except Exception:
             pass
 
-        # Cleanly disconnect any idle, stale, or existing voice connection before attaching VoiceRecvClient
-        had_previous_voice = bool(guild.voice_client or (guild.me.voice and guild.me.voice.channel))
-        if had_previous_voice:
-            existing_vc = guild.voice_client
-            if existing_vc:
-                try:
-                    if hasattr(existing_vc, "stop_listening"):
-                        existing_vc.stop_listening()
-                except Exception:
-                    pass
-                try:
-                    await asyncio.wait_for(existing_vc.disconnect(force=True), timeout=3.0)
-                except Exception:
-                    pass
-                try:
-                    existing_vc.cleanup()
-                except Exception:
-                    pass
-            try:
-                self.bot._connection._remove_voice_client(guild.id)
-            except Exception:
-                pass
-            await asyncio.sleep(0.5)
-
-        # Auto-ensure meeting channel if not yet created
-        settings = await self._get_meeting_settings(guild.id)
-        if not settings.get("channel_id"):
-            target_ch, _ = await ensure_meeting_channel(
-                self.bot, guild, author, privacy_mode=settings.get("privacy_mode", "locked")
-            )
-            if target_ch:
-                await self.repo.set_channel(
-                    guild.id,
-                    target_ch.id,
-                    privacy_mode=settings.get("privacy_mode", "locked"),
-                )
-
-        # Check voice receiver module availability
-        if not VOICE_RECV_AVAILABLE or voice_recv is None:
-            await ctx.send_warning(
-                "Voice receiver module (`discord-ext-voice-recv`) is not active in this bot environment.\n"
-                "Please run `pip install discord-ext-voice-recv` on the server."
-            )
+        if guild.id in self._connecting_guilds:
+            await ctx.send_warning("A voice connection attempt is already in progress for this server. Please wait a moment.")
             return
 
-        # Connect with VoiceRecvClient (automated retry & reconnect=True for Discord 4006 session recovery)
-        voice_client: Optional[voice_recv.VoiceRecvClient] = None
-        last_conn_err: Optional[Exception] = None
+        self._connecting_guilds.add(guild.id)
+        try:
+            # Cleanly disconnect any idle, stale, or existing voice connection before attaching VoiceRecvClient
+            had_previous_voice = bool(guild.voice_client or (guild.me.voice and guild.me.voice.channel))
+            if had_previous_voice:
+                try:
+                    music_cog = self.bot.get_cog("Music")
+                    if music_cog and hasattr(music_cog, "controller"):
+                        m_player = music_cog.controller.get_player(guild.id)
+                        if m_player:
+                            m_player.cancel_empty_vc_timer(auto_resume=False)
+                            m_player.voice_client = None
+                except Exception:
+                    pass
 
-        for attempt in range(3):
-            try:
-                if hasattr(self.bot._connection, "_voice_clients"):
+                existing_vc = guild.voice_client
+                if existing_vc:
+                    try:
+                        if hasattr(existing_vc, "stop_listening"):
+                            existing_vc.stop_listening()
+                    except Exception:
+                        pass
+                    try:
+                        await asyncio.wait_for(existing_vc.disconnect(force=True), timeout=3.0)
+                    except Exception:
+                        pass
+                    try:
+                        existing_vc.cleanup()
+                    except Exception:
+                        pass
+                try:
                     self.bot._connection._remove_voice_client(guild.id)
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
 
-                voice_client = await vc.connect(
-                    cls=voice_recv.VoiceRecvClient, timeout=20.0, reconnect=True, self_deaf=False, self_mute=False
+            # Auto-ensure meeting channel if not yet created
+            settings = await self._get_meeting_settings(guild.id)
+            if not settings.get("channel_id"):
+                target_ch, _ = await ensure_meeting_channel(
+                    self.bot, guild, author, privacy_mode=settings.get("privacy_mode", "locked")
                 )
-                if voice_client and voice_client.is_connected():
-                    break
+                if target_ch:
+                    await self.repo.set_channel(
+                        guild.id,
+                        target_ch.id,
+                        privacy_mode=settings.get("privacy_mode", "locked"),
+                    )
+
+            # Check voice receiver module availability
+            if not VOICE_RECV_AVAILABLE or voice_recv is None:
+                await ctx.send_warning(
+                    "Voice receiver module (`discord-ext-voice-recv`) is not active in this bot environment.\n"
+                    "Please run `pip install discord-ext-voice-recv` on the server."
+                )
+                return
+
+            # Connect with VoiceRecvClient (automated retry & reconnect=True for Discord 4006 session recovery)
+            voice_client: Optional[voice_recv.VoiceRecvClient] = None
+            last_conn_err: Optional[Exception] = None
+
+            for attempt in range(3):
+                try:
+                    if hasattr(self.bot._connection, "_voice_clients"):
+                        self.bot._connection._remove_voice_client(guild.id)
+
+                    voice_client = await vc.connect(
+                        cls=voice_recv.VoiceRecvClient, timeout=20.0, reconnect=True, self_deaf=False, self_mute=False
+                    )
+                    if voice_client and voice_client.is_connected():
+                        break
+                except Exception as e:
+                    last_conn_err = e
+                    logger.warning(f"Guild {guild.id}: VoiceRecvClient connect attempt {attempt + 1} notice: {e}")
+                    try:
+                        if guild.voice_client:
+                            await asyncio.wait_for(guild.voice_client.disconnect(force=True), timeout=3.0)
+                    except Exception:
+                        pass
+                    try:
+                        self.bot._connection._remove_voice_client(guild.id)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(1.0 + attempt * 0.5)
+
+            if not voice_client or not voice_client.is_connected():
+                logger.error(f"Failed to connect to VC for meeting in guild {guild.id}: {last_conn_err}", exc_info=True)
+                await ctx.send_error(f"Could not connect to voice channel: `{last_conn_err}`", ephemeral=False)
+                return
+
+            # Proactively ensure DAVE session is initialized if Discord requested DAVE protocol
+            try:
+                conn = getattr(voice_client, "_connection", None)
+                dave_ver = getattr(conn, "dave_protocol_version", 0)
+                if conn and dave_ver > 0 and getattr(conn, "dave_session", None) is None:
+                    await conn.reinit_dave_session()
+                    logger.info(f"Initialized DAVE v{dave_ver} session and transmitted MLS Key Package.")
             except Exception as e:
-                last_conn_err = e
-                logger.warning(f"Guild {guild.id}: VoiceRecvClient connect attempt {attempt + 1} notice: {e}")
+                logger.warning(f"Notice during DAVE init: {e}")
+
+            # Wait up to 3s for initial voice gateway secret_key (XSalsa20 session established)
+            for _ in range(30):
+                if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
+                    break
+                await asyncio.sleep(0.1)
+
+            if not (voice_client.is_connected() and getattr(voice_client, "secret_key", None)):
                 try:
-                    if guild.voice_client:
-                        await asyncio.wait_for(guild.voice_client.disconnect(force=True), timeout=3.0)
+                    await voice_client.disconnect(force=True)
                 except Exception:
                     pass
-                try:
-                    self.bot._connection._remove_voice_client(guild.id)
-                except Exception:
-                    pass
-                await asyncio.sleep(1.0 + attempt * 0.5)
+                await ctx.send_error("Could not complete Discord voice encryption handshake. Please try again.", ephemeral=False)
+                return
 
-        if not voice_client or not voice_client.is_connected():
-            logger.error(f"Failed to connect to VC for meeting in guild {guild.id}: {last_conn_err}", exc_info=True)
-            await ctx.send_error(f"Could not connect to voice channel: `{last_conn_err}`", ephemeral=False)
-            return
-
-        # Proactively ensure DAVE session is initialized if Discord requested DAVE protocol
-        try:
+            # Wait up to 3.5s for DAVE MLS session to become ready if DAVE was initiated by Discord
+            handshake_ok = False
             conn = getattr(voice_client, "_connection", None)
-            dave_ver = getattr(conn, "dave_protocol_version", 0)
-            if conn and dave_ver > 0 and getattr(conn, "dave_session", None) is None:
-                await conn.reinit_dave_session()
-                logger.info(f"Initialized DAVE v{dave_ver} session and transmitted MLS Key Package.")
-        except Exception as e:
-            logger.warning(f"Notice during DAVE init: {e}")
-
-        # Wait up to 3s for initial voice gateway secret_key (XSalsa20 session established)
-        for _ in range(30):
-            if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
-                break
-            await asyncio.sleep(0.1)
-
-        if not (voice_client.is_connected() and getattr(voice_client, "secret_key", None)):
-            try:
-                await voice_client.disconnect(force=True)
-            except Exception:
-                pass
-            await ctx.send_error("Could not complete Discord voice encryption handshake. Please try again.", ephemeral=False)
-            return
-
-        # Wait up to 3.5s for DAVE MLS session to become ready if DAVE was initiated by Discord
-        handshake_ok = False
-        conn = getattr(voice_client, "_connection", None)
-        for _ in range(35):
-            dave_ver = getattr(conn, "dave_protocol_version", 0)
-            dave = getattr(conn, "dave_session", None)
-            dave_ready = getattr(dave, "ready", False) if dave else False
-            if dave_ready:
-                handshake_ok = True
-                logger.info(f"DAVE session ready (v{dave_ver}), starting meeting sink.")
-                break
-            if dave_ver == 0 and dave is None:
-                # Standard voice channel
-                pass
-            await asyncio.sleep(0.1)
-
-        if not handshake_ok:
-            dave_ver = getattr(conn, "dave_protocol_version", 0)
-            dave = getattr(conn, "dave_session", None)
-            dave_ready = getattr(dave, "ready", False) if dave else False
-            if dave_ver == 0 and dave is None:
-                handshake_ok = True
-                logger.info("Non-E2EE voice channel, proceeding with standard audio pipeline.")
-            elif dave is not None and not dave_ready:
-                try:
-                    dave.set_passthrough_mode(True, 120)
+            for _ in range(35):
+                dave_ver = getattr(conn, "dave_protocol_version", 0)
+                dave = getattr(conn, "dave_session", None)
+                dave_ready = getattr(dave, "ready", False) if dave else False
+                if dave_ready:
                     handshake_ok = True
-                    logger.info(f"DAVE v{dave_ver} MLS transition: enabled passthrough mode.")
-                except Exception as _pte:
-                    logger.debug(f"Failed to set DAVE passthrough mode: {_pte}")
+                    logger.info(f"DAVE session ready (v{dave_ver}), starting meeting sink.")
+                    break
+                if dave_ver == 0 and dave is None:
+                    # Standard non-E2EE voice channel - no MLS handshake delay needed
+                    handshake_ok = True
+                    logger.info("Non-E2EE voice channel, proceeding immediately with standard audio pipeline.")
+                    break
+                await asyncio.sleep(0.1)
 
-        if not handshake_ok:
+            if not handshake_ok:
+                dave_ver = getattr(conn, "dave_protocol_version", 0)
+                dave = getattr(conn, "dave_session", None)
+                dave_ready = getattr(dave, "ready", False) if dave else False
+                if dave_ver == 0 and dave is None:
+                    handshake_ok = True
+                    logger.info("Non-E2EE voice channel, proceeding with standard audio pipeline.")
+                elif dave is not None and not dave_ready:
+                    try:
+                        dave.set_passthrough_mode(True, 120)
+                        handshake_ok = True
+                        logger.info(f"DAVE v{dave_ver} MLS transition: enabled passthrough mode.")
+                    except Exception as _pte:
+                        logger.debug(f"Failed to set DAVE passthrough mode: {_pte}")
+
+            if not handshake_ok:
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                await ctx.send_error("Could not complete Discord voice encryption handshake (DAVE). Please try again.", ephemeral=False)
+                return
+
+            sink = MeetingAudioSink(noise_gate=0)
+            sink._voice_client = voice_client
             try:
-                await voice_client.disconnect(force=True)
-            except Exception:
-                pass
-            await ctx.send_error("Could not complete Discord voice encryption handshake (DAVE). Please try again.", ephemeral=False)
-            return
+                voice_client.listen(sink)
+            except Exception as e:
+                logger.error(f"Failed to attach sink in guild {guild.id}: {e}", exc_info=True)
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                await ctx.send_error(f"Failed to initiate voice receive pipeline: `{e}`", ephemeral=False)
+                return
 
-        sink = MeetingAudioSink(noise_gate=0)
-        sink._voice_client = voice_client
-        try:
-            voice_client.listen(sink)
-        except Exception as e:
-            logger.error(f"Failed to attach sink in guild {guild.id}: {e}", exc_info=True)
+            # Force-resume discord.py SocketReader to guarantee UDP packet loop is unblocked
             try:
-                await voice_client.disconnect(force=True)
-            except Exception:
-                pass
-            await ctx.send_error(f"Failed to initiate voice receive pipeline: `{e}`", ephemeral=False)
-            return
+                sock_reader = getattr(voice_client._connection, "_socket_reader", None)
+                if sock_reader:
+                    # SocketReader.resume() takes no arguments — our monkey-patch in the
+                    # imports section already cleared _idle_paused and set _running on register().
+                    # Calling resume() here ensures it stays unblocked if it ever re-paused.
+                    sock_reader.resume()
+                    logger.info(f"Unblocked and force-resumed SocketReader (running={sock_reader._running.is_set()})")
+            except Exception as _sr_err:
+                logger.warning(f"Failed to force-resume SocketReader: {_sr_err}")
 
-        # Force-resume discord.py SocketReader to guarantee UDP packet loop is unblocked
-        try:
-            sock_reader = getattr(voice_client._connection, "_socket_reader", None)
-            if sock_reader:
-                # SocketReader.resume() takes no arguments — our monkey-patch in the
-                # imports section already cleared _idle_paused and set _running on register().
-                # Calling resume() here ensures it stays unblocked if it ever re-paused.
-                sock_reader.resume()
-                logger.info(f"Unblocked and force-resumed SocketReader (running={sock_reader._running.is_set()})")
-        except Exception as _sr_err:
-            logger.warning(f"Failed to force-resume SocketReader: {_sr_err}")
+            # Prime Discord Voice SFU and punch UDP firewall hole to start receiving participant audio
+            try:
+                if hasattr(voice_client, "ws") and voice_client.ws:
+                    await voice_client.ws.speak(discord.gateway.SpeakingState.voice)
+                    for _ in range(5):
+                        voice_client.send_audio_packet(b"\xf8\xff\xfe", encode=False)
+                        await asyncio.sleep(0.02)
+                    await voice_client.ws.speak(discord.gateway.SpeakingState.none)
+            except Exception as e:
+                logger.debug(f"Notice priming voice gateway speaking state: {e}")
 
-        # Prime Discord Voice SFU and punch UDP firewall hole to start receiving participant audio
-        try:
-            if hasattr(voice_client, "ws") and voice_client.ws:
-                await voice_client.ws.speak(discord.gateway.SpeakingState.voice)
-                for _ in range(5):
-                    voice_client.send_audio_packet(b"\xf8\xff\xfe", encode=False)
-                    await asyncio.sleep(0.02)
-                await voice_client.ws.speak(discord.gateway.SpeakingState.none)
-        except Exception as e:
-            logger.debug(f"Notice priming voice gateway speaking state: {e}")
+            self._sessions[guild.id] = MeetingSession(
+                guild_id=guild.id,
+                voice_channel_id=vc.id,
+                text_channel_id=ctx.channel.id,
+                host_id=author.id,
+                start_time=time.time(),
+                voice_client=voice_client,
+                sink=sink,
+            )
 
-        self._sessions[guild.id] = MeetingSession(
-            guild_id=guild.id,
-            voice_channel_id=vc.id,
-            text_channel_id=ctx.channel.id,
-            host_id=author.id,
-            start_time=time.time(),
-            voice_client=voice_client,
-            sink=sink,
-        )
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
 
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
-        sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
+            # Fetch destination channel mention
+            settings = await self._get_meeting_settings(guild.id)
+            ch_id = settings.get("channel_id")
+            dest_str = f"<#{ch_id}>" if ch_id else ctx.channel.mention
 
-        # Fetch destination channel mention
-        settings = await self._get_meeting_settings(guild.id)
-        ch_id = settings.get("channel_id")
-        dest_str = f"<#{ch_id}>" if ch_id else ctx.channel.mention
-
-        container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=f"**Kyro Meeting Started**\n> *Connected to **{vc.name}**. Voice intelligence is active.*"
-        )
-        container.add_separator(divider=True)
-        container.add_text(
-            f"> {dot} **Room:** {vc.mention}\n"
-            f"> {dot} **Recording Status:** {sw_on} `Listening & Diarizing`\n"
-            f"> {dot} **Summary Destination:** {dest_str}\n"
-            f"> {dot} **How to finish:** Use `,meeting stop` when your meeting concludes."
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Started by {author.display_name} • <t:{int(time.time())}:f>")
-        await send_container_response(ctx, container)
+            container = KyroContainer(accent_color=None)
+            container.add_section(
+                content=f"**Kyro Meeting Started**\n> *Connected to **{vc.name}**. Voice intelligence is active.*"
+            )
+            container.add_separator(divider=True)
+            container.add_text(
+                f"> {dot} **Room:** {vc.mention}\n"
+                f"> {dot} **Recording Status:** {sw_on} `Listening & Diarizing`\n"
+                f"> {dot} **Summary Destination:** {dest_str}\n"
+                f"> {dot} **How to finish:** Use `,meeting stop` when your meeting concludes."
+            )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Started by {author.display_name} • <t:{int(time.time())}:f>")
+            await send_container_response(ctx, container)
+        finally:
+            self._connecting_guilds.discard(guild.id)
 
     @meeting_group.command(name="stop", aliases=["end"], description="Stop the meeting and generate summary.")
     async def meeting_stop(self, ctx: CustomContext) -> None:
@@ -1467,6 +1492,10 @@ class MeetingCog(commands.Cog):
         self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
     ) -> None:
         """Auto-finish meeting if all members leave the meeting VC."""
+        # Ignore voice state updates where channel did not change (mute/unmute/deafen/stream)
+        if before.channel == after.channel:
+            return
+
         guild = member.guild
         session = self._sessions.get(guild.id)
         if not session:
@@ -1475,6 +1504,11 @@ class MeetingCog(commands.Cog):
         # Check if the bot itself was disconnected from voice
         if self.bot.user and member.id == self.bot.user.id:
             if after.channel is None:
+                # Guard against spurious / delayed gateway disconnect events when client is still alive
+                if session.voice_client and session.voice_client.is_connected():
+                    logger.debug(f"Guild {guild.id}: Received null voice state but VoiceRecvClient is still connected. Ignoring.")
+                    return
+
                 logger.info(f"Bot was disconnected from meeting VC in guild {guild.id}. Finalizing session...")
                 active_s = self._sessions.pop(guild.id, None)
                 if active_s:
@@ -1484,7 +1518,11 @@ class MeetingCog(commands.Cog):
                         active_s.sink.cleanup()
                     except Exception:
                         pass
-                    asyncio.create_task(self._process_meeting_completion(active_s))
+                    # Only synthesize AI completion if meeting ran for at least 10 seconds
+                    if time.time() - active_s.start_time >= 10.0:
+                        asyncio.create_task(self._process_meeting_completion(active_s))
+                    else:
+                        logger.info(f"Guild {guild.id}: Meeting disconnected <10s after start ({time.time() - active_s.start_time:.1f}s); cleanly discarded.")
             return
 
         if member.bot:
@@ -1512,7 +1550,10 @@ class MeetingCog(commands.Cog):
                         self.bot._connection._remove_voice_client(guild.id)
                     except Exception:
                         pass
-                    asyncio.create_task(self._process_meeting_completion(active_s))
+                    if time.time() - active_s.start_time >= 10.0:
+                        asyncio.create_task(self._process_meeting_completion(active_s))
+                    else:
+                        logger.info(f"Guild {guild.id}: Meeting ended due to empty VC in <10s; cleanly discarded.")
 
 
 async def setup(bot: KyroBot) -> None:

@@ -134,6 +134,8 @@ class MusicAgent:
                     pass
 
                 # 3. Transmit Gateway Opcode 4 to reset state on Discord voice servers
+                if player:
+                    player._disconnect_expected_until = time.monotonic() + 5.0
                 try:
                     await guild.change_voice_state(channel=None)
                     await asyncio.sleep(0.3)
@@ -448,7 +450,8 @@ class MusicAgent:
 
                     vc = getattr(player, "voice_client", None)
                     # Zombie criteria: no voice client, or voice client disconnected
-                    if not vc or not getattr(vc, "connected", False):
+                    is_live = bool(vc and (getattr(vc, "connected", False) or getattr(vc, "is_connected", lambda: False)()))
+                    if not is_live:
                         last_active = getattr(player, "_last_active_time", now)
                         if now - last_active > 180.0 and not player.is_playing:
                             logger.info(f"MusicAgent Sweeper: Purging zombie player in guild {guild_id}")

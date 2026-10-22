@@ -82,25 +82,29 @@ class KyroBot(commands.Bot):
         self.session: aiohttp.ClientSession | None = None
         self.start_time: discord.datetime = discord.utils.utcnow()
 
-        # Core Managers & Emoji Registry
-        self.guild_mgr: GuildManager = GuildManager(self.db, cache=self.cache)
-        self.perm_mgr: PermissionManager = PermissionManager(self, self.db)
-        self.blacklist_mgr: BlacklistManager = BlacklistManager(self.db)
-        self.sys_mgr: SystemManager = SystemManager(self.db)
-        self.log_mgr: LogManager = LogManager(self.db)
-        self.premium_mgr: PremiumManager = PremiumManager(self.db)
-        self.embed_mgr: EmbedManager = EmbedManager(self.db)
-        self.event_mgr: EventManager = EventManager(self.db)
-        self.ticket_mgr: TicketManager = TicketManager(self.db)
-        self.tech_mgr: TechNewsManager = TechNewsManager(self.db)
-        self.dev_mgr: DevPulseManager = DevPulseManager(self.db)
-        self.tech_realtime_mgr: TechRealtimeManager = TechRealtimeManager(self.db)
-        self.temp_voice_mgr: TempVoiceManager = TempVoiceManager(self.db)
-        self.translator_mgr: TranslatorManager = TranslatorManager(self.db)
-        self.sticky_mgr: StickyManager = StickyManager(self.db)
-        self.antinuke_mgr: AntinukeManager = AntinukeManager(self.db)
-        self.media_mgr: MediaManager = MediaManager(self.db)
-        self.giveaway_mgr: GiveawayManager = GiveawayManager(self.db)
+        # Centralized Domain Service Registry (Decoupled Architecture)
+        from src.core.services import ServiceRegistry
+        self.services: ServiceRegistry = ServiceRegistry(self, self.db, self.cache)
+
+        # 100% Backwards-Compatible Manager Aliases for existing cogs/commands
+        self.guild_mgr: GuildManager = self.services.guild
+        self.perm_mgr: PermissionManager = self.services.perm
+        self.blacklist_mgr: BlacklistManager = self.services.blacklist
+        self.sys_mgr: SystemManager = self.services.system
+        self.log_mgr: LogManager = self.services.log
+        self.premium_mgr: PremiumManager = self.services.premium
+        self.embed_mgr: EmbedManager = self.services.embed
+        self.event_mgr: EventManager = self.services.event
+        self.ticket_mgr: TicketManager = self.services.ticket
+        self.tech_mgr: TechNewsManager = self.services.tech
+        self.dev_mgr: DevPulseManager = self.services.dev
+        self.tech_realtime_mgr: TechRealtimeManager = self.services.tech_realtime
+        self.temp_voice_mgr: TempVoiceManager = self.services.temp_voice
+        self.translator_mgr: TranslatorManager = self.services.translator
+        self.sticky_mgr: StickyManager = self.services.sticky
+        self.antinuke_mgr: AntinukeManager = self.services.antinuke
+        self.media_mgr: MediaManager = self.services.media
+        self.giveaway_mgr: GiveawayManager = self.services.giveaway
         self.custom_emojis: EmojiRegistry = EmojiRegistry(self)
         self.no_prefix_users: set[int] = set()
         self.custom_status: str | None = None
@@ -176,38 +180,23 @@ class KyroBot(commands.Bot):
         # connect to Database Pool
         await self.db.connect()
 
-        # load all Manager Caches & Custom Emojis
-        await self.guild_mgr.load_cache()
-        await self.perm_mgr.load_cache()
-        await self.blacklist_mgr.load_cache()
-        await self.sys_mgr.load_cache()
-        await self.log_mgr.load_cache()
-        await self.premium_mgr.load_cache()
-        await self.ticket_mgr.load_cache()
-        await self.tech_mgr.load_cache()
-        await self.dev_mgr.load_cache()
-        await self.tech_realtime_mgr.initialize()
-        await self.temp_voice_mgr.load_cache()
-        await self.translator_mgr.load_cache()
-        await self.sticky_mgr.load_cache()
-        await self.antinuke_mgr.load_cache()
-        await self.media_mgr.load_cache()
-        await self.giveaway_mgr.load_cache()
+        # Load all Domain Services in isolated, fault-tolerant hydration & Custom Emojis
+        await self.services.load_all()
         await self.custom_emojis.load()
 
-        # Load No-Prefix authorized users into memory
+        # Load No-Prefix authorized users into memory via repository
         try:
-            np_rows = await self.db.fetch_all("SELECT user_id FROM system_no_prefix;")
+            np_rows = await self.services.system.repo.get_all_no_prefix_users()
             self.no_prefix_users = {int(r["user_id"]) for r in np_rows}
             logger.info(f"Loaded {len(self.no_prefix_users)} No-Prefix authorized user(s) into memory cache.")
         except Exception as e:
             logger.debug(f"Notice loading No-Prefix users: {e}")
 
-        # Load persistent custom bot status into memory
+        # Load persistent custom bot status into memory via repository
         try:
-            status_row = await self.db.fetch_one("SELECT value FROM system_state WHERE key = 'bot_status';")
-            if status_row and status_row.get("value"):
-                self.custom_status = status_row["value"]
+            status_val = await self.services.system.repo.get_state("bot_status")
+            if status_val:
+                self.custom_status = status_val
                 logger.info(f"Loaded persistent custom bot status: {self.custom_status}")
         except Exception as e:
             logger.debug(f"Notice loading custom status: {e}")

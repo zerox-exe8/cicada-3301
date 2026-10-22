@@ -51,6 +51,20 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             await send_container_response(ctx, container)
             return
 
+    # Mutual exclusion: check if Voice Meeting Intelligence is actively recording
+    meeting_cog = cog.bot.get_cog("Meeting")
+    if meeting_cog and hasattr(meeting_cog, "_sessions") and ctx.guild.id in meeting_cog._sessions:
+        container = KyroContainer(accent_color=None)
+        container.add_section(
+            content=(
+                "**Voice Session Conflict**\n"
+                "> An active Voice Meeting session is currently recording in this server.\n"
+                "> Please stop the meeting with `,meeting stop` before starting music playback."
+            )
+        )
+        await send_container_response(ctx, container)
+        return
+
     player = cog.controller.get_or_create_player(ctx.guild)
     player.home_channel = ctx.channel
     player.cancel_empty_vc_timer(auto_resume=False)

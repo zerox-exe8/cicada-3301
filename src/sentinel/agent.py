@@ -56,6 +56,7 @@ class KyroSentinel:
         self._lavalink_breaker_open: bool = False
         self._event_loop_lag_ms: float = 0.0
         self._session: Optional[aiohttp.ClientSession] = None
+        self._zombie_voice_candidates: dict[int, float] = {}
         self._healed_counts: dict[str, int] = {
             "voice": 0,
             "music": 0,
@@ -452,15 +453,52 @@ class KyroSentinel:
             )
 
     async def _sweep_zombie_voice_clients(self) -> None:
-        """Autonomously sweep and recycle orphaned, disconnected, or hung voice clients."""
+        """Autonomously sweep and recycle orphaned, disconnected, or hung voice clients safely."""
         try:
+            now = time.time()
+            current_guild_ids = {g.id for g in self.bot.guilds}
+            self._zombie_voice_candidates = {
+                gid: ts for gid, ts in self._zombie_voice_candidates.items() if gid in current_guild_ids
+            }
+
+            meeting_cog = self.bot.get_cog("Meeting")
+            music_cog = self.bot.get_cog("Music")
+
             for guild in list(self.bot.guilds):
                 vc = guild.voice_client
-                if vc:
-                    # Check if voice connection is broken or channel missing
-                    if not getattr(vc, "is_connected", lambda: True)() or not getattr(vc, "channel", None):
-                        logger.warning(f"Sentinel: Detected zombie voice client in {guild.name} ({guild.id}). Purging...")
+                if not vc:
+                    self._zombie_voice_candidates.pop(guild.id, None)
+                    continue
+
+                # 1. Never purge an active Meeting recording session
+                if meeting_cog and hasattr(meeting_cog, "_sessions") and guild.id in meeting_cog._sessions:
+                    self._zombie_voice_candidates.pop(guild.id, None)
+                    continue
+
+                # 2. Never purge an active or connecting Music session
+                if music_cog and hasattr(music_cog, "controller"):
+                    player = music_cog.controller.get_player(guild.id)
+                    if player:
+                        if player.playing or getattr(player, "_disconnect_expected_until", 0) > time.monotonic():
+                            self._zombie_voice_candidates.pop(guild.id, None)
+                            continue
+
+                # 3. Check if voice connection is broken or channel missing
+                is_connected = getattr(vc, "is_connected", lambda: True)()
+                has_channel = bool(getattr(vc, "channel", None))
+
+                if not is_connected or not has_channel:
+                    first_seen = self._zombie_voice_candidates.setdefault(guild.id, now)
+                    # Require persistent orphaned state for >= 60 seconds (2 watchdog ticks)
+                    if now - first_seen >= 60.0:
+                        logger.warning(
+                            f"Sentinel: Detected persistently orphaned voice client in {guild.name} ({guild.id}) "
+                            f"(broken for {now - first_seen:.1f}s). Reclaiming..."
+                        )
+                        self._zombie_voice_candidates.pop(guild.id, None)
                         await self.heal_stuck_voice_client(guild)
+                else:
+                    self._zombie_voice_candidates.pop(guild.id, None)
         except Exception as e:
             logger.debug(f"Sentinel: Error during zombie voice sweep: {e}")
 
@@ -538,7 +576,7 @@ class KyroSentinel:
             raise
 
     async def heal_stuck_voice_client(self, guild: discord.Guild) -> bool:
-        """Cleanly reset a zombie/hung voice client in a guild."""
+        """Cleanly reset a zombie/hung voice client in a guild without sending desynchronizing gateway states."""
         try:
             vc = guild.voice_client
             if vc:
@@ -555,14 +593,18 @@ class KyroSentinel:
                     vc.cleanup()
                 except Exception:
                     pass
-            try:
-                self.bot._connection._remove_voice_client(guild.id)
-            except Exception:
-                pass
-            try:
-                await guild.change_voice_state(channel=None)
-            except Exception:
-                pass
+
+            # Only call _remove_voice_client if the guild still has a lingering internal
+            # voice client entry AFTER our disconnect attempt. Blindly calling this on
+            # a guild where voice state was already cleaned up corrupts Discord.py's
+            # internal connection registry and causes Music players to lose their
+            # voice clients silently on the next play command.
+            if guild.voice_client is not None and hasattr(self.bot, "_connection"):
+                try:
+                    self.bot._connection._remove_voice_client(guild.id)
+                except Exception:
+                    pass
+
             music_cog = self.bot.get_cog("Music")
             if music_cog and hasattr(music_cog, "controller"):
                 player = music_cog.controller.get_player(guild.id)
@@ -573,7 +615,7 @@ class KyroSentinel:
                 IncidentSeverity.INFO,
                 "Zombie Voice Client Cleaned",
                 f"Cleaned stuck voice client in guild {guild.id}",
-                action_taken="Forcefully disconnected, purged cache and cleared gateway voice state",
+                action_taken="Safely disconnected orphaned voice client and conditionally purged internal registry",
                 resolved=True,
                 guild_id=guild.id,
             )

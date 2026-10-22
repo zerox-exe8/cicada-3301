@@ -2,25 +2,27 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from src.database.postgres import PostgresDatabase
+from src.database.base import BaseDatabase
+from src.repositories.ticket_repo import TicketRepository
 
 logger = logging.getLogger("Kyro.Managers.Ticket")
 
 
 class TicketManager:
-    """Manager for modular ticket panels and active ticket sessions."""
+    """Manager for modular ticket panels and active ticket sessions via TicketRepository."""
 
-    def __init__(self, db: PostgresDatabase) -> None:
+    def __init__(self, db: BaseDatabase) -> None:
         self.db = db
+        self.repo: TicketRepository = TicketRepository(db)
         # guild_id -> list of panel dicts
         self._panels_cache: dict[int, list[dict[str, Any]]] = {}
         # channel_id -> ticket dict
         self._active_tickets_cache: dict[int, dict[str, Any]] = {}
 
     async def load_cache(self) -> None:
-        """Load all active ticket panels and open tickets into memory."""
+        """Load all active ticket panels and open tickets into memory via repository."""
         try:
-            panels = await self.db.fetch_all("SELECT * FROM ticket_panels ORDER BY id ASC;")
+            panels = await self.repo.get_all_panels()
             self._panels_cache.clear()
             for p in panels:
                 gid = int(p["guild_id"])
@@ -28,7 +30,7 @@ class TicketManager:
                     self._panels_cache[gid] = []
                 self._panels_cache[gid].append(p)
 
-            tickets = await self.db.fetch_all("SELECT * FROM active_tickets WHERE status = 'open';")
+            tickets = await self.repo.get_all_open_tickets()
             self._active_tickets_cache.clear()
             for t in tickets:
                 cid = int(t["channel_id"])
@@ -56,42 +58,22 @@ class TicketManager:
         button_emoji: str | None = None,
         created_by: int = 0,
     ) -> dict[str, Any]:
-        """Create or update a ticket panel configuration."""
+        """Create or update a ticket panel configuration via repository."""
         clean_name = panel_name.lower().strip()
-        query = """
-        INSERT INTO ticket_panels (
-            guild_id, panel_name, embed_name, channel_id, message_id,
-            category_id, support_role_id, log_channel_id, naming_format,
-            button_label, button_style, button_emoji, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        ON CONFLICT (guild_id, panel_name) DO UPDATE SET
-            embed_name = EXCLUDED.embed_name,
-            channel_id = EXCLUDED.channel_id,
-            message_id = EXCLUDED.message_id,
-            category_id = EXCLUDED.category_id,
-            support_role_id = EXCLUDED.support_role_id,
-            log_channel_id = EXCLUDED.log_channel_id,
-            naming_format = EXCLUDED.naming_format,
-            button_label = EXCLUDED.button_label,
-            button_style = EXCLUDED.button_style,
-            button_emoji = EXCLUDED.button_emoji
-        RETURNING *;
-        """
-        row = await self.db.fetch_one(
-            query,
-            guild_id,
-            clean_name,
-            embed_name,
-            channel_id,
-            message_id,
-            category_id,
-            support_role_id,
-            log_channel_id,
-            naming_format,
-            button_label,
-            button_style,
-            button_emoji,
-            created_by,
+        row = await self.repo.upsert_panel(
+            guild_id=guild_id,
+            panel_name=clean_name,
+            embed_name=embed_name,
+            channel_id=channel_id,
+            message_id=message_id,
+            category_id=category_id,
+            support_role_id=support_role_id,
+            log_channel_id=log_channel_id,
+            naming_format=naming_format,
+            button_label=button_label,
+            button_style=button_style,
+            button_emoji=button_emoji,
+            created_by=created_by,
         )
 
         if guild_id not in self._panels_cache:
@@ -109,12 +91,7 @@ class TicketManager:
                 if p["panel_name"] == clean_name:
                     return p
 
-        row = await self.db.fetch_one(
-            "SELECT * FROM ticket_panels WHERE guild_id = $1 AND panel_name = $2;",
-            guild_id,
-            clean_name,
-        )
-        return row
+        return await self.repo.get_panel(guild_id, clean_name)
 
     async def get_panel_by_id(self, panel_id: int) -> dict[str, Any] | None:
         """Fetch a panel by panel ID across caches."""
@@ -123,11 +100,7 @@ class TicketManager:
                 if p.get("id") == panel_id:
                     return p
 
-        row = await self.db.fetch_one(
-            "SELECT * FROM ticket_panels WHERE id = $1;",
-            panel_id,
-        )
-        return row
+        return await self.repo.get_panel_by_id(panel_id)
 
     async def get_panel_by_message(self, guild_id: int, message_id: int) -> dict[str, Any] | None:
         """Fetch a panel by its deployed message ID."""
@@ -136,33 +109,21 @@ class TicketManager:
                 if p.get("message_id") == message_id:
                     return p
 
-        row = await self.db.fetch_one(
-            "SELECT * FROM ticket_panels WHERE guild_id = $1 AND message_id = $2;",
-            guild_id,
-            message_id,
-        )
-        return row
+        return await self.repo.get_panel_by_message(guild_id, message_id)
 
     async def list_panels(self, guild_id: int) -> list[dict[str, Any]]:
         """List all configured panels for a guild."""
         if guild_id in self._panels_cache:
             return list(self._panels_cache[guild_id])
 
-        rows = await self.db.fetch_all(
-            "SELECT * FROM ticket_panels WHERE guild_id = $1 ORDER BY id ASC;",
-            guild_id,
-        )
+        rows = await self.repo.list_panels(guild_id)
         self._panels_cache[guild_id] = rows
         return rows
 
     async def delete_panel(self, guild_id: int, panel_name: str) -> bool:
-        """Delete a ticket panel from database and cache."""
+        """Delete a ticket panel from database and cache via repository."""
         clean_name = panel_name.lower().strip()
-        await self.db.execute(
-            "DELETE FROM ticket_panels WHERE guild_id = $1 AND panel_name = $2;",
-            guild_id,
-            clean_name,
-        )
+        await self.repo.delete_panel(guild_id, clean_name)
         if guild_id in self._panels_cache:
             self._panels_cache[guild_id] = [p for p in self._panels_cache[guild_id] if p["panel_name"] != clean_name]
         return True
@@ -171,14 +132,7 @@ class TicketManager:
 
     async def get_next_ticket_number(self, guild_id: int) -> int:
         """Increment and return the next sequential ticket number for the guild."""
-        query = """
-        INSERT INTO guild_ticket_counters (guild_id, total_tickets)
-        VALUES ($1, 1)
-        ON CONFLICT (guild_id) DO UPDATE SET total_tickets = guild_ticket_counters.total_tickets + 1
-        RETURNING total_tickets;
-        """
-        row = await self.db.fetch_one(query, guild_id)
-        return int(row["total_tickets"]) if row else 1
+        return await self.repo.get_next_ticket_number(guild_id)
 
     # ─── ACTIVE TICKET OPERATIONS ─────────────────────────────────────────────
 
@@ -190,13 +144,8 @@ class TicketManager:
         user_id: int,
         ticket_number: int,
     ) -> dict[str, Any]:
-        """Record an open ticket in the database and cache."""
-        query = """
-        INSERT INTO active_tickets (guild_id, panel_id, channel_id, user_id, ticket_number, status)
-        VALUES ($1, $2, $3, $4, $5, 'open')
-        RETURNING *;
-        """
-        row = await self.db.fetch_one(query, guild_id, panel_id, channel_id, user_id, ticket_number)
+        """Record an open ticket in the database and cache via repository."""
+        row = await self.repo.create_ticket(guild_id, panel_id, channel_id, user_id, ticket_number)
         if row:
             self._active_tickets_cache[channel_id] = row
         return row or {}
@@ -206,10 +155,7 @@ class TicketManager:
         if channel_id in self._active_tickets_cache:
             return self._active_tickets_cache[channel_id]
 
-        row = await self.db.fetch_one(
-            "SELECT * FROM active_tickets WHERE channel_id = $1;",
-            channel_id,
-        )
+        row = await self.repo.get_ticket(channel_id)
         if row and row.get("status") == "open":
             self._active_tickets_cache[channel_id] = row
         return row
@@ -221,38 +167,18 @@ class TicketManager:
                 if panel_id is None or t.get("panel_id") == panel_id:
                     return t
 
-        query = "SELECT * FROM active_tickets WHERE guild_id = $1 AND user_id = $2 AND status = 'open'"
-        args: list[Any] = [guild_id, user_id]
-        if panel_id is not None:
-            query += " AND panel_id = $3"
-            args.append(panel_id)
-        query += " LIMIT 1;"
-
-        row = await self.db.fetch_one(query, *args)
-        return row
+        return await self.repo.get_active_ticket_for_user(guild_id, user_id, panel_id)
 
     async def claim_ticket(self, channel_id: int, claimed_by: int) -> bool:
         """Set the claiming staff member for an active ticket."""
-        await self.db.execute(
-            "UPDATE active_tickets SET claimed_by = $1 WHERE channel_id = $2 AND status = 'open';",
-            claimed_by,
-            channel_id,
-        )
+        await self.repo.claim_ticket(channel_id, claimed_by)
         if channel_id in self._active_tickets_cache:
             self._active_tickets_cache[channel_id]["claimed_by"] = claimed_by
         return True
 
     async def close_ticket(self, channel_id: int, closed_by: int) -> bool:
         """Mark an active ticket as closed."""
-        await self.db.execute(
-            """
-            UPDATE active_tickets
-            SET status = 'closed', closed_at = CURRENT_TIMESTAMP, closed_by = $1
-            WHERE channel_id = $2;
-            """,
-            closed_by,
-            channel_id,
-        )
+        await self.repo.close_ticket(channel_id, closed_by)
         if channel_id in self._active_tickets_cache:
             del self._active_tickets_cache[channel_id]
         return True

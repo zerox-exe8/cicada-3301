@@ -255,7 +255,7 @@ async def discover_working_node(timeout: float = 20.0) -> Optional[tuple[str, st
         return None
 
     async def _probe(uri: str, password: str) -> Optional[str]:
-        ok, _ = await probe_node(uri, password, timeout=min(timeout, 9.0))
+        ok, _ = await probe_candidate_node(uri, password, timeout=min(timeout, 9.0))
         return uri if ok else None
 
     results = await asyncio.gather(
@@ -272,29 +272,41 @@ async def discover_working_node(timeout: float = 20.0) -> Optional[tuple[str, st
     return None
 
 
-async def probe_node(node: Any, timeout: float = 6.0) -> bool:
+async def probe_node(
+    target: Any,
+    password_or_timeout: Any = None,
+    timeout: float = 6.0,
+    user_id: str = "100000000000000001",
+) -> bool:
     """
     Verify that a node's REST API actually answers.
 
-    A node can report ``CONNECTED`` (its websocket is still alive) while its REST
-    API is completely hung - and every player operation (skip, play, stop) goes
-    through the REST API. Treating such a node as healthy is exactly what makes
-    the music commands time out while everything else looks fine.
+    Accepts either an active ``wavelink.Node`` instance (or any object exposing
+    ``uri`` and ``_session``), or a ``(uri, password)`` string pair.
+    Returns True if the node is healthy and responsive, False otherwise.
     """
-    session = getattr(node, "_session", None)
+    if isinstance(target, str):
+        password = str(password_or_timeout) if password_or_timeout is not None else ""
+        ok, _ = await probe_candidate_node(target, password, timeout=timeout, user_id=user_id)
+        return ok
+
+    if isinstance(password_or_timeout, (int, float)):
+        timeout = float(password_or_timeout)
+
+    session = getattr(target, "_session", None)
     if session is None or getattr(session, "closed", False):
         return False
 
     # `/v4/info` is the Lavalink v4 information endpoint (`/v4/version` does not
     # exist in v4 and answers 404).
-    uri = f"{node.uri}/v4/info"
+    uri = f"{getattr(target, 'uri', '')}/v4/info"
 
     # `Node.headers` asserts that a client is attached, which is not the case for
     # a node that never finished connecting. Fall back to an empty header set:
     # the node then answers 401 instead of 200, which still proves the REST API
     # is responsive.
     try:
-        headers = node.headers
+        headers = target.headers
     except Exception:
         headers = {}
 
@@ -357,7 +369,7 @@ async def check_websocket(
         return False, err_text(e)
 
 
-async def probe_node(
+async def probe_candidate_node(
     uri: str,
     password: str,
     timeout: float = 8.0,
@@ -413,7 +425,10 @@ async def probe_node(
             except Exception as e:
                 return False, f"REST {err_text(e)}"
 
-            if "youtube" not in (info.get("sourceManagers") or []):
+            sources = info.get("sourceManagers") or []
+            plugins = [p.get("name") for p in (info.get("plugins") or []) if isinstance(p, dict)]
+            has_youtube = "youtube" in sources or any("youtube" in str(p).lower() for p in plugins)
+            if not has_youtube:
                 return False, "node has no YouTube source"
 
             return True, "node is fully operational"
@@ -482,10 +497,10 @@ async def connect_lavalink_node(
                 await asyncio.sleep(0.5)
 
             if node.status == wavelink.NodeStatus.CONNECTED:
-                if await probe_node(uri, password):
+                if await probe_node(node):
                     logger.info(f"Connected to Lavalink node {uri}")
                     return node
-                reason = "the session was not usable"
+                reason = "REST API unresponsive"
             else:
                 reason = f"status={getattr(node.status, 'name', node.status)}"
 

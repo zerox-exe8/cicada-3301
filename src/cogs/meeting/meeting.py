@@ -1208,7 +1208,7 @@ class MeetingCog(commands.Cog):
                 except Exception:
                     pass
                 try:
-                    await existing_vc.disconnect(force=True)
+                    await asyncio.wait_for(existing_vc.disconnect(force=True), timeout=3.0)
                 except Exception:
                     pass
                 try:
@@ -1267,7 +1267,7 @@ class MeetingCog(commands.Cog):
                 logger.warning(f"Guild {guild.id}: VoiceRecvClient connect attempt {attempt + 1} notice: {e}")
                 try:
                     if guild.voice_client:
-                        await guild.voice_client.disconnect(force=True)
+                        await asyncio.wait_for(guild.voice_client.disconnect(force=True), timeout=3.0)
                 except Exception:
                     pass
                 try:

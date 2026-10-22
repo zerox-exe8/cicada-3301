@@ -38,6 +38,11 @@ Unlike traditional bots constrained by legacy Discord embeds and sluggish databa
   node REST API is health-probed, so a single unresponsive node can never freeze
   the music commands.
 - Automatic failover across `LAVALINK_FALLBACK_URIS` when the primary node is unreachable.
+- **Automatic node discovery**: when every configured node is down, the bot scans
+  the community Lavalink directory and picks a node that passes a full health
+  check (websocket `ready` op + REST API + YouTube source). Community nodes come
+  and go constantly, so this is what keeps the music alive without any manual
+  intervention.
 
 ### 4. Lavalink Node Deployment
 - The Lavalink node runs as its **own Render Background Worker** (`render.lavalink.yaml`),

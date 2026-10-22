@@ -26,7 +26,9 @@ the pool forever. ``discard_node`` removes them properly.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Optional
 
 import aiohttp
@@ -167,6 +169,109 @@ async def close_pool_nodes() -> None:
         await close_node(node)
 
 
+# ── Public node discovery ──
+#
+# Community Lavalink nodes come and go, and most of them have a broken
+# websocket (the handshake is rejected with HTTP 400 by a proxy, or the node
+# closes the socket before sending its 'ready' op). Because the audio session
+# is only created through that websocket, a broken node means the bot cannot
+# play anything at all - even though the REST API still answers and song
+# searches keep working.
+#
+# The directory below is refreshed every few minutes by its maintainers and only
+# lists nodes that were online at that moment. Kyro probes the entries itself
+# and only ever uses a node that passed the full check.
+
+_public_nodes_cache: tuple[float, list[tuple[str, str]]] | None = None
+_PUBLIC_NODE_CACHE_TTL = 900.0  # 15 minutes
+
+
+async def fetch_public_nodes(limit: int = 30) -> list[tuple[str, str]]:
+    """
+    Fetch the community Lavalink directory and return (uri, password) pairs.
+
+    Results are cached for a while so a failing node does not hammer the
+    directory API on every heal attempt.
+    """
+    global _public_nodes_cache
+
+    from src.core.config import Config
+
+    now = time.time()
+    if _public_nodes_cache and now - _public_nodes_cache[0] < _PUBLIC_NODE_CACHE_TTL:
+        return _public_nodes_cache[1][:limit]
+
+    url = (Config.LAVALINK_PUBLIC_LIST_URL or "").strip()
+    if not url:
+        return []
+
+    try:
+        timeout_cfg = aiohttp.ClientTimeout(total=15.0, connect=8.0)
+        async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    logger.warning(f"Lavalink node directory returned HTTP {resp.status}")
+                    return []
+                raw = await resp.text()
+                entries = json.loads(raw)
+    except Exception as e:
+        logger.warning(f"Could not fetch the Lavalink node directory: {err_text(e)}")
+        return []
+
+    nodes: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        version = entry.get("version") or entry.get("restVersion")
+        if version not in ("v4", "4"):
+            continue
+        host = (entry.get("host") or "").strip()
+        if not host:
+            continue
+        port = entry.get("port") or 2333
+        secure = bool(entry.get("secure"))
+        scheme = "https" if secure else "http"
+        uri = f"{scheme}://{host}:{port}"
+        if uri in seen:
+            continue
+        seen.add(uri)
+        nodes.append((uri, entry.get("password") or "youshallnotpass"))
+
+    logger.info(f"Lavalink node directory returned {len(nodes)} v4 node(s).")
+    _public_nodes_cache = (now, nodes)
+    return nodes[:limit]
+
+
+async def discover_working_node(timeout: float = 20.0) -> Optional[tuple[str, str]]:
+    """
+    Find a public Lavalink node that actually works right now.
+
+    Every candidate is probed in parallel, so the whole scan costs about as much
+    as the slowest single probe instead of the sum of all of them.
+    """
+    nodes = await fetch_public_nodes()
+    if not nodes:
+        return None
+
+    async def _probe(uri: str, password: str) -> Optional[str]:
+        ok, _ = await probe_node(uri, password, timeout=min(timeout, 9.0))
+        return uri if ok else None
+
+    results = await asyncio.gather(
+        *[_probe(uri, pw) for uri, pw in nodes],
+        return_exceptions=True,
+    )
+
+    for (uri, _), result in zip(nodes, results):
+        if isinstance(result, str):
+            logger.info(f"Discovered a working public Lavalink node: {uri}")
+            return uri, dict(nodes)[uri]
+
+    logger.warning("No public Lavalink node passed the full health check.")
+    return None
+
+
 async def probe_node(node: Any, timeout: float = 6.0) -> bool:
     """
     Verify that a node's REST API actually answers.
@@ -204,10 +309,21 @@ async def probe_node(node: Any, timeout: float = 6.0) -> bool:
         return False
 
 
+def _ws_url(uri: str) -> str:
+    """Build the websocket URL for a Lavalink node URI."""
+    url = uri.rstrip("/")
+    if url.startswith("https://"):
+        url = "wss://" + url[len("https://"):]
+    elif url.startswith("http://"):
+        url = "ws://" + url[len("http://"):]
+    return url + "/v4/websocket"
+
+
 async def check_websocket(
     uri: str,
     password: str,
     timeout: float = 8.0,
+    user_id: str = "100000000000000001",
 ) -> tuple[bool, str]:
     """
     Verify that a node accepts a WebSocket upgrade before we rely on it.
@@ -216,20 +332,21 @@ async def check_websocket(
     forever, so without this pre-flight the only symptom is a vague timeout.
     A reverse proxy that does not forward the Upgrade headers answers with
     HTTP 400, a wrong password with 401/403 - both are actionable.
-    """
-    ws_url = uri.rstrip("/")
-    if ws_url.startswith("https://"):
-        ws_url = "wss://" + ws_url[len("https://"):]
-    elif ws_url.startswith("http://"):
-        ws_url = "ws://" + ws_url[len("http://"):]
-    ws_url += "/v4/websocket"
 
+    The ``User-Id`` header is mandatory: some nodes reject the handshake with
+    401 when it is missing, even though the password is correct.
+    """
+    headers = {
+        "Authorization": password,
+        "User-Id": str(user_id),
+        "Client-Name": "Wavelink/3.5.2",
+    }
     try:
         timeout_cfg = aiohttp.ClientTimeout(total=timeout, connect=timeout)
         async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
             async with session.ws_connect(
-                ws_url,
-                headers={"Authorization": password},
+                _ws_url(uri),
+                headers=headers,
             ):
                 return True, "websocket handshake ok"
     except aiohttp.WSServerHandshakeError as e:
@@ -240,24 +357,109 @@ async def check_websocket(
         return False, err_text(e)
 
 
+async def probe_node(
+    uri: str,
+    password: str,
+    timeout: float = 8.0,
+    user_id: str = "100000000000000001",
+) -> tuple[bool, str]:
+    """
+    Fully verify a Lavalink node: websocket 'ready' + REST + YouTube source.
+
+    The handshake alone is not enough. A Lavalink node closes the connection
+    right after the upgrade unless the ``User-Id`` header is present, and the
+    session (which holds the players) is only created when the node sends its
+    ``ready`` op. A node that answers the handshake but never sends ``ready``
+    cannot play anything.
+    """
+    headers = {
+        "Authorization": password,
+        # Lavalink closes the socket without this header, and it also rejects
+        # non-snowflake values, so a realistic id is used for the probe.
+        "User-Id": str(user_id),
+        "Client-Name": "Wavelink/3.5.2",
+    }
+    try:
+        timeout_cfg = aiohttp.ClientTimeout(total=timeout, connect=timeout)
+        async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
+            try:
+                async with session.ws_connect(_ws_url(uri), headers=headers) as ws:
+                    msg = await asyncio.wait_for(ws.receive(), timeout=timeout)
+                    if msg.type is not aiohttp.WSMsgType.TEXT:
+                        return False, "websocket closed before the 'ready' op"
+                    try:
+                        payload = json.loads(msg.data)
+                    except Exception:
+                        return False, "websocket sent an invalid payload"
+                    if payload.get("op") != "ready":
+                        return False, f"websocket sent '{payload.get('op')}' instead of 'ready'"
+            except aiohttp.WSServerHandshakeError as e:
+                return False, f"websocket rejected with HTTP {e.status}"
+            except asyncio.TimeoutError:
+                return False, "websocket handshake timed out"
+            except Exception as e:
+                return False, err_text(e)
+
+            # The REST API must answer too and expose the YouTube source.
+            try:
+                async with session.get(
+                    f"{uri.rstrip('/')}/v4/info", headers=headers, timeout=timeout
+                ) as resp:
+                    if resp.status != 200:
+                        return False, f"REST /v4/info returned HTTP {resp.status}"
+                    info = json.loads(await resp.text())
+            except asyncio.TimeoutError:
+                return False, "REST API timed out"
+            except Exception as e:
+                return False, f"REST {err_text(e)}"
+
+            if "youtube" not in (info.get("sourceManagers") or []):
+                return False, "node has no YouTube source"
+
+            return True, "node is fully operational"
+
+    except Exception as e:
+        return False, err_text(e)
+
+
 async def connect_lavalink_node(
     bot: Optional["discord.Client"] = None,
     *,
     inactive_player_timeout: int = 300,
+    allow_discovery: bool = True,
 ) -> wavelink.Node:
     """
     Connect to the first reachable Lavalink node.
 
-    The primary URI is tried first, then any configured fallbacks. Wavelink's
-    ``Pool.connect`` swallows connection errors and only registers the node on
-    success, so the real connection state is verified explicitly afterwards.
+    Order:
+      1. the configured primary node
+      2. the configured fallback nodes (LAVALINK_FALLBACK_URIS)
+      3. a working node discovered from the community directory
 
-    A node is only accepted when its REST API answers as well - a node whose
-    websocket is up but whose REST is hung cannot play music.
+    Wavelink's ``Pool.connect`` swallows connection errors and only registers
+    the node on success, so the real connection state is verified explicitly
+    afterwards. A node is only accepted when its websocket delivers the 'ready'
+    op AND its REST API answers - a node whose REST is hung cannot play music.
     """
-    failures: list[str] = []
+    from src.core.config import Config
 
-    for uri, password in candidates():
+    failures: list[str] = []
+    tried: set[str] = set()
+
+    async def _try(uri: str, password: str) -> Optional[wavelink.Node]:
+        if uri in tried:
+            return None
+        tried.add(uri)
+
+        # Fast pre-flight. A node whose websocket is rejected answers in a
+        # fraction of a second, while a full connect attempt would burn the
+        # whole connect timeout before failing.
+        ws_ok, ws_reason = await check_websocket(uri, password)
+        if not ws_ok:
+            failures.append(f"{uri} -> {ws_reason}")
+            logger.warning(f"Lavalink node {uri} unusable: {ws_reason}")
+            return None
+
         node = create_lavalink_node(
             uri,
             password,
@@ -280,22 +482,31 @@ async def connect_lavalink_node(
                 await asyncio.sleep(0.5)
 
             if node.status == wavelink.NodeStatus.CONNECTED:
-                if await probe_node(node):
+                if await probe_node(uri, password):
                     logger.info(f"Connected to Lavalink node {uri}")
                     return node
-                reason = "REST API unresponsive"
+                reason = "the session was not usable"
             else:
                 reason = f"status={getattr(node.status, 'name', node.status)}"
 
         await close_node(node)
+        failures.append(f"{uri} -> {reason}")
+        logger.warning(f"Lavalink node {uri} could not be used: {reason}")
+        return None
 
-        # Wavelink swallows the websocket handshake error and leaves the node in
-        # CONNECTING forever, so the failure reason is unknown at this point.
-        # A handshake probe explains it exactly: HTTP 400 means the node's proxy
-        # does not forward WebSocket upgrades, 401/403 means a wrong password.
-        _, ws_reason = await check_websocket(uri, password)
-        failures.append(f"{uri} -> {ws_reason}")
-        logger.warning(f"Lavalink node {uri} unusable: {ws_reason} (detail: {reason})")
+    # 1 + 2: configured nodes
+    for uri, password in candidates():
+        node = await _try(uri, password)
+        if node is not None:
+            return node
+
+    # 3: community directory - only when it is enabled and no configured node worked
+    if allow_discovery and Config.LAVALINK_AUTO_DISCOVER:
+        discovered = await discover_working_node()
+        if discovered is not None:
+            node = await _try(*discovered)
+            if node is not None:
+                return node
 
     detail = "; ".join(failures) if failures else "no URI configured"
     raise LavalinkUnavailable(f"No reachable Lavalink node ({detail})")

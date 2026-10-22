@@ -74,6 +74,20 @@ class Config:
     # Optional comma separated fallback Lavalink URIs. When the primary node is
     # unreachable the bot fails over to these instead of losing music entirely.
     LAVALINK_FALLBACK_URIS: str = os.getenv("LAVALINK_FALLBACK_URIS", "").strip()
+    # Community Lavalink node directory used for automatic discovery when every
+    # configured node is unusable. Set to an empty value to disable it.
+    LAVALINK_PUBLIC_LIST_URL: str = os.getenv(
+        "LAVALINK_PUBLIC_LIST_URL",
+        "https://lavalink-list.ajieblogs.eu.org/All",
+    ).strip()
+    # Allow the bot to pick a working public node on its own when the configured
+    # ones are down.
+    LAVALINK_AUTO_DISCOVER: bool = os.getenv("LAVALINK_AUTO_DISCOVER", "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
 
     # Aesthetics
     COLORS: ThemeColors = ThemeColors()

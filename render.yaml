@@ -20,5 +20,9 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: LAVALINK_AUTO_DISCOVER
+        value: 1
+      - key: LAVALINK_PUBLIC_LIST_URL
+        value: https://lavalink-list.ajieblogs.eu.org/All
 
 

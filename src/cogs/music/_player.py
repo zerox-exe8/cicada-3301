@@ -631,40 +631,27 @@ class GuildPlayer:
     async def skip(self) -> None:
         """
         Skip the currently playing track.
-
-        Never raises: a failing transport call (Lavalink REST timeout, closed
-        websocket, ...) must not kill the command. When the node never received
-        the stop request the queue would freeze forever, so in that case the
-        playlist is advanced locally (the next track replaces the still playing
-        one on the node).
+        Directly pops the next queued track and plays it via Lavalink's native replacement.
         """
         if self.loop_mode == "track":
             self.loop_mode = "off"
 
-        # Snapshot the advance generation so we can detect a TrackEnd event that
-        # already advanced the queue for this very skip.
-        advance_gen = self._advance_gen
+        target = await self.pop_next_track()
+        if target is not None:
+            await self.play_track(target)
+        else:
+            self.current = None
+            if self.voice_client:
+                try:
+                    await asyncio.wait_for(
+                        self.voice_client.skip(force=True),
+                        timeout=LAVALINK_OP_TIMEOUT,
+                    )
+                except Exception as e:
+                    logger.debug(f"Guild {self.guild.id}: voice skip notice: {e}")
+            await self.send_queue_ended_card()
+            self.schedule_empty_vc_timer()
 
-        failed = False
-        if self.voice_client:
-            try:
-                # Bounded: a dead Lavalink node must never hold this command (and the
-                # advance lock behind it) for the session's default 300s HTTP timeout.
-                await asyncio.wait_for(
-                    self.voice_client.skip(force=True),
-                    timeout=LAVALINK_OP_TIMEOUT,
-                )
-            except Exception as e:
-                failed = True
-                logger.warning(
-                    f"Guild {self.guild.id}: voice skip request failed "
-                    f"({type(e).__name__}: {e}); advancing the queue locally."
-                )
-
-        if failed:
-            # Lavalink never stopped the track — advance manually so the
-            # playlist keeps moving instead of freezing on the current track.
-            await self.on_track_end(reason="finished", manual=True, expected_gen=advance_gen)
 
     async def stop(self) -> None:
         """Stop playback and disconnect."""
@@ -768,11 +755,13 @@ class GuildPlayer:
                     logger.debug(f"Guild {self.guild.id}: Duplicate on_track_end call debounced")
                     return
                 # A locally advanced skip may still be followed by the node's own
-                # TrackEnd event — ignore it instead of skipping a second track.
-                if self._last_manual_advance and (now - self._last_manual_advance) < 2.0:
+                # TrackEnd event — ignore it within a short window to avoid double-skip.
+                # Window reduced to 1.5s (was 2.0s) so rapid legitimate user skips
+                # are not incorrectly blocked.
+                if self._last_manual_advance and (now - self._last_manual_advance) < 1.5:
                     logger.debug(
-                        f"Guild {self.guild.id}: Redundant TrackEnd event after a locally "
-                        "advanced skip ignored"
+                        f"Guild {self.guild.id}: Redundant TrackEnd event after a manually "
+                        "advanced skip ignored (within 1.5s window)"
                     )
                     self._last_advance_time = now
                     return
@@ -924,7 +913,8 @@ class GuildPlayer:
         if not self.home_channel:
             return
 
-        dot = self.bot.custom_emojis.get("heart_dot", "")
+        e_reg = getattr(self.bot, "custom_emojis", None)
+        dot = e_reg.get("heart_dot", "") if hasattr(e_reg, "get") else ""
         bullet = f"{dot} " if dot else "> "
 
         container = KyroContainer(accent_color=None)

@@ -150,7 +150,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 pl = None
 
             if pl and pl.tracks:
-                was_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
+                was_idle = player.current is None
                 first_item = pl.tracks[0]
                 first_track = Track(
                     title=first_item.title,
@@ -273,7 +273,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 results = await asyncio.wait_for(wavelink.Playable.search(lookup_target), timeout=6.0)
                 if isinstance(results, wavelink.Playlist) and results.tracks:
                     pl = results
-                    was_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
+                    was_idle = player.current is None
                     first_p = pl.tracks[0]
                     first_thumb = first_p.artwork or (f"https://i.ytimg.com/vi/{first_p.identifier}/hqdefault.jpg" if getattr(first_p, "identifier", None) else None)
                     first_track = Track(
@@ -500,7 +500,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 pass
 
         # ── Step 2: Dispatch Playback or Enqueue ──
-        is_idle = (player.current is None) or (not player.is_playing and not player.is_paused)
+        is_idle = player.current is None
         if is_idle:
             player._was_paused_for_empty_vc = False
             await player.play_track(track, message_to_edit=search_msg)

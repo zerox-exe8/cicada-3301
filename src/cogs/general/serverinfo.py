@@ -101,7 +101,7 @@ class ServerInfoView(discord.ui.View):
         guild = self.guild
         container = KyroContainer(accent_color=None)
         e_reg = getattr(self.ctx.bot, "custom_emojis", {})
-        dot = e_reg.get("heart_dot", "❥")
+        dot = e_reg.get("heart_dot", "❤")
 
         # Asset links header (Icon, Banner, Splash)
         links = []
@@ -111,71 +111,59 @@ class ServerInfoView(discord.ui.View):
             links.append(f"[Banner]({guild.banner.url})")
         if guild.splash:
             links.append(f"[Splash]({guild.splash.url})")
-        links_str = " | ".join(links) if links else "None"
+        links_str = " | ".join(links) if links else ""
 
         # ─── MODULE 1: OVERVIEW ────────────────────────────────────────────────
         if self.current_module == "overview":
             created_ts = int(guild.created_at.timestamp())
             owner = guild.owner or guild.get_member(guild.owner_id)
-
-            # Highlighted owner information
             if owner:
-                owner_tag = f"`{owner.name}`"
-                owner_mention = f"<@{owner.id}>"
-                owner_id_str = f"`{owner.id}`"
-                if owner.joined_at:
-                    owner_tenure = f"<t:{int(owner.joined_at.timestamp())}:D> (<t:{int(owner.joined_at.timestamp())}:R>)"
-                else:
-                    owner_tenure = f"<t:{int(owner.created_at.timestamp())}:R>"
+                owner_name = getattr(owner, "name", str(owner))
+                owner_id = owner.id
             else:
-                owner_tag = "`Unknown`"
-                owner_mention = f"<@{guild.owner_id}>"
-                owner_id_str = f"`{guild.owner_id}`"
-                owner_tenure = "Unknown"
+                owner_name = "Unknown"
+                owner_id = guild.owner_id
 
-            vanity = f"discord.gg/{guild.vanity_url_code}" if getattr(guild, "vanity_url_code", None) else "None"
-            locale = str(guild.preferred_locale)
+            total_members = guild.member_count or len(guild.members)
+            bots_count = sum(1 for m in guild.members if m.bot)
+            humans_count = max(0, total_members - bots_count)
 
-            # Notable feature badges
-            features_map = {
-                "COMMUNITY": "Community",
-                "PARTNERED": "Partnered",
-                "VERIFIED": "Verified",
-                "DISCOVERABLE": "Discoverable",
-                "VANITY_URL": "Vanity URL",
-                "INVITE_SPLASH": "Splash Invite",
-                "BANNER": "Banner",
-                "ANIMATED_ICON": "Animated Icon",
-                "MEMBER_VERIFICATION_GATE_ENABLED": "Member Screening",
-                "AUTO_MODERATION": "AutoMod",
-                "ROLE_ICONS": "Role Icons",
-            }
-            notable = [features_map[f] for f in guild.features if f in features_map]
-            if not notable and guild.features:
-                notable = [f.replace("_", " ").title() for f in guild.features[:6]]
-            badges_str = " ".join(f"`{b}`" for b in notable) if notable else "`Standard`"
+            text_channels = len(guild.text_channels)
+            voice_channels = len(guild.voice_channels)
+            categories = len(guild.categories)
+            stage_count = len(guild.stage_channels) if hasattr(guild, "stage_channels") else 0
+            forum_count = len(guild.forums) if hasattr(guild, "forums") else 0
+            total_channels = text_channels + voice_channels + stage_count + forum_count
 
-            desc_block = f"> *\"{guild.description}\"*\n\n" if guild.description else ""
+            roles_count = len([r for r in guild.roles if not r.is_default()])
+            emojis_count = len(guild.emojis)
 
+            boost_tier = guild.premium_tier
+            boost_count = guild.premium_subscription_count or 0
+            verif_level = str(guild.verification_level).replace("_", " ").title()
+
+            # Header: Server Name (# title) with server icon thumbnail accessory
             container.add_section(
-                content=(
-                    f"### {guild.name}\n"
-                    f"> **Assets:** {links_str}\n\n"
-                    f"{desc_block}"
-                    f"**Server Owner**\n"
-                    f"{dot} Mention: {owner_mention} ({owner_tag})\n"
-                    f"{dot} Owner ID: {owner_id_str}\n"
-                    f"{dot} Ownership Since: {owner_tenure}\n\n"
-                    f"**Server Identity**\n"
-                    f"{dot} Server ID: `{guild.id}`\n"
-                    f"{dot} Created On: <t:{created_ts}:D> (<t:{created_ts}:R>)\n"
-                    f"{dot} Primary Locale: `{locale}`\n"
-                    f"{dot} Assigned Shard: `#{guild.shard_id}`\n"
-                    f"{dot} Vanity Invite: `{vanity}`\n\n"
-                    f"**Perks & Badges**\n"
-                    f"{dot} Badges: {badges_str}"
-                )
+                content=f"# {guild.name}",
+                accessory={"type": 11, "media": {"url": guild.icon.url}} if guild.icon else None,
             )
+            container.add_separator(divider=True)
+
+            overview_lines = [
+                f"> {dot} **Owner:** `{owner_name}`",
+                f"> {dot} **Owner ID:** `{owner_id}`",
+                f"> {dot} **Server ID:** `{guild.id}`",
+                f"> {dot} **Created:** <t:{created_ts}:R> (<t:{created_ts}:D>)",
+                f"> {dot} **Members:** `{total_members:,}` ({humans_count:,} Humans • {bots_count:,} Bots)",
+                f"> {dot} **Channels:** `{total_channels}` ({text_channels} Text • {voice_channels} Voice • {categories} Categories)",
+                f"> {dot} **Roles & Emojis:** `{roles_count}` Roles • `{emojis_count}` Emojis",
+                f"> {dot} **Boost Status:** `Level {boost_tier}` ({boost_count} Boosts)",
+                f"> {dot} **Verification:** `{verif_level}`",
+            ]
+            if links_str:
+                overview_lines.append(f"> {dot} **Assets:** {links_str}")
+
+            container.add_text("\n".join(overview_lines))
 
         # ─── MODULE 2: MEMBERS ────────────────────────────────────────────────
         elif self.current_module == "members":
@@ -214,7 +202,8 @@ class ServerInfoView(discord.ui.View):
                     f"**Staff & Supporters**\n"
                     f"{dot} Server Staff: `{staff_count:,}` members\n"
                     f"{dot} Active Boosters: `{boosters_count:,}` members"
-                )
+                ),
+                accessory={"type": 11, "media": {"url": guild.icon.url}} if guild.icon else None,
             )
 
         # ─── MODULE 3: CHANNELS ───────────────────────────────────────────────
@@ -254,7 +243,8 @@ class ServerInfoView(discord.ui.View):
                     f"{dot} System Messages: {sys_ch}\n"
                     f"{dot} Safety Updates: {safety_ch}\n"
                     f"{dot} AFK Channel: {afk_ch}"
-                )
+                ),
+                accessory={"type": 11, "media": {"url": guild.icon.url}} if guild.icon else None,
             )
 
         # ─── MODULE 4: SECURITY ───────────────────────────────────────────────
@@ -286,7 +276,8 @@ class ServerInfoView(discord.ui.View):
                     f"{dot} Max Audio Bitrate: `{bitrate_kbps} kbps`\n"
                     f"{dot} Upload File Limit: `{filesize_mb} MB`\n"
                     f"{dot} Emoji Capacity: `{emoji_capacity} slots`"
-                )
+                ),
+                accessory={"type": 11, "media": {"url": guild.icon.url}} if guild.icon else None,
             )
 
         # ─── MODULE 5: ROLES ──────────────────────────────────────────────────
@@ -326,11 +317,9 @@ class ServerInfoView(discord.ui.View):
                     f"{dot} Custom Stickers: `{total_stickers}`\n\n"
                     f"**Top Roles**\n"
                     f"{roles_block}{more_str}"
-                )
+                ),
+                accessory={"type": 11, "media": {"url": guild.icon.url}} if guild.icon else None,
             )
-
-        if guild.icon:
-            container.add_thumbnail(guild.icon.url)
 
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {self.ctx.author.name}")

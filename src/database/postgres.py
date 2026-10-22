@@ -365,6 +365,12 @@ class PostgresDatabase(BaseDatabase):
             """
             ALTER TABLE guild_autoroles ADD COLUMN IF NOT EXISTS bot_role_id BIGINT;
             """,
+            """
+            ALTER TABLE guild_autoroles ADD COLUMN IF NOT EXISTS human_role_ids TEXT DEFAULT '';
+            """,
+            """
+            ALTER TABLE guild_autoroles ADD COLUMN IF NOT EXISTS bot_role_ids TEXT DEFAULT '';
+            """,
             # Guild 24/7 Voice Stay Mode table
             """
             CREATE TABLE IF NOT EXISTS guild_music_247 (

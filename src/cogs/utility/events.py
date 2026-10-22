@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from src.core.bot import KyroBot
 from src.core.context import CustomContext
+from src.cogs.moderation._helpers import resolve_role
 from src.cogs.utility.embed_builder import ContainerDraft
 from src.utils.containers import KyroContainer, send_container_response
 from src.utils.placeholders import resolve_placeholders
@@ -184,35 +185,100 @@ class AutoEvents(commands.Cog):
             logger.error(f"Failed to dispatch {event_type} card in {guild.name}: {e}", exc_info=e)
             return False, f"Error sending message: {e}"
 
-    async def _get_autorole_id(self, guild_id: int, target: str = "human") -> int | None:
-        """Fetch configured autorole ID for the guild with L1 microsecond cache ('human' or 'bot')."""
-        cached = self.bot.cache.get_autorole(guild_id, target=target)
+    async def _get_autorole_ids(self, guild_id: int, target: str = "human") -> list[int]:
+        """Fetch list of configured autorole IDs with L1 cache and database fallback ('human' or 'bot')."""
+        cached = self.bot.cache.get_autorole_list(guild_id, target=target)
         if cached is not None:
-            return cached if cached != 0 else None
+            return list(cached)
 
         try:
             row = await self.bot.db.fetch_one(
-                "SELECT role_id, human_role_id, bot_role_id FROM guild_autoroles WHERE guild_id = ?;",
+                "SELECT role_id, human_role_id, bot_role_id, human_role_ids, bot_role_ids FROM guild_autoroles WHERE guild_id = ?;",
                 guild_id,
             )
         except Exception:
-            row = await self.bot.db.fetch_one(
-                "SELECT role_id FROM guild_autoroles WHERE guild_id = ?;",
-                guild_id,
-            )
+            try:
+                row = await self.bot.db.fetch_one(
+                    "SELECT role_id, human_role_id, bot_role_id FROM guild_autoroles WHERE guild_id = ?;",
+                    guild_id,
+                )
+            except Exception:
+                row = await self.bot.db.fetch_one(
+                    "SELECT role_id FROM guild_autoroles WHERE guild_id = ?;",
+                    guild_id,
+                )
 
         if not row:
-            self.bot.cache.set_autorole(guild_id, 0, target="human")
-            self.bot.cache.set_autorole(guild_id, 0, target="bot")
-            return None
+            self.bot.cache.set_autorole_list(guild_id, [], target="human")
+            self.bot.cache.set_autorole_list(guild_id, [], target="bot")
+            return []
 
-        human_role = row.get("human_role_id") or row.get("role_id")
-        bot_role = row.get("bot_role_id")
+        # Parse humans
+        human_ids: list[int] = []
+        raw_human_csv = row.get("human_role_ids")
+        if raw_human_csv:
+            human_ids = [int(x.strip()) for x in str(raw_human_csv).split(",") if x.strip().isdigit()]
+        elif row.get("human_role_id"):
+            human_ids = [int(row["human_role_id"])]
+        elif row.get("role_id"):
+            human_ids = [int(row["role_id"])]
 
-        self.bot.cache.set_autorole(guild_id, human_role if human_role else 0, target="human")
-        self.bot.cache.set_autorole(guild_id, bot_role if bot_role else 0, target="bot")
+        # Parse bots
+        bot_ids: list[int] = []
+        raw_bot_csv = row.get("bot_role_ids")
+        if raw_bot_csv:
+            bot_ids = [int(x.strip()) for x in str(raw_bot_csv).split(",") if x.strip().isdigit()]
+        elif row.get("bot_role_id"):
+            bot_ids = [int(row["bot_role_id"])]
 
-        return bot_role if target == "bot" else human_role
+        self.bot.cache.set_autorole_list(guild_id, human_ids, target="human")
+        self.bot.cache.set_autorole_list(guild_id, bot_ids, target="bot")
+
+        return list(bot_ids if target == "bot" else human_ids)
+
+    async def _get_autorole_id(self, guild_id: int, target: str = "human") -> int | None:
+        """Fetch primary autorole ID (single role backward compatibility)."""
+        roles = await self._get_autorole_ids(guild_id, target=target)
+        return roles[0] if roles else None
+
+    async def _set_autorole_ids(self, guild_id: int, role_ids: list[int], target: str = "human") -> None:
+        """Persist autorole IDs to database and update L1 cache."""
+        clean_ids = [r for r in role_ids if r and r > 0]
+        csv_ids = ",".join(str(r) for r in clean_ids)
+        primary_id = clean_ids[0] if clean_ids else None
+
+        if target == "bot":
+            await self.bot.db.execute(
+                """
+                INSERT INTO guild_autoroles (guild_id, bot_role_id, bot_role_ids)
+                VALUES (?, ?, ?)
+                ON CONFLICT (guild_id) DO UPDATE SET
+                    bot_role_id = EXCLUDED.bot_role_id,
+                    bot_role_ids = EXCLUDED.bot_role_ids,
+                    updated_at = CURRENT_TIMESTAMP;
+                """,
+                guild_id,
+                primary_id,
+                csv_ids,
+            )
+            self.bot.cache.set_autorole_list(guild_id, clean_ids, target="bot")
+        else:
+            await self.bot.db.execute(
+                """
+                INSERT INTO guild_autoroles (guild_id, human_role_id, role_id, human_role_ids)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (guild_id) DO UPDATE SET
+                    human_role_id = EXCLUDED.human_role_id,
+                    role_id = EXCLUDED.role_id,
+                    human_role_ids = EXCLUDED.human_role_ids,
+                    updated_at = CURRENT_TIMESTAMP;
+                """,
+                guild_id,
+                primary_id,
+                primary_id,
+                csv_ids,
+            )
+            self.bot.cache.set_autorole_list(guild_id, clean_ids, target="human")
 
     # ─── Event Listeners ─────────────────────────────────────────────────────
 
@@ -221,15 +287,20 @@ class AutoEvents(commands.Cog):
         """Handle welcome greeting and auto-role on member join (separate human and bot roles)."""
         # Handle Auto-Role assignment (for both humans and bots)
         target_type = "bot" if member.bot else "human"
-        role_id = await self._get_autorole_id(member.guild.id, target=target_type)
-        if role_id:
-            role = member.guild.get_role(role_id)
-            if role and member.guild.me.guild_permissions.manage_roles and member.guild.me.top_role > role:
+        role_ids = await self._get_autorole_ids(member.guild.id, target=target_type)
+        if role_ids and member.guild.me.guild_permissions.manage_roles:
+            roles_to_add: list[discord.Role] = []
+            for r_id in role_ids:
+                role = member.guild.get_role(r_id)
+                if role and member.guild.me.top_role > role:
+                    roles_to_add.append(role)
+            if roles_to_add:
                 try:
-                    await member.add_roles(role, reason=f"Kyro Auto-Role System ({target_type.capitalize()})")
-                    logger.info(f"Assigned {target_type} autorole @{role.name} to {member} in {member.guild.name}")
+                    await member.add_roles(*roles_to_add, reason=f"Kyro Auto-Role System ({target_type.capitalize()})")
+                    role_names = ", ".join(f"@{r.name}" for r in roles_to_add)
+                    logger.info(f"Assigned {target_type} autorole(s) [{role_names}] to {member} in {member.guild.name}")
                 except Exception as e:
-                    logger.warning(f"Failed to assign {target_type} autorole in {member.guild.name}: {e}")
+                    logger.warning(f"Failed to assign {target_type} autorole(s) in {member.guild.name}: {e}")
 
         # Welcome greetings and DMs are only for real human members
         if member.bot:
@@ -312,6 +383,96 @@ class AutoEvents(commands.Cog):
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
+    # ─── Auto-Role Shared Handlers ───────────────────────────────────────────
+
+    async def _handle_autorole_add(
+        self,
+        ctx: CustomContext,
+        target: str,
+        role: discord.Role,
+    ) -> None:
+        """Shared logic for adding an autorole with duplicate check and hierarchy validation."""
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "❤")
+
+        err = self._validate_autorole(ctx, role)
+        if err:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Auto-Role Error**")
+            container.add_separator(divider=True)
+            container.add_text(f"> {err}")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+            return
+
+        current_ids = await self._get_autorole_ids(ctx.guild.id, target=target)
+        if role.id in current_ids:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content=f"**{'Human' if target == 'human' else 'Bot'} Auto-Role**")
+            container.add_separator(divider=True)
+            container.add_text(f"> {role.mention} is already configured as the {target} auto-role.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+            return
+
+        current_ids.append(role.id)
+        await self._set_autorole_ids(ctx.guild.id, current_ids, target=target)
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(content=f"**{'Human' if target == 'human' else 'Bot'} Auto-Role Command**")
+        container.add_separator(divider=True)
+        container.add_text(
+            f"{dot} **Target:** `{'Humans Only' if target == 'human' else 'Bots Only'}`\n"
+            f"{dot} **Assigned Role:** @{role.name} `「{role.id}」`\n"
+            f"{dot} **Moderator:** **{ctx.author.display_name}**"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
+
+    async def _handle_autorole_remove(
+        self,
+        ctx: CustomContext,
+        target: str,
+        role: Optional[discord.Role] = None,
+    ) -> None:
+        """Shared logic for removing a specific autorole or clearing target autoroles."""
+        current_ids = await self._get_autorole_ids(ctx.guild.id, target=target)
+        target_name = "human" if target == "human" else "bot"
+
+        if role:
+            if role.id not in current_ids:
+                container = KyroContainer(accent_color=None)
+                container.add_section(content=f"**{'Human' if target == 'human' else 'Bot'} Auto-Role**")
+                container.add_separator(divider=True)
+                container.add_text(f"> {role.mention} is not in the {target_name} auto-role list.")
+                container.add_separator(divider=True)
+                container.add_text(f"-# Requested by {ctx.author.display_name}")
+                await send_container_response(ctx, container)
+                return
+
+            current_ids.remove(role.id)
+            await self._set_autorole_ids(ctx.guild.id, current_ids, target=target)
+
+            container = KyroContainer(accent_color=None)
+            container.add_section(content=f"**{'Human' if target == 'human' else 'Bot'} Auto-Role Removed**")
+            container.add_separator(divider=True)
+            container.add_text(f"> @{role.name} `「{role.id}」` has been removed from {target_name} auto-roles.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+        else:
+            await self._set_autorole_ids(ctx.guild.id, [], target=target)
+            container = KyroContainer(accent_color=None)
+            container.add_section(content=f"**{'Human' if target == 'human' else 'Bot'} Auto-Role Disabled**")
+            container.add_separator(divider=True)
+            container.add_text(f"> Automatic role assignment for {'human members' if target == 'human' else 'bot accounts'} has been deactivated.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+
     @autorole_group.command(
         name="show",
         aliases=["config", "status", "list"],
@@ -323,14 +484,14 @@ class AutoEvents(commands.Cog):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "❤")
 
-        human_role_id = await self._get_autorole_id(ctx.guild.id, target="human")
-        bot_role_id = await self._get_autorole_id(ctx.guild.id, target="bot")
+        human_role_ids = await self._get_autorole_ids(ctx.guild.id, target="human")
+        bot_role_ids = await self._get_autorole_ids(ctx.guild.id, target="bot")
 
-        human_role = ctx.guild.get_role(human_role_id) if human_role_id else None
-        bot_role = ctx.guild.get_role(bot_role_id) if bot_role_id else None
+        human_roles = [ctx.guild.get_role(r) for r in human_role_ids if ctx.guild.get_role(r)]
+        bot_roles = [ctx.guild.get_role(r) for r in bot_role_ids if ctx.guild.get_role(r)]
 
-        human_str = f"@{human_role.name} `「{human_role.id}」`" if human_role else "`Disabled`"
-        bot_str = f"@{bot_role.name} `「{bot_role.id}」`" if bot_role else "`Disabled`"
+        human_str = ", ".join(f"@{r.name} `「{r.id}」`" for r in human_roles) if human_roles else "`Disabled`"
+        bot_str = ", ".join(f"@{r.name} `「{r.id}」`" for r in bot_roles) if bot_roles else "`Disabled`"
 
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Auto-Role Show**")
@@ -352,11 +513,11 @@ class AutoEvents(commands.Cog):
     async def autorole_reset(self, ctx: CustomContext) -> None:
         """Disable all auto-roles."""
         await self.bot.db.execute(
-            "UPDATE guild_autoroles SET human_role_id = NULL, bot_role_id = NULL, role_id = NULL WHERE guild_id = ?;",
+            "UPDATE guild_autoroles SET human_role_id = NULL, bot_role_id = NULL, role_id = NULL, human_role_ids = '', bot_role_ids = '' WHERE guild_id = ?;",
             ctx.guild.id,
         )
-        self.bot.cache.set_autorole(ctx.guild.id, 0, target="human")
-        self.bot.cache.set_autorole(ctx.guild.id, 0, target="bot")
+        self.bot.cache.set_autorole_list(ctx.guild.id, [], target="human")
+        self.bot.cache.set_autorole_list(ctx.guild.id, [], target="bot")
 
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Auto-Role Reset**")
@@ -366,32 +527,134 @@ class AutoEvents(commands.Cog):
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
+    @autorole_group.command(
+        name="add",
+        description="Add an auto-role for humans or bots.",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_add_cmd(
+        self,
+        ctx: CustomContext,
+        target_or_role: str,
+        *,
+        role_arg: Optional[str] = None,
+    ) -> None:
+        """Add an auto-role for humans (default) or bots."""
+        lowered = target_or_role.lower()
+        if lowered in ("bot", "bots"):
+            target = "bot"
+            query = role_arg
+        elif lowered in ("human", "humans", "user", "users"):
+            target = "human"
+            query = role_arg
+        else:
+            target = "human"
+            query = f"{target_or_role} {role_arg}".strip() if role_arg else target_or_role
+
+        if not query:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Auto-Role Error**")
+            container.add_separator(divider=True)
+            container.add_text("> Please specify a role to add (e.g. `?autorole add @role` or `?autorole add bot @role`).")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+            return
+
+        role = resolve_role(ctx.guild, query)
+        if not role:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Auto-Role Error**")
+            container.add_separator(divider=True)
+            container.add_text(f"> Could not find role `{query}` in this server.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+            return
+
+        await self._handle_autorole_add(ctx, target, role)
+
+    @autorole_group.command(
+        name="remove",
+        aliases=["del", "delete"],
+        description="Remove a configured auto-role or disable it.",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_remove_cmd(
+        self,
+        ctx: CustomContext,
+        target_or_role: Optional[str] = None,
+        *,
+        role_arg: Optional[str] = None,
+    ) -> None:
+        """Remove a configured auto-role."""
+        if not target_or_role:
+            await self.autorole_group(ctx)
+            return
+
+        lowered = target_or_role.lower()
+        if lowered in ("bot", "bots"):
+            target = "bot"
+            role = resolve_role(ctx.guild, role_arg) if role_arg else None
+            await self._handle_autorole_remove(ctx, target, role)
+        elif lowered in ("human", "humans", "user", "users"):
+            target = "human"
+            role = resolve_role(ctx.guild, role_arg) if role_arg else None
+            await self._handle_autorole_remove(ctx, target, role)
+        else:
+            query = f"{target_or_role} {role_arg}".strip() if role_arg else target_or_role
+            role = resolve_role(ctx.guild, query)
+            if not role:
+                container = KyroContainer(accent_color=None)
+                container.add_section(content="**Auto-Role Error**")
+                container.add_separator(divider=True)
+                container.add_text(f"> Could not find role `{query}` in this server.")
+                container.add_separator(divider=True)
+                container.add_text(f"-# Requested by {ctx.author.display_name}")
+                await send_container_response(ctx, container)
+                return
+
+            human_ids = await self._get_autorole_ids(ctx.guild.id, target="human")
+            bot_ids = await self._get_autorole_ids(ctx.guild.id, target="bot")
+            if role.id in human_ids:
+                await self._handle_autorole_remove(ctx, "human", role)
+            elif role.id in bot_ids:
+                await self._handle_autorole_remove(ctx, "bot", role)
+            else:
+                container = KyroContainer(accent_color=None)
+                container.add_section(content="**Auto-Role Error**")
+                container.add_separator(divider=True)
+                container.add_text(f"> {role.mention} is not configured as an auto-role.")
+                container.add_separator(divider=True)
+                container.add_text(f"-# Requested by {ctx.author.display_name}")
+                await send_container_response(ctx, container)
+
     # ─── Auto-Role Human Subgroup ────────────────────────────────────────────
 
     @autorole_group.group(
         name="human",
         aliases=["humans", "user", "users"],
         invoke_without_command=True,
-        fallback="set",
         description="Configure automatic role assignment for real human members.",
     )
-    @app_commands.describe(role="Role to assign when a human member joins")
     @commands.has_permissions(manage_roles=True)
-    async def autorole_human(self, ctx: CustomContext, role: Optional[discord.Role] = None) -> None:
+    async def autorole_human(self, ctx: CustomContext, *, role_input: Optional[str] = None) -> None:
         """Set or view auto-role for human members."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "❤")
-        if role is None:
-            human_role_id = await self._get_autorole_id(ctx.guild.id, target="human")
-            role = ctx.guild.get_role(human_role_id) if human_role_id else None
+
+        if role_input is None:
+            human_role_ids = await self._get_autorole_ids(ctx.guild.id, target="human")
+            roles = [ctx.guild.get_role(r) for r in human_role_ids if ctx.guild.get_role(r)]
             container = KyroContainer(accent_color=None)
             container.add_section(content="**Human Auto-Role Status**")
             container.add_separator(divider=True)
-            if role:
+            if roles:
+                role_str = ", ".join(f"@{r.name} `「{r.id}」`" for r in roles)
                 container.add_text(
-                    f"{dot} **Current Role:** @{role.name} `「{role.id}」`\n"
-                    f"{dot} **To Change:** `{prefix}autorole human <role>`\n"
+                    f"{dot} **Current Role:** {role_str}\n"
+                    f"{dot} **To Add:** `{prefix}autorole human <role>`\n"
                     f"{dot} **To Disable:** `{prefix}autorole human remove`"
                 )
             else:
@@ -404,62 +667,54 @@ class AutoEvents(commands.Cog):
             await send_container_response(ctx, container)
             return
 
-        err = self._validate_autorole(ctx, role)
-        if err:
+        clean_query = role_input.strip()
+        if clean_query.lower().startswith("add "):
+            clean_query = clean_query[4:].strip()
+        elif clean_query.lower().startswith("set "):
+            clean_query = clean_query[4:].strip()
+
+        role = resolve_role(ctx.guild, clean_query)
+        if not role:
             container = KyroContainer(accent_color=None)
             container.add_section(content="**Auto-Role Error**")
             container.add_separator(divider=True)
-            container.add_text(f"> {err}")
+            container.add_text(f"> Could not find role `{clean_query}` in this server.")
             container.add_separator(divider=True)
             container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
-        await self.bot.db.execute(
-            """
-            INSERT INTO guild_autoroles (guild_id, human_role_id, role_id)
-            VALUES (?, ?, ?)
-            ON CONFLICT (guild_id) DO UPDATE SET human_role_id = EXCLUDED.human_role_id, role_id = EXCLUDED.role_id, updated_at = CURRENT_TIMESTAMP;
-            """,
-            ctx.guild.id,
-            role.id,
-            role.id,
-        )
-        self.bot.cache.set_autorole(ctx.guild.id, role.id, target="human")
+        await self._handle_autorole_add(ctx, "human", role)
 
-        container = KyroContainer(accent_color=None)
-        container.add_section(content="**Human Auto-Role Command**")
-        container.add_separator(divider=True)
-        container.add_text(
-            f"{dot} **Target:** `Humans Only`\n"
-            f"{dot} **Assigned Role:** @{role.name} `「{role.id}」`\n"
-            f"{dot} **Moderator:** **{ctx.author.display_name}**"
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
-        await send_container_response(ctx, container)
+    @autorole_human.command(
+        name="add",
+        description="Add an auto-role for human members.",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_human_add(self, ctx: CustomContext, *, role_input: str) -> None:
+        """Add an auto-role for human members."""
+        role = resolve_role(ctx.guild, role_input)
+        if not role:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Auto-Role Error**")
+            container.add_separator(divider=True)
+            container.add_text(f"> Could not find role `{role_input}` in this server.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+            return
+        await self._handle_autorole_add(ctx, "human", role)
 
     @autorole_human.command(
         name="remove",
-        aliases=["disable", "reset"],
-        description="Disable auto-role for human members.",
+        aliases=["disable", "reset", "del"],
+        description="Disable auto-role for human members or remove a specific role.",
     )
     @commands.has_permissions(manage_roles=True)
-    async def autorole_human_remove(self, ctx: CustomContext) -> None:
-        """Disable human auto-role."""
-        await self.bot.db.execute(
-            "UPDATE guild_autoroles SET human_role_id = NULL, role_id = NULL WHERE guild_id = ?;",
-            ctx.guild.id,
-        )
-        self.bot.cache.set_autorole(ctx.guild.id, 0, target="human")
-
-        container = KyroContainer(accent_color=None)
-        container.add_section(content="**Human Auto-Role Disabled**")
-        container.add_separator(divider=True)
-        container.add_text("> Automatic role assignment for human members has been deactivated.")
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
-        await send_container_response(ctx, container)
+    async def autorole_human_remove(self, ctx: CustomContext, *, role_input: Optional[str] = None) -> None:
+        """Disable human auto-role or remove a specific role."""
+        role = resolve_role(ctx.guild, role_input) if role_input else None
+        await self._handle_autorole_remove(ctx, "human", role)
 
     # ─── Auto-Role Bot Subgroup ──────────────────────────────────────────────
 
@@ -467,26 +722,26 @@ class AutoEvents(commands.Cog):
         name="bot",
         aliases=["bots"],
         invoke_without_command=True,
-        fallback="set",
         description="Configure automatic role assignment for invited bot accounts.",
     )
-    @app_commands.describe(role="Role to assign when a bot joins")
     @commands.has_permissions(manage_roles=True)
-    async def autorole_bot(self, ctx: CustomContext, role: Optional[discord.Role] = None) -> None:
+    async def autorole_bot(self, ctx: CustomContext, *, role_input: Optional[str] = None) -> None:
         """Set or view auto-role for bot accounts."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "❤")
-        if role is None:
-            bot_role_id = await self._get_autorole_id(ctx.guild.id, target="bot")
-            role = ctx.guild.get_role(bot_role_id) if bot_role_id else None
+
+        if role_input is None:
+            bot_role_ids = await self._get_autorole_ids(ctx.guild.id, target="bot")
+            roles = [ctx.guild.get_role(r) for r in bot_role_ids if ctx.guild.get_role(r)]
             container = KyroContainer(accent_color=None)
             container.add_section(content="**Bot Auto-Role Status**")
             container.add_separator(divider=True)
-            if role:
+            if roles:
+                role_str = ", ".join(f"@{r.name} `「{r.id}」`" for r in roles)
                 container.add_text(
-                    f"{dot} **Current Role:** @{role.name} `「{role.id}」`\n"
-                    f"{dot} **To Change:** `{prefix}autorole bot <role>`\n"
+                    f"{dot} **Current Role:** {role_str}\n"
+                    f"{dot} **To Add:** `{prefix}autorole bot <role>`\n"
                     f"{dot} **To Disable:** `{prefix}autorole bot remove`"
                 )
             else:
@@ -499,61 +754,54 @@ class AutoEvents(commands.Cog):
             await send_container_response(ctx, container)
             return
 
-        err = self._validate_autorole(ctx, role)
-        if err:
+        clean_query = role_input.strip()
+        if clean_query.lower().startswith("add "):
+            clean_query = clean_query[4:].strip()
+        elif clean_query.lower().startswith("set "):
+            clean_query = clean_query[4:].strip()
+
+        role = resolve_role(ctx.guild, clean_query)
+        if not role:
             container = KyroContainer(accent_color=None)
             container.add_section(content="**Auto-Role Error**")
             container.add_separator(divider=True)
-            container.add_text(f"> {err}")
+            container.add_text(f"> Could not find role `{clean_query}` in this server.")
             container.add_separator(divider=True)
             container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
-        await self.bot.db.execute(
-            """
-            INSERT INTO guild_autoroles (guild_id, bot_role_id)
-            VALUES (?, ?)
-            ON CONFLICT (guild_id) DO UPDATE SET bot_role_id = EXCLUDED.bot_role_id, updated_at = CURRENT_TIMESTAMP;
-            """,
-            ctx.guild.id,
-            role.id,
-        )
-        self.bot.cache.set_autorole(ctx.guild.id, role.id, target="bot")
+        await self._handle_autorole_add(ctx, "bot", role)
 
-        container = KyroContainer(accent_color=None)
-        container.add_section(content="**Bot Auto-Role Command**")
-        container.add_separator(divider=True)
-        container.add_text(
-            f"{dot} **Target:** `Bots Only`\n"
-            f"{dot} **Assigned Role:** @{role.name} `「{role.id}」`\n"
-            f"{dot} **Moderator:** **{ctx.author.display_name}**"
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
-        await send_container_response(ctx, container)
+    @autorole_bot.command(
+        name="add",
+        description="Add an auto-role for bot accounts.",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_bot_add(self, ctx: CustomContext, *, role_input: str) -> None:
+        """Add an auto-role for bot accounts."""
+        role = resolve_role(ctx.guild, role_input)
+        if not role:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Auto-Role Error**")
+            container.add_separator(divider=True)
+            container.add_text(f"> Could not find role `{role_input}` in this server.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container)
+            return
+        await self._handle_autorole_add(ctx, "bot", role)
 
     @autorole_bot.command(
         name="remove",
-        aliases=["disable", "reset"],
-        description="Disable auto-role for bot accounts.",
+        aliases=["disable", "reset", "del"],
+        description="Disable auto-role for bot accounts or remove a specific role.",
     )
     @commands.has_permissions(manage_roles=True)
-    async def autorole_bot_remove(self, ctx: CustomContext) -> None:
-        """Disable bot auto-role."""
-        await self.bot.db.execute(
-            "UPDATE guild_autoroles SET bot_role_id = NULL WHERE guild_id = ?;",
-            ctx.guild.id,
-        )
-        self.bot.cache.set_autorole(ctx.guild.id, 0, target="bot")
-
-        container = KyroContainer(accent_color=None)
-        container.add_section(content="**Bot Auto-Role Disabled**")
-        container.add_separator(divider=True)
-        container.add_text("> Automatic role assignment for bot accounts has been deactivated.")
-        container.add_separator(divider=True)
-        container.add_text(f"-# Requested by {ctx.author.display_name}")
-        await send_container_response(ctx, container)
+    async def autorole_bot_remove(self, ctx: CustomContext, *, role_input: Optional[str] = None) -> None:
+        """Disable bot auto-role or remove a specific role."""
+        role = resolve_role(ctx.guild, role_input) if role_input else None
+        await self._handle_autorole_remove(ctx, "bot", role)
 
     # ─── Welcome Command Group ───────────────────────────────────────────────
 

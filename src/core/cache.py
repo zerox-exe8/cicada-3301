@@ -44,6 +44,8 @@ class MicrosecondCache:
         self.prefixes: Dict[int, str] = {}
         self.autoroles: Dict[int, Optional[int]] = {}
         self.bot_autoroles: Dict[int, Optional[int]] = {}
+        self.autorole_lists: Dict[int, list[int]] = {}
+        self.bot_autorole_lists: Dict[int, list[int]] = {}
         self.modlogs: Dict[int, Optional[int]] = {}
         self.music_247: Dict[int, bool] = {}
         self.ghostping: Dict[int, bool] = {}
@@ -98,7 +100,7 @@ class MicrosecondCache:
         self.prefixes.pop(guild_id, None)
 
     def get_autorole(self, guild_id: int, target: str = "human") -> Optional[int]:
-        """Retrieve configured autorole ID for guild ('human' or 'bot')."""
+        """Retrieve primary configured autorole ID for guild ('human' or 'bot')."""
         if target == "bot":
             return self.bot_autoroles.get(guild_id)
         return self.autoroles.get(guild_id)
@@ -108,8 +110,26 @@ class MicrosecondCache:
         val = role_id if (role_id and role_id > 0) else None
         if target == "bot":
             self.bot_autoroles[guild_id] = val
+            self.bot_autorole_lists[guild_id] = [val] if val else []
         else:
             self.autoroles[guild_id] = val
+            self.autorole_lists[guild_id] = [val] if val else []
+
+    def get_autorole_list(self, guild_id: int, target: str = "human") -> Optional[list[int]]:
+        """Retrieve list of configured autorole IDs for guild ('human' or 'bot')."""
+        if target == "bot":
+            return self.bot_autorole_lists.get(guild_id)
+        return self.autorole_lists.get(guild_id)
+
+    def set_autorole_list(self, guild_id: int, role_ids: list[int], target: str = "human") -> None:
+        """Store list of autorole IDs in L1 memory ('human' or 'bot')."""
+        clean_ids = [r for r in role_ids if r and r > 0]
+        if target == "bot":
+            self.bot_autorole_lists[guild_id] = clean_ids
+            self.bot_autoroles[guild_id] = clean_ids[0] if clean_ids else None
+        else:
+            self.autorole_lists[guild_id] = clean_ids
+            self.autoroles[guild_id] = clean_ids[0] if clean_ids else None
 
     def get_modlog_channel(self, guild_id: int) -> Optional[int]:
         """Retrieve modlog channel ID in sub-0.01ms."""

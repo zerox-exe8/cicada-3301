@@ -304,8 +304,64 @@ class AutoEvents(commands.Cog):
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} `{prefix}autorole human <role> | remove`\n"
-            f"{dot} `{prefix}autorole bot <role> | remove`"
+            f"{dot} `{prefix}autorole bot <role> | remove`\n"
+            f"{dot} `{prefix}autorole config`\n"
+            f"{dot} `{prefix}autorole reset`"
         )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
+
+    @autorole_group.command(
+        name="config",
+        aliases=["status", "show"],
+        description="View current auto-role configuration for this server.",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_config(self, ctx: CustomContext) -> None:
+        """View configured human and bot auto-roles."""
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "❤")
+
+        human_role_id = await self._get_autorole_id(ctx.guild.id, target="human")
+        bot_role_id = await self._get_autorole_id(ctx.guild.id, target="bot")
+
+        human_role = ctx.guild.get_role(human_role_id) if human_role_id else None
+        bot_role = ctx.guild.get_role(bot_role_id) if bot_role_id else None
+
+        human_str = f"@{human_role.name} `「{human_role.id}」`" if human_role else "`Disabled`"
+        bot_str = f"@{bot_role.name} `「{bot_role.id}」`" if bot_role else "`Disabled`"
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(content="**Auto-Role Configuration**")
+        container.add_separator(divider=True)
+        container.add_text(
+            f"{dot} **Human Role:** {human_str}\n"
+            f"{dot} **Bot Role:** {bot_str}"
+        )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
+        await send_container_response(ctx, container)
+
+    @autorole_group.command(
+        name="reset",
+        aliases=["clear"],
+        description="Disable all auto-roles (humans and bots).",
+    )
+    @commands.has_permissions(manage_roles=True)
+    async def autorole_reset(self, ctx: CustomContext) -> None:
+        """Disable all auto-roles."""
+        await self.bot.db.execute(
+            "UPDATE guild_autoroles SET human_role_id = NULL, bot_role_id = NULL, role_id = NULL WHERE guild_id = ?;",
+            ctx.guild.id,
+        )
+        self.bot.cache.set_autorole(ctx.guild.id, 0, target="human")
+        self.bot.cache.set_autorole(ctx.guild.id, 0, target="bot")
+
+        container = KyroContainer(accent_color=None)
+        container.add_section(content="**Auto-Role Reset**")
+        container.add_separator(divider=True)
+        container.add_text("> All automatic role assignments have been deactivated.")
         container.add_separator(divider=True)
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
@@ -324,34 +380,38 @@ class AutoEvents(commands.Cog):
     async def autorole_human(self, ctx: CustomContext, role: Optional[discord.Role] = None) -> None:
         """Set or view auto-role for human members."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "❤")
         if role is None:
             human_role_id = await self._get_autorole_id(ctx.guild.id, target="human")
             role = ctx.guild.get_role(human_role_id) if human_role_id else None
             container = KyroContainer(accent_color=None)
+            container.add_section(content="**Human Auto-Role Status**")
+            container.add_separator(divider=True)
             if role:
-                container.add_section(
-                    content=(
-                        "**Human Auto-Role Status**\n"
-                        f"> Current role: @{role.name} `「{role.id}」`\n"
-                        f"> To change: `{prefix}autorole human @role`\n"
-                        f"> To disable: `{prefix}autorole human remove`"
-                    )
+                container.add_text(
+                    f"{dot} **Current Role:** @{role.name} `「{role.id}」`\n"
+                    f"{dot} **To Change:** `{prefix}autorole human <role>`\n"
+                    f"{dot} **To Disable:** `{prefix}autorole human remove`"
                 )
             else:
-                container.add_section(
-                    content=(
-                        "**Human Auto-Role Status**\n"
-                        f"> Currently **Disabled**.\n"
-                        f"> To enable: `{prefix}autorole human @role`"
-                    )
+                container.add_text(
+                    f"{dot} **Status:** `Disabled`\n"
+                    f"{dot} **To Enable:** `{prefix}autorole human <role>`"
                 )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
         err = self._validate_autorole(ctx, role)
         if err:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Auto-Role Error**\n> {err}")
+            container.add_section(content="**Auto-Role Error**")
+            container.add_separator(divider=True)
+            container.add_text(f"> {err}")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
@@ -367,21 +427,16 @@ class AutoEvents(commands.Cog):
         )
         self.bot.cache.set_autorole(ctx.guild.id, role.id, target="human")
 
-        e_reg = self.bot.custom_emojis
-        dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "**Human Auto-Role Configured**\n"
-                f"> New human members joining the server will automatically receive **{role.name}**."
-            )
-        )
+        container.add_section(content="**Human Auto-Role Configured**")
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Target:** `Humans Only`\n"
             f"{dot} **Assigned Role:** @{role.name} `「{role.id}」`\n"
             f"{dot} **Configured By:** **{ctx.author.display_name}**"
         )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
     @autorole_human.command(
@@ -399,12 +454,11 @@ class AutoEvents(commands.Cog):
         self.bot.cache.set_autorole(ctx.guild.id, 0, target="human")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "**Human Auto-Role Disabled**\n"
-                "> Automatic role assignment for human members has been deactivated."
-            )
-        )
+        container.add_section(content="**Human Auto-Role Disabled**")
+        container.add_separator(divider=True)
+        container.add_text("> Automatic role assignment for human members has been deactivated.")
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
     # ─── Auto-Role Bot Subgroup ──────────────────────────────────────────────
@@ -421,34 +475,38 @@ class AutoEvents(commands.Cog):
     async def autorole_bot(self, ctx: CustomContext, role: Optional[discord.Role] = None) -> None:
         """Set or view auto-role for bot accounts."""
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
+        e_reg = self.bot.custom_emojis
+        dot = e_reg.get("heart_dot", "❤")
         if role is None:
             bot_role_id = await self._get_autorole_id(ctx.guild.id, target="bot")
             role = ctx.guild.get_role(bot_role_id) if bot_role_id else None
             container = KyroContainer(accent_color=None)
+            container.add_section(content="**Bot Auto-Role Status**")
+            container.add_separator(divider=True)
             if role:
-                container.add_section(
-                    content=(
-                        "**Bot Auto-Role Status**\n"
-                        f"> Current role: @{role.name} `「{role.id}」`\n"
-                        f"> To change: `{prefix}autorole bot @role`\n"
-                        f"> To disable: `{prefix}autorole bot remove`"
-                    )
+                container.add_text(
+                    f"{dot} **Current Role:** @{role.name} `「{role.id}」`\n"
+                    f"{dot} **To Change:** `{prefix}autorole bot <role>`\n"
+                    f"{dot} **To Disable:** `{prefix}autorole bot remove`"
                 )
             else:
-                container.add_section(
-                    content=(
-                        "**Bot Auto-Role Status**\n"
-                        f"> Currently **Disabled**.\n"
-                        f"> To enable: `{prefix}autorole bot @role`"
-                    )
+                container.add_text(
+                    f"{dot} **Status:** `Disabled`\n"
+                    f"{dot} **To Enable:** `{prefix}autorole bot <role>`"
                 )
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
         err = self._validate_autorole(ctx, role)
         if err:
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"**Auto-Role Error**\n> {err}")
+            container.add_section(content="**Auto-Role Error**")
+            container.add_separator(divider=True)
+            container.add_text(f"> {err}")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)
             return
 
@@ -463,21 +521,16 @@ class AutoEvents(commands.Cog):
         )
         self.bot.cache.set_autorole(ctx.guild.id, role.id, target="bot")
 
-        e_reg = self.bot.custom_emojis
-        dot = e_reg.get("heart_dot", "-")
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "**Bot Auto-Role Configured**\n"
-                f"> Newly invited bots will automatically receive **{role.name}**."
-            )
-        )
+        container.add_section(content="**Bot Auto-Role Configured**")
         container.add_separator(divider=True)
         container.add_text(
             f"{dot} **Target:** `Bots Only`\n"
             f"{dot} **Assigned Role:** @{role.name} `「{role.id}」`\n"
             f"{dot} **Configured By:** **{ctx.author.display_name}**"
         )
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
     @autorole_bot.command(
@@ -495,12 +548,11 @@ class AutoEvents(commands.Cog):
         self.bot.cache.set_autorole(ctx.guild.id, 0, target="bot")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                "**Bot Auto-Role Disabled**\n"
-                "> Automatic role assignment for bot accounts has been deactivated."
-            )
-        )
+        container.add_section(content="**Bot Auto-Role Disabled**")
+        container.add_separator(divider=True)
+        container.add_text("> Automatic role assignment for bot accounts has been deactivated.")
+        container.add_separator(divider=True)
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
     # ─── Welcome Command Group ───────────────────────────────────────────────

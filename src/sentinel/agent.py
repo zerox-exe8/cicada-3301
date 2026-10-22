@@ -229,7 +229,17 @@ class KyroSentinel:
         if now - last_alert < 300:
             return
 
+        # A recurring fault (e.g. a Lavalink node that stays down) must not ping
+        # the developer every 5 minutes forever. The same title is only sent
+        # again after a much longer cooldown, while a DIFFERENT fault is
+        # reported immediately.
+        title_key = f"{sub_key}:{incident.title}"
+        last_same = self._last_alert_time.get(title_key, 0)
+        if last_same and now - last_same < 1800:
+            return
+
         self._last_alert_time[sub_key] = now
+        self._last_alert_time[title_key] = now
 
         # Determine target developers
         dev_ids: set[int] = set()
@@ -406,9 +416,12 @@ class KyroSentinel:
                 self.record_incident(
                     SubsystemType.MUSIC,
                     IncidentSeverity.CRITICAL,
-                    "Lavalink Reconnect Failed",
+                    "Lavalink Node Unreachable",
                     err_text(e),
-                    action_taken="Retrying on next cycle",
+                    action_taken=(
+                        "Tried every configured node (primary + fallbacks). "
+                        "Audio playback stays offline until one answers."
+                    ),
                     resolved=False,
                 )
         else:

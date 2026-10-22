@@ -248,6 +248,35 @@ class MusicAgent:
                 logger.error(f"MusicAgent: Error advancing stuck track: {e}")
                 return False, str(e)
 
+    # ── Audio Engine Availability ──
+
+    async def audio_engine_status(self) -> tuple[bool, str]:
+        """
+        Check whether the Lavalink audio engine can actually serve a stream.
+
+        Returns (available, reason). A node that is missing, disconnected or
+        whose REST API does not answer cannot play anything, no matter what the
+        voice gateway thinks.
+        """
+        import wavelink
+
+        try:
+            node = wavelink.Pool.get_node()
+        except Exception:
+            return False, "no Lavalink node is connected"
+
+        if node is None:
+            return False, "no Lavalink node is connected"
+
+        status = getattr(node.status, "name", node.status)
+        if status != "CONNECTED":
+            return False, f"Lavalink node is {status}"
+
+        if not await probe_node(node):
+            return False, "Lavalink node REST API is unresponsive"
+
+        return True, f"Lavalink node {node.uri} is ready"
+
     # ── Universal Command Shield & Exception Handler ──
 
     async def handle_command_error(self, ctx_or_interaction: Any, error: Exception) -> bool:

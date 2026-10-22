@@ -71,10 +71,17 @@ def err_text(exc: BaseException) -> str:
     Many transport exceptions carry an empty message (``TimeoutError``,
     ``ClientOSError``, ``KeyError`` ...), so ``str(exc)`` alone produces a
     completely useless incident report.
+
+    The function is idempotent: an exception whose message already starts with
+    its own class name is not prefixed a second time.
     """
     name = type(exc).__name__
     text = str(exc).strip()
-    return f"{name}: {text}" if text else name
+    if not text:
+        return name
+    if text.startswith(name):
+        return text
+    return f"{name}: {text}"
 
 
 def candidates() -> list[tuple[str, str]]:
@@ -287,8 +294,8 @@ async def connect_lavalink_node(
         # A handshake probe explains it exactly: HTTP 400 means the node's proxy
         # does not forward WebSocket upgrades, 401/403 means a wrong password.
         _, ws_reason = await check_websocket(uri, password)
-        failures.append(f"{uri} -> {ws_reason} ({reason})")
-        logger.warning(f"Lavalink node {uri} unusable: {ws_reason} ({reason})")
+        failures.append(f"{uri} -> {ws_reason}")
+        logger.warning(f"Lavalink node {uri} unusable: {ws_reason} (detail: {reason})")
 
     detail = "; ".join(failures) if failures else "no URI configured"
     raise LavalinkUnavailable(f"No reachable Lavalink node ({detail})")

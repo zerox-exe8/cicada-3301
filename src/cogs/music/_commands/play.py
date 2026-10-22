@@ -62,6 +62,34 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         logger.warning(f"Voice connect error in guild {ctx.guild.id}: {e}")
         agent = getattr(cog, "agent", None)
         if agent:
+            # A dead audio engine is a different failure than a voice gateway
+            # problem: no amount of voice state purging will make the node serve
+            # audio. Tell the user the truth instead of a misleading "recovered"
+            # card, and try to bring the node back up.
+            engine_ok, engine_reason = await agent.audio_engine_status()
+            if not engine_ok:
+                try:
+                    await agent.heal_node()
+                except Exception as heal_err:
+                    logger.warning(
+                        f"Audio engine heal failed in guild {ctx.guild.id}: "
+                        f"{type(heal_err).__name__}: {heal_err}"
+                    )
+                engine_ok, engine_reason = await agent.audio_engine_status()
+
+            if not engine_ok:
+                card = agent.build_maintenance_card(
+                    title="Audio Engine Offline",
+                    issue_desc=f"`{engine_reason}`",
+                    action_taken="Tried to re-establish the Lavalink audio node.",
+                    advice=(
+                        "Music playback is unavailable right now. "
+                        "Please try again in a few minutes."
+                    ),
+                )
+                await send_container_response(ctx, card)
+                return
+
             # Trigger autonomous self-heal
             await agent.heal_voice_session(ctx.guild, reason=str(e))
             card = agent.build_maintenance_card(

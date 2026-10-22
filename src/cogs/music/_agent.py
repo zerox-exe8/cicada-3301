@@ -14,6 +14,7 @@ from src.core.lavalink import (
     close_pool_nodes,
     connect_lavalink_node,
     err_text,
+    probe_node,
 )
 from src.utils.containers import KyroContainer
 
@@ -155,14 +156,26 @@ class MusicAgent:
         Anti-Thundering-Herd Single-Flight Node Reconnector.
         If 1,000 servers detect a node drop simultaneously, only ONE task connects,
         while the other 999 wait on a shared asyncio.Event.
+
+        `force` is advisory: the node is considered healthy only when it reports
+        CONNECTED *and* its REST API answers, so a node with a hung REST API is
+        always rebuilt even when it was not explicitly forced.
         """
         import wavelink
 
-        # If already connected and not forced, return immediately
+        # If already connected and not forced, return immediately.
+        #
+        # A node that reports CONNECTED but whose REST API is hung is NOT healthy:
+        # every player operation (skip, play, stop) goes through the REST API, so
+        # such a node is exactly what makes the music commands time out.
         try:
             current_node = wavelink.Pool.get_node()
-            if not force and current_node and current_node.status == wavelink.NodeStatus.CONNECTED:
-                return True, "Lavalink node is healthy and connected."
+            if current_node and current_node.status == wavelink.NodeStatus.CONNECTED:
+                if await probe_node(current_node):
+                    return True, "Lavalink node is healthy and connected."
+                logger.warning(
+                    "MusicAgent: Lavalink node reports CONNECTED but its REST API is unresponsive."
+                )
         except Exception:
             pass
 

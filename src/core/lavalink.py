@@ -160,6 +160,41 @@ async def close_pool_nodes() -> None:
         await close_node(node)
 
 
+async def probe_node(node: Any, timeout: float = 6.0) -> bool:
+    """
+    Verify that a node's REST API actually answers.
+
+    A node can report ``CONNECTED`` (its websocket is still alive) while its REST
+    API is completely hung - and every player operation (skip, play, stop) goes
+    through the REST API. Treating such a node as healthy is exactly what makes
+    the music commands time out while everything else looks fine.
+    """
+    session = getattr(node, "_session", None)
+    if session is None or getattr(session, "closed", False):
+        return False
+
+    uri = f"{node.uri}/v4/version"
+
+    # `Node.headers` asserts that a client is attached, which is not the case for
+    # a node that never finished connecting. Fall back to an empty header set:
+    # the node then answers 401 instead of 200, which still proves the REST API
+    # is responsive.
+    try:
+        headers = node.headers
+    except Exception:
+        headers = {}
+
+    async def _probe() -> None:
+        async with session.get(uri, headers=headers) as resp:
+            await resp.read()
+
+    try:
+        await asyncio.wait_for(_probe(), timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
 async def connect_lavalink_node(
     bot: Optional["discord.Client"] = None,
     *,
@@ -171,6 +206,9 @@ async def connect_lavalink_node(
     The primary URI is tried first, then any configured fallbacks. Wavelink's
     ``Pool.connect`` swallows connection errors and only registers the node on
     success, so the real connection state is verified explicitly afterwards.
+
+    A node is only accepted when its REST API answers as well - a node whose
+    websocket is up but whose REST is hung cannot play music.
     """
     failures: list[str] = []
 
@@ -194,13 +232,23 @@ async def connect_lavalink_node(
         # Pool.connect logs connection errors instead of raising them.
         for _ in range(10):
             if node.status == wavelink.NodeStatus.CONNECTED:
-                logger.info(f"Connected to Lavalink node {uri}")
-                return node
+                break
             await asyncio.sleep(0.5)
 
-        failures.append(f"{uri} -> status={getattr(node.status, 'name', node.status)}")
-        logger.warning(f"Lavalink node {uri} did not reach CONNECTED state.")
-        await close_node(node)
+        if node.status != wavelink.NodeStatus.CONNECTED:
+            failures.append(f"{uri} -> status={getattr(node.status, 'name', node.status)}")
+            logger.warning(f"Lavalink node {uri} did not reach CONNECTED state.")
+            await close_node(node)
+            continue
+
+        if not await probe_node(node):
+            failures.append(f"{uri} -> REST API unresponsive")
+            logger.warning(f"Lavalink node {uri} connected but its REST API does not answer.")
+            await close_node(node)
+            continue
+
+        logger.info(f"Connected to Lavalink node {uri}")
+        return node
 
     detail = "; ".join(failures) if failures else "no URI configured"
     raise LavalinkUnavailable(f"No reachable Lavalink node ({detail})")

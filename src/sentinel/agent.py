@@ -21,6 +21,7 @@ from src.core.lavalink import (
     close_pool_nodes,
     connect_lavalink_node,
     err_text,
+    probe_node,
 )
 from src.sentinel.models import Incident, IncidentSeverity, SubsystemType
 from src.utils.containers import KyroContainer, send_container_response
@@ -363,10 +364,23 @@ class KyroSentinel:
         import wavelink
         try:
             node = wavelink.Pool.get_node()
-            if node.status != wavelink.NodeStatus.CONNECTED:
-                await self._trigger_lavalink_reconnect(reason=f"Node status is {node.status.name}")
         except Exception:
             await self._trigger_lavalink_reconnect(reason="No node found in Wavelink Pool")
+            return
+
+        if node.status != wavelink.NodeStatus.CONNECTED:
+            await self._trigger_lavalink_reconnect(
+                reason=f"Node status is {getattr(node.status, 'name', node.status)}"
+            )
+            return
+
+        # A node can report CONNECTED while its REST API is hung. Every player
+        # operation goes through the REST API, so the node is only really healthy
+        # when the REST API answers too.
+        if not await probe_node(node):
+            await self._trigger_lavalink_reconnect(
+                reason="Node reports CONNECTED but its REST API is unresponsive"
+            )
 
     async def _trigger_lavalink_reconnect(self, reason: str) -> None:
         """Auto-reconnect Lavalink node with circuit breaker protection."""

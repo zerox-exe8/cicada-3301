@@ -24,6 +24,7 @@ from src.core.lavalink import (
     close_pool_nodes,
     connect_lavalink_node,
     err_text,
+    probe_node,
 )
 from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 from src.cogs.music._views import MusicControlView
@@ -325,26 +326,11 @@ class GuildPlayer:
         """
         Verify the Lavalink node REST API is actually responsive.
 
-        The websocket can be alive while the REST API is slow or unreachable —
+        The websocket can be alive while the REST API is slow or unreachable -
         and the Wavelink voice handshake only completes after a successful REST
         call, so a dead REST API silently turns into a voice connect timeout.
         """
-        session = getattr(node, "_session", None)
-        if session is None or getattr(session, "closed", False):
-            return False
-
-        uri = f"{node.uri}/v4/version"
-        headers = getattr(node, "headers", None) or {}
-
-        async def _probe() -> None:
-            async with session.get(uri, headers=headers) as resp:
-                await resp.read()
-
-        try:
-            await asyncio.wait_for(_probe(), timeout=timeout)
-            return True
-        except Exception:
-            return False
+        return await probe_node(node, timeout=timeout)
 
     # ── Playback Engine ──
 

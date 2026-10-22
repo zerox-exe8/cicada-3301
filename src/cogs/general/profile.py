@@ -31,24 +31,32 @@ class Profile(commands.Cog):
         target = member or ctx.author
         target_id = target.id
 
-        # resolve Standing
+        # Resolve user bio / About Me
+        bio = "No bio set."
+        try:
+            fetched = await self.bot.fetch_user(target_id)
+            if fetched and getattr(fetched, "bio", None) and fetched.bio.strip():
+                clean_bio = fetched.bio.strip().replace("\r\n", " ").replace("\n", " ")
+                bio = clean_bio[:120] + ("..." if len(clean_bio) > 120 else "")
+        except Exception:
+            pass
+
+        # Resolve Badge (Clean, simple text, no emojis)
         is_owner_user = await self.bot.perm_mgr.is_owner(target_id)
         is_dev_user = await self.bot.perm_mgr.is_developer(target_id)
         has_no_prefix = target_id in getattr(self.bot, "no_prefix_users", set()) or is_dev_user
 
         if is_owner_user:
-            standing = "Owner"
+            badge_str = "Owner"
         elif is_dev_user:
-            standing = "Developer"
+            badge_str = "Developer"
         elif has_no_prefix:
-            standing = "Authorized Dispatcher"
+            badge_str = "VIP Dispatcher"
         else:
-            standing = "Standard Client"
+            badge_str = "Member"
 
-        # resolve Access & Tier
-        access_str = "No-Prefix Active" if has_no_prefix else "Standard"
-
-        tier_str = "Standard"
+        # Resolve Premium Plan
+        tier_str = "Free Tier"
         try:
             prem_row = await self.bot.db.fetch_one(
                 "SELECT tier, expires_at FROM user_premium WHERE user_id = $1;",
@@ -62,8 +70,11 @@ class Profile(commands.Cog):
         except Exception:
             pass
 
-        # music Telemetry (Saved Playlists)
-        pl_display = "None"
+        # Resolve No-Prefix
+        no_prefix_str = "Active" if has_no_prefix else "Disabled"
+
+        # Resolve Playlist library
+        pl_display = "`None`"
         try:
             pl_rows = await self.bot.db.fetch_all(
                 "SELECT playlist_name FROM user_playlists WHERE user_id = $1 ORDER BY id ASC;",
@@ -72,13 +83,13 @@ class Profile(commands.Cog):
             if pl_rows:
                 names = [r["playlist_name"] for r in pl_rows if r.get("playlist_name")]
                 if names:
-                    pl_display = ", ".join(f"`{n}`" for n in names[:5])
-                    if len(names) > 5:
-                        pl_display += f" +{len(names) - 5} more"
+                    joined_names = ", ".join(f"`{n}`" for n in names[:3])
+                    extra = f" +{len(names) - 3} more" if len(names) > 3 else ""
+                    pl_display = f"{len(names)} Saved ({joined_names}{extra})"
         except Exception:
             pass
 
-        # live Audio Detection
+        # Resolve Live Audio Detection
         live_audio_title: str | None = None
         live_audio_author: str | None = None
         live_audio_url: str | None = None
@@ -122,39 +133,43 @@ class Profile(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to resolve live audio status in profile: {e}", exc_info=True)
 
+        if live_audio_title:
+            link_str = f"[{live_audio_title}]({live_audio_url})" if live_audio_url else f"`{live_audio_title}`"
+            author_str = f" by `{live_audio_author}`" if live_audio_author else ""
+            vc_str = f" in `{live_audio_vc}`" if live_audio_vc else ""
+            listening_str = f"{link_str}{author_str}{vc_str}"
+        else:
+            listening_str = "`Nothing Playing`"
+
         avatar_url = target.display_avatar.url if target.display_avatar else None
 
         # Build Clean Components V2 Card
         container = KyroContainer(accent_color=None)
+        e_reg = getattr(self.bot, "custom_emojis", None)
+        heart = e_reg.get("heart_dot", "❤") if e_reg else "❤"
+
+        # Header: Large username title with bio tagline below it + avatar thumbnail
         container.add_section(
             content=(
-                f"### {target.name}\n"
-                f"> **Standing** • `{standing}`\n"
-                f"> **Access** • `{access_str}`\n"
-                f"> **Tier** • `{tier_str}`"
+                f"# {target.display_name}\n"
+                f"*{bio}*"
             ),
             accessory={"type": 11, "media": {"url": avatar_url}} if avatar_url else None,
         )
 
+        # Line separator directly below title & tagline
         container.add_separator(divider=True)
 
-        if live_audio_title:
-            link_str = f"[{live_audio_title}]({live_audio_url})" if live_audio_url else f"`{live_audio_title}`"
-            author_str = f" by `{live_audio_author}`" if live_audio_author else ""
-            audio_lines = (
-                f"> **Playlists** • {pl_display}\n"
-                f"> **Live Audio** • {link_str}{author_str}\n"
-                f"> **Channel** • `{live_audio_vc}` • `320kbps Studio Master`\n\n"
-            )
-        else:
-            audio_lines = (
-                f"> **Playlists** • {pl_display}\n"
-                f"> **Live Audio** • `Idle (Not Listening)`\n\n"
-            )
-
-        container.add_text(
-            audio_lines + "-# Powered by Kyro Studio"
+        # Blockquote details with heart bullet: Badge, Premium, No-Prefix, Playlist, Listening to
+        fields_text = (
+            f"> {heart} **Badge:** `{badge_str}`\n"
+            f"> {heart} **Premium:** `{tier_str}`\n"
+            f"> {heart} **No-Prefix:** `{no_prefix_str}`\n"
+            f"> {heart} **Playlist:** {pl_display}\n"
+            f"> {heart} **Listening to:** {listening_str}\n\n"
+            f"-# Powered by Kyro Studio"
         )
+        container.add_text(fields_text)
 
         await send_container_response(ctx, container)
 

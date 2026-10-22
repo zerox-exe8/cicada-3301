@@ -294,45 +294,20 @@ class AutoEvents(commands.Cog):
     )
     @commands.has_permissions(manage_roles=True)
     async def autorole_group(self, ctx: CustomContext) -> None:
-        """View current auto-role configuration for humans and bots."""
+        """View auto-role commands."""
         e_reg = self.bot.custom_emojis
-        dot = e_reg.get("heart_dot", "-")
-        badge = e_reg.get("icon_moderation", "")
-        badge_str = f"{badge} " if badge else ""
+        dot = e_reg.get("heart_dot", "❤")
         prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id)
 
-        human_role_id = await self._get_autorole_id(ctx.guild.id, target="human")
-        bot_role_id = await self._get_autorole_id(ctx.guild.id, target="bot")
-
-        human_role = ctx.guild.get_role(human_role_id) if human_role_id else None
-        bot_role = ctx.guild.get_role(bot_role_id) if bot_role_id else None
-
-        human_str = f"@{human_role.name} `「{human_role.id}」`" if human_role else "`Disabled`"
-        bot_str = f"@{bot_role.name} `「{bot_role.id}」`" if bot_role else "`Disabled`"
-
-        me = ctx.guild.me
-        can_manage = me.guild_permissions.manage_roles or me.guild_permissions.administrator
-        perm_status = "`Valid`" if can_manage else "`Warning: Missing Manage Roles Permission`"
-
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"{badge_str}**Auto-Role Configuration**\n"
-                "> Automatically assign dedicated roles when humans or bots join the server."
-            )
-        )
+        container.add_section(content="**Auto-Role Commands**")
         container.add_separator(divider=True)
         container.add_text(
-            f"{dot} **Human Auto-Role:** {human_str}\n"
-            f"{dot} **Bot Auto-Role:** {bot_str}\n"
-            f"{dot} **Bot Permission:** {perm_status}"
+            f"{dot} `{prefix}autorole human <role> | remove`\n"
+            f"{dot} `{prefix}autorole bot <role> | remove`"
         )
         container.add_separator(divider=True)
-        container.add_text(
-            f"-# **Commands:**\n"
-            f"-# • `{prefix}autorole human @role` • `{prefix}autorole human remove`\n"
-            f"-# • `{prefix}autorole bot @role` • `{prefix}autorole bot remove`"
-        )
+        container.add_text(f"-# Requested by {ctx.author.display_name}")
         await send_container_response(ctx, container)
 
     # ─── Auto-Role Human Subgroup ────────────────────────────────────────────

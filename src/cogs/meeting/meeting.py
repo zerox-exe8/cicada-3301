@@ -274,6 +274,8 @@ class MeetingAudioSink(AudioSinkBase):
         self._last_dave_err: str = "none"
         self._ssrc_counts: dict[int, int] = {}
         self._first_hex: str = ""
+        self._min_payload_len: int = 999999
+        self._max_payload_len: int = 0
         self._opus_err_count: int = 0
         # Dedicated per-SSRC Opus decoders
         self._opus_decoders: dict[int, Any] = {}
@@ -341,6 +343,12 @@ class MeetingAudioSink(AudioSinkBase):
             if opus_bytes in (b"\xf8\xff\xfe", b"\x78\r:") or len(opus_bytes) <= 3:
                 self._silence_pkts += 1
                 return
+
+            payload_len = len(opus_bytes)
+            if payload_len < self._min_payload_len:
+                self._min_payload_len = payload_len
+            if payload_len > self._max_payload_len:
+                self._max_payload_len = payload_len
 
             if not self._first_hex:
                 self._first_hex = f"{opus_bytes[:3].hex()}(len={len(opus_bytes)})"
@@ -983,7 +991,17 @@ class MeetingCog(commands.Cog, name="Meeting"):
         dave_pass = getattr(sink, "_dave_pass", 0)
         last_dave_err = getattr(sink, "_last_dave_err", "none")
         first_hex = getattr(sink, "_first_hex", "empty")
-        ssrc_summary = ", ".join(f"{s}:{c}" for s, c in getattr(sink, "_ssrc_counts", {}).items()) if getattr(sink, "_ssrc_counts", None) else "none"
+        min_p = getattr(sink, "_min_payload_len", 0) if getattr(sink, "_min_payload_len", 999999) != 999999 else 0
+        max_p = getattr(sink, "_max_payload_len", 0)
+        len_info = f"{min_p}..{max_p}"
+        ssrc_details = []
+        for s, c in getattr(sink, "_ssrc_counts", {}).items():
+            u_name = "unknown"
+            if s in getattr(sink, "_ssrc_to_uid", {}):
+                uid = sink._ssrc_to_uid[s]
+                u_name = sink.speaker_names.get(uid, str(uid))
+            ssrc_details.append(f"{s}->{u_name}:{c}")
+        ssrc_summary = ", ".join(ssrc_details) if ssrc_details else "none"
         sink.cleanup()
         dot = self.bot.custom_emojis.get("heart_dot", "•")
 
@@ -1008,7 +1026,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                         detail = "No human speech recognized"
                     opus_errs = getattr(sink, "_opus_err_count", 0)
                     dave_info = f"v{dave_ver} [ready={dave_ready}, succ={dave_succ}, fail={dave_fail}, pass={dave_pass}, sil={silence_pkts}, opus_err={opus_errs}]"
-                    diag_msg = f"Captured {captured_packets} pkts (Decoded: {decoded_frames}, DAVE {dave_info}, SSRC: [{ssrc_summary}], hex: {first_hex}, peak amp: {max_level}/32767). Engine: `{detail}`."
+                    diag_msg = f"Captured {captured_packets} pkts (Decoded: {decoded_frames}, DAVE {dave_info}, SSRC: [{ssrc_summary}], hex: {first_hex}, payload: {len_info}, peak amp: {max_level}/32767). Engine: `{detail}`."
                 c.add_text(
                     f"> {dot} **Duration:** `{duration_fmt}`\n"
                     f"> {dot} **Status:** `No Speech Detected`\n"

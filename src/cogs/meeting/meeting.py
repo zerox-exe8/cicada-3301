@@ -10,8 +10,8 @@ import os
 import struct
 import time
 import wave
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import aiohttp
 import discord
@@ -270,6 +270,8 @@ class MeetingAudioSink(AudioSinkBase):
         self.speaker_names: dict[Any, str] = {}
         self.speaker_chunks: dict[Any, int] = {}
         self.speaker_peaks: dict[Any, int] = {}
+        self.speaker_last_active: dict[Any, float] = {}
+        self.speaker_buffer_start: dict[Any, float] = {}
         self._ssrc_to_uid: dict[int, Any] = {}
         self._voice_client: Optional[Any] = None
         self.packet_count: int = 0
@@ -458,9 +460,13 @@ class MeetingAudioSink(AudioSinkBase):
                 self.speaker_names[uid] = name
                 self.speaker_chunks[uid] = 0
 
+            now = time.time()
             self.speaker_buffers[uid].extend(downsampled)
             self.speaker_chunks[uid] += 1
             self.speaker_peaks[uid] = max(self.speaker_peaks.get(uid, 0), peak_amp)
+            self.speaker_last_active[uid] = now
+            if uid not in self.speaker_buffer_start:
+                self.speaker_buffer_start[uid] = now
             self.decoded_frames += 1
             self.total_pcm_bytes += len(downsampled)
         except Exception:
@@ -552,6 +558,69 @@ class MeetingAudioSink(AudioSinkBase):
         chunks = self.get_speaker_wav_chunks(user_id, chunk_seconds=600)
         return chunks[0] if chunks else None
 
+    @staticmethod
+    def pcm_to_normalized_wav(pcm_bytes: bytes) -> Optional[io.BytesIO]:
+        """Convert raw 16kHz mono PCM bytes into an AGC-normalized in-memory WAV buffer."""
+        if not pcm_bytes or len(pcm_bytes) < int(16000 * 2 * 0.2):
+            return None
+        try:
+            normalized = MeetingAudioSink._normalize_pcm(pcm_bytes)
+            wav_io = io.BytesIO()
+            with wave.open(wav_io, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(normalized)
+            wav_io.seek(0)
+            return wav_io
+        except Exception:
+            return None
+
+    def pop_ready_speaker_chunks(
+        self, max_chunk_duration: float = 25.0, pause_threshold: float = 1.2
+    ) -> list[tuple[Any, str, bytes]]:
+        """
+        Extract PCM chunks ready for immediate real-time transcription:
+        - Either speaker paused for >= pause_threshold (natural silence break)
+        - Or speaker talked continuously for >= max_chunk_duration (preventing buffer accumulation)
+        Returns list of (uid, speaker_name, pcm_bytes) and immediately clears those bytes from RAM!
+        """
+        now = time.time()
+        ready: list[tuple[Any, str, bytes]] = []
+        min_bytes = int(16000 * 2 * 0.8)  # at least 0.8s of speech
+        max_bytes = int(16000 * 2 * max_chunk_duration)
+
+        for uid, buf in list(self.speaker_buffers.items()):
+            buf_len = len(buf)
+            if buf_len < min_bytes:
+                continue
+
+            last_active = self.speaker_last_active.get(uid, now)
+            silence_duration = now - last_active
+
+            if silence_duration >= pause_threshold or buf_len >= max_bytes:
+                chunk_pcm = bytes(buf)
+                buf.clear()
+                self.speaker_buffer_start[uid] = now
+                name = self.speaker_names.get(uid, f"Speaker-{uid}")
+                ready.append((uid, name, chunk_pcm))
+
+        return ready
+
+    def flush_all_remaining_chunks(self) -> list[tuple[Any, str, bytes]]:
+        """Flush any remaining buffered audio at meeting conclusion."""
+        ready: list[tuple[Any, str, bytes]] = []
+        min_bytes = int(16000 * 2 * 0.25)
+        for uid, buf in list(self.speaker_buffers.items()):
+            if len(buf) >= min_bytes:
+                chunk_pcm = bytes(buf)
+                buf.clear()
+                name = self.speaker_names.get(uid, f"Speaker-{uid}")
+                ready.append((uid, name, chunk_pcm))
+            else:
+                buf.clear()
+        return ready
+
     def cleanup(self) -> None:
         """Called automatically by voice_recv AudioReader._stop background thread.
         DO NOT clear speaker_buffers, speaker_peaks, or _ssrc_to_uid here,
@@ -565,6 +634,8 @@ class MeetingAudioSink(AudioSinkBase):
         self.speaker_names.clear()
         self.speaker_chunks.clear()
         self.speaker_peaks.clear()
+        self.speaker_last_active.clear()
+        self.speaker_buffer_start.clear()
         self._ssrc_to_uid.clear()
         self._opus_decoders.clear()
 
@@ -581,6 +652,12 @@ class MeetingSession:
     voice_client: voice_recv.VoiceRecvClient
     sink: MeetingAudioSink
     is_processing: bool = False
+    # Live rolling transcription & marathon meeting state
+    transcript_timeline: list[tuple[float, str, str]] = field(default_factory=list)
+    rolling_summaries: list[str] = field(default_factory=list)
+    pending_tasks: set[asyncio.Task] = field(default_factory=set)
+    last_rolling_summary_time: float = 0.0
+    monitor_task: Optional[asyncio.Task] = None
 
 
 class MeetingCog(commands.Cog, name="Meeting"):
@@ -605,6 +682,11 @@ class MeetingCog(commands.Cog, name="Meeting"):
         self._connecting_guilds.clear()
         for s in list(self._sessions.values()):
             try:
+                if s.monitor_task and not s.monitor_task.done():
+                    s.monitor_task.cancel()
+                for t in s.pending_tasks:
+                    if not t.done():
+                        t.cancel()
                 s.voice_client.stop_listening()
                 asyncio.create_task(s.voice_client.disconnect(force=True))
                 s.sink.destroy()
@@ -676,7 +758,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 form.add_field("file", wav_data, filename="speaker.wav", content_type="audio/wav")
                 form.add_field("model", "whisper-large-v3-turbo")
                 form.add_field("response_format", "json")
-                headers = {"Authorization": f"Bearer {groq_key}"}
+                headers = {
+                    "Authorization": f"Bearer {groq_key}",
+                    "User-Agent": "KyroMeetingAssistant/1.0",
+                }
 
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
@@ -968,6 +1053,95 @@ class MeetingCog(commands.Cog, name="Meeting"):
             "topics": "Team Sync",
         }
 
+    # ------------------ REAL-TIME LIVE ROLLING TRANSCRIPTION ------------------
+
+    async def _live_session_monitor(self, session: MeetingSession) -> None:
+        """Background monitor: checks speaker pauses every 0.8s, dispatches live transcription
+        immediately on natural pauses (1.2s silence) or 25s continuous speech,
+        and manages rolling 10-minute mini-summaries for marathon meetings (1hr - 5hr+).
+        """
+        session.last_rolling_summary_time = time.time()
+        try:
+            while session.guild_id in self._sessions and not session.is_processing:
+                await asyncio.sleep(0.8)
+
+                # 1. Pop ready audio chunks from sink (paused >= 1.2s or reached 25s)
+                ready_chunks = session.sink.pop_ready_speaker_chunks(max_chunk_duration=25.0, pause_threshold=1.2)
+                for uid, name, pcm_bytes in ready_chunks:
+                    wav_io = MeetingAudioSink.pcm_to_normalized_wav(pcm_bytes)
+                    if wav_io:
+                        task = asyncio.create_task(self._process_live_chunk(session, uid, name, wav_io))
+                        session.pending_tasks.add(task)
+                        task.add_done_callback(session.pending_tasks.discard)
+
+                # 2. Rolling mini-summary check (every 10 minutes)
+                now = time.time()
+                if now - session.last_rolling_summary_time >= 600.0:
+                    session.last_rolling_summary_time = now
+                    asyncio.create_task(self._trigger_rolling_summary(session))
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"Notice in live session monitor: {e}")
+
+    async def _process_live_chunk(
+        self, session: MeetingSession, uid: Any, name: str, wav_io: io.BytesIO
+    ) -> None:
+        """Transcribe an isolated live chunk via Groq Whisper (<200ms) and append to timeline."""
+        try:
+            text = await self._transcribe_audio(wav_io)
+            if text and len(text.strip()) >= 2:
+                timestamp = time.time() - session.start_time
+                session.transcript_timeline.append((timestamp, name, text.strip()))
+                logger.debug(f"Live transcribed [{name} at {int(timestamp)}s]: {text.strip()[:60]}")
+        except Exception as e:
+            logger.debug(f"Error in live chunk transcription: {e}")
+        finally:
+            try:
+                wav_io.close()
+            except Exception:
+                pass
+
+    async def _trigger_rolling_summary(self, session: MeetingSession) -> None:
+        """Condense recent conversation into a rolling mini-summary during marathon meetings (1hr+)."""
+        if len(session.transcript_timeline) < 8:
+            return
+        recent_lines = [f"{s_name}: {s_txt}" for _, s_name, s_txt in session.transcript_timeline[-40:]]
+        recent_text = "\n".join(recent_lines)
+        prompt = (
+            "Summarize the following 10-minute segment of a Discord voice meeting into 2-4 concise bullet points.\n"
+            "Keep it natural in conversational Hinglish/English covering main discussion points.\n\n"
+            f"Transcript:\n{recent_text[:10000]}"
+        )
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        if groq_key:
+            try:
+                payload = {
+                    "model": "openai/gpt-oss-20b",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.2,
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {groq_key}",
+                    "User-Agent": "KyroMeetingAssistant/1.0",
+                }
+                async with aiohttp.ClientSession() as aio_s:
+                    async with aio_s.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        json=payload,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=10.0),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            summary_text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                            if summary_text:
+                                session.rolling_summaries.append(summary_text)
+                                logger.info(f"Guild {session.guild_id}: Generated rolling 10-minute mini-summary.")
+            except Exception as e:
+                logger.debug(f"Notice generating rolling mini-summary: {e}")
+
     async def _process_meeting_completion(self, session: MeetingSession) -> None:
         """Asynchronously process audio, transcribe per speaker, generate summary, and post card."""
         guild = self.bot.get_guild(session.guild_id)
@@ -997,8 +1171,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
         duration = int(time.time() - session.start_time)
         duration_fmt = f"{duration // 60}m {duration % 60}s"
 
-        # Transcribe each active speaker using safe chunks
-        speaker_transcripts: list[tuple[str, str]] = []
+        session.is_processing = True
+        if session.monitor_task and not session.monitor_task.done():
+            session.monitor_task.cancel()
+
         sink = session.sink
 
         # Final pass: attempt resolving any remaining provisional ssrc speakers
@@ -1019,26 +1195,52 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     sink.speaker_buffers[uid] = prev_buf + sink.speaker_buffers[uid]
                     sink.speaker_peaks[uid] = max(sink.speaker_peaks.get(uid, 0), prev_peak)
 
-        sem = asyncio.Semaphore(2)
+        # Flush any remaining audio chunks from sink
+        remaining = sink.flush_all_remaining_chunks()
+        for uid, name, pcm_bytes in remaining:
+            wav_io = MeetingAudioSink.pcm_to_normalized_wav(pcm_bytes)
+            if wav_io:
+                t = asyncio.create_task(self._process_live_chunk(session, uid, name, wav_io))
+                session.pending_tasks.add(t)
 
-        async def _transcribe_chunk_safe(ch: bytes) -> str:
-            async with sem:
-                return await self._transcribe_audio(ch)
+        # Await pending live transcription tasks (fast, max 6s timeout)
+        if session.pending_tasks:
+            try:
+                await asyncio.wait(session.pending_tasks, timeout=6.0)
+            except Exception:
+                pass
 
-        all_uids = set(sink.speaker_names.keys()) | set(sink.speaker_buffers.keys())
-        for uid in all_uids:
-            name = sink.speaker_names.get(uid, f"Speaker-{uid}")
-            # Offload heavy PCM normalization and chunking off the asyncio event loop
-            chunks = await asyncio.to_thread(sink.get_speaker_wav_chunks, uid, 30)
-            if not chunks:
-                continue
+        speaker_transcripts: list[tuple[str, str]] = []
 
-            chunk_results = await asyncio.gather(*[_transcribe_chunk_safe(ch) for ch in chunks], return_exceptions=True)
-            speaker_texts = [txt for txt in chunk_results if isinstance(txt, str) and txt.strip()]
+        # 1. Primary path: group speech from live rolling timeline
+        if session.transcript_timeline:
+            unique_speakers = list(dict.fromkeys(s_name for _, s_name, _ in session.transcript_timeline))
+            for s_name in unique_speakers:
+                s_text = " ".join(txt for _, name, txt in session.transcript_timeline if name == s_name).strip()
+                if s_text and len(s_text) >= 2:
+                    speaker_transcripts.append((s_name, s_text))
 
-            full_speaker_text = " ".join(speaker_texts).strip()
-            if full_speaker_text and len(full_speaker_text) >= 2:
-                speaker_transcripts.append((name, full_speaker_text))
+        # 2. Safety fallback: if live timeline had 0 results, fall back to buffer batch processing
+        if not speaker_transcripts:
+            sem = asyncio.Semaphore(2)
+
+            async def _transcribe_chunk_safe(ch: io.BytesIO) -> str:
+                async with sem:
+                    return await self._transcribe_audio(ch)
+
+            all_uids = set(sink.speaker_names.keys()) | set(sink.speaker_buffers.keys())
+            for uid in all_uids:
+                name = sink.speaker_names.get(uid, f"Speaker-{uid}")
+                chunks = await asyncio.to_thread(sink.get_speaker_wav_chunks, uid, 30)
+                if not chunks:
+                    continue
+
+                chunk_results = await asyncio.gather(*[_transcribe_chunk_safe(ch) for ch in chunks], return_exceptions=True)
+                speaker_texts = [txt for txt in chunk_results if isinstance(txt, str) and txt.strip()]
+
+                full_speaker_text = " ".join(speaker_texts).strip()
+                if full_speaker_text and len(full_speaker_text) >= 2:
+                    speaker_transcripts.append((name, full_speaker_text))
 
         # Peak mic amplitude calculation (direct O(1) from live speaker_peaks with thread fallback)
         max_level = max(sink.speaker_peaks.values(), default=0)
@@ -1117,10 +1319,15 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 pass
             return
 
-        # Combine transcripts
-        combined_text = "\n".join([f"{name}: {text}" for name, text in speaker_transcripts])
+        # Combine transcripts (incorporating rolling summaries for marathon meetings if present)
+        if session.rolling_summaries:
+            sections_text = "\n\n".join([f"Key Discussion Section {i+1}:\n{s}" for i, s in enumerate(session.rolling_summaries)])
+            recent_text = "\n".join([f"{name}: {text}" for _, name, text in session.transcript_timeline[-30:]])
+            combined_text = f"{sections_text}\n\nRecent Discussion:\n{recent_text}"
+        else:
+            combined_text = "\n".join([f"{name}: {text}" for name, text in speaker_transcripts])
 
-        # Generate Intelligence Summary via Gemini
+        # Generate Intelligence Summary via Groq LLM / Gemini dual engine
         intel = await self._generate_meeting_intelligence(combined_text)
 
         # Persist to database via repository
@@ -1706,7 +1913,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
             except Exception as e:
                 logger.debug(f"Notice priming voice gateway speaking state: {e}")
 
-            self._sessions[guild.id] = MeetingSession(
+            new_session = MeetingSession(
                 guild_id=guild.id,
                 voice_channel_id=vc.id,
                 text_channel_id=ctx.channel.id,
@@ -1715,6 +1922,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 voice_client=voice_client,
                 sink=sink,
             )
+            new_session.monitor_task = asyncio.create_task(self._live_session_monitor(new_session))
+            self._sessions[guild.id] = new_session
 
             dot = self.bot.custom_emojis.get("heart_dot", "•")
             sw_on = self.bot.custom_emojis.get("icon_switch_on", "[ON]")
@@ -1790,6 +1999,11 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
         duration = int(time.time() - session.start_time)
         if duration < 10:
+            if session.monitor_task and not session.monitor_task.done():
+                session.monitor_task.cancel()
+            for t in session.pending_tasks:
+                if not t.done():
+                    t.cancel()
             session.sink.destroy()
             container = KyroContainer(accent_color=None)
             container.add_section(
@@ -1851,6 +2065,11 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     if time.time() - active_s.start_time >= 10.0:
                         asyncio.create_task(self._process_meeting_completion(active_s))
                     else:
+                        if active_s.monitor_task and not active_s.monitor_task.done():
+                            active_s.monitor_task.cancel()
+                        for t in active_s.pending_tasks:
+                            if not t.done():
+                                t.cancel()
                         active_s.sink.destroy()
                         logger.info(f"Guild {guild.id}: Meeting disconnected <10s after start ({time.time() - active_s.start_time:.1f}s); cleanly discarded.")
             return
@@ -1887,6 +2106,12 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     if time.time() - active_s.start_time >= 10.0:
                         asyncio.create_task(self._process_meeting_completion(active_s))
                     else:
+                        if active_s.monitor_task and not active_s.monitor_task.done():
+                            active_s.monitor_task.cancel()
+                        for t in active_s.pending_tasks:
+                            if not t.done():
+                                t.cancel()
+                        active_s.sink.destroy()
                         logger.info(f"Guild {guild.id}: Meeting ended due to empty VC in <10s; cleanly discarded.")
 
 

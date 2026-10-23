@@ -183,6 +183,29 @@ try:
 
         _vropus.PacketDecoder._dave_decrypt_inner = _patched_dave_decrypt_inner
 
+        # 4. Strip RTP padding when packet.padding is True (RFC 3550 Section 5.1).
+        # In voice_recv, PacketDecryptor leaves trailing padding octets in packet.decrypted_data.
+        # This misaligns DAVE trailers (0xFAFA) and corrupts trailing Opus frame bytes.
+        import discord.ext.voice_recv.reader as _vrreader
+
+        _orig_packet_decryptor_init = _vrreader.PacketDecryptor.__init__
+
+        def _patched_packet_decryptor_init(self: Any, mode: Any, secret_key: bytes) -> None:
+            _orig_packet_decryptor_init(self, mode, secret_key)
+            _raw_decrypt_rtp = self.decrypt_rtp
+
+            def _safe_decrypt_rtp(packet: Any) -> bytes:
+                result = _raw_decrypt_rtp(packet)
+                if getattr(packet, "padding", False) and result:
+                    pad_len = result[-1]
+                    if 0 < pad_len <= len(result):
+                        result = result[:-pad_len]
+                return result
+
+            self.decrypt_rtp = _safe_decrypt_rtp
+
+        _vrreader.PacketDecryptor.__init__ = _patched_packet_decryptor_init
+
         # Mark all patches as successfully applied on discord module across reloads
         discord._KYRO_MEETING_PATCHES_APPLIED = True
 
@@ -251,16 +274,18 @@ class MeetingAudioSink(AudioSinkBase):
         self._last_dave_err: str = "none"
         self._ssrc_counts: dict[int, int] = {}
         self._first_hex: str = ""
-        # Fallback per-SSRC Opus decoders in case data.pcm is empty
+        self._opus_err_count: int = 0
+        # Dedicated per-SSRC Opus decoders
         self._opus_decoders: dict[int, Any] = {}
 
     def wants_opus(self) -> bool:
-        """Request decoded PCM from voice_recv.
-        Returns False so voice_recv's PacketDecoder runs its jitter buffer,
-        packet loss concealment (PLC), forward error correction (FEC), and DAVE
-        decryption pipeline — delivering clean 48kHz stereo 16-bit PCM in data.pcm.
+        """Request raw decrypted Opus frames from voice_recv instead of relying on its PacketDecoder.
+        Returning True bypasses voice_recv's internal PacketDecoder._decode_safe which
+        silently catches OpusError and emits 3840 bytes of zero-amplitude digital silence.
+        Instead, voice_recv performs DAVE decryption and delivers the clean Opus frame in
+        data.opus / data.packet.decrypted_data for our dedicated per-SSRC decoder to process.
         """
-        return False
+        return True
 
     def write(self, user: Optional[discord.Member | discord.User], data: voice_recv.VoiceData) -> None:
         """Receive decoded PCM frame from voice_recv, downsample to 16kHz mono, and buffer per speaker."""
@@ -299,38 +324,44 @@ class MeetingAudioSink(AudioSinkBase):
                     if m and getattr(m, "bot", False):
                         return
 
-            # --- Extract Audio PCM ---
-            # With wants_opus()=False, voice_recv's PacketDecoder runs JitterBuffer, FEC,
-            # and Opus decoding per-SSRC with PLC, delivering clean 48kHz stereo 16-bit PCM in data.pcm.
-            pcm: bytes = getattr(data, "pcm", b"")
-            if not pcm or len(pcm) < 12:
-                # Fallback to raw Opus frame decode if internal PCM is empty
-                opus_bytes: Optional[bytes] = getattr(data, "opus", None)
-                if not opus_bytes:
-                    raw = getattr(data.packet, "decrypted_data", b"") if hasattr(data, "packet") else b""
-                    if raw:
-                        opus_bytes = bytes(raw)
+            # --- Extract Decrypted Opus Frame ---
+            # With wants_opus()=True, voice_recv decrypts DAVE MLS ciphertext and delivers
+            # the clean Opus frame in data.opus or data.packet.decrypted_data without passing
+            # through voice_recv's _decode_safe (which emits fake silence zeros on any error).
+            opus_bytes: Optional[bytes] = getattr(data, "opus", None)
+            if not opus_bytes and hasattr(data, "packet"):
+                raw = getattr(data.packet, "decrypted_data", None)
+                if raw:
+                    opus_bytes = bytes(raw)
 
-                if opus_bytes and len(opus_bytes) >= 3:
-                    if not self._first_hex:
-                        self._first_hex = opus_bytes[:3].hex()
-                    ssrc_key: int = ssrc or 0
-                    if ssrc_key not in self._opus_decoders:
-                        try:
-                            import discord.opus as _dopus
-                            self._opus_decoders[ssrc_key] = _dopus.Decoder()
-                        except Exception:
-                            return
-                    try:
-                        pcm = self._opus_decoders[ssrc_key].decode(opus_bytes, fec=False)
-                    except Exception:
-                        return
+            if not opus_bytes:
+                return
+
+            if not self._first_hex:
+                self._first_hex = opus_bytes[:3].hex()
+
+            # Ignore RFC 6716 DTX / comfort noise frames (e.g. 0xf8fffe, 0x780d3a, <= 3 bytes)
+            if opus_bytes in (b"\xf8\xff\xfe", b"\x78\r:") or len(opus_bytes) <= 3:
+                self._silence_pkts += 1
+                return
+
+            # Dedicated per-SSRC Opus decoder
+            ssrc_key: int = ssrc or 0
+            if ssrc_key not in self._opus_decoders:
+                try:
+                    import discord.opus as _dopus
+                    self._opus_decoders[ssrc_key] = _dopus.Decoder()
+                except Exception:
+                    return
+
+            try:
+                pcm = self._opus_decoders[ssrc_key].decode(opus_bytes, fec=False)
+            except Exception:
+                self._opus_err_count += 1
+                return
 
             if not pcm or len(pcm) < 12:
                 return
-
-            if not self._first_hex and hasattr(data, "packet") and getattr(data.packet, "decrypted_data", None):
-                self._first_hex = bytes(data.packet.decrypted_data)[:3].hex()
 
             # Ensure even byte count for int16 array
             if len(pcm) % 2 != 0:
@@ -968,7 +999,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     detail = getattr(self, "_last_transcribe_diag", None)
                     if not detail:
                         detail = "No human speech recognized"
-                    dave_info = f"v{dave_ver} [ready={dave_ready}, succ={dave_succ}, fail={dave_fail}, pass={dave_pass}, sil={silence_pkts}]"
+                    opus_errs = getattr(sink, "_opus_err_count", 0)
+                    dave_info = f"v{dave_ver} [ready={dave_ready}, succ={dave_succ}, fail={dave_fail}, pass={dave_pass}, sil={silence_pkts}, opus_err={opus_errs}]"
                     diag_msg = f"Captured {captured_packets} pkts (Decoded: {decoded_frames}, DAVE {dave_info}, SSRC: [{ssrc_summary}], hex: {first_hex}, peak amp: {max_level}/32767). Engine: `{detail}`."
                 c.add_text(
                     f"> {dot} **Duration:** `{duration_fmt}`\n"

@@ -818,16 +818,15 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
     async def _generate_meeting_intelligence(self, full_transcript: str) -> dict[str, str]:
         """
-        Synthesize meeting transcript into a structured executive report via Gemini.
+        Synthesize meeting transcript into a structured executive report via LLM (Groq / Gemini).
         Returns dictionary containing summary, decisions, action_items, and topics.
         """
-        api_key = self._get_gemini_key()
-        if not api_key:
+        if not full_transcript or len(full_transcript.strip()) < 4:
             return {
-                "summary": "Meeting transcript recorded successfully.",
-                "decisions": "• Transcript preserved.",
-                "action_items": "• Review transcript for details.",
-                "topics": "Team Discussion",
+                "summary": "Meeting concluded without substantive discussion.",
+                "decisions": "• No major decisions recorded.",
+                "action_items": "• No pending action items.",
+                "topics": "General VC",
             }
 
         prompt = (
@@ -846,53 +845,121 @@ class MeetingCog(commands.Cog, name="Meeting"):
             '  "action_items": "Bullet points of tasks or next steps with member names (e.g. • @Name: Bot setup karega).",\n'
             '  "topics": "2-4 brief key topics discussed (e.g. Gaming, Bot Updates, Server Rules)."\n'
             "}\n\n"
-            f"Transcript:\n{full_transcript[:15000]}"
+            f"Transcript:\n{full_transcript[:18000]}"
         )
 
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
-        }
-
-        models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
-        for m in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+        def _parse_and_norm(raw_json_str: str) -> Optional[dict[str, str]]:
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        url,
-                        json=payload,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=20.0),
-                    ) as resp:
-                        if resp.status == 200:
-                            g_data = await resp.json()
-                            parts = g_data.get("candidates", [])[0].get("content", {}).get("parts", [])
-                            if parts:
-                                raw_text = parts[0].get("text", "{}")
-                                if "```json" in raw_text:
-                                    raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-                                elif "```" in raw_text:
-                                    raw_text = raw_text.split("```")[1].split("```")[0].strip()
-                                parsed = json.loads(raw_text)
+                raw = raw_json_str.strip()
+                if "```json" in raw:
+                    raw = raw.split("```json")[1].split("```")[0].strip()
+                elif "```" in raw:
+                    raw = raw.split("```")[1].split("```")[0].strip()
+                parsed = json.loads(raw)
 
-                                def _norm_field(key: str, default: str) -> str:
-                                    val = parsed.get(key)
-                                    if isinstance(val, list):
-                                        return "\n".join(f"• {str(item).lstrip('•- ')}" for item in val if str(item).strip()) or default
-                                    elif isinstance(val, str) and val.strip():
-                                        return val.strip()
-                                    return default
+                def _norm_field(key: str, default: str) -> str:
+                    val = parsed.get(key)
+                    if isinstance(val, list):
+                        items: list[str] = []
+                        for item in val:
+                            if isinstance(item, dict):
+                                person = item.get("person") or item.get("name") or item.get("member") or ""
+                                task = item.get("task") or item.get("action") or item.get("description") or str(item)
+                                if person:
+                                    items.append(f"• @{person}: {task}")
+                                else:
+                                    items.append(f"• {task}")
+                            elif str(item).strip():
+                                clean = str(item).lstrip("•- ")
+                                items.append(f"• {clean}")
+                        return "\n".join(items) if items else default
+                    elif isinstance(val, str) and val.strip():
+                        return val.strip()
+                    return default
 
-                                return {
-                                    "summary": _norm_field("summary", "Summary synthesized successfully."),
-                                    "decisions": _norm_field("decisions", "• No explicit decisions recorded."),
-                                    "action_items": _norm_field("action_items", "• No pending action items."),
-                                    "topics": _norm_field("topics", "General discussion"),
-                                }
-            except Exception as e:
-                logger.error(f"Error calling Gemini intelligence ({m}) for meeting: {e}", exc_info=True)
+                return {
+                    "summary": _norm_field("summary", "Summary synthesized successfully."),
+                    "decisions": _norm_field("decisions", "• No explicit decisions recorded."),
+                    "action_items": _norm_field("action_items", "• No pending action items."),
+                    "topics": _norm_field("topics", "General discussion"),
+                }
+            except Exception:
+                return None
+
+        # --- Tier 1: High-Speed Groq LLM (~300ms latency, high Hinglish comprehension) ---
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        if groq_key:
+            groq_models = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+            for gm in groq_models:
+                try:
+                    payload = {
+                        "model": gm,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "You are a professional meeting intelligence engine. Output strictly valid JSON matching keys: summary, decisions, action_items, topics.",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0.2,
+                    }
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {groq_key}",
+                        "User-Agent": "KyroMeetingAssistant/1.0",
+                    }
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            "https://api.groq.com/openai/v1/chat/completions",
+                            json=payload,
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=15.0),
+                        ) as resp:
+                            if resp.status == 200:
+                                g_json = await resp.json()
+                                choices = g_json.get("choices") or []
+                                if choices:
+                                    content = choices[0].get("message", {}).get("content", "")
+                                    res = _parse_and_norm(content)
+                                    if res:
+                                        logger.info(f"Meeting intelligence synthesized via Groq ({gm})")
+                                        return res
+                except Exception as e:
+                    logger.debug(f"Groq intelligence ({gm}) notice: {e}")
+
+        # --- Tier 2: Google Gemini Generative AI (Multilingual & Regional Fallback) ---
+        api_key = self._get_gemini_key()
+        if api_key:
+            gemini_payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
+            }
+            gemini_headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+            gemini_models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
+            for m in gemini_models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            url,
+                            json=gemini_payload,
+                            headers=gemini_headers,
+                            timeout=aiohttp.ClientTimeout(total=35.0),
+                        ) as resp:
+                            if resp.status == 200:
+                                g_data = await resp.json()
+                                candidates = g_data.get("candidates") or []
+                                if candidates:
+                                    parts = candidates[0].get("content", {}).get("parts") or []
+                                    if parts:
+                                        raw_text = parts[0].get("text", "{}")
+                                        res = _parse_and_norm(raw_text)
+                                        if res:
+                                            logger.info(f"Meeting intelligence synthesized via Gemini ({m})")
+                                            return res
+                except Exception as e:
+                    logger.error(f"Error calling Gemini intelligence ({m}) for meeting: {e}", exc_info=True)
 
         return {
             "summary": "Meeting concluded. Discussion transcribed.",

@@ -147,6 +147,14 @@ try:
                     )
                     if sink:
                         sink._dave_succ = getattr(sink, "_dave_succ", 0) + 1
+                        if user_id:
+                            sink._ssrc_to_uid[self.ssrc] = user_id
+                            if vc and getattr(vc, "guild", None):
+                                m = vc.guild.get_member(user_id)
+                                if m:
+                                    sink.speaker_names[user_id] = m.display_name
+                                elif user_id not in sink.speaker_names:
+                                    sink.speaker_names[user_id] = f"User-{user_id}"
                     return True
                 except BaseException as e:
                     if isinstance(e, (KeyboardInterrupt, SystemExit)):
@@ -281,13 +289,11 @@ class MeetingAudioSink(AudioSinkBase):
         self._opus_decoders: dict[int, Any] = {}
 
     def wants_opus(self) -> bool:
-        """Request raw decrypted Opus frames from voice_recv instead of relying on its PacketDecoder.
-        Returning True bypasses voice_recv's internal PacketDecoder._decode_safe which
-        silently catches OpusError and emits 3840 bytes of zero-amplitude digital silence.
-        Instead, voice_recv performs DAVE decryption and delivers the clean Opus frame in
-        data.opus / data.packet.decrypted_data for our dedicated per-SSRC decoder to process.
+        """Request decoded PCM frames from voice_recv's PacketDecoder.
+        With DAVE MLS decryption active, PacketDecoder manages the jitter buffer,
+        packet loss concealment (PLC), and libopus decoding natively into data.pcm.
         """
-        return True
+        return False
 
     def write(self, user: Optional[discord.Member | discord.User], data: voice_recv.VoiceData) -> None:
         """Receive decoded PCM frame from voice_recv, downsample to 16kHz mono, and buffer per speaker."""
@@ -326,47 +332,38 @@ class MeetingAudioSink(AudioSinkBase):
                     if m and getattr(m, "bot", False):
                         return
 
-            # --- Extract Decrypted Opus Frame ---
-            # With wants_opus()=True, voice_recv decrypts DAVE MLS ciphertext and delivers
-            # the clean Opus frame in data.opus or data.packet.decrypted_data without passing
-            # through voice_recv's _decode_safe (which emits fake silence zeros on any error).
-            opus_bytes: Optional[bytes] = getattr(data, "opus", None)
-            if not opus_bytes and hasattr(data, "packet"):
-                raw = getattr(data.packet, "decrypted_data", None)
-                if raw:
-                    opus_bytes = bytes(raw)
+            # --- Extract Decoded PCM or Decrypted Opus Frame ---
+            pcm: Optional[bytes] = getattr(data, "pcm", None)
+            if not pcm or len(pcm) < 12:
+                opus_bytes: Optional[bytes] = getattr(data, "opus", None)
+                if not opus_bytes and hasattr(data, "packet"):
+                    raw = getattr(data.packet, "decrypted_data", None)
+                    if raw:
+                        opus_bytes = bytes(raw)
 
-            if not opus_bytes:
-                return
+                if opus_bytes:
+                    if opus_bytes in (b"\xf8\xff\xfe", b"\x78\r:") or len(opus_bytes) <= 3:
+                        self._silence_pkts += 1
+                        return
 
-            # Ignore RFC 6716 DTX / comfort noise frames (e.g. 0xf8fffe, 0x780d3a, <= 3 bytes)
-            if opus_bytes in (b"\xf8\xff\xfe", b"\x78\r:") or len(opus_bytes) <= 3:
-                self._silence_pkts += 1
-                return
+                    payload_len = len(opus_bytes)
+                    if payload_len < self._min_payload_len:
+                        self._min_payload_len = payload_len
+                    if payload_len > self._max_payload_len:
+                        self._max_payload_len = payload_len
 
-            payload_len = len(opus_bytes)
-            if payload_len < self._min_payload_len:
-                self._min_payload_len = payload_len
-            if payload_len > self._max_payload_len:
-                self._max_payload_len = payload_len
-
-            if not self._first_hex:
-                self._first_hex = f"{opus_bytes[:3].hex()}(len={len(opus_bytes)})"
-
-            # Dedicated per-SSRC Opus decoder
-            ssrc_key: int = ssrc or 0
-            if ssrc_key not in self._opus_decoders:
-                try:
-                    import discord.opus as _dopus
-                    self._opus_decoders[ssrc_key] = _dopus.Decoder()
-                except Exception:
-                    return
-
-            try:
-                pcm = self._opus_decoders[ssrc_key].decode(opus_bytes, fec=False)
-            except Exception:
-                self._opus_err_count += 1
-                return
+                    ssrc_key: int = ssrc or 0
+                    if ssrc_key not in self._opus_decoders:
+                        try:
+                            import discord.opus as _dopus
+                            self._opus_decoders[ssrc_key] = _dopus.Decoder()
+                        except Exception:
+                            pass
+                    if ssrc_key in self._opus_decoders:
+                        try:
+                            pcm = self._opus_decoders[ssrc_key].decode(opus_bytes, fec=False)
+                        except Exception:
+                            self._opus_err_count += 1
 
             if not pcm or len(pcm) < 12:
                 return
@@ -376,28 +373,33 @@ class MeetingAudioSink(AudioSinkBase):
                 pcm = pcm[: len(pcm) - 1]
 
             # --- Downsample 48kHz stereo 16-bit -> 16kHz mono ---
-            # 48000 / 16000 = 3 frames. Each stereo frame has 2 samples (Left and Right).
-            # So taking every 3rd stereo frame = step 6 across int16 samples.
+            downsampled = b""
+            peak_amp = 0
             try:
-                pcm_array = array.array("h", pcm)
-                left_samples = pcm_array[0::6]
-                right_samples = pcm_array[1::6]
-                left_peak = max((abs(s) for s in left_samples), default=0)
-                right_peak = max((abs(s) for s in right_samples), default=0)
-                peak_amp = max(left_peak, right_peak)
-                selected_samples = left_samples if left_peak >= right_peak else right_samples
-                downsampled = selected_samples.tobytes()
+                import audioop
+                mono48 = audioop.tomono(pcm, 2, 0.5, 0.5)
+                downsampled, _ = audioop.ratecv(mono48, 2, 1, 48000, 16000, None)
+                peak_amp = audioop.max(downsampled, 2)
             except Exception:
                 try:
                     pcm_array = array.array("h", pcm)
-                    selected_samples = pcm_array[0::6]
-                    peak_amp = max((abs(s) for s in selected_samples), default=0)
+                    left_samples = pcm_array[0::6]
+                    right_samples = pcm_array[1::6]
+                    left_peak = max((abs(s) for s in left_samples), default=0)
+                    right_peak = max((abs(s) for s in right_samples), default=0)
+                    peak_amp = max(left_peak, right_peak)
+                    selected_samples = left_samples if left_peak >= right_peak else right_samples
                     downsampled = selected_samples.tobytes()
                 except Exception:
                     return
 
             if not downsampled:
                 return
+
+            if not self._first_hex:
+                raw_lead = getattr(data.packet, "decrypted_data", None) if hasattr(data, "packet") else None
+                hex_lead = raw_lead[:3].hex() if raw_lead else "pcm"
+                self._first_hex = f"{hex_lead}(amp={peak_amp})"
 
             # --- Resolve speaker identity ---
             uid: Any = None
@@ -551,7 +553,14 @@ class MeetingAudioSink(AudioSinkBase):
         return chunks[0] if chunks else None
 
     def cleanup(self) -> None:
-        """Clear memory buffers, peaks, and per-SSRC Opus decoders."""
+        """Called automatically by voice_recv AudioReader._stop background thread.
+        DO NOT clear speaker_buffers, speaker_peaks, or _ssrc_to_uid here,
+        as _process_meeting_completion requires them for transcription!
+        """
+        self._opus_decoders.clear()
+
+    def destroy(self) -> None:
+        """Explicitly clear memory buffers, peaks, and maps after transcription is complete."""
         self.speaker_buffers.clear()
         self.speaker_names.clear()
         self.speaker_chunks.clear()
@@ -598,7 +607,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
             try:
                 s.voice_client.stop_listening()
                 asyncio.create_task(s.voice_client.disconnect(force=True))
-                s.sink.cleanup()
+                s.sink.destroy()
             except Exception:
                 pass
         self._sessions.clear()
@@ -1002,7 +1011,6 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 u_name = sink.speaker_names.get(uid, str(uid))
             ssrc_details.append(f"{s}->{u_name}:{c}")
         ssrc_summary = ", ".join(ssrc_details) if ssrc_details else "none"
-        sink.cleanup()
         dot = self.bot.custom_emojis.get("heart_dot", "•")
 
         if not speaker_transcripts:
@@ -1036,6 +1044,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 c.add_separator(divider=True)
                 c.add_text(f"-# Kyro Voice Intelligence • <t:{int(time.time())}:f>")
                 await send_container_response(target_ch, c)
+            try:
+                sink.destroy()
+            except Exception:
+                pass
             return
 
         # Combine transcripts
@@ -1117,6 +1129,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
                         )
                     except Exception:
                         pass
+        try:
+            sink.destroy()
+        except Exception:
+            pass
 
     # ------------------ COMMAND INTERFACE ------------------
 
@@ -1206,7 +1222,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 session.voice_client.stop_listening()
                 await session.voice_client.disconnect(force=True)
                 session.voice_client.cleanup()
-                session.sink.cleanup()
+                session.sink.destroy()
             except Exception:
                 pass
             try:
@@ -1707,7 +1723,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
         duration = int(time.time() - session.start_time)
         if duration < 10:
-            session.sink.cleanup()
+            session.sink.destroy()
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content="**Meeting Concluded**\n> The meeting was stopped after less than 10 seconds. Session discarded without generating a summary."
@@ -1762,13 +1778,13 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     try:
                         active_s.voice_client.stop_listening()
                         active_s.voice_client.cleanup()
-                        active_s.sink.cleanup()
                     except Exception:
                         pass
                     # Only synthesize AI completion if meeting ran for at least 10 seconds
                     if time.time() - active_s.start_time >= 10.0:
                         asyncio.create_task(self._process_meeting_completion(active_s))
                     else:
+                        active_s.sink.destroy()
                         logger.info(f"Guild {guild.id}: Meeting disconnected <10s after start ({time.time() - active_s.start_time:.1f}s); cleanly discarded.")
             return
 

@@ -337,13 +337,13 @@ class MeetingAudioSink(AudioSinkBase):
             if not opus_bytes:
                 return
 
-            if not self._first_hex:
-                self._first_hex = opus_bytes[:3].hex()
-
             # Ignore RFC 6716 DTX / comfort noise frames (e.g. 0xf8fffe, 0x780d3a, <= 3 bytes)
             if opus_bytes in (b"\xf8\xff\xfe", b"\x78\r:") or len(opus_bytes) <= 3:
                 self._silence_pkts += 1
                 return
+
+            if not self._first_hex:
+                self._first_hex = f"{opus_bytes[:3].hex()}(len={len(opus_bytes)})"
 
             # Dedicated per-SSRC Opus decoder
             ssrc_key: int = ssrc or 0
@@ -651,7 +651,39 @@ class MeetingCog(commands.Cog, name="Meeting"):
         if not wav_data or len(wav_data) < 500:
             return ""
 
-        # Tier 1: Google Gemini Multimodal Audio (Primary, ultra-accurate Hindi/Hinglish/English)
+        # Tier 1: Groq Whisper-large-v3-turbo (Ultra-fast ~200ms latency, high multilingual accuracy)
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        if groq_key:
+            try:
+                form = aiohttp.FormData()
+                form.add_field("file", wav_data, filename="speaker.wav", content_type="audio/wav")
+                form.add_field("model", "whisper-large-v3-turbo")
+                form.add_field("response_format", "json")
+                headers = {"Authorization": f"Bearer {groq_key}"}
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "https://api.groq.com/openai/v1/audio/transcriptions",
+                        headers=headers,
+                        data=form,
+                        timeout=aiohttp.ClientTimeout(total=10.0),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            txt = data.get("text", "").strip()
+                            clean_txt = (
+                                txt.replace("<noise>", "")
+                                .replace("[silence]", "")
+                                .replace("[blank_audio]", "")
+                                .strip()
+                            )
+                            if clean_txt and len(clean_txt) >= 2:
+                                self._last_transcribe_diag = "Transcribed by Groq Whisper"
+                                return clean_txt
+            except Exception as e:
+                logger.debug(f"Groq Whisper exception: {e}")
+
+        # Tier 2: Google Gemini Multimodal Audio (Fallback, ultra-accurate Hindi/Hinglish/English)
         gemini_key = self._get_gemini_key()
         if gemini_key:
             b64_audio = base64.b64encode(wav_data).decode("utf-8")
@@ -714,7 +746,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 self._last_transcribe_diag = f"Gemini timeout/error: {e}"
                 logger.debug(f"Gemini transcription failed: {e}")
 
-        # Tier 2: Google Speech Recognition (Free fallback, specialized for Indian dialects)
+        # Tier 3: Google Speech Recognition (Free fallback, specialized for Indian dialects)
         if SPEECH_RECOGNITION_AVAILABLE and sr is not None:
             try:
                 def _run_google_sr() -> str:
@@ -745,31 +777,6 @@ class MeetingCog(commands.Cog, name="Meeting"):
             except Exception as e:
                 self._last_transcribe_diag = f"Google SR error: {e}"
                 logger.debug(f"Notice from Google Speech Recognition: {e}")
-
-        # Tier 3: Groq Whisper-large-v3-turbo (if GROQ_API_KEY is configured)
-        groq_key = os.getenv("GROQ_API_KEY", "").strip()
-        if groq_key:
-            try:
-                form = aiohttp.FormData()
-                form.add_field("file", wav_data, filename="speaker.wav", content_type="audio/wav")
-                form.add_field("model", "whisper-large-v3-turbo")
-                form.add_field("response_format", "json")
-                headers = {"Authorization": f"Bearer {groq_key}"}
-
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        "https://api.groq.com/openai/v1/audio/transcriptions",
-                        headers=headers,
-                        data=form,
-                        timeout=aiohttp.ClientTimeout(total=20.0),
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            txt = data.get("text", "").strip()
-                            if txt:
-                                return txt
-            except Exception as e:
-                logger.debug(f"Groq Whisper exception: {e}")
 
         # Tier 4: Local faster-whisper (if available)
         if FASTER_WHISPER_AVAILABLE:

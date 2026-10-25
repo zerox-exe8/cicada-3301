@@ -587,7 +587,7 @@ class MeetingAudioSink(AudioSinkBase):
         """
         now = time.time()
         ready: list[tuple[Any, str, bytes]] = []
-        min_bytes = int(16000 * 2 * 0.8)  # at least 0.8s of speech
+        min_bytes = int(16000 * 2 * 0.5)  # at least 0.5s of speech
         max_bytes = int(16000 * 2 * max_chunk_duration)
 
         for uid, buf in list(self.speaker_buffers.items()):
@@ -655,6 +655,7 @@ class MeetingSession:
     # Live rolling transcription & marathon meeting state
     transcript_timeline: list[tuple[float, str, str]] = field(default_factory=list)
     rolling_summaries: list[str] = field(default_factory=list)
+    last_summarized_idx: int = 0
     pending_tasks: set[asyncio.Task] = field(default_factory=set)
     last_rolling_summary_time: float = 0.0
     monitor_task: Optional[asyncio.Task] = None
@@ -901,7 +902,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
         return ""
 
-    async def _generate_meeting_intelligence(self, full_transcript: str) -> dict[str, str]:
+    async def _generate_meeting_intelligence(self, full_transcript: str, duration_seconds: int = 0) -> dict[str, str]:
         """
         Synthesize meeting transcript into a structured executive report via LLM (Groq / Gemini).
         Returns dictionary containing summary, decisions, action_items, and topics.
@@ -914,8 +915,27 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 "topics": "General VC",
             }
 
+        is_marathon = duration_seconds >= 1200  # 20+ mins
+        duration_minutes = max(1, duration_seconds // 60)
+
+        if is_marathon:
+            depth_instruction = (
+                f"- IMPORTANT: This was an extensive {duration_minutes}-minute long meeting. "
+                "DO NOT produce a tiny 2-3 line summary! Provide a rich, comprehensive, multi-paragraph Executive Narrative "
+                "(3 to 5 well-developed paragraphs) covering the overall background, core discussions, debates, perspectives, and outcomes.\n"
+                "- Write detailed Key Decisions with full context: WHAT was decided, WHY it was decided, and WHO agreed.\n"
+                "- Write detailed Action Items with the assigned member (@Name), specific task details, and priority tags ([High Priority], [Medium Priority], etc.).\n"
+                "- Provide 4-6 key Discussion Topics/Themes.\n"
+            )
+        else:
+            depth_instruction = (
+                "- Provide a thorough, cohesive 2-3 paragraph Executive Summary explaining the core topics and outcomes.\n"
+                "- Provide Key Decisions with rationale and Action Items with assignees and priority.\n"
+                "- Provide 3-5 key Discussion Topics.\n"
+            )
+
         prompt = (
-            "You are the Meeting Intelligence Assistant for Kyro Discord Bot.\n"
+            "You are the Lead Meeting Intelligence Architect for Kyro Discord Bot.\n"
             "Analyze the following conversation transcript from a Discord voice meeting.\n"
             "The conversation may be in Hindi, Hinglish (Hindi + English mixed), Marathi, other Indian languages, or English.\n\n"
             "CRITICAL INSTRUCTIONS FOR EASY USER UNDERSTANDING:\n"
@@ -923,14 +943,15 @@ class MeetingCog(commands.Cog, name="Meeting"):
             "- Write the summary, decisions, and action items in simple, friendly, everyday conversational language (Hinglish / natural words) matching the style and tone of the participants.\n"
             "- Do NOT use stiff corporate or robotic jargon. Keep it direct and helpful.\n"
             "- If users were joking, chatting casually, or planning something, reflect that naturally.\n\n"
+            f"{depth_instruction}\n"
             "Respond STRICTLY in valid JSON matching this schema:\n"
             "{\n"
-            '  "summary": "A clear, natural 2-3 sentence overview of what was talked about in simple everyday language.",\n'
-            '  "decisions": "Bullet points of key decisions or agreements reached (e.g. • Kal sabhi log 9 baje stream karenge).",\n'
-            '  "action_items": "Bullet points of tasks or next steps with member names (e.g. • @Name: Bot setup karega).",\n'
-            '  "topics": "2-4 brief key topics discussed (e.g. Gaming, Bot Updates, Server Rules)."\n'
+            '  "summary": "Detailed, cohesive multi-paragraph overview of what was talked about in simple everyday language.",\n'
+            '  "decisions": "Bullet points of key decisions or agreements reached with context (e.g. • Kal sabhi log 9 baje stream karenge kyunki sab free hain).",\n'
+            '  "action_items": "Bullet points of tasks or next steps with member names and priority (e.g. • @Name: Bot setup karega [High Priority]).",\n'
+            '  "topics": "3-5 key topics discussed (e.g. Gaming, Bot Updates, Server Rules)"\n'
             "}\n\n"
-            f"Transcript:\n{full_transcript[:18000]}"
+            f"Transcript:\n{full_transcript[:90000]}"
         )
 
         def _parse_and_norm(raw_json_str: str) -> Optional[dict[str, str]]:
@@ -950,10 +971,12 @@ class MeetingCog(commands.Cog, name="Meeting"):
                             if isinstance(item, dict):
                                 person = item.get("person") or item.get("name") or item.get("member") or ""
                                 task = item.get("task") or item.get("action") or item.get("description") or str(item)
+                                priority = item.get("priority", "")
+                                prio_str = f" [{priority}]" if priority else ""
                                 if person:
-                                    items.append(f"• @{person}: {task}")
+                                    items.append(f"• @{person}: {task}{prio_str}")
                                 else:
-                                    items.append(f"• {task}")
+                                    items.append(f"• {task}{prio_str}")
                             elif str(item).strip():
                                 clean = str(item).lstrip("•- ")
                                 items.append(f"• {clean}")
@@ -971,10 +994,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
             except Exception:
                 return None
 
-        # --- Tier 1: High-Speed Groq LLM (~300ms latency, high Hinglish comprehension) ---
+        # --- Tier 1: High-Speed Groq LLM (~300ms latency, high Hinglish comprehension, 128k context) ---
         groq_key = os.getenv("GROQ_API_KEY", "").strip()
         if groq_key:
-            groq_models = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
             for gm in groq_models:
                 try:
                     payload = {
@@ -999,7 +1022,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                             "https://api.groq.com/openai/v1/chat/completions",
                             json=payload,
                             headers=headers,
-                            timeout=aiohttp.ClientTimeout(total=15.0),
+                            timeout=aiohttp.ClientTimeout(total=25.0),
                         ) as resp:
                             if resp.status == 200:
                                 g_json = await resp.json()
@@ -1104,43 +1127,91 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
     async def _trigger_rolling_summary(self, session: MeetingSession) -> None:
         """Condense recent conversation into a rolling mini-summary during marathon meetings (1hr+)."""
-        if len(session.transcript_timeline) < 8:
+        current_len = len(session.transcript_timeline)
+        if current_len - session.last_summarized_idx < 6:
             return
-        recent_lines = [f"{s_name}: {s_txt}" for _, s_name, s_txt in session.transcript_timeline[-40:]]
+
+        # Sort so far to maintain strict chronological order
+        session.transcript_timeline.sort(key=lambda x: x[0])
+        new_items = session.transcript_timeline[session.last_summarized_idx:current_len]
+        session.last_summarized_idx = current_len
+
+        recent_lines = [f"{s_name}: {s_txt}" for _, s_name, s_txt in new_items]
         recent_text = "\n".join(recent_lines)
+        if not recent_text.strip():
+            return
+
+        mins_elapsed = int((time.time() - session.start_time) // 60)
         prompt = (
-            "Summarize the following 10-minute segment of a Discord voice meeting into 2-4 concise bullet points.\n"
-            "Keep it natural in conversational Hinglish/English covering main discussion points.\n\n"
-            f"Transcript:\n{recent_text[:10000]}"
+            f"You are the Meeting Intelligence Assistant for Kyro Discord Bot.\n"
+            f"Summarize the following conversation segment of a Discord voice meeting (around minute {mins_elapsed}) into 3-5 concise, informative bullet points.\n"
+            f"Capture key discussion points, context, and decisions in natural everyday Hinglish/English.\n\n"
+            f"Transcript Segment:\n{recent_text[:25000]}"
         )
+
         groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        summary_text = ""
         if groq_key:
-            try:
-                payload = {
-                    "model": "openai/gpt-oss-20b",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.2,
-                }
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {groq_key}",
-                    "User-Agent": "KyroMeetingAssistant/1.0",
-                }
-                async with aiohttp.ClientSession() as aio_s:
-                    async with aio_s.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        json=payload,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=10.0),
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            summary_text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                            if summary_text:
-                                session.rolling_summaries.append(summary_text)
-                                logger.info(f"Guild {session.guild_id}: Generated rolling 10-minute mini-summary.")
-            except Exception as e:
-                logger.debug(f"Notice generating rolling mini-summary: {e}")
+            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+            for gm in groq_models:
+                try:
+                    payload = {
+                        "model": gm,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2,
+                    }
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {groq_key}",
+                        "User-Agent": "KyroMeetingAssistant/1.0",
+                    }
+                    async with aiohttp.ClientSession() as aio_s:
+                        async with aio_s.post(
+                            "https://api.groq.com/openai/v1/chat/completions",
+                            json=payload,
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=15.0),
+                        ) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                choices = data.get("choices") or []
+                                if choices:
+                                    summary_text = choices[0].get("message", {}).get("content", "").strip()
+                                    if summary_text:
+                                        break
+                except Exception as e:
+                    logger.debug(f"Notice generating rolling mini-summary ({gm}): {e}")
+
+        # Fallback to Gemini if Groq was unavailable
+        if not summary_text:
+            gemini_key = self._get_gemini_key()
+            if gemini_key:
+                try:
+                    g_payload = {
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.2},
+                    }
+                    g_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
+                    async with aiohttp.ClientSession() as aio_s:
+                        async with aio_s.post(
+                            g_url,
+                            headers={"Content-Type": "application/json", "x-goog-api-key": gemini_key},
+                            json=g_payload,
+                            timeout=aiohttp.ClientTimeout(total=20.0),
+                        ) as resp:
+                            if resp.status == 200:
+                                g_data = await resp.json()
+                                candidates = g_data.get("candidates") or []
+                                if candidates:
+                                    parts = candidates[0].get("content", {}).get("parts") or []
+                                    if parts:
+                                        summary_text = parts[0].get("text", "").strip()
+                except Exception as e:
+                    logger.debug(f"Notice generating Gemini rolling mini-summary: {e}")
+
+        if summary_text:
+            session.rolling_summaries.append(f"**Phase (~{mins_elapsed}m):**\n{summary_text}")
+            logger.info(f"Guild {session.guild_id}: Generated rolling 10-minute mini-summary at ~{mins_elapsed}m.")
 
     async def _process_meeting_completion(self, session: MeetingSession) -> None:
         """Asynchronously process audio, transcribe per speaker, generate summary, and post card."""
@@ -1319,18 +1390,33 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 pass
             return
 
-        # Combine transcripts (incorporating rolling summaries for marathon meetings if present)
+        # 1. Sort timeline strictly by audio timestamp (guarantees 100% chronological dialogue order)
+        session.transcript_timeline.sort(key=lambda x: x[0])
+
+        # 2. Build formatted chronological dialogue lines [MM:SS] Speaker: Text
+        chronological_lines: list[str] = []
+        for t_stamp, s_name, s_txt in session.transcript_timeline:
+            mins = int(t_stamp // 60)
+            secs = int(t_stamp % 60)
+            chronological_lines.append(f"[{mins:02d}:{secs:02d}] {s_name}: {s_txt}")
+        chronological_transcript = "\n".join(chronological_lines)
+
+        # 3. Build comprehensive input for AI (Never drop the verbatim conversation!)
         if session.rolling_summaries:
-            sections_text = "\n\n".join([f"Key Discussion Section {i+1}:\n{s}" for i, s in enumerate(session.rolling_summaries)])
-            recent_text = "\n".join([f"{name}: {text}" for _, name, text in session.transcript_timeline[-30:]])
-            combined_text = f"{sections_text}\n\nRecent Discussion:\n{recent_text}"
+            milestones = "\n\n".join(session.rolling_summaries)
+            combined_text = (
+                f"=== MEETING PHASES & MILESTONES ===\n{milestones}\n\n"
+                f"=== FULL CHRONOLOGICAL CONVERSATION ===\n{chronological_transcript}"
+            )
+        elif chronological_transcript:
+            combined_text = chronological_transcript
         else:
             combined_text = "\n".join([f"{name}: {text}" for name, text in speaker_transcripts])
 
-        # Generate Intelligence Summary via Groq LLM / Gemini dual engine
-        intel = await self._generate_meeting_intelligence(combined_text)
+        # 4. Generate Deep Meeting Intelligence via Groq / Gemini
+        intel = await self._generate_meeting_intelligence(combined_text, duration_seconds=duration)
 
-        # Persist to database via repository
+        # Persist session to database via repository
         try:
             await self.repo.save_session(
                 session.guild_id,
@@ -1345,15 +1431,22 @@ class MeetingCog(commands.Cog, name="Meeting"):
         except Exception as e:
             logger.debug(f"Notice saving meeting session to db: {e}")
 
-        # Post structured V2 card into target channel
+        # Post redesigned Components V2 card and Verbatim Transcript to target channel
         if target_ch:
             vc = guild.get_channel(session.voice_channel_id)
             vc_name = vc.name if vc else "Voice Channel"
             enabled_modules = settings.get("modules", set())
 
+            dot = self.bot.custom_emojis.get("heart_dot", "•")
+            arrow = self.bot.custom_emojis.get("white_arrow", "›")
+            file_icon = self.bot.custom_emojis.get("icons_file", "📝")
+
             container = KyroContainer(accent_color=None)
             container.add_section(
-                content=f"**Kyro Meeting Intelligence**\n> *Executive meeting summary and action items for **{vc_name}**.*"
+                content=(
+                    f"**Kyro Meeting Intelligence**\n"
+                    f"> Executive meeting briefing, strategic decisions & task matrix for **{vc_name}**."
+                )
             )
             container.add_separator(divider=True)
 
@@ -1361,15 +1454,15 @@ class MeetingCog(commands.Cog, name="Meeting"):
             topics_line = f" — **Topics:** `{intel['topics']}`" if "topics" in enabled_modules and intel.get("topics") else ""
             container.add_text(
                 f"> {dot} **Room:** `{vc_name}` — **Duration:** `{duration_fmt}`\n"
-                f"> {dot} **Speakers:** `{len(speaker_transcripts)}`{topics_line}"
+                f"> {dot} **Speakers ({len(speaker_transcripts)}):** `{', '.join(s[0] for s in speaker_transcripts[:8])}`{topics_line}"
             )
             container.add_separator(divider=True)
 
             # Summary section
             if "summary" in enabled_modules:
                 container.add_text(
-                    f"**Executive Summary:**\n"
-                    f"> {intel['summary']}"
+                    f"**Executive Briefing:**\n"
+                    f"{arrow} {intel['summary']}"
                 )
                 container.add_separator(divider=True)
 
@@ -1377,7 +1470,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
             if "decisions" in enabled_modules:
                 decisions_clean = intel["decisions"].strip()
                 container.add_text(
-                    f"**Key Decisions:**\n{decisions_clean}"
+                    f"**Key Decisions & Consensus:**\n"
+                    f"{decisions_clean}"
                 )
                 container.add_separator(divider=True)
 
@@ -1385,12 +1479,58 @@ class MeetingCog(commands.Cog, name="Meeting"):
             if "action_items" in enabled_modules:
                 actions_clean = intel["action_items"].strip()
                 container.add_text(
-                    f"**Action Items:**\n{actions_clean}"
+                    f"**Action Items & Ownership:**\n"
+                    f"{actions_clean}"
                 )
                 container.add_separator(divider=True)
 
-            container.add_text(f"-# Recorded by Kyro Voice Intelligence • <t:{int(time.time())}:f>")
-            await send_container_response(target_ch, container)
+            container.add_text(
+                f"-# Recorded by Kyro Voice Intelligence • <t:{int(time.time())}:f>\n"
+                f"-# {file_icon} Full verbatim transcript is attached below."
+            )
+
+            # Generate downloadable Markdown transcript document
+            speaker_list_str = ", ".join(f"`{s[0]}`" for s in speaker_transcripts)
+            transcript_content = (
+                f"# Kyro Meeting Intelligence — Verbatim Transcript\n\n"
+                f"| Attribute | Details |\n"
+                f"| :--- | :--- |\n"
+                f"| **Server** | {guild.name} (`{guild.id}`) |\n"
+                f"| **Voice Channel** | {vc_name} (`{session.voice_channel_id}`) |\n"
+                f"| **Duration** | {duration_fmt} ({duration}s) |\n"
+                f"| **Recorded At** | <t:{int(session.start_time)}:F> |\n"
+                f"| **Speakers** | {speaker_list_str} |\n"
+                f"| **Topics** | {intel.get('topics', 'General VC')} |\n\n"
+                f"---\n\n"
+                f"## 1. Executive Briefing\n\n"
+                f"{intel['summary']}\n\n"
+                f"---\n\n"
+                f"## 2. Key Decisions & Consensus\n\n"
+                f"{intel['decisions']}\n\n"
+                f"---\n\n"
+                f"## 3. Action Items & Ownership\n\n"
+                f"{intel['action_items']}\n\n"
+                f"---\n\n"
+                f"## 4. Full Verbatim Chronological Transcript\n\n"
+                f"```text\n"
+                f"{chronological_transcript if chronological_transcript else 'No speech timeline captured.'}\n"
+                f"```\n"
+            )
+
+            file_bytes = io.BytesIO(transcript_content.encode("utf-8"))
+            filename = f"kyro_meeting_{session.guild_id}_{int(time.time())}.md"
+            transcript_file = discord.File(fp=file_bytes, filename=filename)
+
+            try:
+                await send_container_response(target_ch, container, file=transcript_file)
+            except Exception as e:
+                logger.error(f"Error dispatching meeting container with file: {e}", exc_info=True)
+                try:
+                    await send_container_response(target_ch, container)
+                    file_bytes.seek(0)
+                    await target_ch.send(file=transcript_file)
+                except Exception as inner_e:
+                    logger.error(f"Failed fallback dispatch: {inner_e}")
 
             # If command channel is different, leave a fleeting link notice
             if session.text_channel_id != target_ch.id:
@@ -1398,7 +1538,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 if isinstance(cmd_ch, discord.TextChannel):
                     try:
                         await cmd_ch.send(
-                            f"-# {dot} 📝 Meeting summary has been posted to {target_ch.mention}.",
+                            f"-# {dot} 📝 Meeting summary and transcript file have been posted to {target_ch.mention}.",
                             delete_after=10.0,
                         )
                     except Exception:

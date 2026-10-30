@@ -394,6 +394,17 @@ class ErrorHandler(commands.Cog):
                 )
             )
 
+        elif isinstance(error, app_commands.CommandNotFound):
+            cmd_name = getattr(interaction, "data", {}).get("name", "Unknown") if hasattr(interaction, "data") else "Unknown"
+            logger.info(f"Stale/unregistered slash command interaction received: {cmd_name}")
+            container.add_section(
+                content=(
+                    f"**{warn_icon}Command Outdated**\n"
+                    f"> The `/{cmd_name}` slash command is outdated or no longer registered.\n"
+                    f"> Please run `?sync` to clean up and update the server command tree."
+                )
+            )
+
         elif isinstance(error, discord.HTTPException) and error.status == 429:
             logger.error(
                 f"Discord REST API 429 Rate Limit active during slash command '{interaction.command}': {error}."

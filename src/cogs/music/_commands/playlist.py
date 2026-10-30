@@ -563,7 +563,7 @@ async def handle_playlist(
             await ctx.send_warning(f"Playlist `{pl_row['playlist_name']}` is empty.")
             return
 
-        if not ctx.author.voice or not ctx.author.voice.channel:
+        if not ctx.guild or not isinstance(ctx.author, discord.Member) or not ctx.author.voice or not ctx.author.voice.channel:
             await ctx.send_warning("You must be in a voice channel to play music.")
             return
 

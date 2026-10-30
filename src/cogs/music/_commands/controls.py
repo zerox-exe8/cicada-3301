@@ -21,7 +21,7 @@ _247_DEBOUNCE_SECONDS: float = 3.0
 
 def check_voice_channel(ctx: commands.Context) -> tuple[bool, str | None]:
     """Verify that author is in the same voice channel as the bot."""
-    if not ctx.author.voice or not ctx.author.voice.channel:
+    if not ctx.guild or not isinstance(ctx.author, discord.Member) or not ctx.author.voice or not ctx.author.voice.channel:
         return False, "You must be connected to a voice channel to use music commands."
     if ctx.guild.me.voice and ctx.guild.me.voice.channel:
         if ctx.guild.me.voice.channel.id != ctx.author.voice.channel.id:
@@ -226,7 +226,7 @@ async def execute_stay(cog: Music, ctx: commands.Context) -> None:
             cog.controller._247_cache.add(ctx.guild.id)
         player.cancel_empty_vc_timer(auto_resume=False)
         # Connect immediately if not already connected
-        if not player.is_connected and ctx.author.voice and ctx.author.voice.channel:
+        if not player.is_connected and isinstance(ctx.author, discord.Member) and ctx.author.voice and ctx.author.voice.channel:
             try:
                 await player.connect_voice(ctx.author.voice.channel)
             except Exception:

@@ -58,6 +58,12 @@ class Music(commands.Cog):
         # Register persistent view for button interactions
         self.bot.add_view(MusicControlView(bot, None))
 
+    async def cog_check(self, ctx: commands.Context) -> bool:
+        """Enforce guild-only execution for all music commands."""
+        if not ctx.guild:
+            raise commands.NoPrivateMessage("Music commands cannot be used in private messages or DMs.")
+        return True
+
     async def _connect_lavalink(self) -> None:
         """Wait for bot login and connect to Lavalink node."""
         while not self.bot.is_ready():
@@ -399,7 +405,7 @@ class Music(commands.Cog):
     )
     async def join(self, ctx: CustomContext) -> None:
         """Connect to voice channel with smart moving support."""
-        if not ctx.author.voice or not ctx.author.voice.channel:
+        if not ctx.guild or not isinstance(ctx.author, discord.Member) or not ctx.author.voice or not ctx.author.voice.channel:
             container = KyroContainer(accent_color=None)
             container.add_text("**You must be in a voice channel to use this command.**")
             await send_container_response(ctx, container)

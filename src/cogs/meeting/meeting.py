@@ -997,7 +997,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         # --- Tier 1: High-Speed Groq LLM (~300ms latency, high Hinglish comprehension, 128k context) ---
         groq_key = os.getenv("GROQ_API_KEY", "").strip()
         if groq_key:
-            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+            groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
             for gm in groq_models:
                 try:
                     payload = {
@@ -1152,7 +1152,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         groq_key = os.getenv("GROQ_API_KEY", "").strip()
         summary_text = ""
         if groq_key:
-            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+            groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
             for gm in groq_models:
                 try:
                     payload = {

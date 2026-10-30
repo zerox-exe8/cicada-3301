@@ -31,7 +31,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         except Exception:
             pass
 
-    if not ctx.author.voice or not ctx.author.voice.channel:
+    if not ctx.guild or not isinstance(ctx.author, discord.Member) or not ctx.author.voice or not ctx.author.voice.channel:
         container = KyroContainer(accent_color=None)
         container.add_text("**You must be in a voice channel to play music.**")
         await send_container_response(ctx, container)

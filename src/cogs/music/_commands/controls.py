@@ -4,6 +4,7 @@ import logging
 import random
 import time
 from typing import TYPE_CHECKING, Optional
+import discord
 from discord.ext import commands
 
 from src.utils.containers import KyroContainer, send_container_response

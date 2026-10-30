@@ -524,11 +524,19 @@ class Music(commands.Cog):
 
     @commands.hybrid_command(
         name="stop",
-        aliases=["disconnect", "dc"],
         description="Stop playback, clear queue, and disconnect from voice.",
     )
     async def stop(self, ctx: CustomContext) -> None:
         """Stop music, clear queue and leave voice."""
+        await execute_stop(self, ctx)
+
+    @commands.hybrid_command(
+        name="disconnect",
+        aliases=["dc"],
+        description="Disconnect Kyro from voice, clear queue, and stop music playback.",
+    )
+    async def disconnect(self, ctx: CustomContext) -> None:
+        """Disconnect Kyro from voice, clear queue, and stop music playback."""
         await execute_stop(self, ctx)
 
     @commands.hybrid_command(

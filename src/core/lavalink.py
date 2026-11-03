@@ -96,9 +96,16 @@ def candidates() -> list[tuple[str, str]]:
         result.append((primary, Config.LAVALINK_PASSWORD))
 
     for raw in (Config.LAVALINK_FALLBACK_URIS or "").split(","):
-        uri = raw.strip()
+        raw_clean = raw.strip()
+        if not raw_clean:
+            continue
+        if "|" in raw_clean:
+            uri, pw = raw_clean.split("|", 1)
+            uri, pw = uri.strip(), pw.strip()
+        else:
+            uri, pw = raw_clean, Config.LAVALINK_PASSWORD
         if uri and all(uri != known for known, _ in result):
-            result.append((uri, Config.LAVALINK_PASSWORD))
+            result.append((uri, pw))
 
     return result
 
@@ -396,15 +403,26 @@ async def probe_candidate_node(
         async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
             try:
                 async with session.ws_connect(_ws_url(uri), headers=headers) as ws:
-                    msg = await asyncio.wait_for(ws.receive(), timeout=timeout)
-                    if msg.type is not aiohttp.WSMsgType.TEXT:
-                        return False, "websocket closed before the 'ready' op"
-                    try:
-                        payload = json.loads(msg.data)
-                    except Exception:
-                        return False, "websocket sent an invalid payload"
-                    if payload.get("op") != "ready":
-                        return False, f"websocket sent '{payload.get('op')}' instead of 'ready'"
+                    ready_found = False
+                    start_t = time.monotonic()
+                    while time.monotonic() - start_t < timeout:
+                        msg = await asyncio.wait_for(ws.receive(), timeout=timeout)
+                        if msg.type is not aiohttp.WSMsgType.TEXT:
+                            break
+                        try:
+                            payload = json.loads(msg.data)
+                        except Exception:
+                            break
+                        op = payload.get("op")
+                        if op == "ready":
+                            ready_found = True
+                            break
+                        elif op == "stats":
+                            continue
+                        else:
+                            break
+                    if not ready_found:
+                        return False, "websocket did not deliver 'ready' op"
             except aiohttp.WSServerHandshakeError as e:
                 return False, f"websocket rejected with HTTP {e.status}"
             except asyncio.TimeoutError:
@@ -430,6 +448,18 @@ async def probe_candidate_node(
             has_youtube = "youtube" in sources or any("youtube" in str(p).lower() for p in plugins)
             if not has_youtube:
                 return False, "node has no YouTube source"
+
+            # Fast test track check: ensure YouTube source isn't blocked on this node
+            try:
+                import urllib.parse
+                test_url = f"{uri.rstrip('/')}/v4/loadtracks?identifier=" + urllib.parse.quote("ytmsearch:faded")
+                async with session.get(test_url, headers=headers, timeout=min(timeout, 5.0)) as track_resp:
+                    if track_resp.status == 200:
+                        track_data = json.loads(await track_resp.text())
+                        if track_data.get("loadType") == "error":
+                            return False, "node YouTube source returned error"
+            except Exception:
+                pass
 
             return True, "node is fully operational"
 

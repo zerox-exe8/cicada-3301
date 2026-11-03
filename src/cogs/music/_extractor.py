@@ -183,9 +183,10 @@ def score_candidate(
         w for w in q_tokens
         if w not in {"8d", "3d", "audio", "song", "music", "video", "official", "use", "headphones", "sound"}
     }
-    title_matched = sum(1 for tok in substantive_q_tokens if _fuzzy_match(tok, title_tokens))
-    if substantive_q_tokens and not title_matched:
-        # Candidate has ZERO matching substantive title words: immediately disqualify
+    author_tokens = [w for w in re.findall(r"\w+", c_author) if len(w) > 1]
+    title_or_author_matched = sum(1 for tok in substantive_q_tokens if _fuzzy_match(tok, title_tokens) or _fuzzy_match(tok, author_tokens))
+    if substantive_q_tokens and not title_or_author_matched:
+        # Candidate has ZERO matching substantive words in either title OR artist: disqualify
         return -500.0
 
     matched = sum(1 for tok in q_tokens if _fuzzy_match(tok, title_tokens) or tok in c_author)
@@ -213,8 +214,9 @@ def score_candidate(
     core_words = [w for w in re.findall(r"\w{3,}", clean_c_title) if w not in {"from", "ost", "song", "audio", "video"}]
     query_substantive = [w for w in re.findall(r"\w{3,}", q_lower) if w not in {"from", "ost", "song", "audio", "video", "official"}]
     if core_words and query_substantive:
+        is_artist_query = all(any(_fuzzy_match(qw, [at]) for at in author_tokens) for qw in query_substantive)
         overlap = [w for w in core_words if any(_fuzzy_match(w, [qw]) for qw in query_substantive)]
-        if not overlap:
+        if not overlap and not is_artist_query:
             score -= 100.0
 
     # Boost official artist topic tracks and original audio
@@ -415,6 +417,7 @@ class NativeExtractor:
         import wavelink
 
         # direct YouTube URL Handling
+        search_target = raw_q
         yt_match = YOUTUBE_URL_REGEX.search(raw_q)
         orig_yt_url = None
         if yt_match:
@@ -441,11 +444,16 @@ class NativeExtractor:
                     return trk
             except Exception as e:
                 logger.debug(f"Direct YouTube URL resolution notice: {e}")
+            try:
+                yt_title = await asyncio.wait_for(cls._fetch_youtube_title(orig_yt_url), timeout=4.0)
+                if yt_title:
+                    search_target = yt_title
+            except Exception as e:
+                logger.debug(f"YouTube title fetch notice: {e}")
 
         # Spotify URL Handling (Extract '{Title} {Artist}' metadata to bridge to YouTube)
         is_spotify = any(sp in raw_q for sp in ("spotify.com/", "spotify.link/", "spotify:track:", "spotify.app.link/", "spoti.fi/"))
         orig_spotify_url = None
-        search_target = raw_q
 
         if is_spotify:
             sp_url = raw_q
@@ -547,6 +555,20 @@ class NativeExtractor:
                     return trk
             except Exception as e:
                 logger.debug(f"Raw query fallback notice: {e}")
+
+        # Priority 4: Direct JioSaavn HD Audio Engine (0% Cloud Block, 320kbps Akamai MP4/AAC Stream)
+        try:
+            saavn_target = search_target if not orig_yt_url else cleaned_query
+            saavn_trk = await cls._extract_jiosaavn(saavn_target, requester=requester, is_autoplay=is_autoplay)
+            if saavn_trk and saavn_trk.stream_url:
+                if orig_yt_url:
+                    saavn_trk.url = orig_yt_url
+                elif orig_spotify_url:
+                    saavn_trk.url = orig_spotify_url
+                _SEARCH_CACHE[cache_key] = (now, saavn_trk)
+                return saavn_trk
+        except Exception as e:
+            logger.debug(f"JioSaavn fallback search notice: {e}")
 
         return None
 

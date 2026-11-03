@@ -454,10 +454,12 @@ class GuildPlayer:
 
     def _is_direct_stream_url(self, url: str) -> bool:
         """Return True only if url is a raw audio stream Lavalink can play via HTTP."""
-        if not url or not url.startswith("http"):
+        if not url or not url.startswith(("http://", "https://")):
             return False
         u_low = url.lower()
-        if "googlevideo.com" in u_low and any(ext in u_low for ext in (".mp4", "videoplayback", ".m4a", ".webm", ".opus", ".mp3")):
+        if any(domain in u_low for domain in ("googlevideo.com", "saavncdn.com", "jiosaavn.com", "akamai")):
+            return True
+        if any(ext in u_low for ext in (".mp4", ".m4a", ".mp3", ".webm", ".opus", ".aac", "videoplayback")):
             return True
         return False
 
@@ -520,6 +522,17 @@ class GuildPlayer:
         playable = getattr(track, "_playable", None)
         if playable:
             return playable
+
+        # ── Priority 1.5: Direct Audio Stream URL (Akamai MP4/AAC / Direct Stream) ──
+        if track.stream_url and self._is_direct_stream_url(track.stream_url):
+            try:
+                results = await asyncio.wait_for(wavelink.Playable.search(track.stream_url), timeout=8.0)
+                if results:
+                    p = results[0] if isinstance(results, list) else results.tracks[0]
+                    track._playable = p
+                    return p
+            except Exception as e:
+                logger.debug(f"Direct stream playable resolution error for '{track.title}': {e}")
 
         # ── Node Health Pre-check: Ensure Lavalink node is alive ──
         try:
@@ -746,6 +759,29 @@ class GuildPlayer:
 
         if reason and str(reason).lower() in ("loadfailed", "load_failed"):
             logger.warning(f"Guild {self.guild.id}: Lavalink reported track loadFailed.")
+            # Unblocked recovery: if current track failed from YouTube, retry once with direct stream
+            curr = self.current
+            if curr and not getattr(curr, "_load_failed_retried", False):
+                curr._load_failed_retried = True
+                try:
+                    from src.cogs.music._extractor import NativeExtractor
+                    query_target = curr.query or f"{curr.title} {curr.author}".strip()
+                    logger.info(f"Guild {self.guild.id}: Attempting unblocked stream recovery for '{curr.title}'...")
+                    fallback_trk = await asyncio.wait_for(
+                        NativeExtractor._extract_jiosaavn(query_target, requester=curr.requester, is_autoplay=curr.is_autoplay),
+                        timeout=5.0,
+                    )
+                    if fallback_trk and fallback_trk.stream_url:
+                        fallback_trk._load_failed_retried = True
+                        p = await self._resolve_playable(fallback_trk)
+                        if p:
+                            fallback_trk._playable = p
+                            logger.info(f"Guild {self.guild.id}: Successfully recovered '{curr.title}' via unblocked audio stream.")
+                            await self.play_track(fallback_trk)
+                            return
+                except Exception as rec_err:
+                    logger.debug(f"Guild {self.guild.id}: Stream recovery notice: {rec_err}")
+
             next_track = await self.pop_next_track()
             if next_track:
                 await self.play_track(next_track)

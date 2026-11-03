@@ -477,11 +477,25 @@ class NativeExtractor:
 
         cleaned_query = parse_and_clean_query(search_target)
 
-        # Priority 1: YouTube Music search via Lavalink (Official release priority)
+        # Priority 1: High-Speed Unblocked JioSaavn HD Audio Engine (0% Cloud Block, 320kbps Akamai MP4/AAC Stream)
+        try:
+            saavn_target = search_target if not orig_yt_url else cleaned_query
+            saavn_trk = await cls._extract_jiosaavn(saavn_target, requester=requester, is_autoplay=is_autoplay)
+            if saavn_trk and saavn_trk.stream_url:
+                if orig_yt_url:
+                    saavn_trk.url = orig_yt_url
+                elif orig_spotify_url:
+                    saavn_trk.url = orig_spotify_url
+                _SEARCH_CACHE[cache_key] = (now, saavn_trk)
+                return saavn_trk
+        except Exception as e:
+            logger.debug(f"JioSaavn primary search notice: {e}")
+
+        # Priority 2: YouTube Music search via Lavalink (Fallback if not in Saavn catalog)
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
-                timeout=8.0,
+                timeout=6.0,
             )
             if results:
                 top = results[0] if isinstance(results, list) else results.tracks[0]
@@ -503,11 +517,11 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"YouTube Music search notice: {e}")
 
-        # Priority 2: Standard YouTube search via Lavalink
+        # Priority 3: Standard YouTube search via Lavalink
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTube),
-                timeout=8.0,
+                timeout=6.0,
             )
             if results:
                 top = results[0] if isinstance(results, list) else results.tracks[0]
@@ -529,12 +543,12 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"YouTube fallback search notice: {e}")
 
-        # Priority 3: Raw query fallback if cleaned was different
+        # Priority 4: Raw query fallback if cleaned was different
         if search_target.lower() != cleaned_query.lower():
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=8.0,
+                    timeout=6.0,
                 )
                 if results:
                     top = results[0] if isinstance(results, list) else results.tracks[0]
@@ -555,20 +569,6 @@ class NativeExtractor:
                     return trk
             except Exception as e:
                 logger.debug(f"Raw query fallback notice: {e}")
-
-        # Priority 4: Direct JioSaavn HD Audio Engine (0% Cloud Block, 320kbps Akamai MP4/AAC Stream)
-        try:
-            saavn_target = search_target if not orig_yt_url else cleaned_query
-            saavn_trk = await cls._extract_jiosaavn(saavn_target, requester=requester, is_autoplay=is_autoplay)
-            if saavn_trk and saavn_trk.stream_url:
-                if orig_yt_url:
-                    saavn_trk.url = orig_yt_url
-                elif orig_spotify_url:
-                    saavn_trk.url = orig_spotify_url
-                _SEARCH_CACHE[cache_key] = (now, saavn_trk)
-                return saavn_trk
-        except Exception as e:
-            logger.debug(f"JioSaavn fallback search notice: {e}")
 
         return None
 

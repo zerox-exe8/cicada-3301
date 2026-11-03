@@ -776,8 +776,12 @@ class GuildPlayer:
                         p = await self._resolve_playable(fallback_trk)
                         if p:
                             fallback_trk._playable = p
+                            self.current = fallback_trk
+                            # Update existing card in place to prevent duplicate embeds
+                            await self.update_controller_message()
+                            vol_int = int(self.volume * 100)
+                            await self.voice_client.play(p, volume=vol_int, paused=False)
                             logger.info(f"Guild {self.guild.id}: Successfully recovered '{curr.title}' via unblocked audio stream.")
-                            await self.play_track(fallback_trk)
                             return
                 except Exception as rec_err:
                     logger.debug(f"Guild {self.guild.id}: Stream recovery notice: {rec_err}")
@@ -933,19 +937,30 @@ class GuildPlayer:
         container = self.build_now_playing_container(track)
         view = MusicControlView(self.bot, player=self, track_url=track.url)
 
-        # For every song starting from queue, skip, autoplay, or fresh play: send a brand-new clean Now Playing card!
+        # 1. If message_to_edit is provided, edit it directly (e.g. replacing 'Searching...' card)
+        if message_to_edit and isinstance(message_to_edit, discord.Message):
+            try:
+                await edit_container_response(message_to_edit, container, view=view, content=None)
+                self.controller_message = message_to_edit
+                return
+            except Exception:
+                pass
+
+        # 2. Clean up any existing controller card to prevent duplicate cards in chat
+        if self.controller_message and isinstance(self.controller_message, discord.Message):
+            try:
+                await self.controller_message.delete()
+            except Exception:
+                pass
+            self.controller_message = None
+
+        # 3. Post a fresh Now Playing card
         try:
             msg = await send_container_response(
                 self.home_channel, container, view=view, content=None
             )
             if isinstance(msg, discord.Message):
                 self.controller_message = msg
-                # Clean up initial temporary searching message if present
-                if message_to_edit and isinstance(message_to_edit, discord.Message) and message_to_edit.id != msg.id:
-                    try:
-                        await message_to_edit.delete()
-                    except Exception:
-                        pass
         except Exception as e:
             logger.debug(f"Failed to send now playing card: {e}")
 

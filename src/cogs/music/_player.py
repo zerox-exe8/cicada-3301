@@ -61,6 +61,7 @@ class GuildPlayer:
         self.smart_autoplay: bool = False
         self.autoplay_history: Set[str] = set()
         self.is_247: bool = False
+        self._is_paused: bool = False
 
         # UI & Communication
         self.home_channel: Optional[discord.TextChannel | discord.Thread] = None
@@ -92,17 +93,18 @@ class GuildPlayer:
     @property
     def is_playing(self) -> bool:
         """Check if actively playing audio."""
-        vc = self.guild.voice_client
-        if vc and isinstance(vc, wavelink.Player):
-            return vc.playing and not vc.paused
-        return False
+        if self.is_paused or self.current is None:
+            return False
+        return self.is_connected
 
     @property
     def is_paused(self) -> bool:
         """Check if playback is currently paused."""
+        if getattr(self, "_is_paused", False):
+            return True
         vc = self.guild.voice_client
         if vc and isinstance(vc, wavelink.Player):
-            return vc.paused
+            return getattr(vc, "paused", False)
         return False
 
     # ── Thread-Safe Queue Operations ──
@@ -416,6 +418,7 @@ class GuildPlayer:
         self.current = track
         self.autoplay_history.add(track.title.lower())
         self._was_paused_for_empty_vc = False
+        self._is_paused = False
         self.cancel_empty_vc_timer(auto_resume=False)
 
         # 3. Start playback on Lavalink node with volume (explicitly unpaused)
@@ -534,6 +537,29 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"Direct stream playable resolution error for '{track.title}': {e}")
 
+        # ── Priority 1.8: Instant JioSaavn HD Stream resolution (0.15s, 0% Cloud Block) ──
+        try:
+            from src.cogs.music._extractor import NativeExtractor, clean_track_title
+            clean_t = clean_track_title(track.title) if track.title else ""
+            raw_a = track.author if (track.author and "spotify" not in track.author.lower() and "unknown" not in track.author.lower() and "artist" != track.author.lower()) else ""
+            saavn_q = f"{clean_t} {raw_a}".strip() or track.query or track.title or ""
+            if saavn_q and not saavn_q.startswith(("http://", "https://")):
+                saavn_trk = await asyncio.wait_for(
+                    NativeExtractor._extract_jiosaavn(saavn_q, requester=track.requester, is_autoplay=track.is_autoplay),
+                    timeout=3.5,
+                )
+                if saavn_trk and saavn_trk.stream_url:
+                    track.stream_url = saavn_trk.stream_url
+                    if not track.thumbnail:
+                        track.thumbnail = saavn_trk.thumbnail
+                    direct_results = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=5.0)
+                    if direct_results:
+                        p = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
+                        track._playable = p
+                        return p
+        except Exception as e:
+            logger.debug(f"Direct JioSaavn cascade resolution notice for '{track.title}': {e}")
+
         # ── Node Health Pre-check: Ensure Lavalink node is alive ──
         try:
             node = wavelink.Pool.get_node()
@@ -637,7 +663,8 @@ class GuildPlayer:
 
     def pause(self) -> bool:
         """Pause playback."""
-        if self.voice_client and self.voice_client.playing and not self.voice_client.paused:
+        if self.voice_client and self.current and not self.is_paused:
+            self._is_paused = True
             try:
                 self.voice_client._paused = True
             except Exception:
@@ -648,7 +675,8 @@ class GuildPlayer:
 
     def resume(self) -> bool:
         """Resume playback."""
-        if self.voice_client and self.voice_client.paused:
+        if self.voice_client and (self.is_paused or getattr(self.voice_client, "paused", False)):
+            self._is_paused = False
             try:
                 self.voice_client._paused = False
             except Exception:
@@ -665,6 +693,13 @@ class GuildPlayer:
         """
         if self.loop_mode == "track":
             self.loop_mode = "off"
+
+        # Silence current audio immediately so user gets instant cut
+        if self.voice_client and self.voice_client.playing:
+            try:
+                asyncio.create_task(self._bounded_node_call(self.voice_client.pause(True)))
+            except Exception:
+                pass
 
         target = await self.pop_next_track()
         if target is not None:
@@ -690,6 +725,7 @@ class GuildPlayer:
         self.current = None
         self.autoplay_history.clear()
         self._was_paused_for_empty_vc = False
+        self._is_paused = False
 
         if self.voice_client:
             # Mark this as a self-initiated disconnect so the matching
@@ -765,7 +801,17 @@ class GuildPlayer:
                 curr._load_failed_retried = True
                 try:
                     from src.cogs.music._extractor import NativeExtractor
-                    query_target = curr.query or f"{curr.title} {curr.author}".strip()
+                    if curr.query and not curr.query.startswith(("http://", "https://")):
+                        query_target = curr.query
+                    else:
+                        query_target = f"{curr.title} {curr.author}".strip()
+                    if curr.url and any(yt in curr.url for yt in ("youtube.com/", "youtu.be/")) and ("unknown" in query_target.lower() or not query_target):
+                        try:
+                            yt_t = await asyncio.wait_for(NativeExtractor._fetch_youtube_title(curr.url), timeout=3.0)
+                            if yt_t:
+                                query_target = yt_t
+                        except Exception:
+                            pass
                     logger.info(f"Guild {self.guild.id}: Attempting unblocked stream recovery for '{curr.title}'...")
                     fallback_trk = await asyncio.wait_for(
                         NativeExtractor._extract_jiosaavn(query_target, requester=curr.requester, is_autoplay=curr.is_autoplay),

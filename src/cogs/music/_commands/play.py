@@ -192,6 +192,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     if clean_q.startswith("<") and clean_q.endswith(">"):
         clean_q = clean_q[1:-1].strip()
 
+    from src.cogs.music._extractor import YOUTUBE_URL_REGEX
+    yt_vid_m = YOUTUBE_URL_REGEX.search(clean_q)
+    # If the URL contains a specific video ID and isn't an explicit /playlist, sanitize it to pure video URL
+    if yt_vid_m and "/playlist" not in clean_q.lower():
+        clean_q = f"https://www.youtube.com/watch?v={yt_vid_m.group(1)}"
+
     try:
         # Check if Playlist URL (Spotify, YouTube, SoundCloud, etc.)
         if is_playlist_url(clean_q):
@@ -347,6 +353,21 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     lookup_target = sp_title
             except Exception as e:
                 logger.debug(f"Spotify track title fetch notice: {e}")
+
+        # If single YouTube video URL, resolve metadata title & bridge to unblocked stream engine
+        orig_yt_target = None
+        yt_m = YOUTUBE_URL_REGEX.search(lookup_target)
+        if yt_m:
+            orig_yt_target = f"https://www.youtube.com/watch?v={yt_m.group(1)}"
+            try:
+                yt_title = await asyncio.wait_for(
+                    NativeExtractor._fetch_youtube_title(orig_yt_target),
+                    timeout=4.0
+                )
+                if yt_title:
+                    lookup_target = yt_title
+            except Exception as e:
+                logger.debug(f"YouTube track title fetch notice: {e}")
 
         is_direct_url = lookup_target.startswith(("http://", "https://"))
 
@@ -598,7 +619,15 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         except Exception:
             pass
 
-        track.query = query
+        if orig_yt_target:
+            track.url = orig_yt_target
+            if yt_m:
+                track.thumbnail = f"https://i.ytimg.com/vi/{yt_m.group(1)}/hqdefault.jpg"
+
+        if query.startswith(("http://", "https://")):
+            track.query = f"{track.title} {track.author}".strip()
+        else:
+            track.query = query
         track.requester_id = ctx.author.id
 
         # Record analytics if available

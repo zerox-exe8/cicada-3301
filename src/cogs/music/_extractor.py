@@ -269,8 +269,10 @@ def normalize_unicode_text(text: str) -> str:
     """
     if not text:
         return ""
-    # nFKD converts mathematical bold/italic/sans/serif/fullwidth into plain letters & numbers
+    # NFKD decomposes mathematical bold/italic/sans/serif/fullwidth and accented letters
     norm = unicodedata.normalize("NFKD", text)
+    # Strip combining diacritical marks (e.g. Brahmāstra -> Brahmastra, Kesariyā -> Kesariya)
+    norm = "".join(c for c in norm if not unicodedata.combining(c))
     # remove variation selectors & zero-width characters
     norm = re.sub(r"[\ufe00-\ufe0f\u200b-\u200d]", "", norm)
     # remove non-BMP characters (emojis and extra planes)
@@ -354,15 +356,12 @@ def is_playlist_url(raw_url: str) -> bool:
         u = u[1:-1].strip()
     u_low = u.lower()
 
-    # Spotify short links (mobile share links like spotify.link, spotify.app.link, spoti.fi)
-    if any(sp in u_low for sp in ("spotify.link/", "spotify.app.link/", "spoti.fi/")):
-        return True
-
-    # YouTube Playlists (only pure playlists without specific video target 'v=')
+    # YouTube: If it contains a specific video ID (watch?v=, youtu.be/<id>, shorts/),
+    # it is a single track, NEVER treat it as a playlist!
     if any(yt in u_low for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
-        if "/playlist" in u_low:
-            return True
-        if "list=" in u_low and "v=" not in u_low:
+        if YOUTUBE_URL_REGEX.search(u):
+            return False
+        if "/playlist" in u_low or "list=" in u_low:
             return True
 
     # Spotify Playlists & Albums
@@ -416,34 +415,15 @@ class NativeExtractor:
 
         import wavelink
 
-        # direct YouTube URL Handling
+        # direct YouTube URL Handling (Extract title via oEmbed & route to unblocked audio engine)
         search_target = raw_q
         yt_match = YOUTUBE_URL_REGEX.search(raw_q)
         orig_yt_url = None
+        orig_yt_thumb = None
         if yt_match:
             video_id = yt_match.group(1)
             orig_yt_url = f"https://www.youtube.com/watch?v={video_id}"
-            try:
-                results = await asyncio.wait_for(wavelink.Playable.search(orig_yt_url), timeout=8.0)
-                if results:
-                    top = results[0] if isinstance(results, list) else results.tracks[0]
-                    thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
-                    trk = Track(
-                        title=top.title or "Unknown Track",
-                        author=top.author or "Unknown Artist",
-                        url=orig_yt_url,
-                        stream_url="",
-                        duration=int((top.length or 0) / 1000),
-                        thumbnail=thumb,
-                        requester=requester,
-                        is_autoplay=is_autoplay,
-                        query=raw_q,
-                    )
-                    trk._playable = top
-                    _SEARCH_CACHE[cache_key] = (now, trk)
-                    return trk
-            except Exception as e:
-                logger.debug(f"Direct YouTube URL resolution notice: {e}")
+            orig_yt_thumb = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
             try:
                 yt_title = await asyncio.wait_for(cls._fetch_youtube_title(orig_yt_url), timeout=4.0)
                 if yt_title:
@@ -1304,7 +1284,35 @@ class NativeExtractor:
 
         # youTube Playlist
         if any(d in clean_u for d in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
-            return await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
+            pl_res = await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)
+            if pl_res and pl_res.tracks:
+                return pl_res
+            # Lavalink Fallback for YouTube Playlist
+            try:
+                import wavelink
+                node_res = await asyncio.wait_for(wavelink.Playable.search(clean_u), timeout=8.0)
+                if isinstance(node_res, wavelink.Playlist) and node_res.tracks:
+                    pl_tracks = [
+                        PlaylistTrackItem(
+                            title=clean_track_title(p.title),
+                            author=p.author or "YouTube",
+                            query=f"{clean_track_title(p.title)} {p.author or ''}".strip(),
+                            duration=int((p.length or 0) / 1000),
+                            url=p.uri,
+                        )
+                        for p in node_res.tracks
+                    ]
+                    return PlaylistResult(
+                        title=clean_track_title(node_res.name or "YouTube Playlist"),
+                        author="YouTube",
+                        url=clean_u,
+                        tracks=pl_tracks,
+                        thumbnail=node_res.tracks[0].artwork if node_res.tracks else None,
+                        requester=requester,
+                    )
+            except Exception as e:
+                logger.debug(f"Lavalink YouTube playlist fallback notice: {e}")
+            return None
 
         # soundCloud / Generic Fallback via yt-dlp
         return await asyncio.to_thread(cls._sync_extract_youtube_playlist, clean_u, requester)

@@ -125,7 +125,7 @@ class MusicControlView(discord.ui.View):
             button.label = "Pause"
             if e_reg:
                 button.emoji = e_reg.get_emoji_obj("paused")
-        elif player.is_playing:
+        else:
             player.pause()
             button.label = "Resume"
             if e_reg:
@@ -164,10 +164,7 @@ class MusicControlView(discord.ui.View):
         c.add_text(f"**Skipped:** `{old_title}`")
         await send_container_response(interaction, c, ephemeral=True)
 
-        try:
-            await player.skip()
-        except Exception as e:
-            logger.warning(f"Skip button failed in guild {interaction.guild_id}: {type(e).__name__}: {e}")
+        asyncio.create_task(player.skip())
 
     @discord.ui.button(
         label="Vol -",

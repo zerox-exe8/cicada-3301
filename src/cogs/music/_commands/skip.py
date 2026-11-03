@@ -34,7 +34,4 @@ async def execute_skip(cog: Music, ctx: commands.Context) -> None:
     # Send instant confirmation without blocking user turn
     await send_container_response(ctx, container)
 
-    try:
-        await player.skip()
-    except Exception as e:
-        logger.warning(f"Guild {ctx.guild.id}: skip failed: {type(e).__name__}: {e}")
+    asyncio.create_task(player.skip())

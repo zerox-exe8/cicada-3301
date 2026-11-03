@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Optional, Any
 import discord
@@ -130,7 +131,7 @@ class MusicControlView(discord.ui.View):
             if e_reg:
                 button.emoji = e_reg.get_emoji_obj("music") or e_reg.get_emoji_obj("paused")
 
-        await player.update_controller_message(force=True)
+        asyncio.create_task(player.update_controller_message(force=True))
 
     @discord.ui.button(
         label="Skip",
@@ -158,14 +159,15 @@ class MusicControlView(discord.ui.View):
             await send_container_response(interaction, c, ephemeral=True)
             return
 
+        old_title = player.current.title if player.current else "track"
+        c = KyroContainer()
+        c.add_text(f"**Skipped:** `{old_title}`")
+        await send_container_response(interaction, c, ephemeral=True)
+
         try:
             await player.skip()
         except Exception as e:
             logger.warning(f"Skip button failed in guild {interaction.guild_id}: {type(e).__name__}: {e}")
-            c = KyroContainer()
-            c.add_section(content=f"**Skip Notice**\n> Could not skip right now: `{e}`")
-            await send_container_response(interaction, c, ephemeral=True)
-            return
 
     @discord.ui.button(
         label="Vol -",
@@ -189,7 +191,7 @@ class MusicControlView(discord.ui.View):
 
         cur_vol = int(player.volume * 100)
         player.set_volume(cur_vol - 10)
-        await player.update_controller_message(force=True)
+        asyncio.create_task(player.update_controller_message(force=True))
 
     @discord.ui.button(
         label="Vol +",
@@ -213,7 +215,7 @@ class MusicControlView(discord.ui.View):
 
         cur_vol = int(player.volume * 100)
         player.set_volume(cur_vol + 10)
-        await player.update_controller_message(force=True)
+        asyncio.create_task(player.update_controller_message(force=True))
 
     @discord.ui.button(
         label="Stop",
@@ -338,7 +340,7 @@ class MusicControlView(discord.ui.View):
             return
 
         new_mode = player.set_loop_mode()
-        await player.update_controller_message(force=True)
+        asyncio.create_task(player.update_controller_message(force=True))
         c = KyroContainer()
         c.add_section(content=f"**Loop Mode**\n> Loop mode set to **{new_mode.upper()}**.")
         await send_container_response(interaction, c, ephemeral=True)
@@ -366,7 +368,7 @@ class MusicControlView(discord.ui.View):
 
         player.smart_autoplay = not player.smart_autoplay
         state = "Enabled" if player.smart_autoplay else "Disabled"
-        await player.update_controller_message(force=True)
+        asyncio.create_task(player.update_controller_message(force=True))
         c = KyroContainer()
         c.add_section(content=f"**Smart Autoplay**\n> Smart Autoplay **{state}**.")
         await send_container_response(interaction, c, ephemeral=True)

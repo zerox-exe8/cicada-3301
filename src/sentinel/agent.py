@@ -195,11 +195,14 @@ class KyroSentinel:
                                     raw_txt = re.sub(r"^```(?:json)?\s*", "", raw_txt)
                                     raw_txt = re.sub(r"\s*```$", "", raw_txt)
                                 parsed = json.loads(raw_txt)
-                                rca = (
-                                    f"**Root Cause:** {parsed.get('root_cause', 'Unknown')}\n"
-                                    f"**Impact:** {parsed.get('impact', 'None')}\n"
-                                    f"**Remediation:** {parsed.get('recommended_fix', 'Inspect logs')}"
-                                )
+                                root = (parsed.get("root_cause") or "").strip()
+                                fix = (parsed.get("recommended_fix") or "").strip()
+                                if root and fix:
+                                    rca = f"{root.rstrip('.')} — {fix}"
+                                elif root:
+                                    rca = root
+                                else:
+                                    rca = parsed.get("summary") or "Internal exception occurred."
                                 incident.ai_analysis = rca
                                 return rca
                     elif resp.status in (404, 503, 429):
@@ -257,24 +260,22 @@ class KyroSentinel:
             dev_ids.update({1082437832087445604, 879986471866630155})
 
         container = KyroContainer(accent_color=None)
-        container.add_section(
-            content=(
-                f"**🚨 Kyro Sentinel Critical Incident Alert**\n"
-                f"> **Incident:** `{incident.id}` | **Subsystem:** `{incident.subsystem.value}`\n"
-                f"> **Issue:** **{incident.title}**\n"
-                f"> **Details:** `{incident.details[:300]}`"
-            )
-        )
+        container.add_text(f"## 🚨 Sentinel Alert • `{incident.id}`")
+        container.add_separator(divider=True)
 
+        lines = [
+            f"> • **Issue:** `{incident.title}`",
+            f"> • **Subsystem:** `{incident.subsystem.value.upper()}`",
+        ]
         if incident.ai_analysis:
-            container.add_separator(divider=True)
-            container.add_section(
-                content=f"**🤖 Gemini AI Autonomous Diagnosis**\n{incident.ai_analysis}"
-            )
+            lines.append(f"> • **Reason & Fix:** {incident.ai_analysis}")
+        elif incident.details:
+            lines.append(f"> • **Details:** `{incident.details[:160]}`")
 
+        container.add_section(content="\n".join(lines))
         container.add_separator(divider=True)
         container.add_text(
-            f"-# Autonomous Sentinel Telemetry • Time: `{incident.formatted_time}` • Use `?sentinel heal` to intervene"
+            f"-# Time: `{incident.formatted_time}` • Use `?sentinel heal` to intervene"
         )
 
         for dev_id in dev_ids:

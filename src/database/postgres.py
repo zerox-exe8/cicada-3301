@@ -809,6 +809,20 @@ class PostgresDatabase(BaseDatabase):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
+            # Voice Meeting Schedules table
+            """
+            CREATE TABLE IF NOT EXISTS meeting_schedules (
+                id SERIAL PRIMARY KEY,
+                guild_id BIGINT NOT NULL,
+                voice_channel_id BIGINT NOT NULL,
+                start_time VARCHAR(10) NOT NULL,
+                end_time VARCHAR(10) NOT NULL,
+                enabled BOOLEAN DEFAULT TRUE,
+                created_by BIGINT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_meeting_schedules_guild ON meeting_schedules(guild_id, enabled);",
         ]
         if not self.pool or self.pool._closed:
             await self._heal_pool()

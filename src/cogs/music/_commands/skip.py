@@ -29,18 +29,12 @@ async def execute_skip(cog: Music, ctx: commands.Context) -> None:
         return
 
     old_title = player.current.title
+    container = KyroContainer(accent_color=None)
+    container.add_text(f"**Skipped:** `{old_title}`")
+    # Send instant confirmation without blocking user turn
+    await send_container_response(ctx, container)
+
     try:
         await player.skip()
     except Exception as e:
-        # The skip itself is already fault tolerant inside GuildPlayer.skip();
-        # this is the last line of defence so the user always gets feedback
-        # instead of an unhandled command exception.
         logger.warning(f"Guild {ctx.guild.id}: skip failed: {type(e).__name__}: {e}")
-        container = KyroContainer(accent_color=None)
-        container.add_text(f"**Could not skip:** `{e}`\n> Please try again in a moment.")
-        await send_container_response(ctx, container)
-        return
-
-    container = KyroContainer(accent_color=None)
-    container.add_text(f"**Skipped:** `{old_title}`")
-    await send_container_response(ctx, container)

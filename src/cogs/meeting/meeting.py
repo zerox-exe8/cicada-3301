@@ -12,12 +12,14 @@ import time
 import wave
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
+from datetime import datetime, timezone, timedelta
 
 import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from src.repositories.meeting_repo import MeetingRepository
+from src.cogs.meeting._schedule_view import MeetingScheduleWizard
 
 try:
     import discord.ext.voice_recv as voice_recv
@@ -659,6 +661,8 @@ class MeetingSession:
     pending_tasks: set[asyncio.Task] = field(default_factory=set)
     last_rolling_summary_time: float = 0.0
     monitor_task: Optional[asyncio.Task] = None
+    is_scheduled: bool = False
+    schedule_end_time: str = ""
 
 
 class MeetingCog(commands.Cog, name="Meeting"):
@@ -677,9 +681,12 @@ class MeetingCog(commands.Cog, name="Meeting"):
         self._sessions: dict[int, MeetingSession] = {}
         # guild_id -> in-flight connection semaphore
         self._connecting_guilds: set[int] = set()
+        self.schedule_monitor_loop.start()
 
     def cog_unload(self) -> None:
         """Clean up all active recording sessions when unloading cog."""
+        if hasattr(self, "schedule_monitor_loop") and self.schedule_monitor_loop.is_running():
+            self.schedule_monitor_loop.cancel()
         self._connecting_guilds.clear()
         for s in list(self._sessions.values()):
             try:
@@ -694,6 +701,195 @@ class MeetingCog(commands.Cog, name="Meeting"):
             except Exception:
                 pass
         self._sessions.clear()
+
+    # ------------------ SCHEDULE HELPERS & LOOP ------------------
+
+    @tasks.loop(seconds=30)
+    async def schedule_monitor_loop(self) -> None:
+        """Periodically check active scheduled meetings and wrap up if end time passed."""
+        now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+        curr_hm = now_ist.strftime("%H:%M")
+
+        for guild_id, session in list(self._sessions.items()):
+            if getattr(session, "is_scheduled", False) and not session.is_processing:
+                sched_end = getattr(session, "schedule_end_time", "")
+                if sched_end and curr_hm >= sched_end:
+                    logger.info(f"Guild {guild_id}: Scheduled meeting end time {sched_end} reached. Wrapping up...")
+                    active_s = self._sessions.pop(guild_id, None)
+                    if active_s:
+                        try:
+                            active_s.voice_client.stop_listening()
+                            await asyncio.wait_for(active_s.voice_client.disconnect(force=True), timeout=2.0)
+                            active_s.voice_client.cleanup()
+                        except Exception:
+                            pass
+                        try:
+                            guild = self.bot.get_guild(guild_id)
+                            if guild:
+                                await guild.change_voice_state(channel=None)
+                        except Exception:
+                            pass
+                        asyncio.create_task(self._process_meeting_completion(active_s))
+
+    @schedule_monitor_loop.before_loop
+    async def before_schedule_monitor_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _check_schedule_auto_join(
+        self, guild: discord.Guild, member: discord.Member, channel: discord.VoiceChannel
+    ) -> None:
+        """Evaluate if member joined a scheduled voice channel within active time window."""
+        try:
+            schedules = await self.repo.get_schedules(guild.id)
+            if not schedules:
+                return
+
+            now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+            curr_hm = now_ist.strftime("%H:%M")
+
+            for sch in schedules:
+                if sch.get("voice_channel_id") == channel.id and sch.get("enabled", True):
+                    s_time = sch["start_time"]
+                    e_time = sch["end_time"]
+                    in_window = (s_time <= curr_hm < e_time) if s_time < e_time else (curr_hm >= s_time or curr_hm < e_time)
+                    if in_window:
+                        non_bots = [m for m in channel.members if not m.bot]
+                        if len(non_bots) >= 1:
+                            await self._start_scheduled_meeting(guild, channel, sch)
+                            break
+        except Exception as err:
+            logger.debug(f"Guild {guild.id}: error in _check_schedule_auto_join: {err}")
+
+    async def _start_scheduled_meeting(
+        self, guild: discord.Guild, vc: discord.VoiceChannel, schedule: dict[str, Any]
+    ) -> None:
+        """Autonomous auto-join for scheduled voice meetings."""
+        if guild.id in self._sessions or guild.id in self._connecting_guilds:
+            return
+
+        settings = await self._get_meeting_settings(guild.id)
+        if not settings.get("enabled", True):
+            return
+
+        # Check Lavalink music playback
+        try:
+            music_cog = self.bot.get_cog("Music")
+            if music_cog and hasattr(music_cog, "controller"):
+                m_player = music_cog.controller.get_player(guild.id)
+                if m_player and (m_player.is_playing or len(m_player.queue) > 0):
+                    logger.info(f"Guild {guild.id}: Skipping scheduled meeting because music is active.")
+                    return
+        except Exception:
+            pass
+
+        me = guild.me
+        if not vc.permissions_for(me).connect:
+            logger.warning(f"Guild {guild.id}: Cannot auto-join scheduled meeting: missing connect permission in {vc.name}.")
+            return
+
+        self._connecting_guilds.add(guild.id)
+        voice_client: Optional[voice_recv.VoiceRecvClient] = None
+        try:
+            voice_client = await vc.connect(cls=voice_recv.VoiceRecvClient, timeout=15.0, reconnect=True)
+            
+            # DAVE handshake
+            handshake_ok = False
+            conn = getattr(voice_client, "_connection", None)
+            for _ in range(35):
+                dave_ver = getattr(conn, "dave_protocol_version", 0)
+                dave = getattr(conn, "dave_session", None)
+                dave_ready = getattr(dave, "ready", False) if dave else False
+                if dave_ready or (dave_ver == 0 and dave is None):
+                    handshake_ok = True
+                    break
+                await asyncio.sleep(0.1)
+
+            if not handshake_ok:
+                conn = getattr(voice_client, "_connection", None)
+                dave = getattr(conn, "dave_session", None)
+                if dave is not None and not getattr(dave, "ready", False):
+                    try:
+                        dave.set_passthrough_mode(True, 120)
+                        handshake_ok = True
+                    except Exception:
+                        pass
+
+            if not handshake_ok:
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                return
+
+            sink = MeetingAudioSink(noise_gate=0)
+            sink._voice_client = voice_client
+            voice_client.listen(sink)
+
+            try:
+                sock_reader = getattr(voice_client._connection, "_socket_reader", None)
+                if sock_reader:
+                    sock_reader.resume()
+            except Exception:
+                pass
+
+            try:
+                if hasattr(voice_client, "ws") and voice_client.ws:
+                    await voice_client.ws.speak(discord.gateway.SpeakingState.voice)
+                    for _ in range(5):
+                        voice_client.send_audio_packet(b"\xf8\xff\xfe", encode=False)
+                        await asyncio.sleep(0.02)
+                    await voice_client.ws.speak(discord.gateway.SpeakingState.none)
+            except Exception:
+                pass
+
+            text_ch_id = settings.get("channel_id")
+            report_ch: Optional[discord.TextChannel] = None
+            if text_ch_id:
+                ch = guild.get_channel(text_ch_id)
+                if isinstance(ch, discord.TextChannel):
+                    report_ch = ch
+            if not report_ch:
+                report_ch = guild.system_channel or next(
+                    (c for c in guild.text_channels if c.permissions_for(me).send_messages), None
+                )
+
+            new_session = MeetingSession(
+                guild_id=guild.id,
+                voice_channel_id=vc.id,
+                text_channel_id=report_ch.id if report_ch else 0,
+                host_id=schedule.get("created_by") or (self.bot.user.id if self.bot.user else 0),
+                start_time=time.time(),
+                voice_client=voice_client,
+                sink=sink,
+            )
+            setattr(new_session, "is_scheduled", True)
+            setattr(new_session, "schedule_end_time", schedule["end_time"])
+            new_session.monitor_task = asyncio.create_task(self._live_session_monitor(new_session))
+            self._sessions[guild.id] = new_session
+
+            if report_ch:
+                container = KyroContainer(accent_color=None)
+                container.add_text("## Automated Meeting Started")
+                container.add_separator(divider=True)
+                lines = [
+                    f"> • **Voice Channel:** {vc.mention}",
+                    f"> • **Schedule Window:** `{schedule['start_time']}` – `{schedule['end_time']}` (IST)",
+                    "> • **Status:** `Recording & Transcription Active`",
+                ]
+                container.add_section(content="\n".join(lines))
+                container.add_separator(divider=True)
+                container.add_text("-# Triggered automatically because members joined during scheduled window.")
+                await send_container_response(report_ch, container)
+
+        except Exception as e:
+            logger.error(f"Guild {guild.id}: Scheduled meeting join error: {e}", exc_info=True)
+            if voice_client:
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+        finally:
+            self._connecting_guilds.discard(guild.id)
 
     # ------------------ SETTINGS HELPERS ------------------
 
@@ -1564,6 +1760,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
             f"> {dot} `{prefix}meeting start`\n"
             f"> {dot} `{prefix}meeting stop`\n"
             f"> {dot} `{prefix}meeting show`\n"
+            f"> {dot} `{prefix}meeting schedule`\n"
             f"> {dot} `{prefix}meeting setup`\n"
             f"> {dot} `{prefix}meeting channel <#channel|reset>`\n"
             f"> {dot} `{prefix}meeting enable`\n"
@@ -1586,6 +1783,93 @@ class MeetingCog(commands.Cog, name="Meeting"):
             return
         container = self._build_usage_card(ctx)
         await send_container_response(ctx, container)
+
+    # ------------------ SCHEDULE COMMANDS ------------------
+
+    @meeting_group.group(
+        name="schedule",
+        aliases=["schedules", "sched"],
+        description="Configure automated recurring voice meeting schedules.",
+        invoke_without_command=True,
+    )
+    @commands.guild_only()
+    async def meeting_schedule_group(self, ctx: CustomContext) -> None:
+        """Launch the 2-step interactive slider wizard to schedule automated meetings."""
+        if ctx.invoked_subcommand is not None:
+            return
+        if not (ctx.author.guild_permissions.administrator or ctx.author.id == ctx.guild.owner_id):
+            await ctx.send_warning("Only administrators can configure meeting schedules.")
+            return
+
+        wizard = MeetingScheduleWizard(self.bot, ctx.guild, ctx.author, self.repo)
+        container = wizard.get_container()
+        await send_container_response(ctx, container, view=wizard)
+
+    @meeting_schedule_group.command(
+        name="add",
+        aliases=["create", "new"],
+        description="Launch the 2-step slider wizard to schedule automated meetings.",
+    )
+    @commands.guild_only()
+    async def meeting_schedule_add(self, ctx: CustomContext) -> None:
+        """Launch the 2-step interactive slider wizard to schedule automated meetings."""
+        if not (ctx.author.guild_permissions.administrator or ctx.author.id == ctx.guild.owner_id):
+            await ctx.send_warning("Only administrators can configure meeting schedules.")
+            return
+
+        wizard = MeetingScheduleWizard(self.bot, ctx.guild, ctx.author, self.repo)
+        container = wizard.get_container()
+        await send_container_response(ctx, container, view=wizard)
+
+    @meeting_schedule_group.command(
+        name="list",
+        aliases=["show"],
+        description="List all automated meeting schedules for this server.",
+    )
+    @commands.guild_only()
+    async def meeting_schedule_list(self, ctx: CustomContext) -> None:
+        """Display all configured meeting schedules."""
+        schedules = await self.repo.get_all_schedules(ctx.guild.id)
+        if not schedules:
+            c = KyroContainer(accent_color=None)
+            c.add_text("## Meeting Schedules")
+            c.add_separator(divider=True)
+            c.add_text("> No automated meeting schedules configured.\n> Use `?meeting schedule` to configure one.")
+            await send_container_response(ctx, c)
+            return
+
+        c = KyroContainer(accent_color=None)
+        c.add_text("## Meeting Schedules")
+        c.add_separator(divider=True)
+        body = []
+        for s in schedules:
+            status = "Active" if s.get("enabled", True) else "Disabled"
+            body.append(
+                f"> • **ID `#{s['id']}`:** <#{s['voice_channel_id']}> | `{s['start_time']} – {s['end_time']}` (IST) | `{status}`"
+            )
+        c.add_section(content="\n".join(body))
+        c.add_separator(divider=True)
+        c.add_text(f"-# Use `{ctx.clean_prefix}meeting schedule delete <id>` to remove a schedule.")
+        await send_container_response(ctx, c)
+
+    @meeting_schedule_group.command(
+        name="delete",
+        aliases=["remove", "del"],
+        description="Delete a configured meeting schedule by ID.",
+    )
+    @commands.guild_only()
+    async def meeting_schedule_delete(self, ctx: CustomContext, schedule_id: int) -> None:
+        """Remove a meeting schedule."""
+        if not (ctx.author.guild_permissions.administrator or ctx.author.id == ctx.guild.owner_id):
+            await ctx.send_warning("Only administrators can delete meeting schedules.")
+            return
+
+        await self.repo.delete_schedule(schedule_id, ctx.guild.id)
+        c = KyroContainer(accent_color=None)
+        c.add_text("## Meeting Schedule Deleted")
+        c.add_separator(divider=True)
+        c.add_text(f"> Schedule `#{schedule_id}` has been successfully removed.")
+        await send_container_response(ctx, c)
 
     @meeting_group.command(name="setup", description="Launch the step-by-step Meeting Intelligence setup wizard.")
     async def meeting_setup(self, ctx: CustomContext) -> None:
@@ -2183,6 +2467,9 @@ class MeetingCog(commands.Cog, name="Meeting"):
         guild = member.guild
         session = self._sessions.get(guild.id)
         if not session:
+            if not member.bot and after.channel and after.channel != before.channel:
+                if guild.id not in self._connecting_guilds:
+                    asyncio.create_task(self._check_schedule_auto_join(guild, member, after.channel))
             return
 
         # Check if the bot itself was disconnected from voice

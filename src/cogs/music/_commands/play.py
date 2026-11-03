@@ -106,16 +106,28 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     import wavelink
 
-    # Send Searching Track card IMMEDIATELY (0ms feedback feel!)
+    # ── Step 0: Parallel Launch of Searching Card & Voice Connection ──
     search_container = KyroContainer(accent_color=None)
     search_container.add_text(f"**Searching:** `{query}`...")
-    search_msg = await send_container_response(ctx, search_container)
+    search_msg_task = asyncio.create_task(send_container_response(ctx, search_container))
 
-    # Connect to voice
-    try:
-        await player.connect_voice(voice_channel)
-    except Exception as e:
-        logger.warning(f"Voice connect error in guild {ctx.guild.id}: {e}")
+    needs_connect = (
+        not player.is_connected
+        or not player.voice_client
+        or getattr(player.voice_client, "channel", None) != voice_channel
+    )
+    connect_task: Optional[asyncio.Task] = (
+        asyncio.create_task(player.connect_voice(voice_channel)) if needs_connect else None
+    )
+
+    async def _handle_voice_connect_error(err: Exception) -> bool:
+        logger.warning(f"Voice connect error in guild {ctx.guild.id}: {err}")
+        search_msg = None
+        try:
+            search_msg = await search_msg_task
+        except Exception:
+            pass
+
         agent = getattr(cog, "agent", None)
         if agent:
             engine_ok, engine_reason = await agent.audio_engine_status()
@@ -142,41 +154,40 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 if search_msg:
                     try:
                         await edit_container_response(search_msg, card)
-                        return
+                        return False
                     except Exception:
                         pass
                 await send_container_response(ctx, card)
-                return
+                return False
 
-            # Trigger autonomous self-heal
-            await agent.heal_voice_session(ctx.guild, reason=str(e))
+            await agent.heal_voice_session(ctx.guild, reason=str(err))
             card = agent.build_maintenance_card(
                 title="Voice Gateway Auto-Recovery",
-                issue_desc=f"`{e}`",
+                issue_desc=f"`{err}`",
                 action_taken="Purged stale voice gateway state and refreshed connection pipeline.",
                 advice="Please try playing your track again in a moment.",
             )
             if search_msg:
                 try:
                     await edit_container_response(search_msg, card)
-                    return
+                    return False
                 except Exception:
                     pass
             await send_container_response(ctx, card)
-            return
+            return False
 
         container = KyroContainer(accent_color=None)
-        container.add_text(f"**Failed to connect to voice channel:** `{e}`")
+        container.add_text(f"**Failed to connect to voice channel:** `{err}`")
         if search_msg:
             try:
                 await edit_container_response(search_msg, container)
-                return
+                return False
             except Exception:
                 pass
         await send_container_response(ctx, container)
-        return
+        return False
 
-    # ── Step 0: Clean query & prepare execution wrapper ──
+    # ── Step 1: Clean query & start immediate track extraction ──
     clean_q = query.strip()
     if clean_q.startswith("<") and clean_q.endswith(">"):
         clean_q = clean_q[1:-1].strip()
@@ -223,6 +234,20 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     for it in pl.tracks[1:]
                 ]
 
+                # Ensure voice connection is ready before queueing & playing
+                if connect_task:
+                    try:
+                        await connect_task
+                    except Exception as conn_e:
+                        await _handle_voice_connect_error(conn_e)
+                        return
+
+                search_msg = None
+                try:
+                    search_msg = await search_msg_task
+                except Exception:
+                    pass
+
                 # 1. Thread-safe queue update
                 if was_idle:
                     await player.add_tracks(remaining_tracks)
@@ -258,6 +283,13 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
                 return
             elif any(sp in clean_q for sp in ("spotify.com", "spotify.link", "spoti.fi", "spotify.app.link")):
+                if connect_task and not connect_task.done():
+                    connect_task.cancel()
+                search_msg = None
+                try:
+                    search_msg = await search_msg_task
+                except Exception:
+                    pass
                 err_c = KyroContainer(accent_color=None)
                 err_c.add_section(
                     content=(
@@ -275,6 +307,13 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 await send_container_response(ctx, err_c)
                 return
             else:
+                if connect_task and not connect_task.done():
+                    connect_task.cancel()
+                search_msg = None
+                try:
+                    search_msg = await search_msg_task
+                except Exception:
+                    pass
                 err_c = KyroContainer(accent_color=None)
                 err_c.add_section(
                     content=(
@@ -348,6 +387,19 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     ]
                     for idx, p in enumerate(pl.tracks[1:]):
                         remaining_tracks[idx]._playable = p
+
+                    if connect_task:
+                        try:
+                            await connect_task
+                        except Exception as conn_e:
+                            await _handle_voice_connect_error(conn_e)
+                            return
+
+                    search_msg = None
+                    try:
+                        search_msg = await search_msg_task
+                    except Exception:
+                        pass
 
                     if was_idle:
                         await player.add_tracks(remaining_tracks)
@@ -514,6 +566,13 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
         # If still no track found, edit the searching message to inform user
         if not track:
+            if connect_task and not connect_task.done():
+                connect_task.cancel()
+            search_msg = None
+            try:
+                search_msg = await search_msg_task
+            except Exception:
+                pass
             err_container = KyroContainer(accent_color=None)
             err_container.add_text(f"**No results found for:** `{query}`")
             if search_msg:
@@ -524,6 +583,20 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     pass
             await send_container_response(ctx, err_container)
             return
+
+        # Ensure voice connection is ready before starting playback
+        if connect_task:
+            try:
+                await connect_task
+            except Exception as conn_e:
+                await _handle_voice_connect_error(conn_e)
+                return
+
+        search_msg = None
+        try:
+            search_msg = await search_msg_task
+        except Exception:
+            pass
 
         track.query = query
         track.requester_id = ctx.author.id

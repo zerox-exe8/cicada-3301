@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 from discord.ext import commands
 
@@ -26,7 +27,7 @@ async def execute_pause(cog: Music, ctx: commands.Context) -> None:
         return
 
     if player.pause():
-        await player.update_controller_message(force=True)
+        asyncio.create_task(player.update_controller_message(force=True))
         container = KyroContainer(accent_color=None)
         container.add_text("**Playback paused.** Type `?resume` to continue.")
         await send_container_response(ctx, container)
@@ -53,7 +54,7 @@ async def execute_resume(cog: Music, ctx: commands.Context) -> None:
 
     if player.resume():
         player._was_paused_for_empty_vc = False
-        await player.update_controller_message(force=True)
+        asyncio.create_task(player.update_controller_message(force=True))
         container = KyroContainer(accent_color=None)
         container.add_text("**Playback resumed.**")
         await send_container_response(ctx, container)

@@ -46,6 +46,34 @@ async def get_prefix(bot: KyroBot, message: discord.Message) -> list[str] | str:
     if message.author:
         author_id = message.author.id
         if author_id in getattr(bot, "no_prefix_users", set()) or bot.perm_mgr.is_developer_sync(author_id):
+            content = message.content.strip()
+            # If message explicitly starts with server prefix or bot mention, allow standard prefixed execution
+            if content.startswith(guild_prefix) or (
+                bot.user and content.startswith((f"<@{bot.user.id}>", f"<@!{bot.user.id}>"))
+            ):
+                return commands.when_mentioned_or(guild_prefix)(bot, message)
+
+            # Smart Conversation Guard for No-Prefix:
+            # Prevent natural conversational sentences (like "welcome to our server", "stop it", "skip kar do")
+            # from accidentally triggering commands without a prefix.
+            words = content.split()
+            if words:
+                first_word = words[0].lower()
+                cmd = bot.get_command(first_word)
+                if cmd:
+                    # 1. Group commands (e.g. welcome, meeting, ticket, antinuke):
+                    # Only allow without prefix if no extra words OR the next word is an actual registered subcommand!
+                    if isinstance(cmd, commands.Group):
+                        if len(words) > 1:
+                            sub_cmd = cmd.get_command(words[1].lower())
+                            if not sub_cmd:
+                                # Not a subcommand (e.g. "welcome to our server", "welcome bro") -> normal chat
+                                return commands.when_mentioned_or(guild_prefix)(bot, message)
+                    # 2. Commands that expect NO arguments (e.g. stop, skip, pause, resume, np):
+                    # If extra words were written after the command name, user is talking in chat!
+                    elif len(getattr(cmd, "clean_params", {})) == 0 and len(words) > 1:
+                        return commands.when_mentioned_or(guild_prefix)(bot, message)
+
             return commands.when_mentioned_or(guild_prefix, "")(bot, message)
 
     return commands.when_mentioned_or(guild_prefix)(bot, message)

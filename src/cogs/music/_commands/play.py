@@ -212,33 +212,102 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
             if pl and pl.tracks:
                 was_idle = player.current is None
-                first_item = pl.tracks[0]
-                first_track = Track(
-                    title=first_item.title,
-                    author=first_item.author,
-                    url=first_item.url or clean_q,
-                    stream_url="",
-                    duration=first_item.duration,
-                    thumbnail=pl.thumbnail,
-                    requester=ctx.author.display_name,
-                    requester_id=ctx.author.id,
-                    query=first_item.query or f"{first_item.title} {first_item.author}",
-                )
 
-                remaining_tracks = [
-                    Track(
-                        title=it.title,
-                        author=it.author,
-                        url=it.url or clean_q,
+                # If the playlist URL specifies a targeted video, play that exact song first!
+                target_vid_m = re.search(r"(?:v=|\/|youtu\.be\/)([a-zA-Z0-9_-]{11})", clean_q)
+                target_vid = target_vid_m.group(1) if target_vid_m else None
+
+                target_idx = -1
+                if target_vid:
+                    for idx, it in enumerate(pl.tracks):
+                        if target_vid in (it.url or "") or target_vid in (it.query or ""):
+                            target_idx = idx
+                            break
+
+                first_track: Optional[Track] = None
+                remaining_tracks: list[Track] = []
+
+                if target_idx != -1:
+                    first_item = pl.tracks[target_idx]
+                    other_items = pl.tracks[target_idx + 1:] + pl.tracks[:target_idx]
+                    first_track = Track(
+                        title=first_item.title,
+                        author=first_item.author,
+                        url=first_item.url or clean_q,
                         stream_url="",
-                        duration=it.duration,
-                        thumbnail=pl.thumbnail,
+                        duration=first_item.duration,
+                        thumbnail=first_item.thumbnail or pl.thumbnail,
                         requester=ctx.author.display_name,
                         requester_id=ctx.author.id,
-                        query=it.query or f"{it.title} {it.author}",
+                        query=first_item.query or f"{first_item.title} {first_item.author}",
                     )
-                    for it in pl.tracks[1:]
-                ]
+                    remaining_tracks = [
+                        Track(
+                            title=it.title,
+                            author=it.author,
+                            url=it.url or clean_q,
+                            stream_url="",
+                            duration=it.duration,
+                            thumbnail=it.thumbnail or pl.thumbnail,
+                            requester=ctx.author.display_name,
+                            requester_id=ctx.author.id,
+                            query=it.query or f"{it.title} {it.author}",
+                        )
+                        for it in other_items
+                    ]
+                elif target_vid:
+                    # Video is outside initial playlist batch: resolve video directly to guarantee exact song plays
+                    try:
+                        resolved_t = await asyncio.wait_for(
+                            NativeExtractor.extract(f"https://www.youtube.com/watch?v={target_vid}", requester=ctx.author.display_name),
+                            timeout=5.0
+                        )
+                    except Exception:
+                        resolved_t = None
+                    if resolved_t:
+                        first_track = resolved_t
+                        remaining_tracks = [
+                            Track(
+                                title=it.title,
+                                author=it.author,
+                                url=it.url or clean_q,
+                                stream_url="",
+                                duration=it.duration,
+                                thumbnail=it.thumbnail or pl.thumbnail,
+                                requester=ctx.author.display_name,
+                                requester_id=ctx.author.id,
+                                query=it.query or f"{it.title} {it.author}",
+                            )
+                            for it in pl.tracks
+                        ]
+
+                if not first_track:
+                    first_item = pl.tracks[0]
+                    first_track = Track(
+                        title=first_item.title,
+                        author=first_item.author,
+                        url=first_item.url or clean_q,
+                        stream_url="",
+                        duration=first_item.duration,
+                        thumbnail=first_item.thumbnail or pl.thumbnail,
+                        requester=ctx.author.display_name,
+                        requester_id=ctx.author.id,
+                        query=first_item.query or f"{first_item.title} {first_item.author}",
+                    )
+                    remaining_tracks = [
+                        Track(
+                            title=it.title,
+                            author=it.author,
+                            url=it.url or clean_q,
+                            stream_url="",
+                            duration=it.duration,
+                            thumbnail=it.thumbnail or pl.thumbnail,
+                            requester=ctx.author.display_name,
+                            requester_id=ctx.author.id,
+                            query=it.query or f"{it.title} {it.author}",
+                        )
+                        for it in pl.tracks[1:]
+                    ]
 
                 # Ensure voice connection is ready before queueing & playing
                 if connect_task:
@@ -313,29 +382,36 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 await send_container_response(ctx, err_c)
                 return
             else:
-                if connect_task and not connect_task.done():
-                    connect_task.cancel()
-                search_msg = None
-                try:
-                    search_msg = await search_msg_task
-                except Exception:
-                    pass
-                err_c = KyroContainer(accent_color=None)
-                err_c.add_section(
-                    content=(
-                        "**Playlist Unavailable / Private**\n"
-                        "> Kyro could not load tracks from this playlist URL.\n"
-                        "> Please verify that the playlist is **Public** or **Unlisted** and contains accessible tracks."
-                    )
-                )
-                if search_msg:
+                # If the URL contained a specific video (e.g. watch?v=...&list=...), fallback to playing that video!
+                target_vid_m = re.search(r"(?:v=|\/|youtu\.be\/)([a-zA-Z0-9_-]{11})", clean_q)
+                target_vid = target_vid_m.group(1) if target_vid_m else None
+                if target_vid:
+                    clean_q = f"https://www.youtube.com/watch?v={target_vid}"
+                    # Fall through to standard single track lookup below!
+                else:
+                    if connect_task and not connect_task.done():
+                        connect_task.cancel()
+                    search_msg = None
                     try:
-                        await edit_container_response(search_msg, err_c)
-                        return
+                        search_msg = await search_msg_task
                     except Exception:
                         pass
-                await send_container_response(ctx, err_c)
-                return
+                    err_c = KyroContainer(accent_color=None)
+                    err_c.add_section(
+                        content=(
+                            "**Playlist Unavailable / Private**\n"
+                            "> Kyro could not load tracks from this playlist URL.\n"
+                            "> Please verify that the playlist is **Public** or **Unlisted** and contains accessible tracks."
+                        )
+                    )
+                    if search_msg:
+                        try:
+                            await edit_container_response(search_msg, err_c)
+                            return
+                        except Exception:
+                            pass
+                    await send_container_response(ctx, err_c)
+                    return
 
 
         # ── Step 1: Track Search & Resolution ──

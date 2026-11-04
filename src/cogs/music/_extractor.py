@@ -1512,7 +1512,17 @@ class NativeExtractor:
     ) -> Optional[PlaylistResult]:
         """Synchronous yt-dlp flat playlist extraction."""
         m = re.search(r"[?&]list=([a-zA-Z0-9_-]+)", url)
-        target_url = f"https://www.youtube.com/playlist?list={m.group(1)}" if m else url
+        list_id = m.group(1) if m else ""
+
+        # YouTube Mixes (RD...), Radio playlists, or URLs with a specific watch?v= video:
+        # DO NOT rewrite to /playlist?list= because YouTube blocks them with 'This playlist type is unviewable'.
+        # Keep the original full URL intact!
+        if list_id.startswith("RD") or "v=" in url or "/watch" in url:
+            target_url = url
+        elif list_id:
+            target_url = f"https://www.youtube.com/playlist?list={list_id}"
+        else:
+            target_url = url
 
         ydl_opts = {
             "quiet": True,
@@ -1532,6 +1542,12 @@ class NativeExtractor:
                 info = ydl.extract_info(target_url, download=False)
                 if not info:
                     return None
+
+                # Follow pointer if yt-dlp returned a playlist redirect URL
+                if info.get("_type") == "url" and info.get("url"):
+                    info = ydl.extract_info(info["url"], download=False)
+                    if not info:
+                        return None
 
                 pl_title = info.get("title") or "YouTube Playlist"
                 pl_author = info.get("uploader") or info.get("channel") or "YouTube"

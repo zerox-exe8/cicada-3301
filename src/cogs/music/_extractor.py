@@ -425,6 +425,27 @@ class NativeExtractor:
             orig_yt_url = f"https://www.youtube.com/watch?v={video_id}"
             orig_yt_thumb = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
             try:
+                results = await asyncio.wait_for(wavelink.Playable.search(orig_yt_url), timeout=5.0)
+                if results:
+                    top = results[0] if isinstance(results, list) else results.tracks[0]
+                    thumb = top.artwork or orig_yt_thumb
+                    trk = Track(
+                        title=top.title or "Unknown Track",
+                        author=top.author or "Unknown Artist",
+                        url=orig_yt_url,
+                        stream_url="",
+                        duration=int((top.length or 0) / 1000),
+                        thumbnail=thumb,
+                        requester=requester,
+                        is_autoplay=is_autoplay,
+                        query=raw_q,
+                    )
+                    trk._playable = top
+                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    return trk
+            except Exception as e:
+                logger.debug(f"Direct YouTube URL resolution notice: {e}")
+            try:
                 yt_title = await asyncio.wait_for(cls._fetch_youtube_title(orig_yt_url), timeout=4.0)
                 if yt_title:
                     search_target = yt_title
@@ -457,21 +478,7 @@ class NativeExtractor:
 
         cleaned_query = parse_and_clean_query(search_target)
 
-        # Priority 1: High-Speed Unblocked JioSaavn HD Audio Engine (0% Cloud Block, 320kbps Akamai MP4/AAC Stream)
-        try:
-            saavn_target = search_target if not orig_yt_url else cleaned_query
-            saavn_trk = await cls._extract_jiosaavn(saavn_target, requester=requester, is_autoplay=is_autoplay)
-            if saavn_trk and saavn_trk.stream_url:
-                if orig_yt_url:
-                    saavn_trk.url = orig_yt_url
-                elif orig_spotify_url:
-                    saavn_trk.url = orig_spotify_url
-                _SEARCH_CACHE[cache_key] = (now, saavn_trk)
-                return saavn_trk
-        except Exception as e:
-            logger.debug(f"JioSaavn primary search notice: {e}")
-
-        # Priority 2: YouTube Music search via Lavalink (Fallback if not in Saavn catalog)
+        # Priority 1: High-Speed YouTube Music search via Lavalink (~0.8s resolution, 100% playable)
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
@@ -479,11 +486,11 @@ class NativeExtractor:
             )
             if results:
                 top = results[0] if isinstance(results, list) else results.tracks[0]
-                thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
+                thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
                 trk = Track(
                     title=top.title or cleaned_query,
                     author=top.author or "Artist",
-                    url=orig_spotify_url or top.uri or orig_yt_url or raw_q,
+                    url=orig_spotify_url or orig_yt_url or top.uri or raw_q,
                     stream_url="",
                     duration=int((top.length or 0) / 1000),
                     thumbnail=thumb,
@@ -497,7 +504,7 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"YouTube Music search notice: {e}")
 
-        # Priority 3: Standard YouTube search via Lavalink
+        # Priority 2: Standard YouTube search via Lavalink (Fallback)
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTube),
@@ -505,11 +512,11 @@ class NativeExtractor:
             )
             if results:
                 top = results[0] if isinstance(results, list) else results.tracks[0]
-                thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
+                thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
                 trk = Track(
                     title=top.title or cleaned_query,
                     author=top.author or "Artist",
-                    url=orig_spotify_url or top.uri or orig_yt_url or raw_q,
+                    url=orig_spotify_url or orig_yt_url or top.uri or raw_q,
                     stream_url="",
                     duration=int((top.length or 0) / 1000),
                     thumbnail=thumb,

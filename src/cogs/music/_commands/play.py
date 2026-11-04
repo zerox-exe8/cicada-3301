@@ -475,15 +475,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 track = await asyncio.wait_for(
                     NativeExtractor.extract(lookup_target, requester=ctx.author.display_name),
-                    timeout=12.0
+                    timeout=8.0
                 )
-                if track and track.stream_url and player._is_direct_stream_url(track.stream_url):
-                    try:
-                        direct_results = await asyncio.wait_for(wavelink.Playable.search(track.stream_url), timeout=8.0)
-                        if direct_results:
-                            track._playable = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
-                    except Exception as e:
-                        logger.debug(f"Direct stream playable resolution error: {e}")
             except Exception as e:
                 logger.debug(f"NativeExtractor search notice: {e}")
 

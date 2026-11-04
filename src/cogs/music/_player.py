@@ -251,25 +251,23 @@ class GuildPlayer:
                     logger.error(f"On-demand Lavalink node connect error: {err_text(e)}")
 
             # ── Node REST health probe ──
-            # The Wavelink voice handshake only completes once the node answers the
-            # REST "update player" call. A node whose websocket is up but whose REST
-            # API is slow/unreachable makes every voice connect time out, which used
-            # to be misdiagnosed as a Discord voice gateway fault.
-            if node is not None and not await self._probe_lavalink_node(node):
-                logger.warning(
-                    f"Guild {self.guild.id}: Lavalink REST API is not responsive, "
-                    "re-establishing the node before connecting."
-                )
-                agent = getattr(self.bot, "_music_agent", None)
-                if agent is not None:
+            # Only probe if node status is not already CONNECTED
+            if node is not None and getattr(node, "status", None) != wavelink.NodeStatus.CONNECTED:
+                if not await self._probe_lavalink_node(node):
+                    logger.warning(
+                        f"Guild {self.guild.id}: Lavalink REST API is not responsive, "
+                        "re-establishing the node before connecting."
+                    )
+                    agent = getattr(self.bot, "_music_agent", None)
+                    if agent is not None:
+                        try:
+                            await agent.heal_node(force=True)
+                        except Exception as heal_err:
+                            logger.error(f"Guild {self.guild.id}: Lavalink node heal failed: {heal_err}")
                     try:
-                        await agent.heal_node(force=True)
-                    except Exception as heal_err:
-                        logger.error(f"Guild {self.guild.id}: Lavalink node heal failed: {heal_err}")
-                try:
-                    node = wavelink.Pool.get_node()
-                except Exception:
-                    node = None
+                        node = wavelink.Pool.get_node()
+                    except Exception:
+                        node = None
 
             # Connect as Wavelink Player with automatic retry on temporary Discord gateway blip
             last_error: Optional[BaseException] = None
@@ -526,121 +524,55 @@ class GuildPlayer:
         if playable:
             return playable
 
-        # ── Priority 1.5: Direct Audio Stream URL (Akamai MP4/AAC / Direct Stream) ──
-        if track.stream_url and self._is_direct_stream_url(track.stream_url):
-            try:
-                results = await asyncio.wait_for(wavelink.Playable.search(track.stream_url), timeout=8.0)
-                if results:
-                    p = results[0] if isinstance(results, list) else results.tracks[0]
-                    track._playable = p
-                    return p
-            except Exception as e:
-                logger.debug(f"Direct stream playable resolution error for '{track.title}': {e}")
-
-        # ── Priority 1.8: Instant JioSaavn HD Stream resolution (0.15s, 0% Cloud Block) ──
-        try:
-            from src.cogs.music._extractor import NativeExtractor, clean_track_title
-            clean_t = clean_track_title(track.title) if track.title else ""
-            raw_a = track.author if (track.author and "spotify" not in track.author.lower() and "unknown" not in track.author.lower() and "artist" != track.author.lower()) else ""
-            saavn_q = f"{clean_t} {raw_a}".strip() or track.query or track.title or ""
-            if saavn_q and not saavn_q.startswith(("http://", "https://")):
-                saavn_trk = await asyncio.wait_for(
-                    NativeExtractor._extract_jiosaavn(saavn_q, requester=track.requester, is_autoplay=track.is_autoplay),
-                    timeout=3.5,
-                )
-                if saavn_trk and saavn_trk.stream_url:
-                    track.stream_url = saavn_trk.stream_url
-                    if not track.thumbnail:
-                        track.thumbnail = saavn_trk.thumbnail
-                    direct_results = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=5.0)
-                    if direct_results:
-                        p = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
-                        track._playable = p
-                        return p
-        except Exception as e:
-            logger.debug(f"Direct JioSaavn cascade resolution notice for '{track.title}': {e}")
-
-        # ── Node Health Pre-check: Ensure Lavalink node is alive ──
-        try:
-            node = wavelink.Pool.get_node()
-            if not node or node.status != wavelink.NodeStatus.CONNECTED:
-                if hasattr(self.bot, "_music_agent") and self.bot._music_agent:
-                    await self.bot._music_agent.heal_node()
-                await asyncio.sleep(0.4)
-        except Exception:
-            pass
-
-        url = track.url or ""
-
         # ── Priority 2: Direct URL (YouTube or Spotify track) ──
+        url = track.url or ""
         if url.startswith(("http://", "https://")):
             is_yt = any(yt in url for yt in ("youtube.com/watch", "youtu.be/", "music.youtube.com/watch"))
-            is_sp = "open.spotify.com/track/" in url
-            if is_yt or is_sp:
-                for attempt in range(2):
-                    try:
-                        results = await asyncio.wait_for(
-                            wavelink.Playable.search(url), timeout=10.0
-                        )
-                        if results:
-                            return results[0] if isinstance(results, list) else results.tracks[0]
-                        break  # got empty response, no point retrying
-                    except asyncio.TimeoutError:
-                        logger.debug(f"Direct URL resolve timeout for '{url}' (attempt {attempt + 1})")
-                        if attempt == 0:
-                            await asyncio.sleep(0.5)
-                    except Exception as e:
-                        logger.debug(f"Direct URL resolve notice for '{url}': {e}")
-                        break
+            if is_yt:
+                try:
+                    results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=5.0)
+                    if results:
+                        p = results[0] if isinstance(results, list) else results.tracks[0]
+                        track._playable = p
+                        return p
+                except Exception as e:
+                    logger.debug(f"Direct URL resolve notice for '{url}': {e}")
 
-        # ── Priority 3: Multi-strategy search cascade with retry ──
+        # ── Priority 3: YouTube Music Search via Lavalink (~0.8s) ──
         from src.cogs.music._extractor import clean_track_title
         clean_title = clean_track_title(track.title) if track.title else ""
         raw_author = track.author if (track.author and "spotify" not in track.author.lower() and "unknown" not in track.author.lower() and "artist" != track.author.lower()) else ""
         full_query = f"{clean_title} {raw_author}".strip() or track.query or track.title or ""
 
-        # Build ordered search strategies: (query, source)
-        strategies: list[tuple[str, object]] = []
         if full_query:
-            strategies.append((full_query, wavelink.TrackSource.YouTubeMusic))
-            strategies.append((full_query, wavelink.TrackSource.YouTube))
-            strategies.append((full_query, "spsearch"))
-        if clean_title and clean_title != full_query:
-            strategies.append((clean_title, wavelink.TrackSource.YouTubeMusic))
-            strategies.append((clean_title, wavelink.TrackSource.YouTube))
-        if track.query and track.query not in (full_query, clean_title) and not track.query.startswith(("http://", "https://")):
-            strategies.append((track.query, wavelink.TrackSource.YouTubeMusic))
-            strategies.append((track.query, wavelink.TrackSource.YouTube))
-        if track.title and track.title not in (full_query, clean_title):
-            strategies.append((track.title, wavelink.TrackSource.YouTube))
+            try:
+                results = await asyncio.wait_for(
+                    wavelink.Playable.search(full_query, source=wavelink.TrackSource.YouTubeMusic),
+                    timeout=5.0,
+                )
+                if results:
+                    p = results[0] if isinstance(results, list) else results.tracks[0]
+                    track._playable = p
+                    return p
+            except Exception as e:
+                logger.debug(f"YouTube Music search error for '{full_query}': {e}")
 
-        for query, source in strategies:
-            if not query:
-                continue
-            for attempt in range(2):  # retry once per strategy on timeout
-                try:
-                    results = await asyncio.wait_for(
-                        wavelink.Playable.search(query, source=source),
-                        timeout=10.0,
-                    )
-                    if results:
-                        p = results[0] if isinstance(results, list) else results.tracks[0]
-                        logger.debug(
-                            f"Resolved '{track.title}' via strategy ({source}, query='{query}', attempt={attempt + 1})"
-                        )
-                        return p
-                    break  # empty result — no point retrying this strategy
-                except asyncio.TimeoutError:
-                    logger.debug(
-                        f"Search timeout for '{query}' source={source} (attempt {attempt + 1})"
-                    )
-                    if attempt == 0:
-                        await asyncio.sleep(0.5)
-                except Exception as e:
-                    logger.debug(f"Search error for '{query}' source={source}: {e}")
-                    break  # non-timeout error — skip retry, try next strategy
+        # ── Priority 4: Standard YouTube Fallback ──
+        search_target = clean_title or full_query
+        if search_target:
+            try:
+                results = await asyncio.wait_for(
+                    wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
+                    timeout=5.0,
+                )
+                if results:
+                    p = results[0] if isinstance(results, list) else results.tracks[0]
+                    track._playable = p
+                    return p
+            except Exception as e:
+                logger.debug(f"YouTube fallback search error for '{search_target}': {e}")
 
-        logger.warning(f"All resolution strategies exhausted for '{track.title}' (queries tried: {[s[0] for s in strategies]})")
+        logger.warning(f"All resolution strategies exhausted for '{track.title}'")
         return None
 
 
@@ -686,6 +618,13 @@ class GuildPlayer:
             return True
         return False
 
+    @staticmethod
+    async def _safe_delete_message(msg: discord.Message) -> None:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
     async def skip(self) -> None:
         """
         Skip the currently playing track.
@@ -693,13 +632,6 @@ class GuildPlayer:
         """
         if self.loop_mode == "track":
             self.loop_mode = "off"
-
-        # Silence current audio immediately so user gets instant cut
-        if self.voice_client and self.voice_client.playing:
-            try:
-                asyncio.create_task(self._bounded_node_call(self.voice_client.pause(True)))
-            except Exception:
-                pass
 
         target = await self.pop_next_track()
         if target is not None:
@@ -992,13 +924,11 @@ class GuildPlayer:
             except Exception:
                 pass
 
-        # 2. Clean up any existing controller card to prevent duplicate cards in chat
+        # 2. Clean up any existing controller card to prevent duplicate cards in chat (in background)
         if self.controller_message and isinstance(self.controller_message, discord.Message):
-            try:
-                await self.controller_message.delete()
-            except Exception:
-                pass
+            old_msg = self.controller_message
             self.controller_message = None
+            asyncio.create_task(self._safe_delete_message(old_msg))
 
         # 3. Post a fresh Now Playing card
         try:

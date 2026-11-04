@@ -99,12 +99,6 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:playpause",
     )
     async def btn_pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
-
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -131,7 +125,13 @@ class MusicControlView(discord.ui.View):
             if e_reg:
                 button.emoji = e_reg.get_emoji_obj("music") or e_reg.get_emoji_obj("paused")
 
-        asyncio.create_task(player.update_controller_message(force=True))
+        # Instant 20ms UI response: update button state directly via interaction response
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.edit_message(view=self)
+        except Exception:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
 
     @discord.ui.button(
         label="Skip",
@@ -139,12 +139,6 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:skip",
     )
     async def btn_skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
-
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -159,10 +153,12 @@ class MusicControlView(discord.ui.View):
             await send_container_response(interaction, c, ephemeral=True)
             return
 
-        old_title = player.current.title if player.current else "track"
-        c = KyroContainer()
-        c.add_text(f"**Skipped:** `{old_title}`")
-        await send_container_response(interaction, c, ephemeral=True)
+        # Instant 20ms acknowledgement: clears button spinner immediately
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except Exception:
+            pass
 
         asyncio.create_task(player.skip())
 

@@ -366,7 +366,7 @@ class MusicAgent:
             action = "Verified channel capacity and permission boundaries."
             advice = f"Notice: `{err_str}`"
 
-        # Build and dispatch stylish KyroComponents card
+        # Build and dispatch clean KyroComponents card
         card = self.build_maintenance_card(
             title=title,
             issue_desc=f"`{err_type}: {err_str[:120]}`",
@@ -376,7 +376,7 @@ class MusicAgent:
 
         try:
             from src.utils.containers import send_container_response
-            await send_container_response(ctx_or_interaction, card)
+            await send_container_response(ctx_or_interaction, card, ephemeral=True)
             return True
         except Exception as send_err:
             logger.debug(f"MusicAgent: Could not dispatch maintenance card: {send_err}")
@@ -384,31 +384,19 @@ class MusicAgent:
 
     def build_maintenance_card(
         self,
-        title: str = "Music Subsystem Diagnostics",
+        title: str = "Music Notice",
         issue_desc: str = "Temporary connection blip detected.",
-        action_taken: str = "Automated voice session reset performed.",
+        action_taken: str = "Voice session refreshed.",
         advice: str = "Please try playing your track again in a few moments.",
     ) -> KyroContainer:
-        """Produce a stylish Kyro Components V2 container for transient music errors."""
-        e_reg = getattr(self.bot, "custom_emojis", None)
-        dot = e_reg.get("heart_dot", "•") if e_reg else "•"
-        shield_icon = e_reg.get("icons_shield", "🛡️") if e_reg else "🛡️"
-
+        """Produce a clean Kyro Components V2 container for music notices."""
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**{shield_icon} Kyro Music Agent • Autonomous Shield**\n"
-                f"> *{title}*"
+                f"⚠️ **{title}**\n"
+                f"> {advice or issue_desc}"
             )
         )
-        container.add_separator(divider=True)
-        container.add_text(
-            f"> {dot} **Notice:** {issue_desc}\n"
-            f"> {dot} **Autonomous Action:** {action_taken}\n"
-            f"> {dot} **Resolution:** {advice}"
-        )
-        container.add_separator(divider=True)
-        container.add_text(f"-# Autonomous Music SRE Engine • Real-time Protection")
         return container
 
     # ── High-Volume Background Sweeper & Memory Pruner ──

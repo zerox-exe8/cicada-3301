@@ -142,14 +142,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 engine_ok, engine_reason = await agent.audio_engine_status()
 
             if not engine_ok:
-                card = agent.build_maintenance_card(
-                    title="Audio Engine Offline",
-                    issue_desc=f"`{engine_reason}`",
-                    action_taken="Tried to re-establish the Lavalink audio node.",
-                    advice=(
-                        "Music playback is unavailable right now. "
-                        "Please try again in a few minutes."
-                    ),
+                card = KyroContainer(accent_color=None)
+                card.add_section(
+                    content=(
+                        "⚠️ **Audio Engine Offline**\n"
+                        "> Music playback is temporarily unavailable. Please try again in a few moments."
+                    )
                 )
                 if search_msg:
                     try:
@@ -161,11 +159,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 return False
 
             await agent.heal_voice_session(ctx.guild, reason=str(err))
-            card = agent.build_maintenance_card(
-                title="Voice Gateway Auto-Recovery",
-                issue_desc=f"`{err}`",
-                action_taken="Purged stale voice gateway state and refreshed connection pipeline.",
-                advice="Please try playing your track again in a moment.",
+            card = KyroContainer(accent_color=None)
+            card.add_section(
+                content=(
+                    "⚠️ **Voice Connection Error**\n"
+                    f"> Could not connect to your voice channel: `{err}`. Please rejoin voice and try again."
+                )
             )
             if search_msg:
                 try:
@@ -193,10 +192,11 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         clean_q = clean_q[1:-1].strip()
 
     from src.cogs.music._extractor import YOUTUBE_URL_REGEX
-    yt_vid_m = YOUTUBE_URL_REGEX.search(clean_q)
-    # If the URL contains a specific video ID and isn't an explicit /playlist, sanitize it to pure video URL
-    if yt_vid_m and "/playlist" not in clean_q.lower():
-        clean_q = f"https://www.youtube.com/watch?v={yt_vid_m.group(1)}"
+    # Only sanitize if it is a single video URL, NEVER strip playlist ID
+    if not is_playlist_url(clean_q):
+        yt_vid_m = YOUTUBE_URL_REGEX.search(clean_q)
+        if yt_vid_m and "/playlist" not in clean_q.lower() and "list=" not in clean_q.lower():
+            clean_q = f"https://www.youtube.com/watch?v={yt_vid_m.group(1)}"
 
     try:
         # Check if Playlist URL (Spotify, YouTube, SoundCloud, etc.)
@@ -668,17 +668,13 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     except Exception as e:
         logger.error(f"Guild {ctx.guild.id}: Uncaught error in execute_play for '{query}': {e}", exc_info=True)
-        agent = getattr(cog, "agent", None)
-        if agent:
-            err_card = agent.build_maintenance_card(
-                title="Playback Stream Error",
-                issue_desc=f"`{type(e).__name__}: {e}`",
-                action_taken="Protected audio pipeline and preserved active queue.",
-                advice="Please try again or try another song.",
+        err_card = KyroContainer(accent_color=None)
+        err_card.add_section(
+            content=(
+                "⚠️ **Playback Error**\n"
+                f"> Could not stream track: `{e}`. Please try another song or query."
             )
-        else:
-            err_card = KyroContainer(accent_color=None)
-            err_card.add_text(f"**Playback Error:** `{e}`")
+        )
         if search_msg:
             try:
                 await edit_container_response(search_msg, err_card)

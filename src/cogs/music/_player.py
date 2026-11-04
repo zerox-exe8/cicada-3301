@@ -388,14 +388,7 @@ class GuildPlayer:
                 playable = None
 
         if not playable:
-            logger.warning(f"Guild {self.guild.id}: Lavalink could not resolve playable for '{track.title}'")
-            if self.home_channel:
-                try:
-                    warn_c = KyroContainer(accent_color=None)
-                    warn_c.add_text(f"⚠️ **Could not stream track:** `{track.title}`\n> Audio stream was unavailable on YouTube. Advancing to next track in queue...")
-                    await send_container_response(self.home_channel, warn_c)
-                except Exception:
-                    pass
+            logger.warning(f"Guild {self.guild.id}: Lavalink could not resolve playable for '{track.title}'. Skipping to next track.")
             next_t = await self.pop_next_track()
             if next_t:
                 await self.play_track(next_t, message_to_edit=message_to_edit)
@@ -524,31 +517,23 @@ class GuildPlayer:
         if playable:
             return playable
 
-        # ── Priority 2: Direct URL (YouTube or Spotify track) ──
-        url = track.url or ""
-        if url.startswith(("http://", "https://")):
-            is_yt = any(yt in url for yt in ("youtube.com/watch", "youtu.be/", "music.youtube.com/watch"))
-            if is_yt:
-                try:
-                    results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=5.0)
-                    if results:
-                        p = results[0] if isinstance(results, list) else results.tracks[0]
-                        track._playable = p
-                        return p
-                except Exception as e:
-                    logger.debug(f"Direct URL resolve notice for '{url}': {e}")
-
-        # ── Priority 3: YouTube Music Search via Lavalink (~0.8s) ──
+        # ── Priority 2: High-Speed YouTube Music Search (~0.8s) ──
         from src.cogs.music._extractor import clean_track_title
         clean_title = clean_track_title(track.title) if track.title else ""
-        raw_author = track.author if (track.author and "spotify" not in track.author.lower() and "unknown" not in track.author.lower() and "artist" != track.author.lower()) else ""
-        full_query = f"{clean_title} {raw_author}".strip() or track.query or track.title or ""
+        raw_author = track.author if (track.author and "spotify" not in track.author.lower() and "unknown" not in track.author.lower() and "artist" != track.author.lower() and "youtube" != track.author.lower()) else ""
+        
+        # Clean title of video junk like (Official Video), [Music Video], etc. so YouTube Music matches the exact song
+        import re
+        pure_title = re.sub(r"\(.*?(?:official|video|audio|remix|lyrics|hd|4k|feat|ft).*?\)|\[.*?(?:official|video|audio|remix|lyrics|hd|4k|feat|ft).*?\]", "", clean_title, flags=re.IGNORECASE).strip()
+        pure_title = pure_title or clean_title
+
+        full_query = f"{pure_title} {raw_author}".strip() or track.query or track.title or ""
 
         if full_query:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(full_query, source=wavelink.TrackSource.YouTubeMusic),
-                    timeout=5.0,
+                    timeout=4.0,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
@@ -557,13 +542,13 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"YouTube Music search error for '{full_query}': {e}")
 
-        # ── Priority 4: Standard YouTube Fallback ──
-        search_target = clean_title or full_query
+        # ── Priority 3: Standard YouTube Fallback ──
+        search_target = pure_title or clean_title or full_query
         if search_target:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=5.0,
+                    timeout=4.0,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
@@ -571,6 +556,18 @@ class GuildPlayer:
                     return p
             except Exception as e:
                 logger.debug(f"YouTube fallback search error for '{search_target}': {e}")
+
+        # ── Priority 4: Direct URL Resolution Fallback ──
+        url = track.url or ""
+        if url.startswith(("http://", "https://")):
+            try:
+                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=4.0)
+                if results:
+                    p = results[0] if isinstance(results, list) else results.tracks[0]
+                    track._playable = p
+                    return p
+            except Exception as e:
+                logger.debug(f"Direct URL fallback error for '{url}': {e}")
 
         logger.warning(f"All resolution strategies exhausted for '{track.title}'")
         return None

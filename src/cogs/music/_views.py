@@ -99,6 +99,12 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:playpause",
     )
     async def btn_pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -113,25 +119,13 @@ class MusicControlView(discord.ui.View):
             await send_container_response(interaction, c, ephemeral=True)
             return
 
-        e_reg = getattr(self.bot, "custom_emojis", None)
         if player.is_paused:
             player.resume()
-            button.label = "Pause"
-            if e_reg:
-                button.emoji = e_reg.get_emoji_obj("paused")
         else:
             player.pause()
-            button.label = "Resume"
-            if e_reg:
-                button.emoji = e_reg.get_emoji_obj("music") or e_reg.get_emoji_obj("paused")
 
-        # Instant 20ms UI response: update button state directly via interaction response
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.edit_message(view=self)
-        except Exception:
-            if not interaction.response.is_done():
-                await interaction.response.defer()
+        # Update controller card preserving the exact Components V2 container layout
+        await player.update_controller_message(force=True)
 
     @discord.ui.button(
         label="Skip",
@@ -139,6 +133,12 @@ class MusicControlView(discord.ui.View):
         custom_id="kyro:music:skip",
     )
     async def btn_skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
         if err:
@@ -152,13 +152,6 @@ class MusicControlView(discord.ui.View):
             c.add_section(content="**Skip Notice**\n> Nothing is currently playing to skip.")
             await send_container_response(interaction, c, ephemeral=True)
             return
-
-        # Instant 20ms acknowledgement: clears button spinner immediately
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.defer()
-        except Exception:
-            pass
 
         asyncio.create_task(player.skip())
 

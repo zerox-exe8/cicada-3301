@@ -356,12 +356,9 @@ def is_playlist_url(raw_url: str) -> bool:
         u = u[1:-1].strip()
     u_low = u.lower()
 
-    # YouTube: If it contains a specific video ID (watch?v=, youtu.be/<id>, shorts/),
-    # it is a single track, NEVER treat it as a playlist!
+    # YouTube: Match if URL has 'list=' or '/playlist'
     if any(yt in u_low for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
-        if YOUTUBE_URL_REGEX.search(u):
-            return False
-        if "/playlist" in u_low or "list=" in u_low:
+        if "list=" in u_low or "/playlist" in u_low:
             return True
 
     # Spotify Playlists & Albums
@@ -1567,10 +1564,11 @@ class NativeExtractor:
                     else:
                         v_url = f"https://www.youtube.com/watch?v={v_id}"
 
+                    cl_title = clean_track_title(v_title)
                     tracks.append(PlaylistTrackItem(
-                        title=clean_track_title(v_title),
+                        title=cl_title,
                         author=v_author,
-                        query=v_url,
+                        query=f"{cl_title} {v_author}".strip() or cl_title,
                         duration=v_dur,
                         url=v_url,
                     ))

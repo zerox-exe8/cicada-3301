@@ -27,6 +27,9 @@ async def execute_stop(cog: Music, ctx: commands.Context) -> None:
 
     player._disconnect_announced = True
     await player.stop()
+    e_reg = getattr(cog.bot, "custom_emojis", None)
+    stop_e = (e_reg.get("icons_stop_button", "") or e_reg.get("stop", "")) if e_reg else ""
+    prefix = f"{stop_e} " if stop_e else ""
     container = KyroContainer(accent_color=None)
-    container.add_text("**Player stopped, queue cleared and disconnected from voice.**")
+    container.add_text(f"{prefix}**Player stopped, queue cleared and disconnected from voice.**")
     await send_container_response(ctx, container)

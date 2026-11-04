@@ -28,8 +28,11 @@ async def execute_pause(cog: Music, ctx: commands.Context) -> None:
 
     if player.pause():
         asyncio.create_task(player.update_controller_message(force=True))
+        e_reg = getattr(cog.bot, "custom_emojis", None)
+        p_e = e_reg.get("paused", "") if e_reg else ""
+        prefix = f"{p_e} " if p_e else ""
         container = KyroContainer(accent_color=None)
-        container.add_text("**Playback paused.** Type `?resume` to continue.")
+        container.add_text(f"{prefix}**Playback paused.** Type `?resume` to continue.")
         await send_container_response(ctx, container)
     else:
         container = KyroContainer(accent_color=None)
@@ -55,8 +58,11 @@ async def execute_resume(cog: Music, ctx: commands.Context) -> None:
     if player.resume():
         player._was_paused_for_empty_vc = False
         asyncio.create_task(player.update_controller_message(force=True))
+        e_reg = getattr(cog.bot, "custom_emojis", None)
+        m_e = e_reg.get("music", "") if e_reg else ""
+        prefix = f"{m_e} " if m_e else ""
         container = KyroContainer(accent_color=None)
-        container.add_text("**Playback resumed.**")
+        container.add_text(f"{prefix}**Playback resumed.**")
         await send_container_response(ctx, container)
     else:
         container = KyroContainer(accent_color=None)

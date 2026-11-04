@@ -517,7 +517,19 @@ class GuildPlayer:
         if playable:
             return playable
 
-        # ── Priority 2: High-Speed YouTube Music Search (~0.8s) ──
+        # ── Priority 2: Direct URL Resolution (for YouTube/SoundCloud/Direct URLs) ──
+        url = track.url or ""
+        if url.startswith(("http://", "https://")) and not any(sp in url for sp in ("spotify.com", "spoti.fi")):
+            try:
+                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=5.0)
+                if results:
+                    p = results[0] if isinstance(results, list) else results.tracks[0]
+                    track._playable = p
+                    return p
+            except Exception as e:
+                logger.debug(f"Direct URL resolution error for '{url}': {e}")
+
+        # ── Priority 3: High-Speed YouTube Music Search (~0.8s) ──
         from src.cogs.music._extractor import clean_track_title
         clean_title = clean_track_title(track.title) if track.title else ""
         raw_author = track.author if (track.author and "spotify" not in track.author.lower() and "unknown" not in track.author.lower() and "artist" != track.author.lower() and "youtube" != track.author.lower()) else ""
@@ -542,7 +554,7 @@ class GuildPlayer:
             except Exception as e:
                 logger.debug(f"YouTube Music search error for '{full_query}': {e}")
 
-        # ── Priority 3: Standard YouTube Fallback ──
+        # ── Priority 4: Standard YouTube Fallback ──
         search_target = pure_title or clean_title or full_query
         if search_target:
             try:
@@ -556,18 +568,6 @@ class GuildPlayer:
                     return p
             except Exception as e:
                 logger.debug(f"YouTube fallback search error for '{search_target}': {e}")
-
-        # ── Priority 4: Direct URL Resolution Fallback ──
-        url = track.url or ""
-        if url.startswith(("http://", "https://")):
-            try:
-                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=4.0)
-                if results:
-                    p = results[0] if isinstance(results, list) else results.tracks[0]
-                    track._playable = p
-                    return p
-            except Exception as e:
-                logger.debug(f"Direct URL fallback error for '{url}': {e}")
 
         logger.warning(f"All resolution strategies exhausted for '{track.title}'")
         return None

@@ -430,20 +430,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             except Exception as e:
                 logger.debug(f"Spotify track title fetch notice: {e}")
 
-        # If single YouTube video URL, resolve metadata title & bridge to unblocked stream engine
+        # If single YouTube video URL, preserve normalized direct URL so Lavalink streams the exact video
         orig_yt_target = None
         yt_m = YOUTUBE_URL_REGEX.search(lookup_target)
         if yt_m:
             orig_yt_target = f"https://www.youtube.com/watch?v={yt_m.group(1)}"
-            try:
-                yt_title = await asyncio.wait_for(
-                    NativeExtractor._fetch_youtube_title(orig_yt_target),
-                    timeout=4.0
-                )
-                if yt_title:
-                    lookup_target = yt_title
-            except Exception as e:
-                logger.debug(f"YouTube track title fetch notice: {e}")
+            lookup_target = orig_yt_target
 
         is_direct_url = lookup_target.startswith(("http://", "https://"))
 
@@ -504,15 +496,17 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         await player.add_track(first_track)
                         await player.add_tracks(remaining_tracks)
 
+                    safe_pl_name = (pl.name or "Playlist").replace("[", "(").replace("]", ")")
+                    safe_first_title = (first_track.title or "Unknown Track").replace("[", "(").replace("]", ")")
                     pl_card = KyroContainer(accent_color=None)
                     pl_card.add_section(
                         content=(
-                            f"**Queued Playlist: [{pl.name}]({query})**\n"
+                            f"**Queued Playlist: [{safe_pl_name}]({query})**\n"
                             f"> **Total Tracks:** `{len(pl.tracks)} songs`\n"
-                            f"> **Now Playing:** [{first_track.title}]({first_track.url}) by `{first_track.author}`\n"
+                            f"> **Now Playing:** [{safe_first_title}]({first_track.url}) by `{first_track.author}`\n"
                             f"> **Requested By:** `{ctx.author.display_name}`"
                         ) if was_idle else (
-                            f"**Queued Playlist: [{pl.name}]({query})**\n"
+                            f"**Queued Playlist: [{safe_pl_name}]({query})**\n"
                             f"> **Total Tracks Added:** `{len(pl.tracks)} songs`\n"
                             f"> **Requested By:** `{ctx.author.display_name}`"
                         )
@@ -722,11 +716,12 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         else:
             await player.add_track(track)
             pos = len(player.queue)
+            safe_track_title = (track.title or "Unknown Track").replace("[", "(").replace("]", ")")
             queue_container = KyroContainer(accent_color=None)
             queue_container.add_section(
                 content=(
                     f"**Added to Queue [Position #{pos}]**\n"
-                    f"> **Track:** [{track.title}]({track.url})\n"
+                    f"> **Track:** [{safe_track_title}]({track.url})\n"
                     f"> **Artist:** `{track.author}`\n"
                     f"> **Duration:** `{track.formatted_duration}`\n"
                     f"> **Requested By:** `{track.requester}`"

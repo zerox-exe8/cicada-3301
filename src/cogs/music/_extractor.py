@@ -482,22 +482,32 @@ class NativeExtractor:
                 timeout=6.0,
             )
             if results:
-                top = results[0] if isinstance(results, list) else results.tracks[0]
-                thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
-                trk = Track(
-                    title=top.title or cleaned_query,
-                    author=top.author or "Artist",
-                    url=orig_spotify_url or orig_yt_url or top.uri or raw_q,
-                    stream_url="",
-                    duration=int((top.length or 0) / 1000),
-                    thumbnail=thumb,
-                    requester=requester,
-                    is_autoplay=is_autoplay,
-                    query=raw_q,
-                )
-                trk._playable = top
-                _SEARCH_CACHE[cache_key] = (now, trk)
-                return trk
+                candidates = results if isinstance(results, list) else results.tracks
+                best_cand = None
+                best_score = -999.0
+                for cand in candidates[:5]:
+                    c_dur = int((cand.length or 0) / 1000)
+                    sc = score_candidate(cand.title or "", cand.author or "", cleaned_query, duration=c_dur)
+                    if sc > best_score:
+                        best_score = sc
+                        best_cand = cand
+                if best_cand and (best_score > 0 or not orig_yt_url):
+                    top = best_cand
+                    thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
+                    trk = Track(
+                        title=top.title or cleaned_query,
+                        author=top.author or "Artist",
+                        url=orig_spotify_url or orig_yt_url or top.uri or raw_q,
+                        stream_url="",
+                        duration=int((top.length or 0) / 1000),
+                        thumbnail=thumb,
+                        requester=requester,
+                        is_autoplay=is_autoplay,
+                        query=raw_q,
+                    )
+                    trk._playable = top
+                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    return trk
         except Exception as e:
             logger.debug(f"YouTube Music search notice: {e}")
 
@@ -508,22 +518,32 @@ class NativeExtractor:
                 timeout=6.0,
             )
             if results:
-                top = results[0] if isinstance(results, list) else results.tracks[0]
-                thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
-                trk = Track(
-                    title=top.title or cleaned_query,
-                    author=top.author or "Artist",
-                    url=orig_spotify_url or orig_yt_url or top.uri or raw_q,
-                    stream_url="",
-                    duration=int((top.length or 0) / 1000),
-                    thumbnail=thumb,
-                    requester=requester,
-                    is_autoplay=is_autoplay,
-                    query=raw_q,
-                )
-                trk._playable = top
-                _SEARCH_CACHE[cache_key] = (now, trk)
-                return trk
+                candidates = results if isinstance(results, list) else results.tracks
+                best_cand = None
+                best_score = -999.0
+                for cand in candidates[:5]:
+                    c_dur = int((cand.length or 0) / 1000)
+                    sc = score_candidate(cand.title or "", cand.author or "", cleaned_query, duration=c_dur)
+                    if sc > best_score:
+                        best_score = sc
+                        best_cand = cand
+                if best_cand and (best_score > 0 or not orig_yt_url):
+                    top = best_cand
+                    thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
+                    trk = Track(
+                        title=top.title or cleaned_query,
+                        author=top.author or "Artist",
+                        url=orig_spotify_url or orig_yt_url or top.uri or raw_q,
+                        stream_url="",
+                        duration=int((top.length or 0) / 1000),
+                        thumbnail=thumb,
+                        requester=requester,
+                        is_autoplay=is_autoplay,
+                        query=raw_q,
+                    )
+                    trk._playable = top
+                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    return trk
         except Exception as e:
             logger.debug(f"YouTube fallback search notice: {e}")
 

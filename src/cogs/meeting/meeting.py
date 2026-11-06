@@ -954,6 +954,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 form = aiohttp.FormData()
                 form.add_field("file", wav_data, filename="speaker.wav", content_type="audio/wav")
                 form.add_field("model", "whisper-large-v3-turbo")
+                form.add_field(
+                    "prompt",
+                    "Hindi, Hinglish, casual Indian English conversation, Discord voice chat, tech discussions, gaming.",
+                )
                 form.add_field("response_format", "json")
                 headers = {
                     "Authorization": f"Bearer {groq_key}",
@@ -1111,43 +1115,64 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 "topics": "General VC",
             }
 
-        is_marathon = duration_seconds >= 1200  # 20+ mins
+        lines_count = len([l for l in full_transcript.strip().splitlines() if l.strip()])
         duration_minutes = max(1, duration_seconds // 60)
 
-        if is_marathon:
+        if duration_seconds < 300 or lines_count < 15:
             depth_instruction = (
-                f"- IMPORTANT: This was an extensive {duration_minutes}-minute long meeting. "
-                "DO NOT produce a tiny 2-3 line summary! Provide a rich, comprehensive, multi-paragraph Executive Narrative "
-                "(3 to 5 well-developed paragraphs) covering the overall background, core discussions, debates, perspectives, and outcomes.\n"
-                "- Write detailed Key Decisions with full context: WHAT was decided, WHY it was decided, and WHO agreed.\n"
-                "- Write detailed Action Items with the assigned member (@Name), specific task details, and priority tags ([High Priority], [Medium Priority], etc.).\n"
-                "- Provide 4-6 key Discussion Topics/Themes.\n"
+                "- This was a concise sync / short session. Provide a crisp, high-impact 1-2 paragraph Executive Summary.\n"
+                "- Capture the exact context and what participants discussed without adding unnecessary fluff or artificial length.\n"
+                "- List only actual decisions reached (or note if it was casual banter / chill session) and concrete action items."
+            )
+        elif duration_seconds >= 1200:
+            depth_instruction = (
+                f"- This was an extensive {duration_minutes}-minute marathon meeting.\n"
+                "- Provide a rich, multi-paragraph Executive Narrative (3 to 5 well-developed paragraphs) covering the background, main discussions, individual viewpoints, and final resolutions.\n"
+                "- Detail all key decisions with full rationale (WHAT was agreed, WHY, and WHO supported it).\n"
+                "- Detail all action items with clear assignees (@Member), tasks, and priority tags."
             )
         else:
             depth_instruction = (
-                "- Provide a thorough, cohesive 2-3 paragraph Executive Summary explaining the core topics and outcomes.\n"
-                "- Provide Key Decisions with rationale and Action Items with assignees and priority.\n"
-                "- Provide 3-5 key Discussion Topics.\n"
+                "- Provide a thorough, cohesive 2-3 paragraph Executive Summary explaining the background, discussions, and outcomes.\n"
+                "- Clearly attribute who raised which points or proposals (e.g., 'Aryan ne highlight kiya...', 'Kabir ne bataya...').\n"
+                "- List key decisions with context and rationale.\n"
+                "- List clear action items with assigned members and priority."
             )
+
+        # Smart context window budgeting for marathon sessions (1hr - 5hr+)
+        # Gemini has 1M token context window (~4M chars); Groq has 128k tokens (~500k chars).
+        # We cap at 350,000 chars. If transcript exceeds 350k chars, preserve opening + all milestones + concluding decisions!
+        if len(full_transcript) > 350000:
+            half_budget = 160000
+            head_part = full_transcript[:half_budget]
+            tail_part = full_transcript[-half_budget:]
+            feed_transcript = (
+                f"{head_part}\n\n"
+                f"... [Note: Middle dialogue summarized in meeting milestones above] ...\n\n"
+                f"{tail_part}"
+            )
+        else:
+            feed_transcript = full_transcript
 
         prompt = (
             "You are the Lead Meeting Intelligence Architect for Kyro Discord Bot.\n"
             "Analyze the following conversation transcript from a Discord voice meeting.\n"
-            "The conversation may be in Hindi, Hinglish (Hindi + English mixed), Marathi, other Indian languages, or English.\n\n"
-            "CRITICAL INSTRUCTIONS FOR EASY USER UNDERSTANDING:\n"
-            "- A normal server member must be able to understand the summary instantly.\n"
-            "- Write the summary, decisions, and action items in simple, friendly, everyday conversational language (Hinglish / natural words) matching the style and tone of the participants.\n"
-            "- Do NOT use stiff corporate or robotic jargon. Keep it direct and helpful.\n"
-            "- If users were joking, chatting casually, or planning something, reflect that naturally.\n\n"
-            f"{depth_instruction}\n"
+            "The conversation may be in Hindi, Hinglish (Hindi + English mixed), Indian English, or other regional languages.\n\n"
+            "CRITICAL INSTRUCTIONS FOR A PREMIUM, ENGAGING EXPERIENCE:\n"
+            "1. TONE & LANGUAGE: Write in natural, polite, everyday conversational Hinglish/English matching the participants' vibe. Do NOT use stiff, robotic, or overly corporate jargon.\n"
+            "2. SPEAKER CONTEXT: Explicitly mention participants by name when describing who proposed ideas, raised issues, or agreed to solutions.\n"
+            "3. NO REPETITION: The Summary must be a smooth, cohesive narrative story of what happened. DO NOT copy-paste the Decisions bullet points into the Summary.\n"
+            "4. HONEST HANDLING: If the call was casual chatter, gaming, or informal banter without formal corporate decisions, explicitly state that (e.g. '• Casual voice hangout — no formal decisions required.') instead of fabricating fake corporate decisions.\n"
+            "5. ACTION ITEMS: Include member mentions (@Name) and only assign tasks that were genuinely committed to. If none, state '• No formal tasks assigned.'\n\n"
+            f"{depth_instruction}\n\n"
             "Respond STRICTLY in valid JSON matching this schema:\n"
             "{\n"
-            '  "summary": "Detailed, cohesive multi-paragraph overview of what was talked about in simple everyday language.",\n'
-            '  "decisions": "Bullet points of key decisions or agreements reached with context (e.g. • Kal sabhi log 9 baje stream karenge kyunki sab free hain).",\n'
-            '  "action_items": "Bullet points of tasks or next steps with member names and priority (e.g. • @Name: Bot setup karega [High Priority]).",\n'
-            '  "topics": "3-5 key topics discussed (e.g. Gaming, Bot Updates, Server Rules)"\n'
+            '  "summary": "Cohesive, beautifully written narrative summary in natural Hinglish/English.",\n'
+            '  "decisions": "Bullet points of key decisions with context (e.g. • Antinuke queue lock optimize hoga: Rate-limit delay khatam karne ke liye).",\n'
+            '  "action_items": "Bullet points of tasks with member mentions (e.g. • @Kabir: Antinuke queue lock optimize karega aaj raat tak [High Priority]).",\n'
+            '  "topics": "3-5 key topics separated by commas (e.g. Antinuke Fixes, Music System, Meeting Summary Upgrade)"\n'
             "}\n\n"
-            f"Transcript:\n{full_transcript[:90000]}"
+            f"Transcript:\n{feed_transcript}"
         )
 
         def _parse_and_norm(raw_json_str: str) -> Optional[dict[str, str]]:
@@ -1190,7 +1215,40 @@ class MeetingCog(commands.Cog, name="Meeting"):
             except Exception:
                 return None
 
-        # --- Tier 1: High-Speed Groq LLM (~300ms latency, high Hinglish comprehension, 128k context) ---
+        # --- Tier 1: Google Gemini Generative AI (Supreme Multilingual & Hinglish Intelligence) ---
+        api_key = self._get_gemini_key()
+        if api_key:
+            gemini_payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.25},
+            }
+            gemini_headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+            gemini_models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
+            for m in gemini_models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            url,
+                            json=gemini_payload,
+                            headers=gemini_headers,
+                            timeout=aiohttp.ClientTimeout(total=25.0),
+                        ) as resp:
+                            if resp.status == 200:
+                                g_data = await resp.json()
+                                candidates = g_data.get("candidates") or []
+                                if candidates:
+                                    parts = candidates[0].get("content", {}).get("parts") or []
+                                    if parts:
+                                        raw_text = parts[0].get("text", "{}")
+                                        res = _parse_and_norm(raw_text)
+                                        if res:
+                                            logger.info(f"Meeting intelligence synthesized via Gemini ({m})")
+                                            return res
+                except Exception as e:
+                    logger.debug(f"Gemini intelligence ({m}) notice: {e}")
+
+        # --- Tier 2: High-Speed Groq LLM (Ultra-Fast Fallback) ---
         groq_key = os.getenv("GROQ_API_KEY", "").strip()
         if groq_key:
             groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
@@ -1206,7 +1264,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                             {"role": "user", "content": prompt},
                         ],
                         "response_format": {"type": "json_object"},
-                        "temperature": 0.2,
+                        "temperature": 0.25,
                     }
                     headers = {
                         "Content-Type": "application/json",
@@ -1218,7 +1276,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                             "https://api.groq.com/openai/v1/chat/completions",
                             json=payload,
                             headers=headers,
-                            timeout=aiohttp.ClientTimeout(total=25.0),
+                            timeout=aiohttp.ClientTimeout(total=20.0),
                         ) as resp:
                             if resp.status == 200:
                                 g_json = await resp.json()
@@ -1231,39 +1289,6 @@ class MeetingCog(commands.Cog, name="Meeting"):
                                         return res
                 except Exception as e:
                     logger.debug(f"Groq intelligence ({gm}) notice: {e}")
-
-        # --- Tier 2: Google Gemini Generative AI (Multilingual & Regional Fallback) ---
-        api_key = self._get_gemini_key()
-        if api_key:
-            gemini_payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
-            }
-            gemini_headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
-            gemini_models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
-            for m in gemini_models:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            url,
-                            json=gemini_payload,
-                            headers=gemini_headers,
-                            timeout=aiohttp.ClientTimeout(total=35.0),
-                        ) as resp:
-                            if resp.status == 200:
-                                g_data = await resp.json()
-                                candidates = g_data.get("candidates") or []
-                                if candidates:
-                                    parts = candidates[0].get("content", {}).get("parts") or []
-                                    if parts:
-                                        raw_text = parts[0].get("text", "{}")
-                                        res = _parse_and_norm(raw_text)
-                                        if res:
-                                            logger.info(f"Meeting intelligence synthesized via Gemini ({m})")
-                                            return res
-                except Exception as e:
-                    logger.error(f"Error calling Gemini intelligence ({m}) for meeting: {e}", exc_info=True)
 
         return {
             "summary": "Meeting concluded. Discussion transcribed.",
@@ -1345,65 +1370,67 @@ class MeetingCog(commands.Cog, name="Meeting"):
             f"Transcript Segment:\n{recent_text[:25000]}"
         )
 
-        groq_key = os.getenv("GROQ_API_KEY", "").strip()
         summary_text = ""
-        if groq_key:
-            groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
-            for gm in groq_models:
-                try:
-                    payload = {
-                        "model": gm,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.2,
-                    }
-                    headers = {
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {groq_key}",
-                        "User-Agent": "KyroMeetingAssistant/1.0",
-                    }
-                    async with aiohttp.ClientSession() as aio_s:
-                        async with aio_s.post(
-                            "https://api.groq.com/openai/v1/chat/completions",
-                            json=payload,
-                            headers=headers,
-                            timeout=aiohttp.ClientTimeout(total=15.0),
-                        ) as resp:
-                            if resp.status == 200:
-                                data = await resp.json()
-                                choices = data.get("choices") or []
-                                if choices:
-                                    summary_text = choices[0].get("message", {}).get("content", "").strip()
-                                    if summary_text:
-                                        break
-                except Exception as e:
-                    logger.debug(f"Notice generating rolling mini-summary ({gm}): {e}")
 
-        # Fallback to Gemini if Groq was unavailable
+        # Tier 1: Google Gemini (Multilingual accuracy & context retention)
+        gemini_key = self._get_gemini_key()
+        if gemini_key:
+            try:
+                g_payload = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.25},
+                }
+                g_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
+                async with aiohttp.ClientSession() as aio_s:
+                    async with aio_s.post(
+                        g_url,
+                        headers={"Content-Type": "application/json", "x-goog-api-key": gemini_key},
+                        json=g_payload,
+                        timeout=aiohttp.ClientTimeout(total=20.0),
+                    ) as resp:
+                        if resp.status == 200:
+                            g_data = await resp.json()
+                            candidates = g_data.get("candidates") or []
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts") or []
+                                if parts:
+                                    summary_text = parts[0].get("text", "").strip()
+            except Exception as e:
+                logger.debug(f"Notice generating Gemini rolling mini-summary: {e}")
+
+        # Tier 2: Groq Fallback
         if not summary_text:
-            gemini_key = self._get_gemini_key()
-            if gemini_key:
-                try:
-                    g_payload = {
-                        "contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"temperature": 0.2},
-                    }
-                    g_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
-                    async with aiohttp.ClientSession() as aio_s:
-                        async with aio_s.post(
-                            g_url,
-                            headers={"Content-Type": "application/json", "x-goog-api-key": gemini_key},
-                            json=g_payload,
-                            timeout=aiohttp.ClientTimeout(total=20.0),
-                        ) as resp:
-                            if resp.status == 200:
-                                g_data = await resp.json()
-                                candidates = g_data.get("candidates") or []
-                                if candidates:
-                                    parts = candidates[0].get("content", {}).get("parts") or []
-                                    if parts:
-                                        summary_text = parts[0].get("text", "").strip()
-                except Exception as e:
-                    logger.debug(f"Notice generating Gemini rolling mini-summary: {e}")
+            groq_key = os.getenv("GROQ_API_KEY", "").strip()
+            if groq_key:
+                groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+                for gm in groq_models:
+                    try:
+                        payload = {
+                            "model": gm,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.25,
+                        }
+                        headers = {
+                            "Content-Type": "application/json",
+                            "Authorization": f"Bearer {groq_key}",
+                            "User-Agent": "KyroMeetingAssistant/1.0",
+                        }
+                        async with aiohttp.ClientSession() as aio_s:
+                            async with aio_s.post(
+                                "https://api.groq.com/openai/v1/chat/completions",
+                                json=payload,
+                                headers=headers,
+                                timeout=aiohttp.ClientTimeout(total=15.0),
+                            ) as resp:
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                    choices = data.get("choices") or []
+                                    if choices:
+                                        summary_text = choices[0].get("message", {}).get("content", "").strip()
+                                        if summary_text:
+                                            break
+                    except Exception as e:
+                        logger.debug(f"Notice generating rolling mini-summary ({gm}): {e}")
 
         if summary_text:
             session.rolling_summaries.append(f"**Phase (~{mins_elapsed}m):**\n{summary_text}")
@@ -1589,9 +1616,18 @@ class MeetingCog(commands.Cog, name="Meeting"):
         # 1. Sort timeline strictly by audio timestamp (guarantees 100% chronological dialogue order)
         session.transcript_timeline.sort(key=lambda x: x[0])
 
+        # Coalesce consecutive speech turns from the same speaker within 4 seconds into a single cohesive turn
+        coalesced_timeline: list[tuple[float, str, str]] = []
+        for t_stamp, s_name, s_txt in session.transcript_timeline:
+            if coalesced_timeline and coalesced_timeline[-1][1] == s_name and (t_stamp - coalesced_timeline[-1][0]) <= 4.0:
+                prev_t, prev_name, prev_txt = coalesced_timeline[-1]
+                coalesced_timeline[-1] = (prev_t, prev_name, f"{prev_txt} {s_txt}".strip())
+            else:
+                coalesced_timeline.append((t_stamp, s_name, s_txt))
+
         # 2. Build formatted chronological dialogue lines [MM:SS] Speaker: Text
         chronological_lines: list[str] = []
-        for t_stamp, s_name, s_txt in session.transcript_timeline:
+        for t_stamp, s_name, s_txt in coalesced_timeline:
             mins = int(t_stamp // 60)
             secs = int(t_stamp % 60)
             chronological_lines.append(f"[{mins:02d}:{secs:02d}] {s_name}: {s_txt}")
@@ -1656,15 +1692,25 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
             # Summary section
             if "summary" in enabled_modules:
+                summary_raw = intel["summary"].strip()
+                if len(summary_raw) > 3800:
+                    summary_raw = summary_raw[:3790] + "..."
+                summary_paras = [p.strip() for p in summary_raw.split("\n\n") if p.strip()]
+                if len(summary_paras) > 1:
+                    formatted_summary = "\n\n".join(f"{arrow} {p}" for p in summary_paras)
+                else:
+                    formatted_summary = f"{arrow} {summary_raw}"
                 container.add_text(
                     f"**Executive Briefing:**\n"
-                    f"{arrow} {intel['summary']}"
+                    f"{formatted_summary}"
                 )
                 container.add_separator(divider=True)
 
             # Decisions
             if "decisions" in enabled_modules:
                 decisions_clean = intel["decisions"].strip()
+                if len(decisions_clean) > 3800:
+                    decisions_clean = decisions_clean[:3790] + "..."
                 container.add_text(
                     f"**Key Decisions & Consensus:**\n"
                     f"{decisions_clean}"
@@ -1674,6 +1720,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
             # Action Items
             if "action_items" in enabled_modules:
                 actions_clean = intel["action_items"].strip()
+                if len(actions_clean) > 3800:
+                    actions_clean = actions_clean[:3790] + "..."
                 container.add_text(
                     f"**Action Items & Ownership:**\n"
                     f"{actions_clean}"

@@ -273,7 +273,7 @@ class GuildPlayer:
             last_error: Optional[BaseException] = None
             for attempt in range(3):
                 try:
-                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=8.0)
+                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=20.0)
                     if self.voice_client:
                         self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
                     last_error = None

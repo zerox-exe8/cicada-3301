@@ -929,6 +929,147 @@ class MeetingCog(commands.Cog, name="Meeting"):
         except Exception:
             return ""
 
+    @staticmethod
+    def _is_phantom_speech(text: str) -> bool:
+        """
+        Detect Whisper / ASR hallucinations generated on silent or low-energy audio chunks.
+        Filters out common subtitle artifacts, looping tokens, and phantom phrases.
+        """
+        if not text:
+            return True
+        cleaned = text.strip()
+        if len(cleaned) < 2:
+            return True
+
+        lower = cleaned.lower().strip(" .,!?:;\"'()[]{}")
+        if not lower:
+            return True
+
+        # 1. Known Whisper / YouTube / ASR phantom phrases
+        phantom_phrases = (
+            "thank you for watching",
+            "thanks for watching",
+            "thank you very much for watching",
+            "thank you so much for watching",
+            "please subscribe",
+            "please like and subscribe",
+            "like and subscribe",
+            "like, share and subscribe",
+            "don't forget to subscribe",
+            "subscribe to my channel",
+            "subscribe to the channel",
+            "subtitles by",
+            "transcribed by",
+            "captioned by",
+            "translated by",
+            "amara.org",
+            "all rights reserved",
+            "see you in the next video",
+            "see you next time",
+            "welcome back to my channel",
+            "i will see you in the next video",
+            "bye bye",
+            "bye-bye",
+            "[music]",
+            "(music)",
+            "[applause]",
+            "[laughter]",
+            "[silence]",
+            "[blank_audio]",
+            "mbc",
+            "al jazeera",
+        )
+        for p in phantom_phrases:
+            if p in lower:
+                if lower == p or len(lower) <= len(p) + 12:
+                    return True
+
+        # 2. Token repetition loops (e.g. "you you you you", "the the the the", "bye bye bye")
+        words = lower.split()
+        if len(words) >= 3:
+            if len(set(words)) == 1:
+                return True
+            if len(words) >= 4 and len(set(words)) <= 2:
+                most_freq = max(words.count(w) for w in set(words))
+                if most_freq / len(words) >= 0.75:
+                    return True
+
+        # 3. Single filler artifact tokens on noise
+        if len(words) == 1 and lower in {"so", "you", "and", "the", "um", "uh", "ah", "oh"}:
+            return True
+
+        return False
+
+    @staticmethod
+    def _merge_overlapping_texts(prev: str, curr: str) -> str:
+        """
+        Merge consecutive transcript turns from the same speaker, eliminating
+        redundant duplicate phrases caused by chunk boundaries or ASR stutter.
+        """
+        p_strip = prev.strip()
+        c_strip = curr.strip()
+        if not p_strip:
+            return c_strip
+        if not c_strip:
+            return p_strip
+
+        # 1. Exact duplicates or complete substrings
+        p_lower = p_strip.lower()
+        c_lower = c_strip.lower()
+        if c_lower == p_lower or c_lower in p_lower:
+            return p_strip
+        if p_lower in c_lower:
+            return c_strip
+
+        # 2. Suffix-prefix word overlap detection (up to 8 words)
+        p_words = p_strip.split()
+        c_words = c_strip.split()
+        max_overlap = min(len(p_words), len(c_words), 8)
+        for n in range(max_overlap, 0, -1):
+            p_slice = [w.lower().strip(".,!?:;\"'") for w in p_words[-n:]]
+            c_slice = [w.lower().strip(".,!?:;\"'") for w in c_words[:n]]
+            if p_slice == c_slice:
+                return " ".join(p_words + c_words[n:])
+
+        return f"{p_strip} {c_strip}"
+
+    @staticmethod
+    def _smart_truncate(text: str, max_chars: int = 3800) -> str:
+        """
+        Intelligently truncate long text at natural sentence or paragraph boundaries
+        so that words or sentences are never sliced mid-way and important thoughts are preserved.
+        """
+        if not text:
+            return ""
+        text = text.strip()
+        if len(text) <= max_chars:
+            return text
+
+        target_limit = max_chars - 20
+
+        # 1. Try finding a paragraph break in the latter portion (between 70% and target_limit)
+        para_break = text.rfind("\n\n", int(target_limit * 0.7), target_limit)
+        if para_break != -1:
+            return text[:para_break].strip() + "\n\n*(Summary continued in full transcript file)*"
+
+        # 2. Try finding a clean sentence termination (. or ! or ? followed by whitespace or newline)
+        candidate_indices = []
+        for punct in [".\n", ".\n\n", "! ", "? ", ". "]:
+            idx = text.rfind(punct, int(target_limit * 0.6), target_limit)
+            if idx != -1:
+                candidate_indices.append(idx + (1 if punct.endswith(" ") else len(punct.strip())))
+
+        if candidate_indices:
+            best_idx = max(candidate_indices)
+            return text[:best_idx].strip() + "..."
+
+        # 3. Fallback: break at word boundary to avoid cutting a word in half
+        space_idx = text.rfind(" ", int(target_limit * 0.8), target_limit)
+        if space_idx != -1:
+            return text[:space_idx].strip() + "..."
+
+        return text[:target_limit].strip() + "..."
+
     async def _transcribe_audio(self, wav_io: io.BytesIO) -> str:
         """
         State-of-the-art multilingual and Indian regional speech-to-text pipeline.
@@ -980,7 +1121,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                                 .replace("[blank_audio]", "")
                                 .strip()
                             )
-                            if clean_txt and len(clean_txt) >= 2:
+                            if clean_txt and len(clean_txt) >= 2 and not self._is_phantom_speech(clean_txt):
                                 self._last_transcribe_diag = "Transcribed by Groq Whisper"
                                 return clean_txt
             except Exception as e:
@@ -1032,7 +1173,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                                         .replace("EMPTY", "")
                                         .strip()
                                     )
-                                    if clean_text and len(clean_text) >= 2:
+                                    if clean_text and len(clean_text) >= 2 and not self._is_phantom_speech(clean_text):
                                         self._last_transcribe_diag = "Transcribed by Gemini"
                                         return clean_text
                                     else:
@@ -1063,7 +1204,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     for lang in ["hi-IN", "en-IN", "mr-IN"]:
                         try:
                             res = recognizer.recognize_google(audio, language=lang)
-                            if res and len(res.strip()) >= 2:
+                            if res and len(res.strip()) >= 2 and not self._is_phantom_speech(res.strip()):
                                 return res.strip()
                         except sr.UnknownValueError:
                             continue
@@ -1072,7 +1213,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     return ""
 
                 sr_result = await asyncio.to_thread(_run_google_sr)
-                if sr_result:
+                if sr_result and not self._is_phantom_speech(sr_result):
                     self._last_transcribe_diag = "Transcribed by Google SR"
                     return sr_result
                 elif not getattr(self, "_last_transcribe_diag", None):
@@ -1095,14 +1236,20 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     return text.strip()
 
                 whisper_text = await asyncio.to_thread(_run_faster_whisper)
-                if whisper_text and len(whisper_text) >= 2:
+                if whisper_text and len(whisper_text) >= 2 and not self._is_phantom_speech(whisper_text):
                     return whisper_text
             except Exception as e:
                 logger.debug(f"faster-whisper transcription error: {e}")
 
         return ""
 
-    async def _generate_meeting_intelligence(self, full_transcript: str, duration_seconds: int = 0) -> dict[str, str]:
+    async def _generate_meeting_intelligence(
+        self,
+        full_transcript: str,
+        duration_seconds: int = 0,
+        host_name: str = "",
+        all_speakers: list[str] | None = None,
+    ) -> dict[str, str]:
         """
         Synthesize meeting transcript into a structured executive report via LLM (Groq / Gemini).
         Returns dictionary containing summary, decisions, action_items, and topics.
@@ -1118,23 +1265,32 @@ class MeetingCog(commands.Cog, name="Meeting"):
         lines_count = len([l for l in full_transcript.strip().splitlines() if l.strip()])
         duration_minutes = max(1, duration_seconds // 60)
 
-        if duration_seconds < 300 or lines_count < 15:
+        speakers_list = [s for s in (all_speakers or []) if s.strip()]
+        if host_name and host_name not in speakers_list:
+            all_known = [f"{host_name} (Host)"] + speakers_list
+        else:
+            all_known = speakers_list or [host_name or "Participants"]
+        speakers_str = ", ".join(all_known)
+        host_display = host_name or "Meeting Host"
+
+        if duration_seconds < 180 or lines_count < 8:
             depth_instruction = (
-                "- This was a concise sync / short session. Provide a crisp, high-impact 1-2 paragraph Executive Summary.\n"
-                "- Capture the exact context and what participants discussed without adding unnecessary fluff or artificial length.\n"
-                "- List only actual decisions reached (or note if it was casual banter / chill session) and concrete action items."
+                "- Provide a thorough, cohesive 2-paragraph Executive Summary in natural Hinglish/English.\n"
+                f"- Detail how the meeting opened / was initiated by {host_display}, the exact topics raised, and what each participant said.\n"
+                "- Capture all agreements reached and tasks assigned without dismissing any participant."
             )
-        elif duration_seconds >= 1200:
+        elif duration_seconds >= 900:
             depth_instruction = (
-                f"- This was an extensive {duration_minutes}-minute marathon meeting.\n"
-                "- Provide a rich, multi-paragraph Executive Narrative (3 to 5 well-developed paragraphs) covering the background, main discussions, individual viewpoints, and final resolutions.\n"
+                f"- This was an extensive {duration_minutes}-minute in-depth meeting.\n"
+                "- Provide a rich, multi-paragraph Executive Narrative (3 to 4 comprehensive, detailed paragraphs) covering the background, main discussions, individual viewpoints of EVERY participant, and final resolutions.\n"
+                f"- Explain the opening context framed by {host_display}, followed by each speaker's proposals, concerns, and counter-points.\n"
                 "- Detail all key decisions with full rationale (WHAT was agreed, WHY, and WHO supported it).\n"
                 "- Detail all action items with clear assignees (@Member), tasks, and priority tags."
             )
         else:
             depth_instruction = (
-                "- Provide a thorough, cohesive 2-3 paragraph Executive Summary explaining the background, discussions, and outcomes.\n"
-                "- Clearly attribute who raised which points or proposals (e.g., 'Aryan ne highlight kiya...', 'Kabir ne bataya...').\n"
+                "- Provide a thorough, cohesive 3-paragraph Executive Summary explaining the background, discussions, and outcomes.\n"
+                f"- Clearly attribute who raised which points or proposals across ALL participants (including {host_display}).\n"
                 "- List key decisions with context and rationale.\n"
                 "- List clear action items with assigned members and priority."
             )
@@ -1157,18 +1313,34 @@ class MeetingCog(commands.Cog, name="Meeting"):
         prompt = (
             "You are the Lead Meeting Intelligence Architect for Kyro Discord Bot.\n"
             "Analyze the following conversation transcript from a Discord voice meeting.\n"
-            "The conversation may be in Hindi, Hinglish (Hindi + English mixed), Indian English, or other regional languages.\n\n"
-            "CRITICAL INSTRUCTIONS FOR A PREMIUM, ENGAGING EXPERIENCE:\n"
-            "1. TONE & LANGUAGE: Write in natural, polite, everyday conversational Hinglish/English matching the participants' vibe. Do NOT use stiff, robotic, or overly corporate jargon.\n"
-            "2. SPEAKER CONTEXT: Explicitly mention participants by name when describing who proposed ideas, raised issues, or agreed to solutions.\n"
-            "3. NO REPETITION: The Summary must be a smooth, cohesive narrative story of what happened. DO NOT copy-paste the Decisions bullet points into the Summary.\n"
-            "4. HONEST HANDLING: If the call was casual chatter, gaming, or informal banter without formal corporate decisions, explicitly state that (e.g. '• Casual voice hangout — no formal decisions required.') instead of fabricating fake corporate decisions.\n"
-            "5. ACTION ITEMS: Include member mentions (@Name) and only assign tasks that were genuinely committed to. If none, state '• No formal tasks assigned.'\n\n"
+            "The conversation may be in Hindi, Hinglish (Hindi + English mixed), Indian English, or regional languages.\n\n"
+            f"MEETING ATTENDEES & PARTICIPANTS:\n"
+            f"- Meeting Host / Starter: {host_display}\n"
+            f"- Active Speakers in Call: {speakers_str}\n\n"
+            "CRITICAL INSTRUCTIONS FOR EXECUTIVE BRIEFING & TRANSCRIPT ANALYSIS:\n"
+            "1. COMPLETE SPEAKER INCLUSION (ZERO OMISSIONS):\n"
+            f"   - EVERY single participant listed in Active Speakers (especially the Meeting Starter '{host_display}') MUST be explicitly mentioned and represented in the Executive Summary narrative.\n"
+            "   - Explain what each person spoke about, initiated, asked, suggested, or agreed to. Do NOT allow a single speaker to monopolize the summary while omitting others.\n"
+            f"   - Even if {host_display} or any speaker spoke briefly (e.g. framing the meeting, checking audio, asking a question, or giving final consent), their presence and role MUST be highlighted in the briefing narrative.\n\n"
+            "2. DEEP & THOROUGH NARRATIVE (NO SHORT OR SHALLOW SUMMARIES):\n"
+            "   - The Executive Summary must be an extensive, detailed multi-paragraph briefing (3 to 4 comprehensive paragraphs for regular meetings; 2 rich paragraphs for brief calls).\n"
+            "   - Detail the full context: what sparked the meeting, the individual viewpoints/proposals raised by each speaker, alternatives weighed, questions asked, and the consensus reached.\n"
+            "   - Connect the discussion naturally across paragraphs without leaving out important context.\n\n"
+            "3. STRICT FACTUAL ACCURACY & ZERO HALLUCINATION:\n"
+            "   - Ground every statement strictly in the actual words spoken in the transcript.\n"
+            "   - NEVER fabricate, imagine, or assume topics, imaginary projects, corporate buzzwords, tasks, or agreements that were NOT spoken by the participants.\n"
+            "   - Filter out any ASR artifacts or phantom speech (e.g. 'thank you for watching', 'subscribe', or looping phrase glitches) - only analyze real human dialogue.\n\n"
+            "4. NATURAL TONE & LANGUAGE:\n"
+            f"   - Write in natural, polite conversational Hinglish/English (e.g., '{host_display} ne meeting start karte hue poochha...', 'Rohit ne highlight kiya...').\n"
+            "   - Perfectly mirror the actual dialogue's vibe without stiff corporate robot speak.\n\n"
+            "5. DECISIONS & ACTION ITEMS:\n"
+            "   - Decisions: Bullet points detailing WHAT was decided, WHY, and WHO backed it.\n"
+            "   - Action Items: Bullet points assigning tasks to specific participants with mentions: '• @Member: Specific task or deliverable [High/Medium/Low Priority]'. If no explicit tasks were taken, write '• No formal tasks assigned.'\n\n"
             f"{depth_instruction}\n\n"
             "Respond STRICTLY in valid JSON matching this schema:\n"
             "{\n"
-            '  "summary": "Cohesive, beautifully written narrative summary in natural Hinglish/English.",\n'
-            '  "decisions": "Bullet points of key decisions with context (e.g. • Antinuke queue lock optimize hoga: Rate-limit delay khatam karne ke liye).",\n'
+            '  "summary": "Cohesive, rich, multi-paragraph narrative in natural Hinglish/English covering every speaker including the host.",\n'
+            '  "decisions": "Bullet points of key decisions with context and rationale (e.g. • Antinuke queue lock optimize hoga: Rate-limit delay khatam karne ke liye).",\n'
             '  "action_items": "Bullet points of tasks with member mentions (e.g. • @Kabir: Antinuke queue lock optimize karega aaj raat tak [High Priority]).",\n'
             '  "topics": "3-5 key topics separated by commas (e.g. Antinuke Fixes, Music System, Meeting Summary Upgrade)"\n'
             "}\n\n"
@@ -1220,10 +1392,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
         if api_key:
             gemini_payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.25},
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.38},
             }
             gemini_headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
-            gemini_models = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"]
+            gemini_models = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
             for m in gemini_models:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
                 try:
@@ -1251,7 +1423,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         # --- Tier 2: High-Speed Groq LLM (Ultra-Fast Fallback) ---
         groq_key = os.getenv("GROQ_API_KEY", "").strip()
         if groq_key:
-            groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"]
             for gm in groq_models:
                 try:
                     payload = {
@@ -1334,7 +1506,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         """Transcribe an isolated live chunk via Groq Whisper (<200ms) and append to timeline."""
         try:
             text = await self._transcribe_audio(wav_io)
-            if text and len(text.strip()) >= 2:
+            if text and len(text.strip()) >= 2 and not self._is_phantom_speech(text):
                 timestamp = time.time() - session.start_time
                 session.transcript_timeline.append((timestamp, name, text.strip()))
                 logger.debug(f"Live transcribed [{name} at {int(timestamp)}s]: {text.strip()[:60]}")
@@ -1402,7 +1574,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         if not summary_text:
             groq_key = os.getenv("GROQ_API_KEY", "").strip()
             if groq_key:
-                groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+                groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"]
                 for gm in groq_models:
                     try:
                         payload = {
@@ -1511,7 +1683,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
             unique_speakers = list(dict.fromkeys(s_name for _, s_name, _ in session.transcript_timeline))
             for s_name in unique_speakers:
                 s_text = " ".join(txt for _, name, txt in session.transcript_timeline if name == s_name).strip()
-                if s_text and len(s_text) >= 2:
+                if s_text and len(s_text) >= 2 and not self._is_phantom_speech(s_text):
                     speaker_transcripts.append((s_name, s_text))
 
         # 2. Safety fallback: if live timeline had 0 results, fall back to buffer batch processing
@@ -1530,10 +1702,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     continue
 
                 chunk_results = await asyncio.gather(*[_transcribe_chunk_safe(ch) for ch in chunks], return_exceptions=True)
-                speaker_texts = [txt for txt in chunk_results if isinstance(txt, str) and txt.strip()]
+                speaker_texts = [txt for txt in chunk_results if isinstance(txt, str) and txt.strip() and not self._is_phantom_speech(txt)]
 
                 full_speaker_text = " ".join(speaker_texts).strip()
-                if full_speaker_text and len(full_speaker_text) >= 2:
+                if full_speaker_text and len(full_speaker_text) >= 2 and not self._is_phantom_speech(full_speaker_text):
                     speaker_transcripts.append((name, full_speaker_text))
 
         # Peak mic amplitude calculation (direct O(1) from live speaker_peaks with thread fallback)
@@ -1613,15 +1785,33 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 pass
             return
 
+        # Resolve host member display name
+        host_member = guild.get_member(session.host_id)
+        if not host_member:
+            try:
+                host_member = await guild.fetch_member(session.host_id)
+            except Exception:
+                host_member = None
+        host_name = host_member.display_name if host_member else f"User-{session.host_id}"
+        all_speakers = [s[0] for s in speaker_transcripts]
+
         # 1. Sort timeline strictly by audio timestamp (guarantees 100% chronological dialogue order)
         session.transcript_timeline.sort(key=lambda x: x[0])
 
-        # Coalesce consecutive speech turns from the same speaker within 4 seconds into a single cohesive turn
-        coalesced_timeline: list[tuple[float, str, str]] = []
+        # Filter out phantom speech and empty turns
+        filtered_timeline: list[tuple[float, str, str]] = []
         for t_stamp, s_name, s_txt in session.transcript_timeline:
+            clean = s_txt.strip()
+            if clean and not self._is_phantom_speech(clean):
+                filtered_timeline.append((t_stamp, s_name, clean))
+
+        # Coalesce consecutive speech turns from the same speaker within 4 seconds into a single cohesive turn without duplicating overlapping words
+        coalesced_timeline: list[tuple[float, str, str]] = []
+        for t_stamp, s_name, s_txt in filtered_timeline:
             if coalesced_timeline and coalesced_timeline[-1][1] == s_name and (t_stamp - coalesced_timeline[-1][0]) <= 4.0:
                 prev_t, prev_name, prev_txt = coalesced_timeline[-1]
-                coalesced_timeline[-1] = (prev_t, prev_name, f"{prev_txt} {s_txt}".strip())
+                merged_txt = self._merge_overlapping_texts(prev_txt, s_txt)
+                coalesced_timeline[-1] = (prev_t, prev_name, merged_txt)
             else:
                 coalesced_timeline.append((t_stamp, s_name, s_txt))
 
@@ -1646,7 +1836,9 @@ class MeetingCog(commands.Cog, name="Meeting"):
             combined_text = "\n".join([f"{name}: {text}" for name, text in speaker_transcripts])
 
         # 4. Generate Deep Meeting Intelligence via Groq / Gemini
-        intel = await self._generate_meeting_intelligence(combined_text, duration_seconds=duration)
+        intel = await self._generate_meeting_intelligence(
+            combined_text, duration_seconds=duration, host_name=host_name, all_speakers=all_speakers
+        )
 
         # Persist session to database via repository
         try:
@@ -1692,14 +1884,14 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
             # Summary section
             if "summary" in enabled_modules:
-                summary_raw = intel["summary"].strip()
-                if len(summary_raw) > 3800:
-                    summary_raw = summary_raw[:3790] + "..."
+                summary_raw = self._smart_truncate(intel["summary"].strip(), max_chars=3800)
                 summary_paras = [p.strip() for p in summary_raw.split("\n\n") if p.strip()]
-                if len(summary_paras) > 1:
-                    formatted_summary = "\n\n".join(f"{arrow} {p}" for p in summary_paras)
-                else:
-                    formatted_summary = f"{arrow} {summary_raw}"
+                clean_paras = []
+                for p in summary_paras:
+                    clean = p.lstrip("›•- ").strip()
+                    if clean:
+                        clean_paras.append(f"{arrow} {clean}")
+                formatted_summary = "\n\n".join(clean_paras) if clean_paras else f"{arrow} {summary_raw}"
                 container.add_text(
                     f"**Executive Briefing:**\n"
                     f"{formatted_summary}"
@@ -1708,9 +1900,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
             # Decisions
             if "decisions" in enabled_modules:
-                decisions_clean = intel["decisions"].strip()
-                if len(decisions_clean) > 3800:
-                    decisions_clean = decisions_clean[:3790] + "..."
+                decisions_clean = self._smart_truncate(intel["decisions"].strip(), max_chars=3800)
                 container.add_text(
                     f"**Key Decisions & Consensus:**\n"
                     f"{decisions_clean}"
@@ -1719,9 +1909,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
 
             # Action Items
             if "action_items" in enabled_modules:
-                actions_clean = intel["action_items"].strip()
-                if len(actions_clean) > 3800:
-                    actions_clean = actions_clean[:3790] + "..."
+                actions_clean = self._smart_truncate(intel["action_items"].strip(), max_chars=3800)
                 container.add_text(
                     f"**Action Items & Ownership:**\n"
                     f"{actions_clean}"
@@ -1741,6 +1929,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 f"| :--- | :--- |\n"
                 f"| **Server** | {guild.name} (`{guild.id}`) |\n"
                 f"| **Voice Channel** | {vc_name} (`{session.voice_channel_id}`) |\n"
+                f"| **Meeting Host** | `{host_name}` |\n"
                 f"| **Duration** | {duration_fmt} ({duration}s) |\n"
                 f"| **Recorded At** | <t:{int(session.start_time)}:F> |\n"
                 f"| **Speakers** | {speaker_list_str} |\n"

@@ -415,9 +415,16 @@ class KyroSentinel:
                     resolved=True,
                 )
             except Exception as e:
+                # Idle protection: Do not panic or spam critical developer alerts if no server is playing music
+                active_players = 0
+                music_cog = self.bot.get_cog("Music")
+                if music_cog and hasattr(music_cog, "controller"):
+                    active_players = sum(1 for p in music_cog.controller.players.values() if getattr(p, "is_playing", False))
+
+                severity = IncidentSeverity.CRITICAL if active_players > 0 else IncidentSeverity.WARNING
                 self.record_incident(
                     SubsystemType.MUSIC,
-                    IncidentSeverity.CRITICAL,
+                    severity,
                     "Lavalink Node Unreachable",
                     err_text(e),
                     action_taken=(
@@ -431,9 +438,15 @@ class KyroSentinel:
             # 30s watchdog loop floods the incident buffer and the health report.
             if not self._lavalink_breaker_open:
                 self._lavalink_breaker_open = True
+                active_players = 0
+                music_cog = self.bot.get_cog("Music")
+                if music_cog and hasattr(music_cog, "controller"):
+                    active_players = sum(1 for p in music_cog.controller.players.values() if getattr(p, "is_playing", False))
+
+                severity = IncidentSeverity.CRITICAL if active_players > 0 else IncidentSeverity.WARNING
                 self.record_incident(
                     SubsystemType.MUSIC,
-                    IncidentSeverity.CRITICAL,
+                    severity,
                     "Lavalink Circuit Breaker Tripped",
                     f"Lavalink reconnect failed {fails} times ({reason})",
                     action_taken="Circuit breaker open, awaiting server restore",

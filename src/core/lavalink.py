@@ -86,8 +86,16 @@ def err_text(exc: BaseException) -> str:
     return f"{name}: {text}"
 
 
+# Hardened in-code fallback pool: ensures Render never breaks even if .env nodes drop or change passwords
+BUILTIN_LAVALINK_FALLBACKS: list[tuple[str, str]] = [
+    ("http://lavalink.triniumhost.com:4333", "free"),
+    ("https://lava-v4.millohost.my.id:443", "https://discord.gg/mjS5J2K3ep"),
+    ("http://lavalinkv4.serenetia.com:80", "https://seretia.link/discord"),
+]
+
+
 def candidates() -> list[tuple[str, str]]:
-    """Return the primary Lavalink URI first, then any configured fallbacks."""
+    """Return the primary Lavalink URI first, then any configured fallbacks, then built-in resilient nodes."""
     from src.core.config import Config
 
     result: list[tuple[str, str]] = []
@@ -104,6 +112,11 @@ def candidates() -> list[tuple[str, str]]:
             uri, pw = uri.strip(), pw.strip()
         else:
             uri, pw = raw_clean, Config.LAVALINK_PASSWORD
+        if uri and all(uri != known for known, _ in result):
+            result.append((uri, pw))
+
+    # Append built-in verified fallbacks so Render always has live nodes without manual .env updates
+    for uri, pw in BUILTIN_LAVALINK_FALLBACKS:
         if uri and all(uri != known for known, _ in result):
             result.append((uri, pw))
 

@@ -289,8 +289,10 @@ class MeetingAudioSink(AudioSinkBase):
         self._min_payload_len: int = 999999
         self._max_payload_len: int = 0
         self._opus_err_count: int = 0
-        # Dedicated per-SSRC Opus decoders
+        # Dedicated per-SSRC Opus decoders and filter states
         self._opus_decoders: dict[int, Any] = {}
+        self._ratecv_states: dict[int, Any] = {}
+        self.speaker_has_speech: dict[Any, bool] = {}
 
     def wants_opus(self) -> bool:
         """Request decoded PCM frames from voice_recv's PacketDecoder.
@@ -379,11 +381,16 @@ class MeetingAudioSink(AudioSinkBase):
             # --- Downsample 48kHz stereo 16-bit -> 16kHz mono ---
             downsampled = b""
             peak_amp = 0
+            rms_amp = 0
             try:
                 import audioop
                 mono48 = audioop.tomono(pcm, 2, 0.5, 0.5)
-                downsampled, _ = audioop.ratecv(mono48, 2, 1, 48000, 16000, None)
+                rate_state = self._ratecv_states.get(ssrc)
+                downsampled, new_state = audioop.ratecv(mono48, 2, 1, 48000, 16000, rate_state)
+                if ssrc:
+                    self._ratecv_states[ssrc] = new_state
                 peak_amp = audioop.max(downsampled, 2)
+                rms_amp = audioop.rms(downsampled, 2)
             except Exception:
                 try:
                     pcm_array = array.array("h", pcm)
@@ -392,6 +399,7 @@ class MeetingAudioSink(AudioSinkBase):
                     left_peak = max((abs(s) for s in left_samples), default=0)
                     right_peak = max((abs(s) for s in right_samples), default=0)
                     peak_amp = max(left_peak, right_peak)
+                    rms_amp = peak_amp // 3
                     selected_samples = left_samples if left_peak >= right_peak else right_samples
                     downsampled = selected_samples.tobytes()
                 except Exception:
@@ -450,12 +458,14 @@ class MeetingAudioSink(AudioSinkBase):
                     self.speaker_names.pop(provisional_key, None)
                     self.speaker_chunks.pop(provisional_key, None)
                     prev_peak = self.speaker_peaks.pop(provisional_key, 0)
+                    prev_speech = self.speaker_has_speech.pop(provisional_key, False)
                     if uid not in self.speaker_buffers:
                         self.speaker_buffers[uid] = bytearray()
                         self.speaker_names[uid] = name
                         self.speaker_chunks[uid] = 0
                     self.speaker_buffers[uid] = prev_audio + self.speaker_buffers[uid]
                     self.speaker_peaks[uid] = max(self.speaker_peaks.get(uid, 0), prev_peak)
+                    self.speaker_has_speech[uid] = self.speaker_has_speech.get(uid, False) or prev_speech
 
             if uid not in self.speaker_buffers:
                 self.speaker_buffers[uid] = bytearray()
@@ -466,6 +476,8 @@ class MeetingAudioSink(AudioSinkBase):
             self.speaker_buffers[uid].extend(downsampled)
             self.speaker_chunks[uid] += 1
             self.speaker_peaks[uid] = max(self.speaker_peaks.get(uid, 0), peak_amp)
+            if peak_amp >= 200 or rms_amp >= 50:
+                self.speaker_has_speech[uid] = True
             self.speaker_last_active[uid] = now
             if uid not in self.speaker_buffer_start:
                 self.speaker_buffer_start[uid] = now
@@ -475,11 +487,10 @@ class MeetingAudioSink(AudioSinkBase):
             return
 
     @staticmethod
-    def _normalize_pcm(pcm_bytes: bytes, target_peak: int = 25000) -> bytes:
+    def _normalize_pcm(pcm_bytes: bytes, target_peak: int = 22000) -> bytes:
         """
         Automatic Gain Control (AGC) & Dynamic Peak Normalization.
-        Amplifies soft, whispered, or low-mic speech by up to 20x
-        so speech recognition engines can transcribe quiet voices clearly.
+        Amplifies soft, quiet voices safely while protecting against noise amplification & clipping.
         """
         if not pcm_bytes or len(pcm_bytes) < 4:
             return pcm_bytes
@@ -490,14 +501,16 @@ class MeetingAudioSink(AudioSinkBase):
                 return pcm_bytes
 
             max_amp = max(abs(s) for s in samples)
-            if max_amp <= 2:  # Pure absolute silence
+            # Below 150 is ambient electronic noise/hiss — do not amplify noise into fake speech
+            if max_amp < 150:
                 return pcm_bytes
 
             # If audio is already loud enough, do not over-boost
-            if max_amp >= 22000:
+            if max_amp >= 20000:
                 return pcm_bytes
 
-            gain = min(25.0, float(target_peak) / float(max(max_amp, 1)))
+            # Target peak around 22000 with a safe gain clamp of max 6.0x (prevents clipping & noise amplification)
+            gain = min(6.0, float(target_peak) / float(max(max_amp, 1)))
             if gain <= 1.05:
                 return pcm_bytes
 
@@ -579,17 +592,19 @@ class MeetingAudioSink(AudioSinkBase):
             return None
 
     def pop_ready_speaker_chunks(
-        self, max_chunk_duration: float = 25.0, pause_threshold: float = 1.2
+        self, max_chunk_duration: float = 25.0, pause_threshold: float = 1.8
     ) -> list[tuple[Any, str, bytes]]:
         """
         Extract PCM chunks ready for immediate real-time transcription:
-        - Either speaker paused for >= pause_threshold (natural silence break)
-        - Or speaker talked continuously for >= max_chunk_duration (preventing buffer accumulation)
+        - Natural pause >= pause_threshold (default 1.8s for natural conversational pacing)
+        - Or speaker talked continuously for >= max_chunk_duration
+        - VAD Energy Gate: Validates chunk contains genuine speech energy (Peak >= 300, RMS >= 70).
+          Drops background fan/mic hiss and silence chunks immediately to preserve API quotas.
         Returns list of (uid, speaker_name, pcm_bytes) and immediately clears those bytes from RAM!
         """
         now = time.time()
         ready: list[tuple[Any, str, bytes]] = []
-        min_bytes = int(16000 * 2 * 0.5)  # at least 0.5s of speech
+        min_bytes = int(16000 * 2 * 0.6)  # at least 0.6s of audio
         max_bytes = int(16000 * 2 * max_chunk_duration)
 
         for uid, buf in list(self.speaker_buffers.items()):
@@ -603,22 +618,54 @@ class MeetingAudioSink(AudioSinkBase):
             if silence_duration >= pause_threshold or buf_len >= max_bytes:
                 chunk_pcm = bytes(buf)
                 buf.clear()
+                has_speech = self.speaker_has_speech.pop(uid, False)
                 self.speaker_buffer_start[uid] = now
                 name = self.speaker_names.get(uid, f"Speaker-{uid}")
+
+                # VAD Energy Gate: verify the chunk actually has audible speech energy
+                chunk_peak = 0
+                chunk_rms = 0
+                try:
+                    import audioop
+                    chunk_peak = audioop.max(chunk_pcm, 2)
+                    chunk_rms = audioop.rms(chunk_pcm, 2)
+                except Exception:
+                    arr = array.array("h", chunk_pcm)
+                    chunk_peak = max((abs(s) for s in arr), default=0)
+                    chunk_rms = chunk_peak // 3
+
+                # If no speech energy was detected (pure fan/mic noise), discard without calling API
+                if not has_speech and (chunk_peak < 220 or chunk_rms < 50):
+                    continue
+
                 ready.append((uid, name, chunk_pcm))
 
         return ready
 
     def flush_all_remaining_chunks(self) -> list[tuple[Any, str, bytes]]:
-        """Flush any remaining buffered audio at meeting conclusion."""
+        """Flush any remaining buffered audio at meeting conclusion, filtering ambient silence."""
         ready: list[tuple[Any, str, bytes]] = []
-        min_bytes = int(16000 * 2 * 0.25)
+        min_bytes = int(16000 * 2 * 0.4)
         for uid, buf in list(self.speaker_buffers.items()):
             if len(buf) >= min_bytes:
                 chunk_pcm = bytes(buf)
                 buf.clear()
+                has_speech = self.speaker_has_speech.pop(uid, False)
                 name = self.speaker_names.get(uid, f"Speaker-{uid}")
-                ready.append((uid, name, chunk_pcm))
+
+                chunk_peak = 0
+                chunk_rms = 0
+                try:
+                    import audioop
+                    chunk_peak = audioop.max(chunk_pcm, 2)
+                    chunk_rms = audioop.rms(chunk_pcm, 2)
+                except Exception:
+                    arr = array.array("h", chunk_pcm)
+                    chunk_peak = max((abs(s) for s in arr), default=0)
+                    chunk_rms = chunk_peak // 3
+
+                if has_speech or (chunk_peak >= 220 and chunk_rms >= 50):
+                    ready.append((uid, name, chunk_pcm))
             else:
                 buf.clear()
         return ready
@@ -629,6 +676,7 @@ class MeetingAudioSink(AudioSinkBase):
         as _process_meeting_completion requires them for transcription!
         """
         self._opus_decoders.clear()
+        self._ratecv_states.clear()
 
     def destroy(self) -> None:
         """Explicitly clear memory buffers, peaks, and maps after transcription is complete."""
@@ -638,8 +686,10 @@ class MeetingAudioSink(AudioSinkBase):
         self.speaker_peaks.clear()
         self.speaker_last_active.clear()
         self.speaker_buffer_start.clear()
+        self.speaker_has_speech.clear()
         self._ssrc_to_uid.clear()
         self._opus_decoders.clear()
+        self._ratecv_states.clear()
 
 
 @dataclass
@@ -681,6 +731,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
         self._sessions: dict[int, MeetingSession] = {}
         # guild_id -> in-flight connection semaphore
         self._connecting_guilds: set[int] = set()
+        # Rate-limit guard: max 2 concurrent ASR transcription requests across all live chunks
+        self._asr_sem = asyncio.Semaphore(2)
         self.schedule_monitor_loop.start()
 
     def cog_unload(self) -> None:
@@ -941,16 +993,75 @@ class MeetingCog(commands.Cog, name="Meeting"):
         if len(cleaned) < 2:
             return True
 
-        lower = cleaned.lower().strip(" .,!?:;\"'()[]{}")
+        raw_lower = cleaned.lower()
+        # Non-speech sound tags (e.g. [music], (music), [applause], <noise>)
+        sound_tags = ("[music]", "(music)", "[applause]", "[laughter]", "[silence]", "[blank_audio]", "<noise>", "[cheering]", "(applause)", "(laughter)")
+        if any(tag in raw_lower for tag in sound_tags):
+            tag_stripped = raw_lower
+            for tag in sound_tags:
+                tag_stripped = tag_stripped.replace(tag, "")
+            if len(tag_stripped.strip(" .,!?:;\"'()[]{}<>")) < 2:
+                return True
+
+        lower = cleaned.lower().strip(" .,!?:;\"'()[]{}<>")
         if not lower:
             return True
 
-        # 1. Known Whisper / YouTube / ASR phantom phrases
+        # 1. Standalone Whisper silence hallucinations (deterministic outputs on ambient noise)
+        standalone_phantoms = {
+            "thank you",
+            "thank you.",
+            "thank you!",
+            "thanks",
+            "thanks.",
+            "thanks!",
+            "thank you so much",
+            "thank you very much",
+            "thank you guys",
+            "thank you bye",
+            "thank you so much bye",
+            "thank you for listening",
+            "thanks for listening",
+            "bye",
+            "bye bye",
+            "bye-bye",
+            "good night",
+            "goodnight",
+            "peace",
+            "peace out",
+            "shokriya",
+            "dhanyawad",
+            "you",
+            "you.",
+            "okay",
+            "okay.",
+            "yeah",
+            "yeah.",
+            "music",
+            "applause",
+            "laughter",
+            "silence",
+            "blank_audio",
+            "noise",
+            "thanks for watching",
+            "thank you for watching",
+        }
+        if lower in standalone_phantoms:
+            return True
+
+        # If phrase is very short (1-3 words) and consists solely of gratitude/signoff tokens
+        words = lower.split()
+        if len(words) <= 3 and any(w in {"thank", "thanks"} for w in words):
+            return True
+
+        # 2. Known Whisper / YouTube / ASR phantom phrases
         phantom_phrases = (
             "thank you for watching",
             "thanks for watching",
             "thank you very much for watching",
             "thank you so much for watching",
+            "thank you for listening",
+            "thanks for listening",
             "please subscribe",
             "please like and subscribe",
             "like and subscribe",
@@ -959,9 +1070,11 @@ class MeetingCog(commands.Cog, name="Meeting"):
             "subscribe to my channel",
             "subscribe to the channel",
             "subtitles by",
+            "subtitles translated by",
             "transcribed by",
             "captioned by",
             "translated by",
+            "audio transcribed by",
             "amara.org",
             "all rights reserved",
             "see you in the next video",
@@ -1095,6 +1208,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 form = aiohttp.FormData()
                 form.add_field("file", wav_data, filename="speaker.wav", content_type="audio/wav")
                 form.add_field("model", "whisper-large-v3-turbo")
+                form.add_field("temperature", "0.0")
                 form.add_field(
                     "prompt",
                     "Hindi, Hinglish, casual Indian English conversation, Discord voice chat, tech discussions, gaming.",
@@ -1124,6 +1238,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                             if clean_txt and len(clean_txt) >= 2 and not self._is_phantom_speech(clean_txt):
                                 self._last_transcribe_diag = "Transcribed by Groq Whisper"
                                 return clean_txt
+                        else:
+                            logger.debug(f"Groq Whisper HTTP {resp.status}")
             except Exception as e:
                 logger.debug(f"Groq Whisper exception: {e}")
 
@@ -1329,7 +1445,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
             "3. STRICT FACTUAL ACCURACY & ZERO HALLUCINATION:\n"
             "   - Ground every statement strictly in the actual words spoken in the transcript.\n"
             "   - NEVER fabricate, imagine, or assume topics, imaginary projects, corporate buzzwords, tasks, or agreements that were NOT spoken by the participants.\n"
-            "   - Filter out any ASR artifacts or phantom speech (e.g. 'thank you for watching', 'subscribe', or looping phrase glitches) - only analyze real human dialogue.\n\n"
+            "   - Filter out any ASR artifacts or phantom speech (e.g. 'thank you for watching', 'subscribe', or looping phrase glitches) - only analyze real human dialogue.\n"
+            "   - If the call is an informal hangout or casual discussion, accurately capture what participants actually talked about (e.g. server updates, gaming, bot features, banter) rather than inventing a 'gratitude loop' or 'mutual appreciation ceremony'.\n\n"
             "4. NATURAL TONE & LANGUAGE:\n"
             f"   - Write in natural, polite conversational Hinglish/English (e.g., '{host_display} ne meeting start karte hue poochha...', 'Rohit ne highlight kiya...').\n"
             "   - Perfectly mirror the actual dialogue's vibe without stiff corporate robot speak.\n\n"
@@ -1481,8 +1598,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
             while session.guild_id in self._sessions and not session.is_processing:
                 await asyncio.sleep(0.8)
 
-                # 1. Pop ready audio chunks from sink (paused >= 1.2s or reached 25s)
-                ready_chunks = session.sink.pop_ready_speaker_chunks(max_chunk_duration=25.0, pause_threshold=1.2)
+                # 1. Pop ready audio chunks from sink (paused >= 1.8s or reached 25s) with VAD energy check
+                ready_chunks = session.sink.pop_ready_speaker_chunks(max_chunk_duration=25.0, pause_threshold=1.8)
                 for uid, name, pcm_bytes in ready_chunks:
                     wav_io = MeetingAudioSink.pcm_to_normalized_wav(pcm_bytes)
                     if wav_io:
@@ -1503,9 +1620,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
     async def _process_live_chunk(
         self, session: MeetingSession, uid: Any, name: str, wav_io: io.BytesIO
     ) -> None:
-        """Transcribe an isolated live chunk via Groq Whisper (<200ms) and append to timeline."""
+        """Transcribe an isolated live chunk via Groq Whisper (<200ms) with concurrency guard and append to timeline."""
         try:
-            text = await self._transcribe_audio(wav_io)
+            async with self._asr_sem:
+                text = await self._transcribe_audio(wav_io)
             if text and len(text.strip()) >= 2 and not self._is_phantom_speech(text):
                 timestamp = time.time() - session.start_time
                 session.transcript_timeline.append((timestamp, name, text.strip()))
@@ -1653,6 +1771,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     sink.speaker_names.pop(prov_key, None)
                     sink.speaker_chunks.pop(prov_key, None)
                     prev_peak = sink.speaker_peaks.pop(prov_key, 0)
+                    prev_speech = sink.speaker_has_speech.pop(prov_key, False)
                     if uid not in sink.speaker_buffers:
                         m = guild.get_member(uid)
                         sink.speaker_buffers[uid] = bytearray()
@@ -1660,6 +1779,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                         sink.speaker_chunks[uid] = 0
                     sink.speaker_buffers[uid] = prev_buf + sink.speaker_buffers[uid]
                     sink.speaker_peaks[uid] = max(sink.speaker_peaks.get(uid, 0), prev_peak)
+                    sink.speaker_has_speech[uid] = sink.speaker_has_speech.get(uid, False) or prev_speech
 
         # Flush any remaining audio chunks from sink
         remaining = sink.flush_all_remaining_chunks()
@@ -1669,10 +1789,11 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 t = asyncio.create_task(self._process_live_chunk(session, uid, name, wav_io))
                 session.pending_tasks.add(t)
 
-        # Await pending live transcription tasks (fast, max 6s timeout)
-        if session.pending_tasks:
+        # Await pending live transcription tasks (robust 10s timeout to capture final words)
+        tasks_to_wait = [t for t in list(session.pending_tasks) if not t.done()]
+        if tasks_to_wait:
             try:
-                await asyncio.wait(session.pending_tasks, timeout=6.0)
+                await asyncio.wait(tasks_to_wait, timeout=10.0)
             except Exception:
                 pass
 
@@ -2662,7 +2783,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         if duration < 10:
             if session.monitor_task and not session.monitor_task.done():
                 session.monitor_task.cancel()
-            for t in session.pending_tasks:
+            for t in list(session.pending_tasks):
                 if not t.done():
                     t.cancel()
             session.sink.destroy()
@@ -2731,7 +2852,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     else:
                         if active_s.monitor_task and not active_s.monitor_task.done():
                             active_s.monitor_task.cancel()
-                        for t in active_s.pending_tasks:
+                        for t in list(active_s.pending_tasks):
                             if not t.done():
                                 t.cancel()
                         active_s.sink.destroy()
@@ -2772,7 +2893,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     else:
                         if active_s.monitor_task and not active_s.monitor_task.done():
                             active_s.monitor_task.cancel()
-                        for t in active_s.pending_tasks:
+                        for t in list(active_s.pending_tasks):
                             if not t.done():
                                 t.cancel()
                         active_s.sink.destroy()

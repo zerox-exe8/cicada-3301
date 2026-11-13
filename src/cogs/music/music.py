@@ -215,14 +215,29 @@ class Music(commands.Cog):
 
         # bot itself was disconnected from voice
         if member.id == self.bot.user.id and after.channel is None:
+            # 1. Stale event protection: Check if bot is ACTUALLY still in a voice channel right now
+            current_vc = member.guild.me.voice
+            if current_vc and current_vc.channel is not None:
+                logger.debug(
+                    f"Guild {member.guild.id}: ignoring stale voice disconnect event "
+                    f"(bot is actively in #{current_vc.channel.name})."
+                )
+                return
+
             player = self.controller.get_player(member.guild.id)
             if player:
-                # A null voice state is ALSO the delayed answer to a disconnect Kyro
+                # 2. Connection attempt currently in flight: ignore any disconnect event from prior cleanup
+                if getattr(player, "_is_connecting", False):
+                    logger.debug(
+                        f"Guild {member.guild.id}: ignoring disconnect event because connection is currently in flight."
+                    )
+                    return
+
+                # 3. A null voice state is ALSO the delayed answer to a disconnect Kyro
                 # initiated itself (reconnect / stop / self-heal). Discord can deliver
-                # it after the new session is already live — tearing down here would
-                # make the bot join a channel and immediately disconnect itself.
-                if time.monotonic() < player._disconnect_expected_until:
-                    player._disconnect_expected_until = 0.0
+                # multiple null packets. Keep the window valid until monotonic timestamp
+                # elapses WITHOUT resetting it to 0.0, so trailing duplicate packets are swallowed.
+                if time.monotonic() < getattr(player, "_disconnect_expected_until", 0.0):
                     logger.debug(
                         f"Guild {member.guild.id}: ignoring self-initiated voice disconnect event."
                     )
@@ -275,6 +290,14 @@ class Music(commands.Cog):
                 guild.id in getattr(meeting_cog, "_sessions", {})
                 or guild.id in getattr(meeting_cog, "_connecting_guilds", set())
             ):
+                return
+
+            player = self.controller.get_player(guild.id)
+            # If Kyro is ALREADY connecting via connect_voice, DO NOT launch auto_connect!
+            if player and (getattr(player, "_is_connecting", False) or player._connect_lock.locked()):
+                logger.debug(
+                    f"Guild {guild.id}: Bot joined {after.channel.name} via explicit connect_voice, skipping auto-connect."
+                )
                 return
 
             vc = guild.voice_client
@@ -355,6 +378,8 @@ class Music(commands.Cog):
 
         try:
             player = self.controller.get_or_create_player(guild)
+            if getattr(player, "_is_connecting", False) or player._connect_lock.locked():
+                return
             if player.voice_client and getattr(player.voice_client, "connected", False):
                 return
             player.cancel_empty_vc_timer(auto_resume=False)

@@ -334,19 +334,30 @@ class MusicAgent:
             or "exceeded the timeout" in err_low
         )
 
-        # Audio engine (Lavalink node) transport failure.
-        is_node_fault = isinstance(error, (LavalinkException, NodeException)) or (
-            "lavalink" in err_low
-            or "node" in err_low
-            or (isinstance(error, (asyncio.TimeoutError, TimeoutError)) and not is_voice_fault)
+        # Audio engine (Lavalink node) transport failure vs track load error.
+        # CRITICAL: A track-level LavalinkException (e.g. YouTube video blocked/age-restricted)
+        # must NOT trigger heal_node(), because closing the node pool calls player.disconnect()
+        # and kills audio for EVERY server!
+        node = None
+        try:
+            node = wavelink.Pool.get_node()
+        except Exception:
+            pass
+
+        node_is_dead = (
+            not node
+            or getattr(node, "status", None) != wavelink.NodeStatus.CONNECTED
+            or isinstance(error, NodeException)
+            or ("node is not connected" in err_low)
+            or ("no nodes are currently assigned" in err_low)
         )
 
         title = "Music Subsystem Diagnostics"
         action = "Logged diagnostics and secured audio pipeline."
         advice = "Please try executing the command again."
 
-        # Case 1: Audio engine (Lavalink node) unreachable / slow REST transport.
-        if is_node_fault:
+        # Case 1: Audio engine (Lavalink node) actually dead or unreachable.
+        if node_is_dead:
             title = "Audio Engine Auto-Recovery"
             action = "Triggered single-flight Lavalink node pool re-establishment."
             advice = "The audio engine is reconnecting. Please retry in a few seconds."
@@ -359,6 +370,12 @@ class MusicAgent:
                 await self.heal_voice_session(guild, reason=f"Command error: {err_type}")
             action = "Purged stale voice gateway state (your queue was kept intact)."
             advice = "Please try joining the voice channel or re-running the command."
+
+        # Case 3: Track-level streaming or load failure (node is alive, but track rejected)
+        elif isinstance(error, LavalinkException):
+            title = "Track Playback Notice"
+            action = "Skipped unplayable audio source."
+            advice = f"Could not stream this audio track: `{err_str[:120]}`. Please try another song."
 
         # Case 3: Permission or Capacity Constraints
         elif isinstance(error, discord.Forbidden) or "permission" in err_low or "is full" in err_low:

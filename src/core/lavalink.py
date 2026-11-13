@@ -166,6 +166,10 @@ def discard_node(node: Any) -> None:
 async def close_node(node: Any) -> None:
     """Close a node, drop it from the pool and release its HTTP session."""
     try:
+        # Safely detach players so closing the node transport does NOT force-disconnect
+        # the bot from Discord voice channels on Discord Gateway!
+        if hasattr(node, "_players") and isinstance(node._players, dict):
+            node._players.clear()
         # `eject=True` makes wavelink remove the node from its pool itself.
         await asyncio.wait_for(node.close(eject=True), timeout=LAVALINK_OP_TIMEOUT)
     except Exception:

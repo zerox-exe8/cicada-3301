@@ -42,6 +42,134 @@ def shorten_artist(artist: str, max_len: int = 30) -> str:
     return artist if len(artist) <= max_len else artist[:max_len - 3] + "..."
 
 
+class KyroPlayer(wavelink.Player):
+    """
+    Hardened Wavelink 3 Player with Bidirectional Gateway Handshake Defense.
+
+    Fixes three critical upstream flaws in Wavelink 3:
+    1. Out-of-Order Handshake Stalls:
+       Discord sends VOICE_STATE_UPDATE and VOICE_SERVER_UPDATE in non-deterministic order.
+       Upstream Wavelink only calls `_dispatch_voice_update()` inside `on_voice_server_update`.
+       If VOICE_SERVER_UPDATE arrives before VOICE_STATE_UPDATE, Wavelink drops the dispatch
+       and hangs on `_connection_event.wait()` until timeout (20s).
+       KyroPlayer intercepts `on_voice_state_update` to trigger the dispatch as soon as all
+       credentials (sessionId, token, endpoint) are present.
+    2. Fast Failure Trapping:
+       Upstream Wavelink swallows Lavalink exceptions in `_dispatch_voice_update` and silently
+       calls `self.disconnect()`, leaving `connect()` hanging until the timeout expires.
+       KyroPlayer captures any transport error, stores it, and sets `_connection_event` so
+       `connect()` raises the actual error immediately in <200ms instead of 20 seconds.
+    3. Stale Disconnect Packet Guard:
+       When reconnecting, Discord often emits a delayed `channel_id=None` packet from the
+       prior session. Upstream Wavelink unconditionally destroys the player on `not channel_id`,
+       killing the connection before the handshake completes. KyroPlayer drops stale null packets
+       while connection is in flight.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._connect_error: Optional[Exception] = None
+        self._dispatch_lock: asyncio.Lock = asyncio.Lock()
+
+        # Pre-populate voice state from Discord guild member if already available
+        guild = getattr(self, "guild", None)
+        if not guild and hasattr(self, "channel") and self.channel:
+            guild = getattr(self.channel, "guild", None)
+        if guild and guild.me and guild.me.voice:
+            sid = getattr(guild.me.voice, "session_id", None)
+            if sid:
+                self._voice_state["voice"]["session_id"] = sid
+                ch = getattr(guild.me.voice, "channel", None) or getattr(self, "channel", None)
+                if ch:
+                    self._voice_state["channel_id"] = str(ch.id)
+
+    async def on_voice_state_update(self, data: Any, /) -> None:
+        channel_id = data.get("channel_id")
+        # Guard: If channel_id is None and we are still connecting, do NOT let upstream destroy the player!
+        if not channel_id and (not self._connected or not self._connection_event.is_set()):
+            logger.debug(
+                f"KyroPlayer guild {self.guild.id if self.guild else 'unknown'}: "
+                "ignoring stale null channel_id during handshake."
+            )
+            return
+
+        await super().on_voice_state_update(data)
+        if not channel_id:
+            return
+
+        # Check if voice server credentials (token & endpoint) are already buffered
+        v = self._voice_state.get("voice", {})
+        if v.get("token") and v.get("endpoint") and v.get("session_id"):
+            if not self._connected or not self._connection_event.is_set():
+                await self._dispatch_voice_update()
+
+    async def _dispatch_voice_update(self) -> None:
+        async with self._dispatch_lock:
+            if self._connected and self._connection_event.is_set():
+                return
+            assert self.guild is not None
+            data = self._voice_state.get("voice", {})
+            session_id = data.get("session_id")
+            if not session_id and self.guild.me and self.guild.me.voice:
+                session_id = getattr(self.guild.me.voice, "session_id", None)
+                if session_id:
+                    self._voice_state["voice"]["session_id"] = session_id
+
+            token = data.get("token")
+            endpoint = data.get("endpoint")
+            channel_id = self._voice_state.get("channel_id") or (
+                str(self.channel.id) if self.channel else None
+            )
+
+            if not session_id or not token or not endpoint:
+                return
+
+            request = {
+                "voice": {
+                    "sessionId": session_id,
+                    "token": token,
+                    "endpoint": endpoint,
+                    "channelId": channel_id,
+                }
+            }
+
+            try:
+                await self.node._update_player(self.guild.id, data=request)
+                self._connected = True
+                self._connection_event.set()
+            except Exception as exc:
+                logger.error(
+                    f"Guild {self.guild.id}: Lavalink _update_player failed ({type(exc).__name__}: {exc})"
+                )
+                self._connect_error = exc
+                self._connection_event.set()
+
+    async def connect(
+        self,
+        *,
+        timeout: float = 12.0,
+        reconnect: bool = True,
+        self_deaf: bool = False,
+        self_mute: bool = False,
+    ) -> None:
+        self._connect_error = None
+        try:
+            await super().connect(
+                timeout=timeout,
+                reconnect=reconnect,
+                self_deaf=self_deaf,
+                self_mute=self_mute,
+            )
+            if self._connect_error is not None:
+                err = self._connect_error
+                self._connect_error = None
+                raise err
+        except BaseException as exc:
+            if self._guild:
+                self.node._players.pop(self._guild.id, None)
+            raise exc
+
+
 class GuildPlayer:
     """
     High-Performance Lavalink Guild Player for Kyro Bot.
@@ -81,6 +209,8 @@ class GuildPlayer:
         # the delayed answer to a disconnect Kyro initiated itself (reconnect / stop /
         # self-heal) instead of an external disconnect that must end the session.
         self._disconnect_expected_until: float = 0.0
+        # Guard flag indicating that a connect_voice operation is currently in flight
+        self._is_connecting: bool = False
 
     # ── State Properties ──
 
@@ -154,190 +284,206 @@ class GuildPlayer:
     async def connect_voice(self, channel: discord.VoiceChannel | discord.StageChannel) -> None:
         """Connect or move to the specified voice channel using Wavelink with race-condition locking."""
         async with self._connect_lock:
-            # Check if this guild has an active or in-flight Voice Meeting session
-            meeting_cog = self.bot.get_cog("Meeting")
-            if meeting_cog and (
-                self.guild.id in getattr(meeting_cog, "_sessions", {})
-                or self.guild.id in getattr(meeting_cog, "_connecting_guilds", set())
-            ):
-                raise RuntimeError(
-                    f"Cannot connect music player: Guild {self.guild.id} is currently running an active Voice Meeting."
-                )
-
-            # 1. Pre-flight permission and capacity verification
-            me = self.guild.me
-            perms = channel.permissions_for(me)
-            if not perms.connect:
-                raise RuntimeError(f"Kyro lacks 'Connect' permission to join {channel.name}.")
-            if channel.user_limit and channel.user_limit > 0:
-                if len(channel.members) >= channel.user_limit and not perms.move_members:
-                    raise RuntimeError(f"Voice channel {channel.name} is full ({len(channel.members)}/{channel.user_limit} members).")
-
-            vc = self.guild.voice_client
-            if vc and isinstance(vc, wavelink.Player) and vc.connected:
-                if vc.channel and vc.channel.id != channel.id:
-                    try:
-                        # Bounded: move_to talks to the Lavalink REST API.
-                        await asyncio.wait_for(
-                            vc.move_to(channel),
-                            timeout=LAVALINK_OP_TIMEOUT,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Guild {self.guild.id}: move_to {channel.name} failed: "
-                            f"{type(e).__name__}: {e}"
-                        )
-                self.voice_client = vc
-                return
-
-            # If connected to an invalid, disconnected, or non-wavelink player, clean it up first
-            if vc:
-                # Never disconnect an active Meeting VoiceRecvClient!
+            self._is_connecting = True
+            try:
+                # Check if this guild has an active or in-flight Voice Meeting session
+                meeting_cog = self.bot.get_cog("Meeting")
                 if meeting_cog and (
                     self.guild.id in getattr(meeting_cog, "_sessions", {})
                     or self.guild.id in getattr(meeting_cog, "_connecting_guilds", set())
                 ):
-                    return
-
-                # Flag the disconnect as self-initiated so the VOICE_STATE_UPDATE that
-                # Discord sends back for it cannot tear down the session we are about
-                # to establish.
-                self._disconnect_expected_until = time.monotonic() + 5.0
-                try:
-                    # Bounded: this talks to the Lavalink REST API or native voice client
-                    await asyncio.wait_for(
-                        vc.disconnect(force=True),
-                        timeout=2.0 if not isinstance(vc, wavelink.Player) else LAVALINK_OP_TIMEOUT,
+                    raise RuntimeError(
+                        f"Cannot connect music player: Guild {self.guild.id} is currently running an active Voice Meeting."
                     )
-                except Exception:
-                    pass
-                try:
-                    vc.cleanup()
-                except Exception:
-                    pass
-                self.voice_client = None
 
-            # Purge any lingering voice client cache so the next handshake starts clean.
-            #
-            # IMPORTANT: a raw `change_voice_state(channel=None)` must NOT be sent here.
-            # Discord answers it with a VOICE_STATE_UPDATE(channel_id=None) that can land
-            # AFTER the new connection is already live (gateway RTT is often >300ms),
-            # and discord.py then treats it as "we were externally disconnected from
-            # voice" and tears the fresh session down. The net effect is: the bot joins
-            # the channel and immediately disconnects itself.
-            # discord.py's own `VoiceClient.disconnect(wait=True)` already orders this
-            # correctly, so we only clear the local cache here.
-            try:
-                self.bot._connection._remove_voice_client(self.guild.id)
-            except Exception:
-                pass
+                # 1. Pre-flight permission and capacity verification
+                me = self.guild.me
+                perms = channel.permissions_for(me)
+                if not perms.connect:
+                    raise RuntimeError(f"Kyro lacks 'Connect' permission to join {channel.name}.")
+                if channel.user_limit and channel.user_limit > 0:
+                    if len(channel.members) >= channel.user_limit and not perms.move_members:
+                        raise RuntimeError(f"Voice channel {channel.name} is full ({len(channel.members)}/{channel.user_limit} members).")
 
-            # Ensure Wavelink node is alive and connected before connecting player
-            node = None
-            try:
-                node = wavelink.Pool.get_node()
-            except Exception:
-                pass
+                vc = self.guild.voice_client
+                me_voice = self.guild.me.voice if self.guild.me else None
+                bot_in_target_channel = bool(
+                    me_voice is not None
+                    and me_voice.channel is not None
+                    and me_voice.channel.id == channel.id
+                )
 
-            if not node or node.status != wavelink.NodeStatus.CONNECTED:
-                logger.info("Wavelink node disconnected or missing. Re-establishing connection...")
-                try:
-                    await close_pool_nodes()
-                    node = await connect_lavalink_node(
-                        self.bot,
-                        inactive_player_timeout=300,
-                    )
-                except Exception as e:
-                    logger.error(f"On-demand Lavalink node connect error: {err_text(e)}")
-
-            # ── Node REST health probe ──
-            # Only probe if node status is not already CONNECTED
-            if node is not None and getattr(node, "status", None) != wavelink.NodeStatus.CONNECTED:
-                if not await self._probe_lavalink_node(node):
-                    logger.warning(
-                        f"Guild {self.guild.id}: Lavalink REST API is not responsive, "
-                        "re-establishing the node before connecting."
-                    )
-                    agent = getattr(self.bot, "_music_agent", None)
-                    if agent is not None:
+                # Case 1: Already fully connected to target channel
+                if vc and isinstance(vc, wavelink.Player) and vc.connected:
+                    if vc.channel and vc.channel.id == channel.id:
+                        self.voice_client = vc
+                        return
+                    if vc.channel and vc.channel.id != channel.id:
                         try:
-                            await agent.heal_node(force=True)
-                        except Exception as heal_err:
-                            logger.error(f"Guild {self.guild.id}: Lavalink node heal failed: {heal_err}")
-                    try:
-                        node = wavelink.Pool.get_node()
-                    except Exception:
-                        node = None
-
-            # Connect as Wavelink Player with automatic retry on temporary Discord gateway blip
-            last_error: Optional[BaseException] = None
-            for attempt in range(3):
-                try:
-                    self.voice_client = await channel.connect(cls=wavelink.Player, self_deaf=True, timeout=20.0)
-                    if self.voice_client:
-                        self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
-                    last_error = None
-                    break
-                except Exception as e:
-                    last_error = e
-                    logger.warning(
-                        f"Guild {self.guild.id}: Voice connect attempt {attempt + 1}/3 failed "
-                        f"({type(e).__name__}: {e}), clearing voice state and retrying..."
-                    )
-                    stale_vc = self.guild.voice_client
-                    if stale_vc:
-                        self._disconnect_expected_until = time.monotonic() + 5.0
-                        try:
-                            # Bounded: this talks to the Lavalink REST API.
+                            # Bounded: move_to talks to the Lavalink REST API.
                             await asyncio.wait_for(
-                                stale_vc.disconnect(force=True),
+                                vc.move_to(channel),
                                 timeout=LAVALINK_OP_TIMEOUT,
                             )
-                        except Exception:
-                            pass
-                        try:
-                            stale_vc.cleanup()
-                        except Exception:
-                            pass
+                            self.voice_client = vc
+                            return
+                        except Exception as e:
+                            logger.warning(
+                                f"Guild {self.guild.id}: move_to {channel.name} failed: "
+                                f"{type(e).__name__}: {e}"
+                            )
+
+                # Case 2: Bot is already physically in the target channel on Discord Gateway,
+                # re-sync with Lavalink directly without disconnecting from Discord!
+                if bot_in_target_channel and vc and isinstance(vc, wavelink.Player):
+                    logger.info(
+                        f"Guild {self.guild.id}: Bot already in #{channel.name}, syncing voice state with Lavalink..."
+                    )
                     try:
-                        self.bot._connection._remove_voice_client(self.guild.id)
+                        if vc.node and hasattr(vc.node, "_players"):
+                            vc.node._players[self.guild.id] = vc
+                        if hasattr(vc, "_dispatch_voice_update"):
+                            await vc._dispatch_voice_update()
+                        if getattr(vc, "connected", False):
+                            self.voice_client = vc
+                            return
+                    except Exception as sync_err:
+                        logger.warning(f"Guild {self.guild.id}: In-place voice sync failed: {sync_err}")
+
+                # If connected to an invalid, disconnected, or non-wavelink player, clean it up first
+                if vc:
+                    # Never disconnect an active Meeting VoiceRecvClient!
+                    if meeting_cog and (
+                        self.guild.id in getattr(meeting_cog, "_sessions", {})
+                        or self.guild.id in getattr(meeting_cog, "_connecting_guilds", set())
+                    ):
+                        return
+
+                    # Flag the disconnect as self-initiated so the VOICE_STATE_UPDATE that
+                    # Discord sends back for it cannot tear down the session we are about
+                    # to establish.
+                    self._disconnect_expected_until = time.monotonic() + 6.0
+                    try:
+                        # Bounded: this talks to the Lavalink REST API or native voice client
+                        await asyncio.wait_for(
+                            vc.disconnect(force=True),
+                            timeout=2.0 if not isinstance(vc, wavelink.Player) else LAVALINK_OP_TIMEOUT,
+                        )
                     except Exception:
                         pass
                     try:
-                        # Flagged as self-initiated: the VOICE_STATE_UPDATE this triggers
-                        # must not tear down the session created by the next attempt.
-                        self._disconnect_expected_until = time.monotonic() + 5.0
-                        await self.guild.change_voice_state(channel=None)
+                        vc.cleanup()
                     except Exception:
                         pass
                     self.voice_client = None
+                    # Short gateway breathing pause to let Discord process the disconnect before connect opcode
+                    await asyncio.sleep(0.25)
 
-                    # After the first failure, force a node re-sync: the handshake
-                    # waits on the node REST call, so a stale node stalls every retry.
-                    if attempt == 0:
+                # Purge lingering voice client cache so next handshake starts clean
+                try:
+                    self.bot._connection._remove_voice_client(self.guild.id)
+                except Exception:
+                    pass
+
+                # Ensure Wavelink node is alive and connected before connecting player
+                node = None
+                try:
+                    node = wavelink.Pool.get_node()
+                except Exception:
+                    pass
+
+                if not node or node.status != wavelink.NodeStatus.CONNECTED:
+                    logger.info("Wavelink node disconnected or missing. Re-establishing connection...")
+                    try:
+                        await close_pool_nodes()
+                        node = await connect_lavalink_node(
+                            self.bot,
+                            inactive_player_timeout=300,
+                        )
+                    except Exception as e:
+                        logger.error(f"On-demand Lavalink node connect error: {err_text(e)}")
+
+                # ── Node REST health probe ──
+                # Only probe if node status is not already CONNECTED
+                if node is not None and getattr(node, "status", None) != wavelink.NodeStatus.CONNECTED:
+                    if not await self._probe_lavalink_node(node):
+                        logger.warning(
+                            f"Guild {self.guild.id}: Lavalink REST API is not responsive, "
+                            "re-establishing the node before connecting."
+                        )
                         agent = getattr(self.bot, "_music_agent", None)
                         if agent is not None:
                             try:
                                 await agent.heal_node(force=True)
                             except Exception as heal_err:
                                 logger.error(f"Guild {self.guild.id}: Lavalink node heal failed: {heal_err}")
-                    await asyncio.sleep(1.5 * (attempt + 1))
+                        try:
+                            node = wavelink.Pool.get_node()
+                        except Exception:
+                            node = None
 
-            if last_error is not None:
-                logger.error(f"Guild {self.guild.id}: Wavelink connect error: {last_error}")
-                if hasattr(self.bot, "sentinel") and self.bot.sentinel:
-                    from src.sentinel.models import SubsystemType, IncidentSeverity
-                    self.bot.sentinel.record_incident(
-                        SubsystemType.VOICE,
-                        IncidentSeverity.WARNING,
-                        "Voice Gateway Connect Failure",
-                        f"Failed connecting to channel {channel.name} ({channel.id}): "
-                        f"{type(last_error).__name__}: {last_error}",
-                        action_taken="Purged stale voice client & gateway state (queue preserved)",
-                        resolved=True,
-                        guild_id=self.guild.id,
-                    )
-                raise last_error
+                # Connect as hardened KyroPlayer with fast retry on temporary Discord gateway blip
+                last_error: Optional[BaseException] = None
+                for attempt in range(2):
+                    try:
+                        self.voice_client = await channel.connect(cls=KyroPlayer, self_deaf=True, timeout=12.0)
+                        if self.voice_client:
+                            self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
+                        last_error = None
+                        break
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(
+                            f"Guild {self.guild.id}: Voice connect attempt {attempt + 1}/2 failed "
+                            f"({type(e).__name__}: {e}), refreshing voice state..."
+                        )
+                        stale_vc = self.guild.voice_client
+                        if stale_vc:
+                            self._disconnect_expected_until = time.monotonic() + 6.0
+                            try:
+                                await asyncio.wait_for(
+                                    stale_vc.disconnect(force=True),
+                                    timeout=2.0,
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                stale_vc.cleanup()
+                            except Exception:
+                                pass
+                        try:
+                            self.bot._connection._remove_voice_client(self.guild.id)
+                        except Exception:
+                            pass
+                        self.voice_client = None
+
+                        # After first failure, heal node only if unresponsive and pause 0.5s before second attempt
+                        if attempt == 0:
+                            agent = getattr(self.bot, "_music_agent", None)
+                            if agent is not None:
+                                try:
+                                    await agent.heal_node(force=False)
+                                except Exception as heal_err:
+                                    logger.error(f"Guild {self.guild.id}: Lavalink node heal failed: {heal_err}")
+                            await asyncio.sleep(0.5)
+
+                if last_error is not None:
+                    logger.error(f"Guild {self.guild.id}: Wavelink connect error: {last_error}")
+                    if hasattr(self.bot, "sentinel") and self.bot.sentinel:
+                        from src.sentinel.models import SubsystemType, IncidentSeverity
+                        self.bot.sentinel.record_incident(
+                            SubsystemType.VOICE,
+                            IncidentSeverity.WARNING,
+                            "Voice Gateway Connect Failure",
+                            f"Failed connecting to channel {channel.name} ({channel.id}): "
+                            f"{type(last_error).__name__}: {last_error}",
+                            action_taken="Purged stale voice client & gateway state (queue preserved)",
+                            resolved=True,
+                            guild_id=self.guild.id,
+                        )
+                    raise last_error
+            finally:
+                self._is_connecting = False
 
     async def _probe_lavalink_node(self, node: Any, timeout: float = 4.0) -> bool:
         """

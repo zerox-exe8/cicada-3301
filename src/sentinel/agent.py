@@ -388,11 +388,14 @@ class KyroSentinel:
 
         # A node can report CONNECTED while its REST API is hung. Every player
         # operation goes through the REST API, so the node is only really healthy
-        # when the REST API answers too.
+        # when the REST API answers too. Double-check with a 2-second debounce
+        # so a single momentary network jitter never nukes the active music pool.
         if not await probe_node(node):
-            await self._trigger_lavalink_reconnect(
-                reason="Node reports CONNECTED but its REST API is unresponsive"
-            )
+            await asyncio.sleep(2.0)
+            if not await probe_node(node):
+                await self._trigger_lavalink_reconnect(
+                    reason="Node reports CONNECTED but its REST API is unresponsive after retry"
+                )
 
     async def _trigger_lavalink_reconnect(self, reason: str) -> None:
         """Auto-reconnect Lavalink node with circuit breaker protection."""
@@ -496,7 +499,11 @@ class KyroSentinel:
                 if music_cog and hasattr(music_cog, "controller"):
                     player = music_cog.controller.get_player(guild.id)
                     if player:
-                        if player.playing or getattr(player, "_disconnect_expected_until", 0) > time.monotonic():
+                        if (
+                            player.is_playing
+                            or getattr(player, "_is_connecting", False)
+                            or getattr(player, "_disconnect_expected_until", 0) > time.monotonic()
+                        ):
                             self._zombie_voice_candidates.pop(guild.id, None)
                             continue
 

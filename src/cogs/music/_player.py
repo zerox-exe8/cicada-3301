@@ -147,7 +147,7 @@ class KyroPlayer(wavelink.Player):
     async def connect(
         self,
         *,
-        timeout: float = 12.0,
+        timeout: float = 4.0,
         reconnect: bool = True,
         self_deaf: bool = False,
         self_mute: bool = False,
@@ -359,25 +359,22 @@ class GuildPlayer:
                     ):
                         return
 
-                    # Flag the disconnect as self-initiated so the VOICE_STATE_UPDATE that
-                    # Discord sends back for it cannot tear down the session we are about
-                    # to establish.
-                    self._disconnect_expected_until = time.monotonic() + 6.0
-                    try:
-                        # Bounded: this talks to the Lavalink REST API or native voice client
-                        await asyncio.wait_for(
-                            vc.disconnect(force=True),
-                            timeout=2.0 if not isinstance(vc, wavelink.Player) else LAVALINK_OP_TIMEOUT,
-                        )
-                    except Exception:
-                        pass
+                    # Only perform gateway disconnect if the player is actively connected on Discord
+                    if getattr(vc, "connected", False):
+                        self._disconnect_expected_until = time.monotonic() + 4.0
+                        try:
+                            await asyncio.wait_for(
+                                vc.disconnect(force=True),
+                                timeout=1.5,
+                            )
+                        except Exception:
+                            pass
+                        await asyncio.sleep(0.15)
                     try:
                         vc.cleanup()
                     except Exception:
                         pass
                     self.voice_client = None
-                    # Short gateway breathing pause to let Discord process the disconnect before connect opcode
-                    await asyncio.sleep(0.25)
 
                 # Purge lingering voice client cache so next handshake starts clean
                 try:
@@ -426,7 +423,7 @@ class GuildPlayer:
                 last_error: Optional[BaseException] = None
                 for attempt in range(2):
                     try:
-                        self.voice_client = await channel.connect(cls=KyroPlayer, self_deaf=True, timeout=12.0)
+                        self.voice_client = await channel.connect(cls=KyroPlayer, self_deaf=True, timeout=4.0)
                         if self.voice_client:
                             self.voice_client.autoplay = wavelink.AutoPlayMode.disabled
                         last_error = None
@@ -439,14 +436,15 @@ class GuildPlayer:
                         )
                         stale_vc = self.guild.voice_client
                         if stale_vc:
-                            self._disconnect_expected_until = time.monotonic() + 6.0
-                            try:
-                                await asyncio.wait_for(
-                                    stale_vc.disconnect(force=True),
-                                    timeout=2.0,
-                                )
-                            except Exception:
-                                pass
+                            self._disconnect_expected_until = time.monotonic() + 4.0
+                            if getattr(stale_vc, "connected", False):
+                                try:
+                                    await asyncio.wait_for(
+                                        stale_vc.disconnect(force=True),
+                                        timeout=1.5,
+                                    )
+                                except Exception:
+                                    pass
                             try:
                                 stale_vc.cleanup()
                             except Exception:
@@ -457,7 +455,7 @@ class GuildPlayer:
                             pass
                         self.voice_client = None
 
-                        # After first failure, heal node only if unresponsive and pause 0.5s before second attempt
+                        # After first failure, heal node only if unresponsive and pause 0.3s before second attempt
                         if attempt == 0:
                             agent = getattr(self.bot, "_music_agent", None)
                             if agent is not None:
@@ -465,7 +463,7 @@ class GuildPlayer:
                                     await agent.heal_node(force=False)
                                 except Exception as heal_err:
                                     logger.error(f"Guild {self.guild.id}: Lavalink node heal failed: {heal_err}")
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(0.3)
 
                 if last_error is not None:
                     logger.error(f"Guild {self.guild.id}: Wavelink connect error: {last_error}")
@@ -667,7 +665,7 @@ class GuildPlayer:
         url = track.url or ""
         if url.startswith(("http://", "https://")) and not any(sp in url for sp in ("spotify.com", "spoti.fi")):
             try:
-                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=5.0)
+                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=3.0)
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
                     track._playable = p
@@ -691,7 +689,7 @@ class GuildPlayer:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(full_query, source=wavelink.TrackSource.YouTubeMusic),
-                    timeout=4.0,
+                    timeout=3.0,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
@@ -706,7 +704,7 @@ class GuildPlayer:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=4.0,
+                    timeout=2.5,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]

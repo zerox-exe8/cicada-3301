@@ -241,6 +241,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         requester_id=ctx.author.id,
                         query=first_item.query or f"{first_item.title} {first_item.author}",
                     )
+                    first_track._playable = getattr(first_item, "_playable", None)
                     remaining_tracks = [
                         Track(
                             title=it.title,
@@ -294,6 +295,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         requester_id=ctx.author.id,
                         query=first_item.query or f"{first_item.title} {first_item.author}",
                     )
+                    first_track._playable = getattr(first_item, "_playable", None)
                     remaining_tracks = [
                         Track(
                             title=it.title,
@@ -540,59 +542,22 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             except Exception as e:
                 logger.debug(f"Direct URL search notice: {e}")
 
-        # Case B: NativeExtractor (Lavalink YouTube/Spotify Engine)
+        # Case B: NativeExtractor (High-Speed Lavalink YouTube Music / YouTube Engine)
         if not track:
             try:
                 track = await asyncio.wait_for(
                     NativeExtractor.extract(lookup_target, requester=ctx.author.display_name),
-                    timeout=8.0
+                    timeout=5.0
                 )
             except Exception as e:
                 logger.debug(f"NativeExtractor search notice: {e}")
 
-        # Fallback 1: Lavalink YouTube Music Search
-        if not track and not is_direct_url:
-            try:
-                results = await asyncio.wait_for(
-                    wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTubeMusic),
-                    timeout=8.0
-                )
-                if results and not isinstance(results, wavelink.Playlist):
-                    chosen = results[0]
-                    target_low = lookup_target.lower()
-                    for cand in results[:5]:
-                        c_t = (cand.title or "").lower()
-                        c_a = (cand.author or "").lower()
-                        has_unwanted = any(
-                            kw in c_t or kw in c_a
-                            for kw in UNWANTED_VERSION_KEYWORDS
-                            if kw not in target_low
-                        )
-                        if not has_unwanted:
-                            chosen = cand
-                            break
-                    top_p = chosen
-                    track = Track(
-                        title=top_p.title or "Unknown Track",
-                        author=top_p.author or "Unknown Artist",
-                        url=top_p.uri or query,
-                        stream_url="",
-                        duration=int((top_p.length or 0) / 1000),
-                        thumbnail=top_p.artwork,
-                        requester=ctx.author.display_name,
-                        requester_id=ctx.author.id,
-                        query=query,
-                    )
-                    track._playable = top_p
-            except Exception as e:
-                logger.debug(f"YouTube Music search notice: {e}")
-
-        # Fallback 2: YouTube Search via Lavalink
+        # Fast Fallback: Direct YouTube Search via Lavalink (only if NativeExtractor missed)
         if not track and not is_direct_url:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube),
-                    timeout=8.0
+                    timeout=3.5
                 )
                 if results and not isinstance(results, wavelink.Playlist):
                     chosen = results[0]
@@ -623,30 +588,6 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     track._playable = top_p
             except Exception as e:
                 logger.debug(f"YouTube fallback search notice: {e}")
-
-        # Fallback 3: Spotify Server-Side Bridge Search via Lavalink
-        if not track and not is_direct_url:
-            try:
-                results = await asyncio.wait_for(
-                    wavelink.Playable.search(lookup_target, source="spsearch"),
-                    timeout=8.0
-                )
-                if results and not isinstance(results, wavelink.Playlist):
-                    top_p = results[0]
-                    track = Track(
-                        title=top_p.title or "Unknown Track",
-                        author=top_p.author or "Unknown Artist",
-                        url=top_p.uri or query,
-                        stream_url="",
-                        duration=int((top_p.length or 0) / 1000),
-                        thumbnail=top_p.artwork,
-                        requester=ctx.author.display_name,
-                        requester_id=ctx.author.id,
-                        query=query,
-                    )
-                    track._playable = top_p
-            except Exception as e:
-                logger.debug(f"Spotify bridge search notice: {e}")
 
         # If still no track found, edit the searching message to inform user
         if not track:

@@ -398,7 +398,7 @@ class NativeExtractor:
         if cache_key in _SEARCH_CACHE:
             cached_time, cached_track = _SEARCH_CACHE[cache_key]
             if now - cached_time < _CACHE_TTL:
-                return Track(
+                cached_res = Track(
                     title=cached_track.title,
                     author=cached_track.author,
                     url=cached_track.url,
@@ -409,6 +409,8 @@ class NativeExtractor:
                     is_autoplay=is_autoplay,
                     query=cached_track.query,
                 )
+                cached_res._playable = getattr(cached_track, "_playable", None)
+                return cached_res
 
         import wavelink
 
@@ -479,7 +481,7 @@ class NativeExtractor:
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
-                timeout=6.0,
+                timeout=3.5,
             )
             if results:
                 candidates = results if isinstance(results, list) else results.tracks
@@ -515,7 +517,7 @@ class NativeExtractor:
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTube),
-                timeout=6.0,
+                timeout=3.0,
             )
             if results:
                 candidates = results if isinstance(results, list) else results.tracks
@@ -552,7 +554,7 @@ class NativeExtractor:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=6.0,
+                    timeout=2.5,
                 )
                 if results:
                     top = results[0] if isinstance(results, list) else results.tracks[0]

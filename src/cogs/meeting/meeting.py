@@ -26,198 +26,258 @@ try:
     VOICE_RECV_AVAILABLE = True
     AudioSinkBase = voice_recv.AudioSink
 
-    # Guard: Ensures all monkey-patches are applied EXACTLY ONCE across the entire
-    # process lifetime, even if this module is re-imported or the cog is hot-reloaded.
-    # We store this on the 'discord' module because discord is never reloaded by cog reloads.
-    _MEETING_PATCHES_APPLIED: bool = getattr(discord, "_KYRO_MEETING_PATCHES_APPLIED", False)
+    # Persistent hooks cache to ensure monkey-patches wrap the original methods
+    # safely even across cog reloads without stacking or wrapping recursively.
+    import davey
+    import discord.gateway as _gw
+    import discord.voice_state as _vs
+    import discord.ext.voice_recv.opus as _vropus
+    import discord.ext.voice_recv.reader as _vrreader
 
-    if not _MEETING_PATCHES_APPLIED:
-        # 1. Discord.py bug workaround: SocketReader starts paused and clears _idle_paused.
-        # Its register() checks if self._idle_paused before setting _running, which evaluates
-        # to False, leaving the socket reading thread permanently deadlocked.
-        import discord.voice_state as _vs
+    # 1. Discord.py bug workaround: SocketReader starts paused and clears _idle_paused.
+    def _fixed_socket_reader_register(self, callback) -> None:
+        self._callbacks.append(callback)
+        self._idle_paused = False
+        self._running.set()
 
-        def _fixed_socket_reader_register(self, callback) -> None:
-            self._callbacks.append(callback)
-            self._idle_paused = False
-            self._running.set()
+    _vs.SocketReader.register = _fixed_socket_reader_register
 
-        _vs.SocketReader.register = _fixed_socket_reader_register
-
-        # 2. Discord.py DAVE Voice WebSocket Patch:
-        # Discord.py 2.7.1 places DAVE_PREPARE_EPOCH (Opcode 24) and transitions under
-        # 'elif self._connection.dave_session:'. If SESSION_DESCRIPTION starts at protocol 0,
-        # dave_session is None, skipping DAVE_PREPARE_EPOCH, leaving dave_session uninitialized
-        # and dropping all subsequent binary MLS frames.
-        import davey
-        import discord.gateway as _gw
-        import discord.ext.voice_recv.opus as _vropus
-
+    # 2. Discord.py DAVE Voice WebSocket Patch:
+    _orig_voice_ws_received_message = getattr(_gw.DiscordVoiceWebSocket, "_kyro_orig_ws_recv_msg", None)
+    if _orig_voice_ws_received_message is None:
         _orig_voice_ws_received_message = _gw.DiscordVoiceWebSocket.received_message
+        _gw.DiscordVoiceWebSocket._kyro_orig_ws_recv_msg = _orig_voice_ws_received_message
+
+    _orig_voice_ws_received_binary_message = getattr(_gw.DiscordVoiceWebSocket, "_kyro_orig_ws_recv_bin", None)
+    if _orig_voice_ws_received_binary_message is None:
         _orig_voice_ws_received_binary_message = _gw.DiscordVoiceWebSocket.received_binary_message
+        _gw.DiscordVoiceWebSocket._kyro_orig_ws_recv_bin = _orig_voice_ws_received_binary_message
 
-        async def _patched_voice_ws_received_message(self: _gw.DiscordVoiceWebSocket, msg: dict[str, Any]) -> None:
-            op = msg.get("op")
-            data = msg.get("d") or {}
-            state = self._connection
+    async def _patched_voice_ws_received_message(self: _gw.DiscordVoiceWebSocket, msg: dict[str, Any]) -> None:
+        op = msg.get("op")
+        data = msg.get("d") or {}
+        state = self._connection
 
-            if op == self.DAVE_PREPARE_EPOCH:
-                epoch = data.get("epoch")
-                proto_ver = data.get("protocol_version", 1)
-                if epoch == 1:
-                    state.dave_protocol_version = proto_ver
-                    try:
-                        await state.reinit_dave_session()
-                    except Exception:
-                        pass
-
-            elif op == self.DAVE_PREPARE_TRANSITION:
-                transition_id = data.get("transition_id")
-                proto_ver = data.get("protocol_version", 1)
-                if transition_id is not None:
-                    state.dave_pending_transitions[transition_id] = proto_ver
-                    if transition_id == 0:
-                        await state._execute_transition(transition_id)
-                    else:
-                        if proto_ver == 0 and state.dave_session:
-                            state.dave_session.set_passthrough_mode(True, 120)
-                        await self.send_transition_ready(transition_id)
-
-            elif op == self.DAVE_EXECUTE_TRANSITION:
-                transition_id = data.get("transition_id")
-                if transition_id is not None:
-                    await state._execute_transition(transition_id)
-
-            return await _orig_voice_ws_received_message(self, msg)
-
-        async def _patched_voice_ws_received_binary_message(self: _gw.DiscordVoiceWebSocket, msg: bytes) -> None:
-            if len(msg) >= 3:
-                op = msg[2]
-                # MLS binary opcodes: 25=EXTERNAL_SENDER, 27=PROPOSALS, 29=ANNOUNCE_COMMIT_TRANSITION, 30=WELCOME
-                if op in (
-                    self.MLS_EXTERNAL_SENDER,
-                    self.MLS_PROPOSALS,
-                    self.MLS_ANNOUNCE_COMMIT_TRANSITION,
-                    self.MLS_WELCOME,
-                ):
-                    state = self._connection
-                    if state.dave_session is None:
-                        state.dave_protocol_version = max(getattr(state, "dave_protocol_version", 1), 1)
-                        try:
-                            await state.reinit_dave_session()
-                        except Exception:
-                            pass
-
-            return await _orig_voice_ws_received_binary_message(self, msg)
-
-        _gw.DiscordVoiceWebSocket.received_message = _patched_voice_ws_received_message
-        _gw.DiscordVoiceWebSocket.received_binary_message = _patched_voice_ws_received_binary_message
-
-        # 3. Discord-ext-voice-recv DAVE Decryption & Ciphertext Guard:
-        # If dave_session is ready, decrypt inbound packets using per-user ratchet keys.
-        # If decryption fails or session is not ready in an E2EE room, DROP the frame rather than
-        # passing raw DAVE ciphertext into libopus (which throws OpusError and falls back to silence zeros).
-        _orig_dave_decrypt_inner = _vropus.PacketDecoder._dave_decrypt_inner
-
-        def _patched_dave_decrypt_inner(self: _vropus.PacketDecoder, packet: Any) -> bool:
-            sink = getattr(self, "sink", None)
-            if packet.is_silence():
-                if sink:
-                    sink._silence_pkts = getattr(sink, "_silence_pkts", 0) + 1
-                return True
-
-            vc = getattr(self.sink, "voice_client", None) if self.sink else None
-            state = getattr(vc, "_connection", None)
-            session = getattr(state, "dave_session", None)
-            dave_ver = getattr(state, "dave_protocol_version", 0)
-
-            # If DAVE session is ready, ALWAYS decrypt with MLS key
-            if session is not None and getattr(session, "ready", False):
-                user_id = self._cached_id
-                if user_id is None and vc:
-                    user_id = self._cached_id = vc._get_id_from_ssrc(self.ssrc)
-                if user_id is None:
-                    if sink:
-                        sink._dave_fail = getattr(sink, "_dave_fail", 0) + 1
-                        sink._last_dave_err = f"ssrc {self.ssrc} unmapped"
-                    self._dave_log_drop("ssrc not mapped to a user yet")
-                    return False
-
+        if op == self.DAVE_PREPARE_EPOCH:
+            epoch = data.get("epoch")
+            proto_ver = data.get("protocol_version", 1)
+            logger.info(f"DAVE Voice Gateway: DAVE_PREPARE_EPOCH (epoch={epoch}, proto_ver={proto_ver})")
+            if epoch == 1:
+                state.dave_protocol_version = proto_ver
                 try:
-                    packet.decrypted_data = session.decrypt(
-                        int(user_id), davey.MediaType.audio, bytes(packet.decrypted_data)
-                    )
-                    if sink:
-                        sink._dave_succ = getattr(sink, "_dave_succ", 0) + 1
-                        if user_id:
-                            sink._ssrc_to_uid[self.ssrc] = user_id
-                            if vc and getattr(vc, "guild", None):
-                                m = vc.guild.get_member(user_id)
-                                if m:
-                                    sink.speaker_names[user_id] = m.display_name
-                                elif user_id not in sink.speaker_names:
-                                    sink.speaker_names[user_id] = f"User-{user_id}"
-                    return True
-                except BaseException as e:
-                    if isinstance(e, (KeyboardInterrupt, SystemExit)):
-                        raise
-                    err_msg = str(e) or repr(e)
-                    if sink:
-                        sink._last_dave_err = err_msg
-                        sink._dave_fail = getattr(sink, "_dave_fail", 0) + 1
-                    if "UnencryptedWhenPassthroughDisabled" in err_msg:
-                        if sink:
-                            sink._dave_pass = getattr(sink, "_dave_pass", 0) + 1
+                    await state.reinit_dave_session()
+                    logger.info(f"Initialized DAVE v{proto_ver} session and sent MLS Key Package.")
+                except Exception as e:
+                    logger.warning(f"Error during DAVE reinit: {e}")
+            return
+
+        elif op == self.DAVE_PREPARE_TRANSITION:
+            transition_id = data.get("transition_id")
+            proto_ver = data.get("protocol_version", 1)
+            logger.info(f"DAVE Voice Gateway: DAVE_PREPARE_TRANSITION (transition_id={transition_id}, proto_ver={proto_ver})")
+            if transition_id is not None:
+                state.dave_pending_transitions[transition_id] = proto_ver
+                if transition_id == 0:
+                    await state._execute_transition(transition_id)
+                else:
+                    if proto_ver == 0 and state.dave_session:
                         try:
-                            session.set_passthrough_mode(True, 120)
+                            state.dave_session.set_passthrough_mode(True, 120)
                         except Exception:
                             pass
-                        return _orig_dave_decrypt_inner(self, packet)
-                    self._dave_log_drop(f"DAVE decrypt error: {err_msg}")
-                    return False
+                    await self.send_transition_ready(transition_id)
+            return
 
-            if dave_ver > 0:
-                # If session is in passthrough mode, decode standard frames directly
-                if session is not None and getattr(session, "passthrough_mode", False):
-                    return _orig_dave_decrypt_inner(self, packet)
+        elif op == self.DAVE_EXECUTE_TRANSITION:
+            transition_id = data.get("transition_id")
+            logger.info(f"DAVE Voice Gateway: DAVE_EXECUTE_TRANSITION (transition_id={transition_id})")
+            if transition_id is not None:
+                await state._execute_transition(transition_id)
+            return
 
+        return await _orig_voice_ws_received_message(self, msg)
+
+    async def _patched_voice_ws_received_binary_message(self: _gw.DiscordVoiceWebSocket, msg: bytes) -> None:
+        if len(msg) >= 3:
+            self.seq_ack = struct.unpack_from(">H", msg, 0)[0]
+            op = msg[2]
+            state = self._connection
+            if state.dave_session is None and op in (
+                self.MLS_EXTERNAL_SENDER,
+                self.MLS_PROPOSALS,
+                self.MLS_ANNOUNCE_COMMIT_TRANSITION,
+                self.MLS_WELCOME,
+            ):
+                state.dave_protocol_version = max(getattr(state, "dave_protocol_version", 1), 1)
+                try:
+                    await state.reinit_dave_session()
+                    logger.info("Initialized DAVE session from incoming MLS binary message.")
+                except Exception as e:
+                    logger.warning(f"DAVE binary pre-init error: {e}")
+
+            if state.dave_session is None:
+                return
+
+            if op == self.MLS_EXTERNAL_SENDER:
+                try:
+                    state.dave_session.set_external_sender(msg[3:])
+                    logger.debug("DAVE MLS external sender set.")
+                except Exception as e:
+                    logger.warning(f"DAVE set_external_sender error: {e}")
+                return
+            elif op == self.MLS_PROPOSALS:
+                optype = msg[3]
+                try:
+                    result = state.dave_session.process_proposals(
+                        davey.ProposalsOperationType.append if optype == 0 else davey.ProposalsOperationType.revoke,
+                        msg[4:],
+                    )
+                    if isinstance(result, davey.CommitWelcome):
+                        await self.send_binary(
+                            self.MLS_COMMIT_WELCOME,
+                            result.commit + result.welcome if result.welcome else result.commit,
+                        )
+                    logger.debug("DAVE MLS proposals processed.")
+                except Exception as e:
+                    logger.warning(f"DAVE process_proposals error: {e}")
+                return
+            elif op == self.MLS_ANNOUNCE_COMMIT_TRANSITION:
+                transition_id = struct.unpack_from(">H", msg, 3)[0]
+                try:
+                    state.dave_session.process_commit(msg[5:])
+                    if transition_id != 0:
+                        state.dave_pending_transitions[transition_id] = state.dave_protocol_version
+                        await self.send_transition_ready(transition_id)
+                    ready = getattr(state.dave_session, "ready", False)
+                    logger.info(f"DAVE MLS commit processed for transition {transition_id} (ready={ready}).")
+                except Exception as e:
+                    logger.warning(f"DAVE MLS process_commit failed for transition {transition_id}: {e}")
+                    await state._recover_from_invalid_commit(transition_id)
+                return
+            elif op == self.MLS_WELCOME:
+                transition_id = struct.unpack_from(">H", msg, 3)[0]
+                try:
+                    state.dave_session.process_welcome(msg[5:])
+                    if transition_id != 0:
+                        state.dave_pending_transitions[transition_id] = state.dave_protocol_version
+                        await self.send_transition_ready(transition_id)
+                    ready = getattr(state.dave_session, "ready", False)
+                    logger.info(f"DAVE MLS welcome processed for transition {transition_id} (ready={ready}).")
+                except Exception as e:
+                    logger.warning(f"DAVE MLS process_welcome failed for transition {transition_id}: {e}")
+                    await state._recover_from_invalid_commit(transition_id)
+                return
+
+        return await _orig_voice_ws_received_binary_message(self, msg)
+
+    _gw.DiscordVoiceWebSocket.received_message = _patched_voice_ws_received_message
+    _gw.DiscordVoiceWebSocket.received_binary_message = _patched_voice_ws_received_binary_message
+
+    # 3. Discord-ext-voice-recv DAVE Decryption & Ciphertext Guard:
+    _orig_dave_decrypt_inner = getattr(_vropus.PacketDecoder, "_kyro_orig_dave_decrypt_inner", None)
+    if _orig_dave_decrypt_inner is None:
+        _orig_dave_decrypt_inner = _vropus.PacketDecoder._dave_decrypt_inner
+        _vropus.PacketDecoder._kyro_orig_dave_decrypt_inner = _orig_dave_decrypt_inner
+
+    def _patched_dave_decrypt_inner(self: _vropus.PacketDecoder, packet: Any) -> bool:
+        sink = getattr(self, "sink", None)
+        if packet.is_silence():
+            if sink:
+                sink._silence_pkts = getattr(sink, "_silence_pkts", 0) + 1
+            return True
+
+        vc = getattr(self.sink, "voice_client", None) if self.sink else None
+        state = getattr(vc, "_connection", None)
+        session = getattr(state, "dave_session", None)
+        dave_ver = getattr(state, "dave_protocol_version", 0)
+
+        # If DAVE session is ready, ALWAYS decrypt with MLS ratchet keys
+        if session is not None and getattr(session, "ready", False):
+            user_id = self._cached_id
+            if user_id is None and vc:
+                user_id = self._cached_id = vc._get_id_from_ssrc(self.ssrc)
+            if user_id is None:
                 if sink:
                     sink._dave_fail = getattr(sink, "_dave_fail", 0) + 1
-                    sink._last_dave_err = "session not ready"
-                self._dave_log_drop(
-                    f"DAVE v{dave_ver} awaiting MLS session ready (ready={getattr(session, 'ready', False) if session else 'None'})"
-                )
+                    sink._last_dave_err = f"ssrc {self.ssrc} unmapped"
+                self._dave_log_drop("ssrc not mapped to a user yet")
                 return False
 
-            return _orig_dave_decrypt_inner(self, packet)
+            try:
+                packet.decrypted_data = session.decrypt(
+                    int(user_id), davey.MediaType.audio, bytes(packet.decrypted_data)
+                )
+                if sink:
+                    sink._dave_succ = getattr(sink, "_dave_succ", 0) + 1
+                    if user_id:
+                        sink._ssrc_to_uid[self.ssrc] = user_id
+                        if vc and getattr(vc, "guild", None):
+                            m = vc.guild.get_member(user_id)
+                            if m:
+                                sink.speaker_names[user_id] = m.display_name
+                            elif user_id not in sink.speaker_names:
+                                sink.speaker_names[user_id] = f"User-{user_id}"
+                return True
+            except BaseException as e:
+                if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                    raise
+                err_msg = str(e) or repr(e)
+                if sink:
+                    sink._last_dave_err = err_msg
+                    sink._dave_fail = getattr(sink, "_dave_fail", 0) + 1
+                if "UnencryptedWhenPassthroughDisabled" in err_msg:
+                    if sink:
+                        sink._dave_pass = getattr(sink, "_dave_pass", 0) + 1
+                    try:
+                        session.set_passthrough_mode(True, 120)
+                    except Exception:
+                        pass
+                    return _orig_dave_decrypt_inner(self, packet)
+                self._dave_log_drop(f"DAVE decrypt error: {err_msg}")
+                return False
 
-        _vropus.PacketDecoder._dave_decrypt_inner = _patched_dave_decrypt_inner
+        if dave_ver > 0:
+            user_id = self._cached_id or (vc._get_id_from_ssrc(self.ssrc) if vc else None)
+            if session is not None and user_id and getattr(session, "can_passthrough", None):
+                try:
+                    if session.can_passthrough(int(user_id)):
+                        return _orig_dave_decrypt_inner(self, packet)
+                except Exception:
+                    pass
 
-        # 4. Strip RTP padding when packet.padding is True (RFC 3550 Section 5.1).
-        # In voice_recv, PacketDecryptor leaves trailing padding octets in packet.decrypted_data.
-        # This misaligns DAVE trailers (0xFAFA) and corrupts trailing Opus frame bytes.
-        import discord.ext.voice_recv.reader as _vrreader
+            if sink:
+                sink._dave_fail = getattr(sink, "_dave_fail", 0) + 1
+                sink._last_dave_err = "session not ready"
+            self._dave_log_drop(
+                f"DAVE v{dave_ver} awaiting MLS session ready (ready={getattr(session, 'ready', False) if session else 'None'})"
+            )
+            return False
 
+        return _orig_dave_decrypt_inner(self, packet)
+
+    _vropus.PacketDecoder._dave_decrypt_inner = _patched_dave_decrypt_inner
+
+    # 4. Strip RTP padding when packet.padding is True (RFC 3550 Section 5.1).
+    _orig_packet_decryptor_init = getattr(_vrreader.PacketDecryptor, "_kyro_orig_init", None)
+    if _orig_packet_decryptor_init is None:
         _orig_packet_decryptor_init = _vrreader.PacketDecryptor.__init__
+        _vrreader.PacketDecryptor._kyro_orig_init = _orig_packet_decryptor_init
 
-        def _patched_packet_decryptor_init(self: Any, mode: Any, secret_key: bytes) -> None:
-            _orig_packet_decryptor_init(self, mode, secret_key)
-            _raw_decrypt_rtp = self.decrypt_rtp
+    def _patched_packet_decryptor_init(self: Any, mode: Any, secret_key: bytes) -> None:
+        _orig_packet_decryptor_init(self, mode, secret_key)
+        _raw_decrypt_rtp = self.decrypt_rtp
 
-            def _safe_decrypt_rtp(packet: Any) -> bytes:
-                result = _raw_decrypt_rtp(packet)
-                if getattr(packet, "padding", False) and result:
-                    pad_len = result[-1]
-                    if 0 < pad_len <= len(result):
-                        result = result[:-pad_len]
-                return result
+        def _safe_decrypt_rtp(packet: Any) -> bytes:
+            result = _raw_decrypt_rtp(packet)
+            if getattr(packet, "padding", False) and result:
+                pad_len = result[-1]
+                if 0 < pad_len <= len(result):
+                    result = result[:-pad_len]
+            return result
 
-            self.decrypt_rtp = _safe_decrypt_rtp
+        self.decrypt_rtp = _safe_decrypt_rtp
 
-        _vrreader.PacketDecryptor.__init__ = _patched_packet_decryptor_init
-
-        # Mark all patches as successfully applied on discord module across reloads
-        discord._KYRO_MEETING_PATCHES_APPLIED = True
+    _vrreader.PacketDecryptor.__init__ = _patched_packet_decryptor_init
 
 except (ImportError, Exception):
     voice_recv = None
@@ -844,14 +904,25 @@ class MeetingCog(commands.Cog, name="Meeting"):
         try:
             voice_client = await vc.connect(cls=voice_recv.VoiceRecvClient, timeout=15.0, reconnect=True)
             
-            # DAVE handshake
+            # Robust DAVE handshake wait
             handshake_ok = False
             conn = getattr(voice_client, "_connection", None)
-            for _ in range(35):
-                dave_ver = getattr(conn, "dave_protocol_version", 0)
-                dave = getattr(conn, "dave_session", None)
+            for wait_step in range(50):
+                dave_ver = getattr(conn, "dave_protocol_version", 0) if conn else 0
+                dave = getattr(conn, "dave_session", None) if conn else None
                 dave_ready = getattr(dave, "ready", False) if dave else False
-                if dave_ready or (dave_ver == 0 and dave is None):
+                if dave_ready:
+                    handshake_ok = True
+                    break
+
+                if conn and dave_ver > 0 and dave is None:
+                    try:
+                        await conn.reinit_dave_session()
+                    except Exception:
+                        pass
+
+                # Only after waiting at least 1.5s with zero DAVE protocol signaled do we assume non-E2EE
+                if wait_step >= 15 and dave_ver == 0 and dave is None:
                     handshake_ok = True
                     break
                 await asyncio.sleep(0.1)
@@ -861,8 +932,11 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 dave = getattr(conn, "dave_session", None)
                 if dave is not None and not getattr(dave, "ready", False):
                     try:
-                        dave.set_passthrough_mode(True, 120)
-                        handshake_ok = True
+                        if conn:
+                            await conn.reinit_dave_session()
+                        await asyncio.sleep(1.5)
+                        if getattr(dave, "ready", False):
+                            handshake_ok = True
                     except Exception:
                         pass
 
@@ -1607,7 +1681,31 @@ class MeetingCog(commands.Cog, name="Meeting"):
                         session.pending_tasks.add(task)
                         task.add_done_callback(session.pending_tasks.discard)
 
-                # 2. Rolling mini-summary check (every 10 minutes)
+                # 2. DAVE self-healing: If encrypted packets are actively arriving but 100% failing,
+                # re-trigger DAVE key package negotiation to unfreeze desynced MLS session
+                sink = session.sink
+                fail_cnt = getattr(sink, "_dave_fail", 0)
+                succ_cnt = getattr(sink, "_dave_succ", 0)
+                if fail_cnt >= 50 and succ_cnt == 0:
+                    last_heal = getattr(session, "_last_dave_heal_time", 0.0)
+                    now_ts = time.time()
+                    if now_ts - last_heal >= 15.0:
+                        session._last_dave_heal_time = now_ts
+                        vc = getattr(session, "voice_client", None)
+                        conn = getattr(vc, "_connection", None) if vc else None
+                        dave_ver = getattr(conn, "dave_protocol_version", 0) if conn else 0
+                        dave = getattr(conn, "dave_session", None) if conn else None
+                        if conn and dave_ver > 0 and not getattr(dave, "ready", False):
+                            logger.warning(
+                                f"Guild {session.guild_id}: DAVE decryption failing ({fail_cnt} dropped pkts, 0 succ). "
+                                f"Attempting proactive MLS reinit..."
+                            )
+                            try:
+                                await conn.reinit_dave_session()
+                            except Exception as _he:
+                                logger.warning(f"DAVE self-heal reinit failed: {_he}")
+
+                # 3. Rolling mini-summary check (every 10 minutes)
                 now = time.time()
                 if now - session.last_rolling_summary_time >= 600.0:
                     session.last_rolling_summary_time = now
@@ -2618,38 +2716,50 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 await ctx.send_error("Could not complete Discord voice encryption handshake. Please try again.", ephemeral=False)
                 return
 
-            # Wait up to 3.5s for DAVE MLS session to become ready if DAVE was initiated by Discord
+            # Wait up to 5.0s for DAVE MLS session to become ready if DAVE was initiated by Discord
             handshake_ok = False
             conn = getattr(voice_client, "_connection", None)
-            for _ in range(35):
-                dave_ver = getattr(conn, "dave_protocol_version", 0)
-                dave = getattr(conn, "dave_session", None)
+            for wait_step in range(50):
+                dave_ver = getattr(conn, "dave_protocol_version", 0) if conn else 0
+                dave = getattr(conn, "dave_session", None) if conn else None
                 dave_ready = getattr(dave, "ready", False) if dave else False
                 if dave_ready:
                     handshake_ok = True
-                    logger.info(f"DAVE session ready (v{dave_ver}), starting meeting sink.")
+                    logger.info(f"DAVE session ready (v{dave_ver}) after {wait_step * 0.1:.1f}s, starting meeting sink.")
                     break
-                if dave_ver == 0 and dave is None:
-                    # Standard non-E2EE voice channel - no MLS handshake delay needed
+
+                if conn and dave_ver > 0 and dave is None:
+                    try:
+                        await conn.reinit_dave_session()
+                    except Exception as _re:
+                        logger.debug(f"Wait step reinit notice: {_re}")
+
+                # Only after waiting at least 1.5s with zero DAVE protocol signaled do we assume non-E2EE
+                if wait_step >= 15 and dave_ver == 0 and dave is None:
                     handshake_ok = True
-                    logger.info("Non-E2EE voice channel, proceeding immediately with standard audio pipeline.")
+                    logger.info("Non-E2EE voice channel confirmed, proceeding with standard audio pipeline.")
                     break
+
                 await asyncio.sleep(0.1)
 
             if not handshake_ok:
-                dave_ver = getattr(conn, "dave_protocol_version", 0)
-                dave = getattr(conn, "dave_session", None)
+                dave_ver = getattr(conn, "dave_protocol_version", 0) if conn else 0
+                dave = getattr(conn, "dave_session", None) if conn else None
                 dave_ready = getattr(dave, "ready", False) if dave else False
-                if dave_ver == 0 and dave is None:
+                if dave_ready:
                     handshake_ok = True
-                    logger.info("Non-E2EE voice channel, proceeding with standard audio pipeline.")
                 elif dave is not None and not dave_ready:
                     try:
-                        dave.set_passthrough_mode(True, 120)
-                        handshake_ok = True
-                        logger.info(f"DAVE v{dave_ver} MLS transition: enabled passthrough mode.")
-                    except Exception as _pte:
-                        logger.debug(f"Failed to set DAVE passthrough mode: {_pte}")
+                        logger.warning("DAVE MLS session not ready after 5s. Attempting final MLS re-initialization...")
+                        if conn:
+                            await conn.reinit_dave_session()
+                        await asyncio.sleep(1.5)
+                        dave_ready = getattr(dave, "ready", False)
+                        if dave_ready:
+                            handshake_ok = True
+                            logger.info("DAVE session became ready after final MLS re-initialization.")
+                    except Exception as _re:
+                        logger.warning(f"Final MLS reinit failed: {_re}")
 
             if not handshake_ok:
                 try:

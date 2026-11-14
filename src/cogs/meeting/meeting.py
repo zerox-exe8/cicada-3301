@@ -904,48 +904,33 @@ class MeetingCog(commands.Cog, name="Meeting"):
         try:
             voice_client = await vc.connect(cls=voice_recv.VoiceRecvClient, timeout=15.0, reconnect=True)
             
-            # Robust DAVE handshake wait
-            handshake_ok = False
-            conn = getattr(voice_client, "_connection", None)
-            for wait_step in range(50):
-                dave_ver = getattr(conn, "dave_protocol_version", 0) if conn else 0
-                dave = getattr(conn, "dave_session", None) if conn else None
-                dave_ready = getattr(dave, "ready", False) if dave else False
-                if dave_ready:
-                    handshake_ok = True
-                    break
-
-                if conn and dave_ver > 0 and dave is None:
-                    try:
-                        await conn.reinit_dave_session()
-                    except Exception:
-                        pass
-
-                # Only after waiting at least 1.5s with zero DAVE protocol signaled do we assume non-E2EE
-                if wait_step >= 15 and dave_ver == 0 and dave is None:
-                    handshake_ok = True
+            # Wait up to 5.0s for initial voice gateway secret_key
+            for _ in range(50):
+                if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
                     break
                 await asyncio.sleep(0.1)
 
-            if not handshake_ok:
-                conn = getattr(voice_client, "_connection", None)
-                dave = getattr(conn, "dave_session", None)
-                if dave is not None and not getattr(dave, "ready", False):
-                    try:
-                        if conn:
-                            await conn.reinit_dave_session()
-                        await asyncio.sleep(1.5)
-                        if getattr(dave, "ready", False):
-                            handshake_ok = True
-                    except Exception:
-                        pass
-
-            if not handshake_ok:
+            if not (voice_client.is_connected() and getattr(voice_client, "secret_key", None)):
                 try:
                     await voice_client.disconnect(force=True)
                 except Exception:
                     pass
                 return
+
+            # Proactively ensure DAVE session is initialized if DAVE is active
+            conn = getattr(voice_client, "_connection", None)
+            for _ in range(25):
+                dave_ver = getattr(conn, "dave_protocol_version", 0) if conn else 0
+                dave = getattr(conn, "dave_session", None) if conn else None
+                if conn and dave_ver > 0 and dave is None:
+                    try:
+                        await conn.reinit_dave_session()
+                        break
+                    except Exception:
+                        pass
+                if dave is not None:
+                    break
+                await asyncio.sleep(0.1)
 
             sink = MeetingAudioSink(noise_gate=0)
             sink._voice_client = voice_client
@@ -2692,18 +2677,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 await ctx.send_error(f"Could not connect to voice channel: `{last_conn_err}`", ephemeral=False)
                 return
 
-            # Proactively ensure DAVE session is initialized if Discord requested DAVE protocol
-            try:
-                conn = getattr(voice_client, "_connection", None)
-                dave_ver = getattr(conn, "dave_protocol_version", 0)
-                if conn and dave_ver > 0 and getattr(conn, "dave_session", None) is None:
-                    await conn.reinit_dave_session()
-                    logger.info(f"Initialized DAVE v{dave_ver} session and transmitted MLS Key Package.")
-            except Exception as e:
-                logger.warning(f"Notice during DAVE init: {e}")
-
-            # Wait up to 3s for initial voice gateway secret_key (XSalsa20 session established)
-            for _ in range(30):
+            # Wait up to 5s for initial voice gateway secret_key (XSalsa20/ChaCha20 transport encryption)
+            for _ in range(50):
                 if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
                     break
                 await asyncio.sleep(0.1)
@@ -2716,58 +2691,21 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 await ctx.send_error("Could not complete Discord voice encryption handshake. Please try again.", ephemeral=False)
                 return
 
-            # Wait up to 5.0s for DAVE MLS session to become ready if DAVE was initiated by Discord
-            handshake_ok = False
+            # Proactively ensure DAVE session is initialized and MLS Key Package is transmitted if DAVE is active
             conn = getattr(voice_client, "_connection", None)
-            for wait_step in range(50):
+            for _ in range(25):  # Wait up to 2.5s for DAVE protocol / session initialization
                 dave_ver = getattr(conn, "dave_protocol_version", 0) if conn else 0
                 dave = getattr(conn, "dave_session", None) if conn else None
-                dave_ready = getattr(dave, "ready", False) if dave else False
-                if dave_ready:
-                    handshake_ok = True
-                    logger.info(f"DAVE session ready (v{dave_ver}) after {wait_step * 0.1:.1f}s, starting meeting sink.")
-                    break
-
                 if conn and dave_ver > 0 and dave is None:
                     try:
                         await conn.reinit_dave_session()
-                    except Exception as _re:
-                        logger.debug(f"Wait step reinit notice: {_re}")
-
-                # Only after waiting at least 1.5s with zero DAVE protocol signaled do we assume non-E2EE
-                if wait_step >= 15 and dave_ver == 0 and dave is None:
-                    handshake_ok = True
-                    logger.info("Non-E2EE voice channel confirmed, proceeding with standard audio pipeline.")
+                        logger.info(f"Initialized DAVE v{dave_ver} session and transmitted MLS Key Package.")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Notice during DAVE init: {e}")
+                if dave is not None:
                     break
-
                 await asyncio.sleep(0.1)
-
-            if not handshake_ok:
-                dave_ver = getattr(conn, "dave_protocol_version", 0) if conn else 0
-                dave = getattr(conn, "dave_session", None) if conn else None
-                dave_ready = getattr(dave, "ready", False) if dave else False
-                if dave_ready:
-                    handshake_ok = True
-                elif dave is not None and not dave_ready:
-                    try:
-                        logger.warning("DAVE MLS session not ready after 5s. Attempting final MLS re-initialization...")
-                        if conn:
-                            await conn.reinit_dave_session()
-                        await asyncio.sleep(1.5)
-                        dave_ready = getattr(dave, "ready", False)
-                        if dave_ready:
-                            handshake_ok = True
-                            logger.info("DAVE session became ready after final MLS re-initialization.")
-                    except Exception as _re:
-                        logger.warning(f"Final MLS reinit failed: {_re}")
-
-            if not handshake_ok:
-                try:
-                    await voice_client.disconnect(force=True)
-                except Exception:
-                    pass
-                await ctx.send_error("Could not complete Discord voice encryption handshake (DAVE). Please try again.", ephemeral=False)
-                return
 
             sink = MeetingAudioSink(noise_gate=0)
             sink._voice_client = voice_client

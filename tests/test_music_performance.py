@@ -219,6 +219,24 @@ class TestMusicPerformance(unittest.IsolatedAsyncioTestCase):
         self.assertLess(fake_score, 0)
         self.assertGreater(real_score, 50)
 
+    def test_transliteration_and_label_scoring(self):
+        """Scorer must correctly match romanized Hindi/Urdu transliterations (e.g. 'maan' vs 'mann') and record label channels."""
+        query = "maan ki lagan fateh ali khan"
+        official_score = score_candidate(
+            title="Mann Ki Lagan - Paap | Rahat Fateh Ali Khan | John Abraham, Udita Goswami | Saregama Music",
+            subtitle_or_author="Saregama Music",
+            query=query,
+            duration=270,
+        )
+        unrelated_score = score_candidate(
+            title="Random LoFi Vibes Chill",
+            subtitle_or_author="Perfumed_thought",
+            query=query,
+            duration=150,
+        )
+        self.assertGreater(official_score, 50.0)
+        self.assertLess(unrelated_score, 0.0)
+
     def test_is_playlist_url_handles_youtube_mixes(self):
         """is_playlist_url must distinguish dynamic YouTube Radio/Mix links from actual user playlists."""
         from src.cogs.music._extractor import is_playlist_url

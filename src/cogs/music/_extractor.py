@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import difflib
 import html
 import json
 import logging
@@ -91,6 +92,9 @@ AUDIO_FORMAT_TAGS = re.compile(
 )
 
 PHONETIC_TYPO_MAP = {
+    "maan ki lagan": "mann ki lagan",
+    "man ki lagan": "mann ki lagan",
+    "fateh ali khan": "rahat fateh ali khan",
     "mossewala": "sidhu moose wala",
     "mosewala": "sidhu moose wala",
     "sidhu moosewala": "sidhu moose wala",
@@ -170,14 +174,16 @@ def score_candidate(
     author_tokens = [w for w in re.findall(r"\w+", c_author) if len(w) > 1]
 
     def _fuzzy_match(tok: str, tokens: list) -> bool:
-        """Check for exact or near-transliteration match (±2 chars, substring)."""
+        """Check for exact, substring, or phonetic/edit-distance transliteration match."""
         if tok in tokens:
             return True
-        # Handles "kesariya" vs "kesariyaa", "arijit" vs "arijite" etc.
-        return any(
-            (tok in t or t in tok) and abs(len(tok) - len(t)) <= 2
-            for t in tokens
-        )
+        for t in tokens:
+            if (tok in t or t in tok) and abs(len(tok) - len(t)) <= 2:
+                return True
+            if len(tok) >= 3 and len(t) >= 3 and abs(len(tok) - len(t)) <= 2:
+                if difflib.SequenceMatcher(None, tok, t).ratio() >= 0.70:
+                    return True
+        return False
 
     # Ensure the candidate has substantive overlap with the query
     substantive_q_tokens = [
@@ -217,7 +223,10 @@ def score_candidate(
 
     # Penalize if query had explicit substantive tokens completely missing from both candidate title and candidate author
     if missing_substantive:
-        if not author_matched_tokens:
+        title_coverage = len(title_matched_tokens) / max(1, len(substantive_q_tokens))
+        if title_coverage >= 0.70:
+            score -= 25.0 * len(missing_substantive)
+        elif not author_matched_tokens:
             score -= 150.0 * len(missing_substantive)
         else:
             score -= 60.0 * len(missing_substantive)
@@ -231,10 +240,19 @@ def score_candidate(
         if not overlap and not is_artist_query:
             score -= 100.0
 
-    # Boost official artist topic tracks and original audio
+    # Boost official artist topic tracks, original audio, and verified label releases
     if " - topic" in c_author or "topic" in c_author:
         score += 40.0
-    if "official audio" in c_title or "official music video" in c_title or "original track" in c_title:
+    if (
+        "official audio" in c_title
+        or "official music video" in c_title
+        or "original track" in c_title
+        or "old hindi song" in c_title
+        or "saregama" in c_title
+        or "saregama" in c_author
+        or "t-series" in c_title
+        or "t-series" in c_author
+    ):
         score += 30.0
 
     # Penalize unwanted modifier keywords using exact word boundaries
@@ -613,7 +631,7 @@ class NativeExtractor:
                     if sc > best_score:
                         best_score = sc
                         best_cand = cand
-                if best_cand and (best_score > 0 or not orig_yt_url):
+                if best_cand and best_score > 0:
                     top = best_cand
                     thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
                     trk = Track(
@@ -649,7 +667,7 @@ class NativeExtractor:
                     if sc > best_score:
                         best_score = sc
                         best_cand = cand
-                if best_cand and (best_score > 0 or not orig_yt_url):
+                if best_cand and best_score > 0:
                     top = best_cand
                     thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
                     trk = Track(
@@ -677,22 +695,32 @@ class NativeExtractor:
                     timeout=5.0,
                 )
                 if results:
-                    top = results[0] if isinstance(results, list) else results.tracks[0]
-                    thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
-                    trk = Track(
-                        title=top.title or search_target,
-                        author=top.author or "Artist",
-                        url=orig_spotify_url or top.uri or orig_yt_url or raw_q,
-                        stream_url="",
-                        duration=int((top.length or 0) / 1000),
-                        thumbnail=thumb,
-                        requester=requester,
-                        is_autoplay=is_autoplay,
-                        query=raw_q,
-                    )
-                    trk._playable = top
-                    _set_search_cache(cache_key, (now, trk))
-                    return trk
+                    candidates = results if isinstance(results, list) else results.tracks
+                    best_cand = None
+                    best_score = -999.0
+                    for cand in candidates[:5]:
+                        c_dur = int((cand.length or 0) / 1000)
+                        sc = score_candidate(cand.title or "", cand.author or "", search_target, duration=c_dur)
+                        if sc > best_score:
+                            best_score = sc
+                            best_cand = cand
+                    if best_cand and best_score > 0:
+                        top = best_cand
+                        thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None)
+                        trk = Track(
+                            title=top.title or search_target,
+                            author=top.author or "Artist",
+                            url=orig_spotify_url or top.uri or orig_yt_url or raw_q,
+                            stream_url="",
+                            duration=int((top.length or 0) / 1000),
+                            thumbnail=thumb,
+                            requester=requester,
+                            is_autoplay=is_autoplay,
+                            query=raw_q,
+                        )
+                        trk._playable = top
+                        _set_search_cache(cache_key, (now, trk))
+                        return trk
             except Exception as e:
                 logger.debug(f"Raw query fallback notice: {e}")
 
@@ -704,22 +732,32 @@ class NativeExtractor:
                 timeout=5.0,
             )
             if results:
-                top = results[0] if isinstance(results, list) else results.tracks[0]
-                thumb = top.artwork or "https://cdn.discordapp.com/embed/avatars/0.png"
-                trk = Track(
-                    title=top.title or sc_target,
-                    author=top.author or "SoundCloud Artist",
-                    url=orig_spotify_url or top.uri or raw_q,
-                    stream_url="",
-                    duration=int((top.length or 0) / 1000),
-                    thumbnail=thumb,
-                    requester=requester,
-                    is_autoplay=is_autoplay,
-                    query=raw_q,
-                )
-                trk._playable = top
-                _SEARCH_CACHE[cache_key] = (now, trk)
-                return trk
+                candidates = results if isinstance(results, list) else results.tracks
+                best_cand = None
+                best_score = -999.0
+                for cand in candidates[:5]:
+                    c_dur = int((cand.length or 0) / 1000)
+                    sc = score_candidate(cand.title or "", cand.author or "", sc_target, duration=c_dur)
+                    if sc > best_score:
+                        best_score = sc
+                        best_cand = cand
+                if best_cand and best_score > 0:
+                    top = best_cand
+                    thumb = top.artwork or "https://cdn.discordapp.com/embed/avatars/0.png"
+                    trk = Track(
+                        title=top.title or sc_target,
+                        author=top.author or "SoundCloud Artist",
+                        url=orig_spotify_url or top.uri or raw_q,
+                        stream_url="",
+                        duration=int((top.length or 0) / 1000),
+                        thumbnail=thumb,
+                        requester=requester,
+                        is_autoplay=is_autoplay,
+                        query=raw_q,
+                    )
+                    trk._playable = top
+                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    return trk
         except Exception as e:
             logger.debug(f"SoundCloud fallback search notice: {e}")
 

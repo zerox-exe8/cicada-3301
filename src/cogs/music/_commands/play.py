@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional
 import discord
 from discord.ext import commands
 
-from src.cogs.music._extractor import UNWANTED_VERSION_KEYWORDS, NativeExtractor, is_playlist_url
+from src.cogs.music._extractor import NativeExtractor, is_playlist_url, score_candidate
 from src.cogs.music._models import Track
 from src.utils.containers import KyroContainer, edit_container_response, send_container_response
 from src.utils.tasks import create_tracked_task
@@ -572,35 +572,32 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube),
-                    timeout=4.0
+                    timeout=5.0
                 )
                 if results and not isinstance(results, wavelink.Playlist):
-                    chosen = results[0]
-                    target_low = lookup_target.lower()
-                    for cand in results[:5]:
-                        c_t = (cand.title or "").lower()
-                        c_a = (cand.author or "").lower()
-                        has_unwanted = any(
-                            kw in c_t or kw in c_a
-                            for kw in UNWANTED_VERSION_KEYWORDS
-                            if kw not in target_low
+                    candidates = results if isinstance(results, list) else getattr(results, "tracks", [results])
+                    best_cand = None
+                    best_score = -999.0
+                    for cand in candidates[:5]:
+                        c_dur = int((cand.length or 0) / 1000)
+                        sc = score_candidate(cand.title or "", cand.author or "", lookup_target, duration=c_dur)
+                        if sc > best_score:
+                            best_score = sc
+                            best_cand = cand
+                    if best_cand and best_score > 0:
+                        top_p = best_cand
+                        track = Track(
+                            title=top_p.title or "Unknown Track",
+                            author=top_p.author or "Unknown Artist",
+                            url=top_p.uri or query,
+                            stream_url="",
+                            duration=int((top_p.length or 0) / 1000),
+                            thumbnail=top_p.artwork,
+                            requester=ctx.author.display_name,
+                            requester_id=ctx.author.id,
+                            query=query,
                         )
-                        if not has_unwanted:
-                            chosen = cand
-                            break
-                    top_p = chosen
-                    track = Track(
-                        title=top_p.title or "Unknown Track",
-                        author=top_p.author or "Unknown Artist",
-                        url=top_p.uri or query,
-                        stream_url="",
-                        duration=int((top_p.length or 0) / 1000),
-                        thumbnail=top_p.artwork,
-                        requester=ctx.author.display_name,
-                        requester_id=ctx.author.id,
-                        query=query,
-                    )
-                    track._playable = top_p
+                        track._playable = top_p
             except Exception as e:
                 logger.debug(f"YouTube fallback search notice: {e}")
 
@@ -619,22 +616,32 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.SoundCloud),
-                    timeout=4.0
+                    timeout=5.0
                 )
                 if results and not isinstance(results, wavelink.Playlist):
-                    top_p = results[0]
-                    track = Track(
-                        title=top_p.title or "Unknown Track",
-                        author=top_p.author or "SoundCloud Artist",
-                        url=top_p.uri or query,
-                        stream_url="",
-                        duration=int((top_p.length or 0) / 1000),
-                        thumbnail=top_p.artwork,
-                        requester=ctx.author.display_name,
-                        requester_id=ctx.author.id,
-                        query=query,
-                    )
-                    track._playable = top_p
+                    candidates = results if isinstance(results, list) else getattr(results, "tracks", [results])
+                    best_cand = None
+                    best_score = -999.0
+                    for cand in candidates[:5]:
+                        c_dur = int((cand.length or 0) / 1000)
+                        sc = score_candidate(cand.title or "", cand.author or "", lookup_target, duration=c_dur)
+                        if sc > best_score:
+                            best_score = sc
+                            best_cand = cand
+                    if best_cand and best_score > 0:
+                        top_p = best_cand
+                        track = Track(
+                            title=top_p.title or "Unknown Track",
+                            author=top_p.author or "SoundCloud Artist",
+                            url=top_p.uri or query,
+                            stream_url="",
+                            duration=int((top_p.length or 0) / 1000),
+                            thumbnail=top_p.artwork,
+                            requester=ctx.author.display_name,
+                            requester_id=ctx.author.id,
+                            query=query,
+                        )
+                        track._playable = top_p
             except Exception as e:
                 logger.debug(f"SoundCloud fallback search notice: {e}")
 

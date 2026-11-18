@@ -680,6 +680,18 @@ class GuildPlayer:
         if playable:
             return playable
 
+        # ── Priority 1.5: Direct Stream URL Resolution (JioSaavn Akamai MP4/AAC / HTTP Stream) ──
+        stream_url = track.stream_url or ""
+        if stream_url.startswith(("http://", "https://")):
+            try:
+                results = await asyncio.wait_for(wavelink.Playable.search(stream_url), timeout=4.0)
+                if results:
+                    p = results[0] if isinstance(results, list) else results.tracks[0]
+                    track._playable = p
+                    return p
+            except Exception as e:
+                logger.debug(f"Direct stream_url resolution error for '{track.title}': {e}")
+
         # ── Priority 2: Direct URL Resolution (for YouTube/SoundCloud/Direct URLs) ──
         url = track.url or ""
         if url.startswith(("http://", "https://")) and not any(sp in url for sp in ("spotify.com", "spoti.fi")):
@@ -731,6 +743,40 @@ class GuildPlayer:
                     return p
             except Exception as e:
                 logger.debug(f"YouTube fallback search error for '{search_target}': {e}")
+
+        # ── Priority 5: JioSaavn Unblocked Audio Engine (Akamai CDN Stream) ──
+        try:
+            from src.cogs.music._extractor import NativeExtractor
+            saavn_target = pure_title or clean_title or full_query or track.title
+            saavn_trk = await asyncio.wait_for(
+                NativeExtractor._extract_jiosaavn(saavn_target, requester=track.requester, is_autoplay=track.is_autoplay),
+                timeout=4.0,
+            )
+            if saavn_trk and saavn_trk.stream_url:
+                results = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=4.0)
+                if results:
+                    p = results[0] if isinstance(results, list) else results.tracks[0]
+                    track._playable = p
+                    track.stream_url = saavn_trk.stream_url
+                    if not track.thumbnail:
+                        track.thumbnail = saavn_trk.thumbnail
+                    return p
+        except Exception as e:
+            logger.debug(f"JioSaavn playable fallback notice for '{track.title}': {e}")
+
+        # ── Priority 6: SoundCloud Fallback ──
+        if search_target:
+            try:
+                results = await asyncio.wait_for(
+                    wavelink.Playable.search(search_target, source=wavelink.TrackSource.SoundCloud),
+                    timeout=3.0,
+                )
+                if results:
+                    p = results[0] if isinstance(results, list) else results.tracks[0]
+                    track._playable = p
+                    return p
+            except Exception as e:
+                logger.debug(f"SoundCloud fallback notice for '{search_target}': {e}")
 
         logger.warning(f"All resolution strategies exhausted for '{track.title}'")
         return None
@@ -921,6 +967,36 @@ class GuildPlayer:
                             await self.voice_client.play(p, volume=vol_int, paused=False)
                             logger.info(f"Guild {self.guild.id}: Successfully recovered '{curr.title}' via unblocked audio stream.")
                             return
+
+                    # Secondary recovery via SoundCloud if JioSaavn was unavailable
+                    try:
+                        sc_res = await asyncio.wait_for(
+                            wavelink.Playable.search(query_target, source=wavelink.TrackSource.SoundCloud),
+                            timeout=4.0,
+                        )
+                        if sc_res:
+                            top_sc = sc_res[0] if isinstance(sc_res, list) else sc_res.tracks[0]
+                            sc_trk = Track(
+                                title=top_sc.title or curr.title,
+                                author=top_sc.author or curr.author,
+                                url=top_sc.uri or curr.url,
+                                stream_url="",
+                                duration=int((top_sc.length or 0) / 1000),
+                                thumbnail=top_sc.artwork or curr.thumbnail,
+                                requester=curr.requester,
+                                is_autoplay=curr.is_autoplay,
+                                query=curr.query,
+                            )
+                            sc_trk._playable = top_sc
+                            sc_trk._load_failed_retried = True
+                            self.current = sc_trk
+                            await self.update_controller_message()
+                            vol_int = int(self.volume * 100)
+                            await self.voice_client.play(top_sc, volume=vol_int, paused=False)
+                            logger.info(f"Guild {self.guild.id}: Successfully recovered '{curr.title}' via SoundCloud.")
+                            return
+                    except Exception as sc_err:
+                        logger.debug(f"Guild {self.guild.id}: SoundCloud recovery notice: {sc_err}")
                 except Exception as rec_err:
                     logger.debug(f"Guild {self.guild.id}: Stream recovery notice: {rec_err}")
 

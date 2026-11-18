@@ -576,6 +576,46 @@ class NativeExtractor:
             except Exception as e:
                 logger.debug(f"Raw query fallback notice: {e}")
 
+        # Priority 5: JioSaavn Unblocked Audio Engine (High-Fidelity 320kbps CDN stream)
+        try:
+            saavn_q = search_target or cleaned_query or raw_q
+            saavn_trk = await asyncio.wait_for(
+                cls._extract_jiosaavn(saavn_q, requester=requester, is_autoplay=is_autoplay),
+                timeout=4.0,
+            )
+            if saavn_trk and saavn_trk.stream_url:
+                _SEARCH_CACHE[cache_key] = (now, saavn_trk)
+                return saavn_trk
+        except Exception as e:
+            logger.debug(f"JioSaavn extraction notice: {e}")
+
+        # Priority 6: SoundCloud via Lavalink
+        try:
+            sc_target = cleaned_query or search_target or raw_q
+            results = await asyncio.wait_for(
+                wavelink.Playable.search(sc_target, source=wavelink.TrackSource.SoundCloud),
+                timeout=3.0,
+            )
+            if results:
+                top = results[0] if isinstance(results, list) else results.tracks[0]
+                thumb = top.artwork or "https://cdn.discordapp.com/embed/avatars/0.png"
+                trk = Track(
+                    title=top.title or sc_target,
+                    author=top.author or "SoundCloud Artist",
+                    url=orig_spotify_url or top.uri or raw_q,
+                    stream_url="",
+                    duration=int((top.length or 0) / 1000),
+                    thumbnail=thumb,
+                    requester=requester,
+                    is_autoplay=is_autoplay,
+                    query=raw_q,
+                )
+                trk._playable = top
+                _SEARCH_CACHE[cache_key] = (now, trk)
+                return trk
+        except Exception as e:
+            logger.debug(f"SoundCloud fallback search notice: {e}")
+
         return None
 
 

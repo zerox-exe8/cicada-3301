@@ -2212,6 +2212,13 @@ All 16 tests completed with 100% success rate in 0.877 seconds.
 - **Remediation:** Imported `re` in `play.py`; initialized `search_msg` in scope; cancelled orphan `connect_task` on error; added forced gateway voice state resets in `_player.py` and self-healing fallback in `stop.py`.
 - **Status:** `CONFIRMED RESOLVED`.
 
+### KYRO-BUG-011: Track Search Premature Timeouts & Stream Silence Abort on Lavalink Datacenter 403
+- **Severity:** `HIGH`
+- **File:** `src/cogs/music/_commands/play.py:554,564`, `src/cogs/music/_extractor.py:550-580`, `src/cogs/music/_player.py:680,958`
+- **Root Cause:** Search queries aborted with "No results found" due to overly aggressive 4.2s/2.2s timeouts on cloud hosting; datacenter IPs triggered YouTube 403 blocks during playback causing Lavalink `loadFailed`; fallback recovery ignored `track.stream_url`, causing Lavalink to attempt parsing raw webpage URLs, which aborted the queue and disconnected the bot.
+- **Remediation:** Expanded search timeouts (8s/4s); integrated JioSaavn (Akamai 320kbps CDN) and SoundCloud multi-tier search fallbacks; prioritized direct `stream_url` resolution in `_resolve_playable_cascade` and auto-recovered failed streams seamlessly.
+- **Status:** `CONFIRMED RESOLVED`.
+
 ## 14.2 Technical Debt Audit
 
 | Debt ID | Module | Technical Debt Description | Recommended Refactoring | Status |

@@ -551,7 +551,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 track = await asyncio.wait_for(
                     NativeExtractor.extract(lookup_target, requester=ctx.author.display_name),
-                    timeout=4.2
+                    timeout=8.0
                 )
             except Exception as e:
                 logger.debug(f"NativeExtractor search notice: {e}")
@@ -561,7 +561,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube),
-                    timeout=2.2
+                    timeout=4.0
                 )
                 if results and not isinstance(results, wavelink.Playlist):
                     chosen = results[0]
@@ -592,6 +592,40 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     track._playable = top_p
             except Exception as e:
                 logger.debug(f"YouTube fallback search notice: {e}")
+
+        # High-Fidelity Fallback: JioSaavn Unblocked Audio Engine (Akamai CDN)
+        if not track and not is_direct_url:
+            try:
+                track = await asyncio.wait_for(
+                    NativeExtractor._extract_jiosaavn(lookup_target, requester=ctx.author.display_name),
+                    timeout=5.0
+                )
+            except Exception as e:
+                logger.debug(f"JioSaavn search notice in play.py: {e}")
+
+        # Final Fallback: SoundCloud via Lavalink
+        if not track and not is_direct_url:
+            try:
+                results = await asyncio.wait_for(
+                    wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.SoundCloud),
+                    timeout=4.0
+                )
+                if results and not isinstance(results, wavelink.Playlist):
+                    top_p = results[0]
+                    track = Track(
+                        title=top_p.title or "Unknown Track",
+                        author=top_p.author or "SoundCloud Artist",
+                        url=top_p.uri or query,
+                        stream_url="",
+                        duration=int((top_p.length or 0) / 1000),
+                        thumbnail=top_p.artwork,
+                        requester=ctx.author.display_name,
+                        requester_id=ctx.author.id,
+                        query=query,
+                    )
+                    track._playable = top_p
+            except Exception as e:
+                logger.debug(f"SoundCloud fallback search notice: {e}")
 
         # If still no track found, edit the searching message to inform user
         if not track:

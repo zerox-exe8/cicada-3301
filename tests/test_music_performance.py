@@ -92,6 +92,14 @@ class TestMusicPerformance(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(m, f"Failed to match target ID in {url}")
             self.assertEqual(m.group(1), expected_id)
 
+    async def test_stream_url_priority_and_saavn_extraction(self):
+        """Verify JioSaavn direct CDN extraction succeeds and returns valid stream URL."""
+        res = await NativeExtractor._extract_jiosaavn("kesariya", requester="Tester", is_autoplay=False)
+        self.assertIsNotNone(res)
+        self.assertIn("kesariya", res.title.lower())
+        self.assertTrue(res.stream_url.startswith("http"))
+        self.assertIn("saavncdn.com", res.stream_url)
+
 
 if __name__ == "__main__":
     unittest.main()

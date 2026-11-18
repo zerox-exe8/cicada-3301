@@ -145,6 +145,21 @@ UNWANTED_VERSION_KEYWORDS = [
     "arz kiya", "spoof", "mimicry", "short version", "reaction", "version",
 ]
 
+# Recognized official music record labels and entertainment companies
+OFFICIAL_MUSIC_LABELS = (
+    "saregama", "t-series", "tseries", "sony music", "sonymusic", "zee music", "zeemusic",
+    "yrf", "yash raj films", "tips official", "tips music", "tips industries", "speed records",
+    "white hill", "geet mp3", "desi melodies", "aditya music", "lahari music", "eros now",
+    "vevo", "warner music", "universal music", "atlantic records", "columbia records",
+    "interscope", "def jam", "republic records", "times music", "venus", "shemaroo", "svf", "muzik247"
+)
+
+# Standard metadata tags indicating original studio or video releases
+OFFICIAL_AUDIO_DESCRIPTORS = (
+    "official audio", "official music video", "official video", "original track",
+    "original song", "full video song", "lyric video", "lyrics video", "old hindi song"
+)
+
 
 def score_candidate(
     title: str,
@@ -152,15 +167,16 @@ def score_candidate(
     query: str,
     views: int = 0,
     duration: int = 0,
+    rank: int = 0,
 ) -> float:
     """
     Score candidate song match to prioritize the original official version.
     Uses fuzzy token matching to handle transliteration variants (e.g. kesariya/kesariyaa).
-    Penalties are calibrated to avoid discarding legitimate official songs.
+    Supports delimited segmented title matching and search engine rank weighting.
     """
     c_title = (title or "").lower()
     c_author = (subtitle_or_author or "").lower()
-    q_lower = query.lower()
+    q_lower = query.lower().strip()
     q_words = set(re.findall(r"\w+", q_lower))
 
     user_requested = {
@@ -208,12 +224,27 @@ def score_candidate(
 
     clean_c_title = re.sub(r"\(.*?\)|\[.*?\]", "", c_title).strip()
     clean_c_title_low = clean_c_title.lower()
-    is_exact_title = bool(clean_c_title and clean_c_title_low == q_lower)
-    is_contained_title = bool(clean_c_title and (clean_c_title_low in q_lower or q_lower.startswith(clean_c_title_low)))
+    clean_no_punct = re.sub(r"[\"']", "", clean_c_title_low).strip()
+    q_clean = re.sub(r"[\"']", "", q_lower).strip()
 
-    if is_exact_title and not has_unwanted_bracket:
+    title_segments = [
+        s.strip()
+        for s in re.split(r"\s*[|•:/~]\s*|\s+[-–—]\s+", clean_no_punct)
+        if s.strip()
+    ]
+
+    is_exact_title = bool(clean_no_punct and clean_no_punct == q_clean)
+    is_exact_segment = any(seg == q_clean for seg in title_segments)
+    is_fuzzy_segment = any(difflib.SequenceMatcher(None, seg, q_clean).ratio() >= 0.85 for seg in title_segments)
+    is_primary_segment = bool(title_segments and (title_segments[0] == q_clean or title_segments[0].startswith(q_clean)))
+    is_contained_title = bool(clean_no_punct and (clean_no_punct in q_clean or q_clean.startswith(clean_no_punct)))
+    is_segment_contain = any((seg in q_clean or q_clean in seg) for seg in title_segments)
+
+    if (is_exact_title or is_exact_segment) and not has_unwanted_bracket:
         score += 55.0
-    elif is_contained_title and not has_unwanted_bracket:
+    elif (is_fuzzy_segment or is_primary_segment) and not has_unwanted_bracket:
+        score += 45.0
+    elif (is_contained_title or is_segment_contain) and not has_unwanted_bracket:
         # Only award title-containment bonus if the candidate author also matches query OR there are no missing substantive tokens
         if not missing_substantive or bool(author_matched_tokens):
             score += 35.0
@@ -240,20 +271,13 @@ def score_candidate(
         if not overlap and not is_artist_query:
             score -= 100.0
 
-    # Boost official artist topic tracks, original audio, and verified label releases
+    # Boost verified label releases, audio descriptors, and official artist topic tracks
+    if any(label in c_title or label in c_author for label in OFFICIAL_MUSIC_LABELS):
+        score += 30.0
+    if any(desc in c_title or desc in c_author for desc in OFFICIAL_AUDIO_DESCRIPTORS):
+        score += 25.0
     if " - topic" in c_author or "topic" in c_author:
         score += 40.0
-    if (
-        "official audio" in c_title
-        or "official music video" in c_title
-        or "original track" in c_title
-        or "old hindi song" in c_title
-        or "saregama" in c_title
-        or "saregama" in c_author
-        or "t-series" in c_title
-        or "t-series" in c_author
-    ):
-        score += 30.0
 
     # Penalize unwanted modifier keywords using exact word boundaries
     for kw in UNWANTED_VERSION_KEYWORDS:
@@ -265,6 +289,14 @@ def score_candidate(
             # Heavily penalize unrequested alternate versions/covers/parodies so official songs win
             score -= 250.0
             break
+
+    # Algorithmic search ranking bias (top YouTube search results carry view and authority momentum)
+    if rank == 0:
+        score += 35.0
+    elif rank == 1:
+        score += 20.0
+    elif rank == 2:
+        score += 10.0
 
     if views > 10_000_000:
         score += 40.0
@@ -604,9 +636,9 @@ class NativeExtractor:
                 candidates = results if isinstance(results, list) else results.tracks
                 best_cand = None
                 best_score = -999.0
-                for cand in candidates[:5]:
+                for idx, cand in enumerate(candidates[:5]):
                     c_dur = int((cand.length or 0) / 1000)
-                    sc = score_candidate(cand.title or "", cand.author or "", cleaned_query, duration=c_dur)
+                    sc = score_candidate(cand.title or "", cand.author or "", cleaned_query, duration=c_dur, rank=idx)
                     if sc > best_score:
                         best_score = sc
                         best_cand = cand
@@ -640,9 +672,9 @@ class NativeExtractor:
                 candidates = results if isinstance(results, list) else results.tracks
                 best_cand = None
                 best_score = -999.0
-                for cand in candidates[:5]:
+                for idx, cand in enumerate(candidates[:5]):
                     c_dur = int((cand.length or 0) / 1000)
-                    sc = score_candidate(cand.title or "", cand.author or "", cleaned_query, duration=c_dur)
+                    sc = score_candidate(cand.title or "", cand.author or "", cleaned_query, duration=c_dur, rank=idx)
                     if sc > best_score:
                         best_score = sc
                         best_cand = cand
@@ -677,9 +709,9 @@ class NativeExtractor:
                     candidates = results if isinstance(results, list) else results.tracks
                     best_cand = None
                     best_score = -999.0
-                    for cand in candidates[:5]:
+                    for idx, cand in enumerate(candidates[:5]):
                         c_dur = int((cand.length or 0) / 1000)
-                        sc = score_candidate(cand.title or "", cand.author or "", search_target, duration=c_dur)
+                        sc = score_candidate(cand.title or "", cand.author or "", search_target, duration=c_dur, rank=idx)
                         if sc > best_score:
                             best_score = sc
                             best_cand = cand
@@ -734,9 +766,9 @@ class NativeExtractor:
                 candidates = results if isinstance(results, list) else results.tracks
                 best_cand = None
                 best_score = -999.0
-                for cand in candidates[:5]:
+                for idx, cand in enumerate(candidates[:5]):
                     c_dur = int((cand.length or 0) / 1000)
-                    sc = score_candidate(cand.title or "", cand.author or "", sc_target, duration=c_dur)
+                    sc = score_candidate(cand.title or "", cand.author or "", sc_target, duration=c_dur, rank=idx)
                     if sc > best_score:
                         best_score = sc
                         best_cand = cand
@@ -843,9 +875,9 @@ class NativeExtractor:
                         songs1 = data1.get("songs", {}).get("data", [])
                         if songs1:
                             scored1 = []
-                            for s in songs1:
+                            for idx, s in enumerate(songs1):
                                 s_dur = int(s.get("duration") or s.get("more_info", {}).get("duration") or 0)
-                                sc = score_candidate(s.get("title") or "", s.get("description") or "", query, duration=s_dur)
+                                sc = score_candidate(s.get("title") or "", s.get("description") or "", query, duration=s_dur, rank=idx)
                                 scored1.append((sc, s))
 
                             scored1.sort(key=lambda x: x[0], reverse=True)
@@ -905,12 +937,12 @@ class NativeExtractor:
                         results = s_data.get("results", [])
                         if results:
                             scored_res = []
-                            for song in results:
+                            for idx, song in enumerate(results):
                                 s_title = song.get("title") or song.get("song") or ""
                                 s_sub = song.get("subtitle") or ""
                                 m_info = song.get("more_info", {})
                                 dur = int(m_info.get("duration") or song.get("duration") or 0)
-                                sc = score_candidate(s_title, s_sub, query, duration=dur)
+                                sc = score_candidate(s_title, s_sub, query, duration=dur, rank=idx)
                                 scored_res.append((sc, song))
 
                             scored_res.sort(key=lambda x: x[0], reverse=True)
@@ -1050,11 +1082,11 @@ class NativeExtractor:
                                 return None
 
                             scored = []
-                            for it in collection:
+                            for idx, it in enumerate(collection):
                                 it_title = it.get("title") or ""
                                 it_user = it.get("user", {}).get("username") or ""
                                 it_dur = int((it.get("duration") or 0) / 1000)
-                                sc = score_candidate(it_title, it_user, query, duration=it_dur)
+                                sc = score_candidate(it_title, it_user, query, duration=it_dur, rank=idx)
                                 scored.append((sc, it))
 
                             scored.sort(key=lambda x: x[0], reverse=True)

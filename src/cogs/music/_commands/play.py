@@ -578,9 +578,9 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     candidates = results if isinstance(results, list) else getattr(results, "tracks", [results])
                     best_cand = None
                     best_score = -999.0
-                    for cand in candidates[:5]:
+                    for idx, cand in enumerate(candidates[:5]):
                         c_dur = int((cand.length or 0) / 1000)
-                        sc = score_candidate(cand.title or "", cand.author or "", lookup_target, duration=c_dur)
+                        sc = score_candidate(cand.title or "", cand.author or "", lookup_target, duration=c_dur, rank=idx)
                         if sc > best_score:
                             best_score = sc
                             best_cand = cand
@@ -622,9 +622,9 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     candidates = results if isinstance(results, list) else getattr(results, "tracks", [results])
                     best_cand = None
                     best_score = -999.0
-                    for cand in candidates[:5]:
+                    for idx, cand in enumerate(candidates[:5]):
                         c_dur = int((cand.length or 0) / 1000)
-                        sc = score_candidate(cand.title or "", cand.author or "", lookup_target, duration=c_dur)
+                        sc = score_candidate(cand.title or "", cand.author or "", lookup_target, duration=c_dur, rank=idx)
                         if sc > best_score:
                             best_score = sc
                             best_cand = cand

@@ -1,4 +1,3 @@
-import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -236,6 +235,46 @@ class TestMusicPerformance(unittest.IsolatedAsyncioTestCase):
         )
         self.assertGreater(official_score, 50.0)
         self.assertLess(unrelated_score, 0.0)
+
+    def test_score_candidate_segmented_title_beats_bare_indie(self):
+        """Official release with segmented credit title must beat bare indie/bhajan upload on generic text queries."""
+        query = "mann ki lagan"
+        official_score = score_candidate(
+            title="Mann Ki Lagan | Rahat Fateh Ali Khan | Paap | Saregama Music",
+            subtitle_or_author="Saregama Music",
+            query=query,
+            duration=270,
+            rank=0,
+        )
+        indie_score = score_candidate(
+            title="Mann Ki Lagan",
+            subtitle_or_author="Avinash Gupta",
+            query=query,
+            duration=300,
+            rank=3,
+        )
+        self.assertGreater(official_score, indie_score)
+        self.assertGreater(official_score, 150.0)
+
+    def test_score_candidate_official_label_and_rank_boost(self):
+        """Major record labels (Sony Music, T-Series, etc.) and search rank 0 must triumph over amateur covers."""
+        query = "channa mereya"
+        official_score = score_candidate(
+            title="Channa Mereya - Lyric Video | Ae Dil Hai Mushkil | Karan Johar | Ranbir | Anushka | Pritam | Arijit",
+            subtitle_or_author="Sony Music India",
+            query=query,
+            duration=289,
+            rank=0,
+        )
+        cover_score = score_candidate(
+            title="Channa Mereya",
+            subtitle_or_author="Rahul Jain",
+            query=query,
+            duration=250,
+            rank=3,
+        )
+        self.assertGreater(official_score, cover_score)
+        self.assertGreater(official_score, 180.0)
 
     def test_is_playlist_url_handles_youtube_mixes(self):
         """is_playlist_url must distinguish dynamic YouTube Radio/Mix links from actual user playlists."""

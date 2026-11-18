@@ -116,7 +116,25 @@ class TicketInsideControlsView(discord.ui.View):
             await send_container_response(interaction, container, ephemeral=True)
             return
 
-        await self.cog.bot.ticket_mgr.claim_ticket(interaction.channel_id, interaction.user.id)
+        if claimed_by and claimed_by != interaction.user.id:
+            container = KyroContainer()
+            container.add_section(content=f"**Ticket Already Claimed**\n> This ticket is already claimed by <@{claimed_by}>.")
+            await send_container_response(interaction, container, ephemeral=True)
+            return
+
+        success = await self.cog.bot.ticket_mgr.claim_ticket(interaction.channel_id, interaction.user.id)
+        if not success:
+            fresh_ticket = await self.cog.bot.ticket_mgr.get_ticket(interaction.channel_id)
+            c_by = fresh_ticket.get("claimed_by") if fresh_ticket else None
+            container = KyroContainer()
+            container.add_section(
+                content=f"**Ticket Already Claimed**\n> This ticket was already claimed by <@{c_by}>."
+                if c_by
+                else "**Ticket Claim Error**\n> Could not claim ticket at this time."
+            )
+            await send_container_response(interaction, container, ephemeral=True)
+            return
+
         claim_card = KyroContainer()
         claim_card.add_section(
             content=f"**Ticket Claimed**\n> This ticket has been claimed by {interaction.user.mention}."

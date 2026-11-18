@@ -295,7 +295,7 @@ def clean_track_title(raw_title: str) -> str:
     clean = re.sub(r"[-–]\s*\d+\s*kbps.*$", "", clean, flags=re.IGNORECASE)
     clean = re.sub(r"\b\d+\s*kbps\b", "", clean, flags=re.IGNORECASE)
     clean = re.sub(
-        r"[\(\[\{]\s*(?:official\s+video|official\s+audio|lyrics?|full\s+song|hd|4k|1080p|audio|video|prod\..*?|dir\..*?|use\s+headphones?)[\)\]\}]",
+        r"[\(\[\{]\s*(?:official\s*(?:music\s*)?video|official\s+audio|music\s+video|lyrics?|lyric\s+video|full\s+song|hd|4k(?:\s*\d+\s*fps)?|1080p|audio|video|prod\..*?|dir\..*?|use\s+headphones?)[\)\]\}]",
         "",
         clean,
         flags=re.IGNORECASE,
@@ -481,7 +481,7 @@ class NativeExtractor:
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
-                timeout=3.5,
+                timeout=2.0,
             )
             if results:
                 candidates = results if isinstance(results, list) else results.tracks
@@ -517,7 +517,7 @@ class NativeExtractor:
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTube),
-                timeout=3.0,
+                timeout=2.2,
             )
             if results:
                 candidates = results if isinstance(results, list) else results.tracks

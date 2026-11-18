@@ -64,7 +64,7 @@ class PermissionManager:
         """Add a developer to memory cache and database."""
         self._developer_ids.add(user_id)
         await self.db.execute(
-            "INSERT OR IGNORE INTO system_developers (user_id, added_by) VALUES (?, ?);",
+            "INSERT INTO system_developers (user_id, added_by) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING;",
             user_id,
             added_by,
         )
@@ -74,7 +74,7 @@ class PermissionManager:
         """Remove a developer from memory cache and database."""
         self._developer_ids.discard(user_id)
         await self.db.execute(
-            "DELETE FROM system_developers WHERE user_id = ?;",
+            "DELETE FROM system_developers WHERE user_id = $1;",
             user_id,
         )
         logger.info(f"Removed developer ID: {user_id}")

@@ -170,11 +170,18 @@ class TicketManager:
         return await self.repo.get_active_ticket_for_user(guild_id, user_id, panel_id)
 
     async def claim_ticket(self, channel_id: int, claimed_by: int) -> bool:
-        """Set the claiming staff member for an active ticket."""
-        await self.repo.claim_ticket(channel_id, claimed_by)
-        if channel_id in self._active_tickets_cache:
-            self._active_tickets_cache[channel_id]["claimed_by"] = claimed_by
-        return True
+        """Set the claiming staff member for an active ticket atomically."""
+        success = await self.repo.claim_ticket(channel_id, claimed_by)
+        if success:
+            if channel_id in self._active_tickets_cache:
+                self._active_tickets_cache[channel_id]["claimed_by"] = claimed_by
+        else:
+            fresh = await self.repo.get_ticket(channel_id)
+            if fresh:
+                self._active_tickets_cache[channel_id] = fresh
+            else:
+                self._active_tickets_cache.pop(channel_id, None)
+        return success
 
     async def close_ticket(self, channel_id: int, closed_by: int) -> bool:
         """Mark an active ticket as closed."""

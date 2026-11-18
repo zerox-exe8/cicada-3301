@@ -20,6 +20,20 @@ async def execute_stop(cog: Music, ctx: commands.Context) -> None:
 
     player = cog.controller.get_player(ctx.guild.id)
     if not player or not player.is_connected:
+        # Self-healing fallback: If bot is physically sitting in a voice channel, force disconnect it!
+        if ctx.guild.me and ctx.guild.me.voice and ctx.guild.me.voice.channel:
+            try:
+                if player:
+                    player.queue.clear()
+                    player.current = None
+                    player.voice_client = None
+                await ctx.guild.change_voice_state(channel=None)
+                container = KyroContainer(accent_color=None)
+                container.add_text("**Cleaned orphaned voice connection and disconnected.**")
+                await send_container_response(ctx, container)
+                return
+            except Exception:
+                pass
         container = KyroContainer(accent_color=None)
         container.add_text("**No active player found in this server.**")
         await send_container_response(ctx, container)

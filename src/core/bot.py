@@ -8,6 +8,10 @@ from discord.ext import commands, tasks
 
 from src.core.config import Config
 from src.core.context import CustomContext
+from src.core.permissions import install_permission_overrides
+
+# Install transparent Application Owner permission overrides globally
+install_permission_overrides()
 from src.database.base import BaseDatabase
 from src.database.postgres import PostgresDatabase
 from src.managers.guild_manager import GuildManager
@@ -357,6 +361,3 @@ class KyroBot(commands.Bot):
                     pass
                 music_cog.controller._players.pop(guild.id, None)
 
-
-# Backward Compatibility Alias
-KyroBot = KyroBot

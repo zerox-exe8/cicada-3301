@@ -25,6 +25,7 @@ class GiveawayManager:
         # giveaway_id -> message_id index
         self._id_to_message_id: dict[int, int] = {}
         self._lock = asyncio.Lock()
+        self._ending_in_flight: set[int] = set()
 
     async def load_cache(self) -> None:
         """Load all currently active (unended) giveaways into memory cache."""
@@ -220,33 +221,46 @@ class GiveawayManager:
 
         giveaway_id = gw["id"]
 
-        # Mark ended in DB
-        await self.db.execute(
-            "UPDATE giveaways SET is_ended = TRUE WHERE id = $1;",
-            giveaway_id,
-        )
-
         async with self._lock:
-            self._active_giveaways.pop(message_id, None)
-            self._id_to_message_id.pop(giveaway_id, None)
+            if giveaway_id in self._ending_in_flight:
+                logger.info(f"Giveaway ID {giveaway_id} is already being finalized in-flight.")
+                return None
+            self._ending_in_flight.add(giveaway_id)
 
-        # Draw winners
-        participants = await self.get_participants(giveaway_id)
-        winner_count = gw["winner_count"]
+        try:
+            # Atomically mark ended in PostgreSQL to prevent concurrent finalize race conditions
+            updated = await self.db.fetch_one(
+                "UPDATE giveaways SET is_ended = TRUE WHERE id = $1 AND is_ended = FALSE RETURNING id;",
+                giveaway_id,
+            )
+            if not updated:
+                logger.info(f"Giveaway ID {giveaway_id} was already finalized in database.")
+                return None
 
-        if not participants:
-            winners = []
-        elif len(participants) <= winner_count:
-            winners = participants
-            random.shuffle(winners)
-        else:
-            winners = random.sample(participants, winner_count)
+            async with self._lock:
+                self._active_giveaways.pop(message_id, None)
+                self._id_to_message_id.pop(giveaway_id, None)
 
-        result = dict(gw)
-        result["is_ended"] = True
-        result["winners"] = winners
-        result["total_entries"] = len(participants)
-        return result
+            # Draw winners
+            participants = await self.get_participants(giveaway_id)
+            winner_count = gw["winner_count"]
+
+            if not participants:
+                winners = []
+            elif len(participants) <= winner_count:
+                winners = participants
+                random.shuffle(winners)
+            else:
+                winners = random.sample(participants, winner_count)
+
+            result = dict(gw)
+            result["is_ended"] = True
+            result["winners"] = winners
+            result["total_entries"] = len(participants)
+            return result
+        finally:
+            async with self._lock:
+                self._ending_in_flight.discard(giveaway_id)
 
     async def reroll_giveaway(self, message_id: int, count: int = 1) -> Optional[tuple[dict[str, Any], list[int]]]:
         """Select new random winner(s) from participants of an existing giveaway."""

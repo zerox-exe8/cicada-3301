@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING, Optional
 import discord
 from discord.ext import commands
@@ -18,6 +19,9 @@ logger = logging.getLogger("Kyro.Music.Play")
 
 async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] = None) -> None:
     """Execute native play command."""
+    search_msg: Optional[discord.Message] = None
+    search_msg_task: Optional[asyncio.Task] = None
+    connect_task: Optional[asyncio.Task] = None
     # Immediately defer interaction if slash command to avoid 3-second Discord timeout (10062)
     if ctx.interaction and not ctx.interaction.response.is_done():
         try:
@@ -547,7 +551,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 track = await asyncio.wait_for(
                     NativeExtractor.extract(lookup_target, requester=ctx.author.display_name),
-                    timeout=5.0
+                    timeout=4.2
                 )
             except Exception as e:
                 logger.debug(f"NativeExtractor search notice: {e}")
@@ -557,7 +561,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(lookup_target, source=wavelink.TrackSource.YouTube),
-                    timeout=3.5
+                    timeout=2.2
                 )
                 if results and not isinstance(results, wavelink.Playlist):
                     chosen = results[0]
@@ -680,6 +684,20 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
 
     except Exception as e:
         logger.error(f"Guild {ctx.guild.id}: Uncaught error in execute_play for '{query}': {e}", exc_info=True)
+        if connect_task and not connect_task.done():
+            connect_task.cancel()
+
+        # If searching card task is pending, resolve it safely so we can edit it
+        if not search_msg and search_msg_task:
+            try:
+                search_msg = await asyncio.wait_for(asyncio.shield(search_msg_task), timeout=1.5)
+            except Exception:
+                pass
+
+        # If player joined voice but playback failed, ensure empty VC timer runs to prevent zombie voice state
+        if player and player.is_connected and player.current is None and not player.queue:
+            player.schedule_empty_vc_timer()
+
         err_card = KyroContainer(accent_color=None)
         err_card.add_section(
             content=(

@@ -382,6 +382,16 @@ class GuildPlayer:
                 except Exception:
                     pass
 
+                # If Discord Gateway still has us recorded in a voice channel but we don't have a working
+                # active player, force a clean voice state reset so Discord emits fresh credentials on connect
+                if self.guild.me and self.guild.me.voice and self.guild.me.voice.channel:
+                    try:
+                        self._disconnect_expected_until = time.monotonic() + 4.0
+                        await self.guild.change_voice_state(channel=None)
+                        await asyncio.sleep(0.15)
+                    except Exception:
+                        pass
+
                 # Ensure Wavelink node is alive and connected before connecting player
                 node = None
                 try:
@@ -454,6 +464,15 @@ class GuildPlayer:
                         except Exception:
                             pass
                         self.voice_client = None
+
+                        # Force Discord Gateway to clear old session if registered in a channel
+                        if self.guild.me and self.guild.me.voice and self.guild.me.voice.channel:
+                            try:
+                                self._disconnect_expected_until = time.monotonic() + 4.0
+                                await self.guild.change_voice_state(channel=None)
+                                await asyncio.sleep(0.15)
+                            except Exception:
+                                pass
 
                         # After first failure, heal node only if unresponsive and pause 0.3s before second attempt
                         if attempt == 0:
@@ -689,7 +708,7 @@ class GuildPlayer:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(full_query, source=wavelink.TrackSource.YouTubeMusic),
-                    timeout=3.0,
+                    timeout=2.0,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
@@ -704,7 +723,7 @@ class GuildPlayer:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=2.5,
+                    timeout=2.0,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]

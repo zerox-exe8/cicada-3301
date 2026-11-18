@@ -48,3 +48,14 @@ All tasks in this repository must strictly adhere to the following non-negotiabl
 - All database operations utilize PostgreSQL with the asynchronous `asyncpg` connection pool on `bot.db`.
 - Always use parameterized queries (`$1`, `$2`, etc.) to prevent SQL injection vulnerabilities.
 - State checks (e.g. `player.is_paused`) must reflect immediately without waiting for asynchronous network round-trips to prevent UI state desynchronization.
+
+---
+
+## 3. Dedicated Workspace Rules
+Detailed engineering, security, and concurrency policies are codified in:
+- [engineering_rules.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/engineering_rules.md)
+- [security_permissions.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/security_permissions.md)
+- [architecture_concurrency.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/architecture_concurrency.md)
+- [testing_and_release.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/testing_and_release.md)
+- [memos_core.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/memos_core.md)
+

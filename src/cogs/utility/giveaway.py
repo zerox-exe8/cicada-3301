@@ -355,6 +355,15 @@ class Giveaways(commands.Cog):
             except Exception as e:
                 logger.debug(f"Failed to edit giveaway message {message_id}: {e}")
 
+            if winners and channel:
+                winner_mentions = ", ".join(f"<@{w}>" for w in winners)
+                try:
+                    await channel.send(
+                        f"Congratulations {winner_mentions}! You won **{res['prize']}**!\n> {msg.jump_url}"
+                    )
+                except Exception as send_err:
+                    logger.debug(f"Failed to post winner announcement for giveaway {message_id}: {send_err}")
+
         return res
 
     # ─── COMMANDS ────────────────────────────────────────────────────────────
@@ -582,6 +591,16 @@ class Giveaways(commands.Cog):
                 return
 
         res = await self.conclude_giveaway(mid)
+        if not res:
+            container = KyroContainer(accent_color=None)
+            container.add_section(content="**Already Ended**")
+            container.add_separator(divider=True)
+            container.add_text(f"{dot} This giveaway has already been concluded.")
+            container.add_separator(divider=True)
+            container.add_text(f"-# Requested by {ctx.author.display_name}")
+            await send_container_response(ctx, container, ephemeral=True)
+            return
+
         container = KyroContainer(accent_color=None)
         container.add_section(content="**Giveaway Ended**")
         container.add_separator(divider=True)

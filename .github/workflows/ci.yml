@@ -1,0 +1,44 @@
+name: Kyro CI/CD Quality & Security Gate
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  verify:
+    name: Lint, Test & Compile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio ruff bandit
+
+      - name: Python Bytecode Compilation Verification
+        run: |
+          python -m compileall src/ tests/
+
+      - name: Ruff Linter Check
+        run: |
+          ruff check src/ tests/ --exit-non-zero-on-fix
+
+      - name: Security Audit with Bandit
+        run: |
+          bandit -r src/ -c pyproject.toml
+
+      - name: Run Test Suite
+        run: |
+          pytest tests/ -v

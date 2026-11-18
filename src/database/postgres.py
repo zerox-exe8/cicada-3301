@@ -125,28 +125,6 @@ class PostgresDatabase(BaseDatabase):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """,
-            # Global Blacklist persistent table
-            """
-            CREATE TABLE IF NOT EXISTS system_blacklists (
-                target_id BIGINT PRIMARY KEY,
-                target_type VARCHAR(16) DEFAULT 'user',
-                reason TEXT,
-                added_by BIGINT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """,
-            # User profiles / Economy table
-            """
-            CREATE TABLE IF NOT EXISTS user_profiles (
-                user_id BIGINT,
-                guild_id BIGINT,
-                balance BIGINT DEFAULT 0,
-                bank BIGINT DEFAULT 0,
-                xp BIGINT DEFAULT 0,
-                level INT DEFAULT 1,
-                PRIMARY KEY (user_id, guild_id)
-            );
-            """,
             # Server modular audit logging channels
             """
             CREATE TABLE IF NOT EXISTS guild_logs (
@@ -302,16 +280,6 @@ class PostgresDatabase(BaseDatabase):
                 UNIQUE(user_id, track_title, artist)
             );
             """,
-            # Guild Music & Autoplay Configuration table
-            """
-            CREATE TABLE IF NOT EXISTS guild_music_settings (
-                guild_id BIGINT PRIMARY KEY,
-                autoplay BOOLEAN DEFAULT FALSE,
-                autoplay_mode VARCHAR(20) DEFAULT 'smart',
-                default_volume INT DEFAULT 100,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """,
             # User Custom Playlists & Liked Songs table
             """
             CREATE TABLE IF NOT EXISTS user_playlists (
@@ -378,14 +346,6 @@ class PostgresDatabase(BaseDatabase):
                 is_247 BOOLEAN DEFAULT FALSE
             );
             """,
-            # Guild Ghost-Ping Settings table
-            """
-            CREATE TABLE IF NOT EXISTS guild_ghostping_settings (
-                guild_id BIGINT PRIMARY KEY,
-                is_enabled BOOLEAN DEFAULT TRUE,
-                channel_id BIGINT
-            );
-            """,
             # User AFK table
             """
             CREATE TABLE IF NOT EXISTS user_afk (
@@ -396,24 +356,6 @@ class PostgresDatabase(BaseDatabase):
                 original_nickname VARCHAR(64),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (user_id, guild_id)
-            );
-            """,
-            # Guild Server Snapshots for Disaster Recovery & Nuke Rollback
-            """
-            CREATE TABLE IF NOT EXISTS guild_server_snapshots (
-                guild_id BIGINT PRIMARY KEY,
-                snapshot_data JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by BIGINT
-            );
-            """,
-            # Guild Anonymous Confession Settings
-            """
-            CREATE TABLE IF NOT EXISTS guild_confession_settings (
-                guild_id BIGINT PRIMARY KEY,
-                channel_id BIGINT,
-                counter INT DEFAULT 0,
-                is_enabled BOOLEAN DEFAULT TRUE
             );
             """,
             # User AFK Voice Mail & Notes Inbox
@@ -526,29 +468,6 @@ class PostgresDatabase(BaseDatabase):
             """
             ALTER TABLE guild_dev_pulse ADD COLUMN IF NOT EXISTS last_dispatch_ts TIMESTAMP;
             """,
-            # Community Projects Showcase Registry
-            """
-            CREATE TABLE IF NOT EXISTS community_projects (
-                id SERIAL PRIMARY KEY,
-                guild_id BIGINT NOT NULL,
-                user_id BIGINT NOT NULL,
-                title VARCHAR(120) NOT NULL,
-                description TEXT NOT NULL,
-                demo_url TEXT NOT NULL,
-                image_url TEXT,
-                message_id BIGINT,
-                channel_id BIGINT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS community_project_upvotes (
-                project_id INT REFERENCES community_projects(id) ON DELETE CASCADE,
-                user_id BIGINT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (project_id, user_id)
-            );
-            """,
             # Real-Time Cloud Infrastructure Outages Tracking Registry for Self-Healing Embeds
             """
             CREATE TABLE IF NOT EXISTS active_tech_incidents (
@@ -641,16 +560,6 @@ class PostgresDatabase(BaseDatabase):
                 target_mode VARCHAR(16) DEFAULT 'ephemeral',
                 disabled_channels BIGINT[] DEFAULT '{}',
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """,
-            # Dynamic Role Shortcuts Configuration
-            """
-            CREATE TABLE IF NOT EXISTS guild_role_shortcuts (
-                guild_id BIGINT NOT NULL,
-                shortcut_name VARCHAR(64) NOT NULL,
-                role_id BIGINT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (guild_id, shortcut_name)
             );
             """,
             # Antinuke Core Settings table

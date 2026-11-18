@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kyro"
+version = "2.0.0"
+description = "Kyro Discord Bot - High-Performance Multi-Purpose Discord Bot"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Kyro Systems Team" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.5",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+    "bandit>=1.7.8",
+    "pip-audit>=2.7.2",
+    "pre-commit>=3.6.2",
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::ResourceWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    ".agents",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes
+    "I",    # isort
+    "C90",  # mccabe complexity
+]
+ignore = [
+    "E501", # line length handled by black/formatter
+    "E402", # module level import not at top of file
+    "F401", # unused import (sometimes needed for re-exports)
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.bandit]
+exclude_dirs = ["tests", ".agents", ".venv", "__pycache__"]
+skips = ["B101"]  # skip assert warnings in tests
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["tests/", ".agents/"]

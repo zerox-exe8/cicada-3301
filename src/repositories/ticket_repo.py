@@ -160,13 +160,14 @@ class TicketRepository(BaseRepository):
         query += " LIMIT 1;"
         return await self.fetch_one(query, *args)
 
-    async def claim_ticket(self, channel_id: int, claimed_by: int) -> None:
-        """Set claiming staff ID for open ticket."""
-        await self.execute(
-            "UPDATE active_tickets SET claimed_by = $1 WHERE channel_id = $2 AND status = 'open';",
+    async def claim_ticket(self, channel_id: int, claimed_by: int) -> bool:
+        """Set claiming staff ID for open ticket atomically if not already claimed."""
+        row = await self.fetch_one(
+            "UPDATE active_tickets SET claimed_by = $1 WHERE channel_id = $2 AND status = 'open' AND claimed_by IS NULL RETURNING id;",
             claimed_by,
             channel_id,
         )
+        return bool(row)
 
     async def close_ticket(self, channel_id: int, closed_by: int) -> None:
         """Set status = closed for ticket."""

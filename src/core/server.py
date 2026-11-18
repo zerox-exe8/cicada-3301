@@ -66,12 +66,20 @@ class HealthServer:
         }
 
     def _check_dashboard_auth(self, request: web.Request) -> bool:
-        """Bearer-token guard for write endpoints (empty token = local dev, allow)."""
+        """Bearer-token guard for write endpoints with constant-time comparison and environment gating."""
+        import secrets
         expected = os.getenv("DASHBOARD_TOKEN", "").strip()
         if not expected:
-            return True
-        auth = request.headers.get("Authorization", "")
-        return auth == f"Bearer {expected}"
+            # Strictly allow unauthenticated writes only in local development on loopback
+            is_local_dev = getattr(Config, "ENVIRONMENT", "development").lower() in ("dev", "development", "local")
+            remote = getattr(request, "remote", "")
+            if is_local_dev and remote in ("127.0.0.1", "::1", "localhost", None):
+                return True
+            return False
+
+        auth = request.headers.get("Authorization", "").strip()
+        expected_header = f"Bearer {expected}"
+        return secrets.compare_digest(auth, expected_header)
 
     async def _handle_home(self, request: web.Request) -> web.Response:
         """Root endpoint returning basic status."""
@@ -82,16 +90,45 @@ class HealthServer:
         )
 
     async def _handle_health(self, request: web.Request) -> web.Response:
-        """Detailed health check endpoint."""
+        """Detailed health check endpoint reporting true subsystem health."""
         bot = self.bot
         ws_ping = round(bot.latency * 1000) if (bot and bot.latency and not math.isnan(bot.latency)) else 0
+        is_ready = bool(bot and bot.is_ready())
+        db_ok = bool(
+            bot
+            and getattr(bot, "db", None)
+            and getattr(bot.db, "pool", None)
+            and not getattr(bot.db.pool, "_closed", True)
+        )
+        lavalink_ok = False
+        try:
+            import wavelink
+            node = wavelink.Pool.get_node()
+            lavalink_ok = bool(node and getattr(node, "status", None) == wavelink.NodeStatus.CONNECTED)
+        except Exception:
+            pass
+
+        if is_ready and db_ok:
+            overall = "healthy" if lavalink_ok else "degraded"
+        elif is_ready:
+            overall = "degraded"
+        else:
+            overall = "initializing"
+
         data = {
-            "status": "healthy",
+            "status": overall,
             "bot": "Kyro",
+            "ready": is_ready,
             "guilds": len(bot.guilds) if bot else 0,
             "ping_ms": ws_ping,
+            "components": {
+                "database": "connected" if db_ok else "disconnected",
+                "lavalink": "connected" if lavalink_ok else "disconnected",
+                "gateway": "ready" if is_ready else "connecting",
+            },
         }
-        return web.json_response(data, status=200, headers=self._cors_headers())
+        status_code = 200 if (is_ready or overall != "unavailable") else 503
+        return web.json_response(data, status=status_code, headers=self._cors_headers())
 
     async def _handle_api_stats(self, request: web.Request) -> web.Response:
         """Real-time bot telemetry metrics JSON API."""

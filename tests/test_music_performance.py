@@ -181,6 +181,11 @@ class TestMusicPerformance(unittest.IsolatedAsyncioTestCase):
         # Must debounce and not pop next track
         player.pop_next_track.assert_not_called()
 
+        # Recovery in flight guard:
+        player._is_recovering = True
+        await player.on_track_end(reason="loadfailed")
+        player.pop_next_track.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

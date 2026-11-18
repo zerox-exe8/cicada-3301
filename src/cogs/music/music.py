@@ -147,14 +147,12 @@ class Music(commands.Cog):
                 IncidentSeverity.WARNING,
                 "Lavalink Track Exception",
                 f"Track '{title}': {exception}",
-                action_taken="Advanced queue to next available stream",
+                action_taken="Lavalink emitted TrackEndEvent to advance or recover queue",
                 resolved=True,
                 guild_id=guild_id,
             )
-        if player_obj and player_obj.guild:
-            player = self.controller.get_player(player_obj.guild.id)
-            if player and hasattr(player, "on_track_end"):
-                await player.on_track_end(reason="loadFailed")
+        # Note: Do NOT call player.on_track_end here! Lavalink emits TrackEndEvent(reason='loadFailed')
+        # immediately following TrackExceptionEvent, which handles recovery without race conditions.
 
     @commands.Cog.listener()
     async def on_wavelink_track_stuck(self, payload: Any) -> None:
@@ -175,10 +173,7 @@ class Music(commands.Cog):
                 resolved=True,
                 guild_id=guild_id,
             )
-        if player_obj and player_obj.guild:
-            player = self.controller.get_player(player_obj.guild.id)
-            if player and hasattr(player, "on_track_end"):
-                await player.on_track_end(reason="loadFailed")
+        # Note: Do NOT call player.on_track_end here; Lavalink emits TrackEndEvent to conclude stuck playback.
 
     @commands.Cog.listener()
     async def on_wavelink_node_closed(self, node: Any, disconnected: Any) -> None:

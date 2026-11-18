@@ -211,6 +211,8 @@ class GuildPlayer:
         self._disconnect_expected_until: float = 0.0
         # Guard flag indicating that a connect_voice operation is currently in flight
         self._is_connecting: bool = False
+        # Guard flag indicating that track recovery is in flight
+        self._is_recovering: bool = False
 
     # ── State Properties ──
 
@@ -949,12 +951,17 @@ class GuildPlayer:
                 )
                 return
 
+        if getattr(self, "_is_recovering", False):
+            logger.debug(f"Guild {self.guild.id}: Recovery in progress, debouncing TrackEnd event.")
+            return
+
         if reason_str in ("loadfailed", "load_failed"):
             logger.warning(f"Guild {self.guild.id}: Lavalink reported track loadFailed.")
             # Unblocked recovery: if current track failed from YouTube, retry once with direct stream
             curr = self.current
             if curr and not getattr(curr, "_load_failed_retried", False):
                 curr._load_failed_retried = True
+                self._is_recovering = True
                 try:
                     from src.cogs.music._extractor import NativeExtractor
                     if curr.query and not curr.query.startswith(("http://", "https://")):
@@ -979,8 +986,8 @@ class GuildPlayer:
                         if p:
                             fallback_trk._playable = p
                             self.current = fallback_trk
-                            # Update existing card in place to prevent duplicate embeds
-                            await self.update_controller_message()
+                            # Update active Now Playing controller card with recovered track details
+                            await self.send_now_playing_card(fallback_trk, message_to_edit=self.controller_message)
                             vol_int = int(self.volume * 100)
                             await self.voice_client.play(p, volume=vol_int, paused=False)
                             logger.info(f"Guild {self.guild.id}: Successfully recovered '{curr.title}' via unblocked audio stream.")
@@ -1008,7 +1015,7 @@ class GuildPlayer:
                             sc_trk._playable = top_sc
                             sc_trk._load_failed_retried = True
                             self.current = sc_trk
-                            await self.update_controller_message()
+                            await self.send_now_playing_card(sc_trk, message_to_edit=self.controller_message)
                             vol_int = int(self.volume * 100)
                             await self.voice_client.play(top_sc, volume=vol_int, paused=False)
                             logger.info(f"Guild {self.guild.id}: Successfully recovered '{curr.title}' via SoundCloud.")
@@ -1017,6 +1024,8 @@ class GuildPlayer:
                         logger.debug(f"Guild {self.guild.id}: SoundCloud recovery notice: {sc_err}")
                 except Exception as rec_err:
                     logger.debug(f"Guild {self.guild.id}: Stream recovery notice: {rec_err}")
+                finally:
+                    self._is_recovering = False
 
             next_track = await self.pop_next_track()
             if next_track:
@@ -1208,8 +1217,13 @@ class GuildPlayer:
 
     async def send_queue_ended_card(self) -> None:
         """Post or edit the Queue Ended card in home channel."""
-        # Safety guard: Never send queue ended card if audio is actively playing or queue is not empty!
-        if self.is_playing or self.queue:
+        # Safety guard: Never send queue ended card if audio is actively playing, queue is not empty, or recovery is in flight!
+        if getattr(self, "_is_recovering", False):
+            return
+        vc = self.guild.voice_client
+        if vc and getattr(vc, "connected", False) and getattr(vc, "playing", False):
+            return
+        if self.current is not None or self.queue:
             return
         if not self.home_channel:
             return

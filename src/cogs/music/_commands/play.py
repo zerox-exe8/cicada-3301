@@ -204,7 +204,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     # Only sanitize if it is a single video URL, NEVER strip playlist ID
     if not is_playlist_url(clean_q):
         yt_vid_m = YOUTUBE_URL_REGEX.search(clean_q)
-        if yt_vid_m and "/playlist" not in clean_q.lower() and "list=" not in clean_q.lower():
+        if yt_vid_m and "/playlist" not in clean_q.lower():
             clean_q = f"https://www.youtube.com/watch?v={yt_vid_m.group(1)}"
 
     try:

@@ -704,13 +704,29 @@ class GuildPlayer:
         url = track.url or ""
         if url.startswith(("http://", "https://")) and not any(sp in url for sp in ("spotify.com", "spoti.fi")):
             try:
-                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=3.0)
+                results = await asyncio.wait_for(wavelink.Playable.search(url), timeout=5.0)
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
                     track._playable = p
                     return p
             except Exception as e:
                 logger.debug(f"Direct URL resolution error for '{url}': {e}")
+
+            # If direct URL lookup failed on Lavalink and it is a YouTube URL, search exact video ID
+            from src.cogs.music._extractor import YOUTUBE_URL_REGEX
+            yt_m = YOUTUBE_URL_REGEX.search(url)
+            if yt_m:
+                video_id = yt_m.group(1)
+                try:
+                    results = await asyncio.wait_for(wavelink.Playable.search(f"ytsearch:{video_id}"), timeout=5.0)
+                    if results:
+                        candidates = results if isinstance(results, list) else results.tracks
+                        for cand in candidates:
+                            if getattr(cand, "identifier", None) == video_id or video_id in (cand.uri or ""):
+                                track._playable = cand
+                                return cand
+                except Exception as e:
+                    logger.debug(f"Video ID YouTube resolution error for '{url}': {e}")
 
         # ── Priority 3: High-Speed YouTube Music Search (~0.8s) ──
         from src.cogs.music._extractor import clean_track_title
@@ -728,7 +744,7 @@ class GuildPlayer:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(full_query, source=wavelink.TrackSource.YouTubeMusic),
-                    timeout=2.0,
+                    timeout=5.0,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
@@ -743,7 +759,7 @@ class GuildPlayer:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=2.0,
+                    timeout=5.0,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
@@ -758,10 +774,10 @@ class GuildPlayer:
             saavn_target = pure_title or clean_title or full_query or track.title
             saavn_trk = await asyncio.wait_for(
                 NativeExtractor._extract_jiosaavn(saavn_target, requester=track.requester, is_autoplay=track.is_autoplay),
-                timeout=4.0,
+                timeout=5.0,
             )
             if saavn_trk and saavn_trk.stream_url:
-                results = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=4.0)
+                results = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=5.0)
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]
                     track._playable = p
@@ -777,7 +793,7 @@ class GuildPlayer:
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.SoundCloud),
-                    timeout=3.0,
+                    timeout=5.0,
                 )
                 if results:
                     p = results[0] if isinstance(results, list) else results.tracks[0]

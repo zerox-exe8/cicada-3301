@@ -201,6 +201,38 @@ class TestMusicPerformance(unittest.IsolatedAsyncioTestCase):
         await player.on_track_end(reason="loadfailed")
         player.pop_next_track.assert_not_called()
 
+    def test_score_candidate_rejects_artist_name_as_title(self):
+        """Scorer must disqualify fake candidates where artist name matches query substring but song title is missing."""
+        query = "maroon 5 - sugar"
+        fake_score = score_candidate(
+            title="Maroon 5",
+            subtitle_or_author="Mask R, Tadpole",
+            query=query,
+            duration=180,
+        )
+        real_score = score_candidate(
+            title="Sugar",
+            subtitle_or_author="Maroon 5",
+            query=query,
+            duration=235,
+        )
+        self.assertLess(fake_score, 0)
+        self.assertGreater(real_score, 50)
+
+    def test_is_playlist_url_handles_youtube_mixes(self):
+        """is_playlist_url must distinguish dynamic YouTube Radio/Mix links from actual user playlists."""
+        from src.cogs.music._extractor import is_playlist_url
+
+        yt_radio_mix = "https://www.youtube.com/watch?v=kJQP7kiw5Fk&list=RDkJQP7kiw5Fk"
+        yt_uploader_mix = "https://www.youtube.com/watch?v=kJQP7kiw5Fk&list=ULkJQP7kiw5Fk"
+        yt_single = "https://www.youtube.com/watch?v=09R8_2nJtjg"
+        yt_real_playlist = "https://www.youtube.com/playlist?list=PL4fGSIFgk5tX8Uf_3Fq6yF_0E3rN3P41k"
+
+        self.assertFalse(is_playlist_url(yt_radio_mix))
+        self.assertFalse(is_playlist_url(yt_uploader_mix))
+        self.assertFalse(is_playlist_url(yt_single))
+        self.assertTrue(is_playlist_url(yt_real_playlist))
+
 
 if __name__ == "__main__":
     unittest.main()

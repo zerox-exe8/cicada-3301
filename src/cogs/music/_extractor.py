@@ -167,6 +167,7 @@ def score_candidate(
     score = 0.0
     q_tokens = [w for w in re.findall(r"\w+", q_lower) if len(w) > 1]
     title_tokens = [w for w in re.findall(r"\w+", c_title) if len(w) > 1]
+    author_tokens = [w for w in re.findall(r"\w+", c_author) if len(w) > 1]
 
     def _fuzzy_match(tok: str, tokens: list) -> bool:
         """Check for exact or near-transliteration match (±2 chars, substring)."""
@@ -178,14 +179,16 @@ def score_candidate(
             for t in tokens
         )
 
-    # Ensure the candidate's TITLE has substantive overlap with the query
-    substantive_q_tokens = {
+    # Ensure the candidate has substantive overlap with the query
+    substantive_q_tokens = [
         w for w in q_tokens
-        if w not in {"8d", "3d", "audio", "song", "music", "video", "official", "use", "headphones", "sound"}
-    }
-    author_tokens = [w for w in re.findall(r"\w+", c_author) if len(w) > 1]
-    title_or_author_matched = sum(1 for tok in substantive_q_tokens if _fuzzy_match(tok, title_tokens) or _fuzzy_match(tok, author_tokens))
-    if substantive_q_tokens and not title_or_author_matched:
+        if w not in {"8d", "3d", "audio", "song", "music", "video", "official", "use", "headphones", "sound", "track", "full", "hd", "4k"}
+    ]
+    title_matched_tokens = [tok for tok in substantive_q_tokens if _fuzzy_match(tok, title_tokens)]
+    author_matched_tokens = [tok for tok in substantive_q_tokens if _fuzzy_match(tok, author_tokens)]
+    missing_substantive = [tok for tok in substantive_q_tokens if tok not in title_matched_tokens and tok not in author_matched_tokens]
+
+    if substantive_q_tokens and not title_matched_tokens and not author_matched_tokens:
         # Candidate has ZERO matching substantive words in either title OR artist: disqualify
         return -500.0
 
@@ -198,17 +201,26 @@ def score_candidate(
     has_unwanted_bracket = any(kw in bracket_content for kw in UNWANTED_VERSION_KEYWORDS if kw not in user_requested)
 
     clean_c_title = re.sub(r"\(.*?\)|\[.*?\]", "", c_title).strip()
-    clean_title_matches = bool(clean_c_title and (q_lower == clean_c_title or clean_c_title in q_lower or q_lower.startswith(clean_c_title)))
-    if clean_title_matches and not has_unwanted_bracket:
-        score += 45.0
+    clean_c_title_low = clean_c_title.lower()
+    is_exact_title = bool(clean_c_title and clean_c_title_low == q_lower)
+    is_contained_title = bool(clean_c_title and (clean_c_title_low in q_lower or q_lower.startswith(clean_c_title_low)))
 
-    # Penalize if query had explicit artist/author tokens not in candidate title that don't match candidate author
-    extra_tokens = [tok for tok in substantive_q_tokens if not _fuzzy_match(tok, title_tokens)]
-    if len(extra_tokens) >= 2:
-        author_tokens = re.findall(r"\w{3,}", c_author.lower())
-        author_matched = sum(1 for tok in extra_tokens if _fuzzy_match(tok, author_tokens))
-        if author_matched == 0:
-            score -= 85.0
+    if is_exact_title and not has_unwanted_bracket:
+        score += 55.0
+    elif is_contained_title and not has_unwanted_bracket:
+        # Only award title-containment bonus if the candidate author also matches query OR there are no missing substantive tokens
+        if not missing_substantive or bool(author_matched_tokens):
+            score += 35.0
+        else:
+            # Candidate title was just an isolated substring (e.g. artist name) and author didn't match
+            score -= 80.0
+
+    # Penalize if query had explicit substantive tokens completely missing from both candidate title and candidate author
+    if missing_substantive:
+        if not author_matched_tokens:
+            score -= 150.0 * len(missing_substantive)
+        else:
+            score -= 60.0 * len(missing_substantive)
 
     # Ensure candidate core title has at least one substantive token present in query (prevents unrelated songs by same artist)
     core_words = [w for w in re.findall(r"\w{3,}", clean_c_title) if w not in {"from", "ost", "song", "audio", "video"}]
@@ -382,7 +394,14 @@ def is_playlist_url(raw_url: str) -> bool:
 
     # YouTube: Match if URL has 'list=' or '/playlist'
     if any(yt in u_low for yt in ("youtube.com/", "youtu.be/", "music.youtube.com/")):
-        if "list=" in u_low or "/playlist" in u_low:
+        m = re.search(r"[?&]list=([a-zA-Z0-9_-]+)", u_low)
+        if m:
+            list_id = m.group(1)
+            # YouTube dynamic radio mix / uploader mix / endless radio: treat as single song if video id is present
+            if list_id.startswith(("rd", "ul", "pu")) and ("v=" in u_low or "youtu.be/" in u_low):
+                return False
+            return True
+        if "/playlist" in u_low:
             return True
 
     # Spotify Playlists & Albums
@@ -447,6 +466,7 @@ class NativeExtractor:
             video_id = yt_match.group(1)
             orig_yt_url = f"https://www.youtube.com/watch?v={video_id}"
             orig_yt_thumb = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+            # 1. Direct URL search on Lavalink
             try:
                 results = await asyncio.wait_for(wavelink.Playable.search(orig_yt_url), timeout=5.0)
                 if results:
@@ -468,12 +488,67 @@ class NativeExtractor:
                     return trk
             except Exception as e:
                 logger.debug(f"Direct YouTube URL resolution notice: {e}")
+
+            # 2. Search exact video ID on YouTube via Lavalink
+            try:
+                results = await asyncio.wait_for(wavelink.Playable.search(f"ytsearch:{video_id}"), timeout=5.0)
+                if results:
+                    candidates = results if isinstance(results, list) else results.tracks
+                    for cand in candidates:
+                        if getattr(cand, "identifier", None) == video_id or video_id in (cand.uri or ""):
+                            thumb = cand.artwork or orig_yt_thumb
+                            trk = Track(
+                                title=cand.title or "Unknown Track",
+                                author=cand.author or "Unknown Artist",
+                                url=orig_yt_url,
+                                stream_url="",
+                                duration=int((cand.length or 0) / 1000),
+                                thumbnail=thumb,
+                                requester=requester,
+                                is_autoplay=is_autoplay,
+                                query=raw_q,
+                            )
+                            trk._playable = cand
+                            _set_search_cache(cache_key, (now, trk))
+                            return trk
+            except Exception as e:
+                logger.debug(f"Video ID YouTube search notice: {e}")
+
+            # 3. Extract title via oEmbed and search YouTube Music / YouTube on Lavalink
             try:
                 yt_title = await asyncio.wait_for(cls._fetch_youtube_title(orig_yt_url), timeout=4.0)
                 if yt_title:
                     search_target = yt_title
             except Exception as e:
                 logger.debug(f"YouTube title fetch notice: {e}")
+
+            cleaned_yt_title = parse_and_clean_query(search_target)
+            for ytsrc in (wavelink.TrackSource.YouTubeMusic, wavelink.TrackSource.YouTube):
+                try:
+                    results = await asyncio.wait_for(
+                        wavelink.Playable.search(cleaned_yt_title, source=ytsrc),
+                        timeout=5.0,
+                    )
+                    if results:
+                        candidates = results if isinstance(results, list) else results.tracks
+                        top = candidates[0]
+                        thumb = top.artwork or orig_yt_thumb
+                        trk = Track(
+                            title=top.title or cleaned_yt_title,
+                            author=top.author or "Artist",
+                            url=orig_yt_url,
+                            stream_url="",
+                            duration=int((top.length or 0) / 1000),
+                            thumbnail=thumb,
+                            requester=requester,
+                            is_autoplay=is_autoplay,
+                            query=raw_q,
+                        )
+                        trk._playable = top
+                        _set_search_cache(cache_key, (now, trk))
+                        return trk
+                except Exception as e:
+                    logger.debug(f"YouTube title Lavalink search notice: {e}")
 
         # Spotify URL Handling (Extract '{Title} {Artist}' metadata to bridge to YouTube)
         is_spotify = any(sp in raw_q for sp in ("spotify.com/", "spotify.link/", "spotify:track:", "spotify.app.link/", "spoti.fi/"))
@@ -502,31 +577,31 @@ class NativeExtractor:
         cleaned_query = parse_and_clean_query(search_target)
 
         # ── Priority 1: JioSaavn Official High-Fidelity Audio Engine (Akamai 320kbps CDN) ──
-        # 100% immune to YouTube 403 / Cloudflare / Datacenter IP rate-limits on cloud hosting!
-        # Resolves in ~0.25s and plays with 0% stutter and zero loadFailed exceptions.
-        try:
-            saavn_q = search_target or cleaned_query or raw_q
-            saavn_trk = await asyncio.wait_for(
-                cls._extract_jiosaavn(saavn_q, requester=requester, is_autoplay=is_autoplay),
-                timeout=2.5,
-            )
-            if saavn_trk and saavn_trk.stream_url:
-                try:
-                    p_res = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=2.0)
-                    if p_res:
-                        saavn_trk._playable = p_res[0] if isinstance(p_res, list) else p_res.tracks[0]
-                except Exception as p_err:
-                    logger.debug(f"Direct stream URL playable search notice: {p_err}")
-                _set_search_cache(cache_key, (now, saavn_trk))
-                return saavn_trk
-        except Exception as e:
-            logger.debug(f"JioSaavn primary search notice: {e}")
+        # Only used when query is NOT a direct YouTube URL (user provided text/song name)
+        if not orig_yt_url:
+            try:
+                saavn_q = search_target or cleaned_query or raw_q
+                saavn_trk = await asyncio.wait_for(
+                    cls._extract_jiosaavn(saavn_q, requester=requester, is_autoplay=is_autoplay),
+                    timeout=3.5,
+                )
+                if saavn_trk and saavn_trk.stream_url:
+                    try:
+                        p_res = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=3.5)
+                        if p_res:
+                            saavn_trk._playable = p_res[0] if isinstance(p_res, list) else p_res.tracks[0]
+                    except Exception as p_err:
+                        logger.debug(f"Direct stream URL playable search notice: {p_err}")
+                    _set_search_cache(cache_key, (now, saavn_trk))
+                    return saavn_trk
+            except Exception as e:
+                logger.debug(f"JioSaavn primary search notice: {e}")
 
-        # ── Priority 2: High-Speed YouTube Music search via Lavalink (Fallback) ──
+        # ── Priority 2: High-Speed YouTube Music search via Lavalink ──
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
-                timeout=2.0,
+                timeout=5.0,
             )
             if results:
                 candidates = results if isinstance(results, list) else results.tracks
@@ -558,11 +633,11 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"YouTube Music search notice: {e}")
 
-        # Priority 3: Standard YouTube search via Lavalink (Fallback)
+        # ── Priority 3: Standard YouTube search via Lavalink ──
         try:
             results = await asyncio.wait_for(
                 wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTube),
-                timeout=2.2,
+                timeout=5.0,
             )
             if results:
                 candidates = results if isinstance(results, list) else results.tracks
@@ -594,12 +669,12 @@ class NativeExtractor:
         except Exception as e:
             logger.debug(f"YouTube fallback search notice: {e}")
 
-        # Priority 4: Raw query fallback if cleaned was different
+        # ── Priority 4: Raw query fallback if cleaned was different ──
         if search_target.lower() != cleaned_query.lower():
             try:
                 results = await asyncio.wait_for(
                     wavelink.Playable.search(search_target, source=wavelink.TrackSource.YouTube),
-                    timeout=2.5,
+                    timeout=5.0,
                 )
                 if results:
                     top = results[0] if isinstance(results, list) else results.tracks[0]
@@ -621,25 +696,12 @@ class NativeExtractor:
             except Exception as e:
                 logger.debug(f"Raw query fallback notice: {e}")
 
-        # Priority 5: JioSaavn Unblocked Audio Engine (High-Fidelity 320kbps CDN stream)
-        try:
-            saavn_q = search_target or cleaned_query or raw_q
-            saavn_trk = await asyncio.wait_for(
-                cls._extract_jiosaavn(saavn_q, requester=requester, is_autoplay=is_autoplay),
-                timeout=4.0,
-            )
-            if saavn_trk and saavn_trk.stream_url:
-                _set_search_cache(cache_key, (now, saavn_trk))
-                return saavn_trk
-        except Exception as e:
-            logger.debug(f"JioSaavn extraction notice: {e}")
-
-        # Priority 6: SoundCloud via Lavalink
+        # ── Priority 5: SoundCloud via Lavalink ──
         try:
             sc_target = cleaned_query or search_target or raw_q
             results = await asyncio.wait_for(
                 wavelink.Playable.search(sc_target, source=wavelink.TrackSource.SoundCloud),
-                timeout=3.0,
+                timeout=5.0,
             )
             if results:
                 top = results[0] if isinstance(results, list) else results.tracks[0]
@@ -752,8 +814,9 @@ class NativeExtractor:
                             scored1.sort(key=lambda x: x[0], reverse=True)
                             has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
 
+                            min_sc = 0.0 if has_user_keyword else 30.0
                             for sc, cand in scored1:
-                                if sc < 0 and not has_user_keyword:
+                                if sc < min_sc:
                                     continue
                                 pid = cand.get("id")
                                 if not pid:
@@ -816,8 +879,9 @@ class NativeExtractor:
                             scored_res.sort(key=lambda x: x[0], reverse=True)
                             has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
 
+                            min_sc = 0.0 if has_user_keyword else 30.0
                             for sc, song in scored_res:
-                                if sc < 0 and not has_user_keyword:
+                                if sc < min_sc:
                                     continue
                                 trk = cls._build_saavn_track(song, requester, is_autoplay, query)
                                 if trk:

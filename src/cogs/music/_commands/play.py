@@ -562,7 +562,7 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 track = await asyncio.wait_for(
                     NativeExtractor.extract(lookup_target, requester=ctx.author.display_name),
-                    timeout=8.0
+                    timeout=15.0
                 )
             except Exception as e:
                 logger.debug(f"NativeExtractor search notice: {e}")

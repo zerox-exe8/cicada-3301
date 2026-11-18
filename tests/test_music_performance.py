@@ -100,6 +100,87 @@ class TestMusicPerformance(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(res.stream_url.startswith("http"))
         self.assertIn("saavncdn.com", res.stream_url)
 
+    def test_player_is_playing_checks_voice_client_state(self):
+        """GuildPlayer.is_playing must check actual voice client playing state, not just current track existence."""
+        from src.cogs.music._player import GuildPlayer
+
+        mock_bot = MagicMock()
+        mock_guild = MagicMock()
+        mock_vc = MagicMock()
+        mock_guild.voice_client = mock_vc
+
+        player = GuildPlayer(mock_bot, mock_guild)
+        mock_vc.connected = True
+        mock_vc.paused = False
+
+        # When current is None, is_playing must be False
+        player.current = None
+        mock_vc.playing = True
+        self.assertFalse(player.is_playing)
+
+        # When current exists but vc.playing is False, is_playing MUST be False (prevents card flip / ghost queueing)
+        mock_track = MagicMock()
+        player.current = mock_track
+        mock_vc.playing = False
+        self.assertFalse(player.is_playing)
+
+        # When current exists, vc is connected, not paused, and vc.playing is True -> is_playing is True
+        mock_vc.playing = True
+        self.assertTrue(player.is_playing)
+
+    async def test_send_queue_ended_card_guards_active_playback(self):
+        """send_queue_ended_card must NEVER overwrite Now Playing controller if audio is actively playing."""
+        from src.cogs.music._player import GuildPlayer
+
+        mock_bot = MagicMock()
+        mock_guild = MagicMock()
+        mock_vc = MagicMock()
+        mock_guild.voice_client = mock_vc
+
+        player = GuildPlayer(mock_bot, mock_guild)
+        player.home_channel = MagicMock()
+        mock_controller_msg = MagicMock()
+        player.controller_message = mock_controller_msg
+
+        # Mock player actively playing
+        mock_vc.connected = True
+        mock_vc.paused = False
+        mock_vc.playing = True
+        player.current = MagicMock()
+
+        await player.send_queue_ended_card()
+
+        # controller_message must be untouched because player is actively playing
+        self.assertEqual(player.controller_message, mock_controller_msg)
+
+    async def test_on_track_end_ignores_benign_stopped_and_stale_events(self):
+        """on_track_end must ignore stopped/replaced events and stale tracks to prevent card overwrite."""
+        from src.cogs.music._player import GuildPlayer
+
+        mock_bot = MagicMock()
+        mock_guild = MagicMock()
+        player = GuildPlayer(mock_bot, mock_guild)
+        player.pop_next_track = AsyncMock()
+
+        # Ignored benign reasons:
+        for benign_reason in ("stopped", "replaced", "cleanup", "clean_up"):
+            await player.on_track_end(reason=benign_reason)
+            player.pop_next_track.assert_not_called()
+
+        # Stale track check:
+        cur_track = MagicMock()
+        cur_playable = MagicMock()
+        cur_playable.identifier = "track_new_123"
+        cur_track._playable = cur_playable
+        player.current = cur_track
+
+        old_ended_track = MagicMock()
+        old_ended_track.identifier = "track_old_999"
+
+        await player.on_track_end(reason="finished", ended_track=old_ended_track)
+        # Must debounce and not pop next track
+        player.pop_next_track.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -195,11 +195,13 @@ class Music(commands.Cog):
         if not player_obj or not player_obj.guild:
             return
         reason = getattr(payload, "reason", "finished")
-        if str(reason).lower() in ("replaced", "cleanup"):
+        reason_str = str(reason).lower()
+        if reason_str in ("replaced", "cleanup", "clean_up", "stopped"):
             return
         player = self.controller.get_player(player_obj.guild.id)
         if player and hasattr(player, "on_track_end"):
-            await player.on_track_end(reason=str(reason))
+            ended_track = getattr(payload, "track", None)
+            await player.on_track_end(reason=reason_str, ended_track=ended_track)
 
     @commands.Cog.listener()
     async def on_voice_state_update(

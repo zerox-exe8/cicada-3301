@@ -215,7 +215,9 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 pl = None
 
             if pl and pl.tracks:
-                was_idle = player.current is None
+                was_idle = not player.is_playing
+                if was_idle:
+                    player.current = None
 
                 # If the playlist URL specifies a targeted video, play that exact song first!
                 target_vid_m = re.search(r"(?:v=|\/|youtu\.be\/)([a-zA-Z0-9_-]{11})", clean_q)
@@ -451,7 +453,9 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 results = await asyncio.wait_for(wavelink.Playable.search(lookup_target), timeout=6.0)
                 if isinstance(results, wavelink.Playlist) and results.tracks:
                     pl = results
-                    was_idle = player.current is None
+                    was_idle = not player.is_playing
+                    if was_idle:
+                        player.current = None
                     first_p = pl.tracks[0]
                     first_thumb = first_p.artwork or (f"https://i.ytimg.com/vi/{first_p.identifier}/hqdefault.jpg" if getattr(first_p, "identifier", None) else None)
                     first_track = Track(
@@ -688,9 +692,10 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 pass
 
         # ── Step 2: Dispatch Playback or Enqueue ──
-        is_idle = player.current is None
+        is_idle = not player.is_playing
         if is_idle:
             player._was_paused_for_empty_vc = False
+            player.current = None  # Clear any stale track reference
             await player.play_track(track, message_to_edit=search_msg)
         else:
             await player.add_track(track)

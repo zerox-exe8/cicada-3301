@@ -223,9 +223,14 @@ class GuildPlayer:
     @property
     def is_playing(self) -> bool:
         """Check if actively playing audio."""
-        if self.is_paused or self.current is None:
+        vc = self.guild.voice_client
+        if not vc or not getattr(vc, "connected", False):
             return False
-        return self.is_connected
+        if self.is_paused or getattr(vc, "paused", False):
+            return False
+        if not getattr(vc, "playing", False):
+            return False
+        return self.current is not None
 
     @property
     def is_paused(self) -> bool:
@@ -920,6 +925,7 @@ class GuildPlayer:
         *,
         manual: bool = False,
         expected_gen: Optional[int] = None,
+        ended_track: Optional[Any] = None,
     ) -> None:
         """
         Invoked when Lavalink finishes playing a track.
@@ -928,10 +934,22 @@ class GuildPlayer:
         ALWAYS advance, while event driven advances are debounced so a duplicate
         `TrackEndEvent` cannot skip two tracks at once.
         """
-        if reason and str(reason).lower() in ("replaced", "cleanup"):
+        reason_str = str(reason).lower() if reason else "finished"
+        if reason_str in ("replaced", "cleanup", "clean_up", "stopped"):
             return
 
-        if reason and str(reason).lower() in ("loadfailed", "load_failed"):
+        # Stale track check: if a specific ended track was passed, ensure it matches current track
+        if ended_track and self.current:
+            cur_p = getattr(self.current, "_playable", None)
+            ended_id = getattr(ended_track, "identifier", None)
+            cur_id = getattr(cur_p, "identifier", None) if cur_p else None
+            if ended_id and cur_id and ended_id != cur_id:
+                logger.debug(
+                    f"Guild {self.guild.id}: Debouncing TrackEnd for stale track {ended_id} (current is {cur_id})"
+                )
+                return
+
+        if reason_str in ("loadfailed", "load_failed"):
             logger.warning(f"Guild {self.guild.id}: Lavalink reported track loadFailed.")
             # Unblocked recovery: if current track failed from YouTube, retry once with direct stream
             curr = self.current
@@ -1190,6 +1208,9 @@ class GuildPlayer:
 
     async def send_queue_ended_card(self) -> None:
         """Post or edit the Queue Ended card in home channel."""
+        # Safety guard: Never send queue ended card if audio is actively playing or queue is not empty!
+        if self.is_playing or self.queue:
+            return
         if not self.home_channel:
             return
 

@@ -477,41 +477,80 @@ class NativeExtractor:
 
         cleaned_query = parse_and_clean_query(search_target)
 
-        # Priority 1: High-Speed YouTube Music search via Lavalink (~0.8s resolution, 100% playable)
-        try:
-            results = await asyncio.wait_for(
-                wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
-                timeout=2.0,
-            )
-            if results:
-                candidates = results if isinstance(results, list) else results.tracks
-                best_cand = None
-                best_score = -999.0
-                for cand in candidates[:5]:
-                    c_dur = int((cand.length or 0) / 1000)
-                    sc = score_candidate(cand.title or "", cand.author or "", cleaned_query, duration=c_dur)
-                    if sc > best_score:
-                        best_score = sc
-                        best_cand = cand
-                if best_cand and (best_score > 0 or not orig_yt_url):
-                    top = best_cand
-                    thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
-                    trk = Track(
-                        title=top.title or cleaned_query,
-                        author=top.author or "Artist",
-                        url=orig_spotify_url or orig_yt_url or top.uri or raw_q,
-                        stream_url="",
-                        duration=int((top.length or 0) / 1000),
-                        thumbnail=thumb,
-                        requester=requester,
-                        is_autoplay=is_autoplay,
-                        query=raw_q,
-                    )
-                    trk._playable = top
-                    _SEARCH_CACHE[cache_key] = (now, trk)
-                    return trk
-        except Exception as e:
-            logger.debug(f"YouTube Music search notice: {e}")
+        # ── High-Speed Concurrent Race: YouTube Music + JioSaavn (320kbps Akamai CDN) ──
+        # Dispatches both engines in parallel. Whichever finishes first with a valid playable wins (~0.2-0.4s!)
+        async def _search_ytm() -> Optional[Track]:
+            try:
+                results = await asyncio.wait_for(
+                    wavelink.Playable.search(cleaned_query, source=wavelink.TrackSource.YouTubeMusic),
+                    timeout=2.0,
+                )
+                if results:
+                    candidates = results if isinstance(results, list) else results.tracks
+                    best_cand = None
+                    best_score = -999.0
+                    for cand in candidates[:5]:
+                        c_dur = int((cand.length or 0) / 1000)
+                        sc = score_candidate(cand.title or "", cand.author or "", cleaned_query, duration=c_dur)
+                        if sc > best_score:
+                            best_score = sc
+                            best_cand = cand
+                    if best_cand and (best_score > 0 or not orig_yt_url):
+                        top = best_cand
+                        thumb = top.artwork or (f"https://i.ytimg.com/vi/{top.identifier}/hqdefault.jpg" if getattr(top, "identifier", None) else None) or orig_yt_thumb
+                        trk = Track(
+                            title=top.title or cleaned_query,
+                            author=top.author or "Artist",
+                            url=orig_spotify_url or orig_yt_url or top.uri or raw_q,
+                            stream_url="",
+                            duration=int((top.length or 0) / 1000),
+                            thumbnail=thumb,
+                            requester=requester,
+                            is_autoplay=is_autoplay,
+                            query=raw_q,
+                        )
+                        trk._playable = top
+                        return trk
+            except Exception as e:
+                logger.debug(f"YouTube Music search notice: {e}")
+            return None
+
+        async def _search_saavn() -> Optional[Track]:
+            try:
+                saavn_q = search_target or cleaned_query or raw_q
+                saavn_trk = await asyncio.wait_for(
+                    cls._extract_jiosaavn(saavn_q, requester=requester, is_autoplay=is_autoplay),
+                    timeout=2.5,
+                )
+                if saavn_trk and saavn_trk.stream_url:
+                    try:
+                        p_res = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=2.0)
+                        if p_res:
+                            saavn_trk._playable = p_res[0] if isinstance(p_res, list) else p_res.tracks[0]
+                    except Exception:
+                        pass
+                    return saavn_trk
+            except Exception as e:
+                logger.debug(f"JioSaavn search notice: {e}")
+            return None
+
+        # Execute parallel race for search queries
+        ytm_task = asyncio.create_task(_search_ytm())
+        saavn_task = asyncio.create_task(_search_saavn())
+        pending = {ytm_task, saavn_task}
+
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                try:
+                    res = task.result()
+                    if res and (getattr(res, "_playable", None) or res.stream_url):
+                        for p_task in pending:
+                            p_task.cancel()
+                        _SEARCH_CACHE[cache_key] = (now, res)
+                        return res
+                except Exception:
+                    pass
 
         # Priority 2: Standard YouTube search via Lavalink (Fallback)
         try:

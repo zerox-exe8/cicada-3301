@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+
 from src.database.base import BaseDatabase
 from src.repositories.ticket_repo import TicketRepository
 

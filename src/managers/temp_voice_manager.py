@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Optional
+
 from src.database.postgres import PostgresDatabase
 
 logger = logging.getLogger("Kyro.Managers.TempVoice")

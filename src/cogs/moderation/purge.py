@@ -3,16 +3,18 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-from typing import TYPE_CHECKING, Optional, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.context import CustomContext
-from src.cogs.moderation._helpers import dispatch_mod_log
 from src.cogs.moderation._commands.purge_bot import execute_purge_bot
 from src.cogs.moderation._commands.purge_human import execute_purge_human
+from src.cogs.moderation._helpers import dispatch_mod_log
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
+from src.utils.tasks import create_tracked_task
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -33,8 +35,6 @@ def can_execute_purge():
         if getattr(bot, "owner_ids", None) and author_id in bot.owner_ids:
             return True
         if hasattr(bot, "perm_mgr") and bot.perm_mgr.is_developer_sync(author_id):
-            return True
-        if author_id in {1082437832087445604, 879986471866630155}:
             return True
         # server Owner & Administrators bypass
         if ctx.guild.owner_id == author_id:
@@ -90,12 +90,15 @@ class PurgeCog(commands.Cog):
         if ctx.interaction and not ctx.interaction.response.is_done():
             try:
                 await ctx.defer(ephemeral=False)
-            except Exception:
-                pass
+            except Exception as defer_err:
+                logger.debug(f"Purge defer notice: {defer_err}")
 
         effective_check: Optional[Callable[[discord.Message], bool]] = None
         if member:
-            effective_check = lambda m: m.author.id == member.id
+            def _member_check(m: discord.Message) -> bool:
+                return m.author.id == member.id
+
+            effective_check = _member_check
         elif check_func:
             effective_check = check_func
 
@@ -105,8 +108,10 @@ class PurgeCog(commands.Cog):
             if not ctx.interaction and ctx.message:
                 try:
                     await ctx.message.delete()
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden):
+                    logger.debug("Trigger message already gone or bot lacks Manage Messages permission")
+                except Exception as del_err:
+                    logger.debug(f"Trigger message delete notice: {del_err}")
 
             if effective_check:
                 # When filtering (bot/human/member), scan history up to 500 messages to collect target count
@@ -130,29 +135,36 @@ class PurgeCog(commands.Cog):
                             try:
                                 await young_msgs[0].delete()
                                 deleted.append(young_msgs[0])
-                            except Exception:
-                                pass
+                            except (discord.NotFound, discord.Forbidden):
+                                logger.debug("Single young message already deleted or forbidden")
+                            except Exception as del_err:
+                                logger.debug(f"Single young message delete notice: {del_err}")
                         else:
                             for i in range(0, len(young_msgs), 100):
                                 batch = young_msgs[i : i + 100]
                                 try:
                                     await ctx.channel.delete_messages(batch)
                                     deleted.extend(batch)
-                                except Exception:
+                                except Exception as bulk_err:
+                                    logger.debug(f"Bulk delete error, falling back to sequential: {bulk_err}")
                                     for bm in batch:
                                         try:
                                             await bm.delete()
                                             deleted.append(bm)
-                                        except Exception:
-                                            pass
+                                        except (discord.NotFound, discord.Forbidden):
+                                            logger.debug("Sequential delete message already gone or forbidden")
+                                        except Exception as single_err:
+                                            logger.debug(f"Sequential delete notice: {single_err}")
 
                     for om in old_msgs:
                         try:
                             await om.delete()
                             deleted.append(om)
                             await asyncio.sleep(0.3)
-                        except Exception:
-                            pass
+                        except (discord.NotFound, discord.Forbidden):
+                            logger.debug("Old message already gone or forbidden")
+                        except Exception as old_del_err:
+                            logger.debug(f"Old message delete notice: {old_del_err}")
             else:
                 # No filter: fetch fresh history and delete resiliently.
                 # (Raw channel.purge() aborts the whole batch with 10008
@@ -173,7 +185,7 @@ class PurgeCog(commands.Cog):
                             await young_all[0].delete()
                             deleted.append(young_all[0])
                         except discord.NotFound:
-                            pass
+                            logger.debug("Young message already gone")
                     else:
                         for i in range(0, len(young_all), 100):
                             batch = young_all[i : i + 100]
@@ -185,16 +197,16 @@ class PurgeCog(commands.Cog):
                                     try:
                                         await bm.delete()
                                         deleted.append(bm)
-                                    except (discord.NotFound, discord.HTTPException):
-                                        pass
+                                    except (discord.NotFound, discord.HTTPException) as single_err:
+                                        logger.debug(f"Sequential fallback delete notice: {single_err}")
 
                 for om in old_all:
                     try:
                         await om.delete()
                         deleted.append(om)
                         await asyncio.sleep(0.3)
-                    except (discord.NotFound, discord.HTTPException):
-                        pass
+                    except (discord.NotFound, discord.HTTPException) as om_err:
+                        logger.debug(f"Old message delete notice: {om_err}")
 
         except discord.Forbidden:
             container = KyroContainer(accent_color=None)
@@ -219,8 +231,8 @@ class PurgeCog(commands.Cog):
             container.add_section(content=f"**Purge Failed**\n> {notice}")
             try:
                 await send_container_response(ctx, container)
-            except Exception:
-                pass
+            except Exception as send_err:
+                logger.warning(f"Failed to send purge failed container: {send_err}")
             return
         except Exception as e:
             logger.error(f"Unexpected error in purge: {e}", exc_info=e)
@@ -228,8 +240,8 @@ class PurgeCog(commands.Cog):
             container.add_section(content=f"**Purge Error**\n> An unexpected error occurred: `{e}`")
             try:
                 await send_container_response(ctx, container)
-            except Exception:
-                pass
+            except Exception as send_err:
+                logger.warning(f"Failed to send purge error container: {send_err}")
             return
 
         # Ultra-clean, minimal Components V2 notification (zero redundant text)
@@ -306,10 +318,12 @@ class PurgeCog(commands.Cog):
                     elif isinstance(res, dict) and "id" in res:
                         target_msg = await ctx.channel.fetch_message(int(res["id"]))
                         await target_msg.delete()
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden):
+                    logger.debug("Confirmation card already deleted or missing permission")
+                except Exception as clean_err:
+                    logger.debug(f"Confirmation cleanup notice: {clean_err}")
 
-            asyncio.create_task(_cleanup_confirmation())
+            create_tracked_task(_cleanup_confirmation(), name="purge_confirmation_cleanup")
 
     @commands.hybrid_group(
         name="purge",
@@ -433,11 +447,12 @@ class PurgeCog(commands.Cog):
         container.add_text(f"-# Requested by {ctx.author.display_name}")
         try:
             await send_container_response(ctx, container, ephemeral=True)
-        except Exception:
+        except Exception as send_err:
+            logger.debug(f"Failed to send purge error container, attempting fallback: {send_err}")
             try:
                 await ctx.send(f"**Purge Error**: `{original}`")
-            except Exception:
-                pass
+            except Exception as ctx_send_err:
+                logger.warning(f"Failed to send fallback purge error: {ctx_send_err}")
 
 
 async def setup(bot: KyroBot) -> None:

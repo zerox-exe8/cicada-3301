@@ -15,7 +15,7 @@ import discord
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
+from src.utils.containers import KyroContainer, edit_container_response, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -70,8 +70,8 @@ class ExpressionManagerView(discord.ui.View):
                 await interaction.response.send_message(f"Action failed: `{error}`", ephemeral=True)
             else:
                 await interaction.followup.send(f"Action failed: `{error}`", ephemeral=True)
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as send_err:
+            logger.debug(f"Interaction error followup notice: {send_err}")
 
     def _get_items(self) -> list[discord.Emoji | discord.GuildSticker]:
         """Fetch sorted list of emojis or stickers for current mode."""
@@ -255,8 +255,8 @@ class ExpressionManagerView(discord.ui.View):
         accessory = {"type": 11, "media": {"url": preview_url}} if preview_url else None
         container.add_section(
             content=(
-                f"**Expression Manager**\n"
-                f"> Manage and bulk-remove server expressions."
+                "**Expression Manager**\n"
+                "> Manage and bulk-remove server expressions."
             ),
             accessory=accessory,
         )
@@ -293,8 +293,8 @@ class ExpressionManagerView(discord.ui.View):
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Switch emojis defer notice: {defer_err}")
 
         self.mode = "emojis"
         self.page = 0
@@ -308,14 +308,14 @@ class ExpressionManagerView(discord.ui.View):
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Switch stickers defer notice: {defer_err}")
 
         if not self.guild.stickers:
             try:
                 await self.guild.fetch_stickers()
-            except Exception:
-                pass
+            except discord.HTTPException as fs_err:
+                logger.debug(f"Fetch stickers notice: {fs_err}")
 
         self.mode = "stickers"
         self.page = 0
@@ -329,8 +329,8 @@ class ExpressionManagerView(discord.ui.View):
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Prev page defer notice: {defer_err}")
 
         if self.page > 0:
             self.page -= 1
@@ -344,8 +344,8 @@ class ExpressionManagerView(discord.ui.View):
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Next page defer notice: {defer_err}")
 
         total = self._get_total_pages()
         if self.page < total - 1:
@@ -360,8 +360,8 @@ class ExpressionManagerView(discord.ui.View):
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Select item defer notice: {defer_err}")
 
         if interaction.data and "values" in interaction.data and interaction.data["values"]:
             self.selected_ids = {int(v) for v in interaction.data["values"]}
@@ -388,8 +388,8 @@ class ExpressionManagerView(discord.ui.View):
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Delete confirm defer notice: {defer_err}")
 
         e_reg = getattr(self.bot, "custom_emojis", None)
         dot = e_reg.get("heart_dot", "-") if e_reg else "-"
@@ -459,8 +459,8 @@ class Emojis(commands.Cog, name="Moderation-Emojis"):
         if not ctx.guild.stickers:
             try:
                 await ctx.guild.fetch_stickers()
-            except Exception:
-                pass
+            except discord.HTTPException as fs_err:
+                logger.debug(f"Fetch stickers command notice: {fs_err}")
 
         initial_mode = "stickers" if ctx.invoked_with in ("stickers", "delsticker") else "emojis"
 

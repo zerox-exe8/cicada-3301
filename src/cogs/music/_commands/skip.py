@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+
 from discord.ext import commands
 
 from src.cogs.music._commands.controls import check_voice_channel

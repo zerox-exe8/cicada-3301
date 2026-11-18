@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -55,6 +56,7 @@ class ChannelInfo(commands.Cog, name="General-ChannelInfo"):
         bitrate = getattr(target_ch, "bitrate", None)
         bitrate_str = f"`{bitrate // 1000} kbps`" if bitrate else "N/A"
 
+        container = KyroContainer()
         container.add_section(
             content=(
                 f"### #{target_ch.name}\n"

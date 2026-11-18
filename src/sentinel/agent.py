@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
-from datetime import datetime, timezone
 import gc
 import json
 import logging
 import os
 import re
 import time
+from collections import deque
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 import aiohttp
 import discord
 from discord.ext import tasks
 
+from src.core.config import Config
 from src.core.lavalink import (
     LAVALINK_OP_TIMEOUT,
     LavalinkUnavailable,
@@ -128,8 +129,8 @@ class KyroSentinel:
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._process_incident_ai_and_alerts(inc))
-            except RuntimeError:
-                pass
+            except RuntimeError as r_err:
+                logger.debug(f"Event loop task spawn notice: {r_err}")
 
         return inc
 
@@ -255,9 +256,9 @@ class KyroSentinel:
         elif getattr(self.bot, "owner_id", None):
             dev_ids.add(self.bot.owner_id)
 
-        # Fallback default developer IDs
+        # Fallback to configured developer and owner IDs
         if not dev_ids:
-            dev_ids.update({1082437832087445604, 879986471866630155})
+            dev_ids.update(Config.OWNER_IDS | Config.DEVELOPER_IDS)
 
         container = KyroContainer(accent_color=None)
         container.add_text(f"## 🚨 Sentinel Alert • `{incident.id}`")
@@ -560,8 +561,8 @@ class KyroSentinel:
                         action_taken=f"Triggered Python garbage collection (reclaimed {collected} objects)",
                         resolved=True,
                     )
-            except Exception:
-                pass
+            except Exception as ram_err:
+                logger.debug(f"RAM check notice: {ram_err}")
 
     # ── Self-Healing Actuators ──
 
@@ -611,12 +612,12 @@ class KyroSentinel:
                         vc.disconnect(force=True),
                         timeout=LAVALINK_OP_TIMEOUT,
                     )
-                except Exception:
-                    pass
+                except Exception as disc_err:
+                    logger.debug(f"Sentinel voice disconnect notice: {disc_err}")
                 try:
                     vc.cleanup()
-                except Exception:
-                    pass
+                except Exception as cl_err:
+                    logger.debug(f"Sentinel voice cleanup notice: {cl_err}")
 
             # Only call _remove_voice_client if the guild still has a lingering internal
             # voice client entry AFTER our disconnect attempt. Blindly calling this on
@@ -626,8 +627,8 @@ class KyroSentinel:
             if guild.voice_client is not None and hasattr(self.bot, "_connection"):
                 try:
                     self.bot._connection._remove_voice_client(guild.id)
-                except Exception:
-                    pass
+                except Exception as rvc_err:
+                    logger.debug(f"Sentinel remove voice client notice: {rvc_err}")
 
             music_cog = self.bot.get_cog("Music")
             if music_cog and hasattr(music_cog, "controller"):
@@ -666,8 +667,8 @@ class KyroSentinel:
                 p = psutil.Process(os.getpid())
                 ram_mb = p.memory_info().rss / (1024 * 1024)
                 cpu_percent = p.cpu_percent(interval=None)
-            except Exception:
-                pass
+            except Exception as ps_err:
+                logger.debug(f"Process stats notice: {ps_err}")
 
         # Wavelink Node status
         node_status = "OFFLINE"

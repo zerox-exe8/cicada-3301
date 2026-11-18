@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import TYPE_CHECKING, Optional, Any
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any, Optional
 
-from datetime import datetime, timezone, timedelta
 import aiohttp
 import discord
 from discord import app_commands
@@ -151,15 +151,15 @@ async def build_tech_dashboard(bot: KyroBot, guild: discord.Guild, cfg: dict[str
     container = KyroContainer(accent_color=None)
     container.add_section(
         content=(
-            f"### Tech Dashboard\n"
-            f"> Status: Active & Broadcasting"
+            "### Tech Dashboard\n"
+            "> Status: Active & Broadcasting"
         )
     )
     container.add_separator(divider=True)
 
     health = await bot.tech_realtime_mgr.get_global_health_summary()
     health_summary_parts = [f"{prov} `{stat}`" for prov, stat in health.items()]
-    health_line = f"**Cloud Health:** " + f"  {dot}  ".join(health_summary_parts)
+    health_line = "**Cloud Health:** " + f"  {dot}  ".join(health_summary_parts)
 
     cadence_raw = cfg.get("cadence", "hourly")
     cadence_label = format_cadence_label(cadence_raw)
@@ -280,8 +280,8 @@ class TechSetupChannelView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Dashboard\n"
-                f"> Setup cancelled."
+                "### Tech Dashboard\n"
+                "> Setup cancelled."
             )
         )
         await edit_container_response(interaction, container, view=None)
@@ -327,7 +327,7 @@ class TechSetupModulesView(discord.ui.View):
         self.bot = bot
         self.author_id = author_id
         self.channel = channel
-        
+
         # If guild already has saved categories, load them; otherwise start empty so user selects to turn ON
         existing = self.bot.tech_mgr.get_config(channel.guild.id) if channel.guild else None
         if existing and existing.get("categories"):
@@ -384,8 +384,8 @@ class TechSetupModulesView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Dashboard\n"
-                f"> Step 2 of 2: Select Modules"
+                "### Tech Dashboard\n"
+                "> Step 2 of 2: Select Modules"
             )
         )
         container.add_separator(divider=True)
@@ -442,13 +442,13 @@ class TechSetupModulesView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Dashboard\n"
-                f"> Step 1 of 2: Select Channel"
+                "### Tech Dashboard\n"
+                "> Step 1 of 2: Select Channel"
             )
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"Select the text channel where real-time tech intelligence will be broadcast."
+            "Select the text channel where real-time tech intelligence will be broadcast."
         )
         await edit_container_response(interaction, container, view=channel_view)
 
@@ -486,8 +486,8 @@ class TechSetupModulesView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Dashboard\n"
-                f"> Intelligence broadcasting is now active."
+                "### Tech Dashboard\n"
+                "> Intelligence broadcasting is now active."
             )
         )
         container.add_separator(divider=True)
@@ -609,8 +609,8 @@ class TechCadenceView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Intelligence Feed\n"
-                f"> Schedule & Cadence Settings"
+                "### Tech Intelligence Feed\n"
+                "> Schedule & Cadence Settings"
             )
         )
         container.add_separator(divider=True)
@@ -751,13 +751,13 @@ class TechStatusView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Dashboard\n"
-                f"> Step 1 of 2: Select Channel"
+                "### Tech Dashboard\n"
+                "> Step 1 of 2: Select Channel"
             )
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"Select the text channel where real-time tech intelligence will be broadcast."
+            "Select the text channel where real-time tech intelligence will be broadcast."
         )
         await edit_container_response(interaction, container, view=channel_view)
 
@@ -771,8 +771,8 @@ class TechStatusView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"### Tech Dashboard\n"
-                f"> Automated broadcasting has been deactivated for this server."
+                "### Tech Dashboard\n"
+                "> Automated broadcasting has been deactivated for this server."
             )
         )
         await edit_container_response(interaction, container, view=None)
@@ -833,8 +833,8 @@ class TechFeedCog(commands.Cog):
                     "This story has expired from active cache. You can view it directly using the article link button.",
                     ephemeral=True,
                 )
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as send_err:
+                logger.debug(f"Expired story send notice: {send_err}")
             return
 
         try:
@@ -851,12 +851,8 @@ class TechFeedCog(commands.Cog):
                     "Could not send DM. Please make sure your DMs are open for server members.",
                     ephemeral=True,
                 )
-            except Exception:
-                pass
-
-    def cog_unload(self) -> None:
-        """Cancel background poller loop when extension unloads or reloads to prevent ghost tasks."""
-        self._poller_task.cancel()
+            except (discord.NotFound, discord.HTTPException) as send_err:
+                logger.debug(f"DM failed response send notice: {send_err}")
 
     # -------------------------------------------------------------------------
     # Autonomous Background Dispatcher Loop (15-Minute Cadence Check in IST)
@@ -996,8 +992,8 @@ class TechFeedCog(commands.Cog):
         """Wait until the bot gateway is ready before starting the background loop."""
         try:
             await self.bot.wait_until_ready()
-        except (RuntimeError, Exception):
-            pass
+        except (RuntimeError, Exception) as w_err:
+            logger.debug(f"wait_until_ready notice: {w_err}")
 
 
 
@@ -1029,8 +1025,8 @@ class TechFeedCog(commands.Cog):
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"### Tech Dashboard\n"
-                    f"> Step 1 of 2: Select Channel"
+                    "### Tech Dashboard\n"
+                    "> Step 1 of 2: Select Channel"
                 )
             )
             container.add_separator(divider=True)
@@ -1043,8 +1039,8 @@ class TechFeedCog(commands.Cog):
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"### Tech Dashboard\n"
-                    f"> Status: Inactive on this server"
+                    "### Tech Dashboard\n"
+                    "> Status: Inactive on this server"
                 )
             )
             container.add_separator(divider=True)

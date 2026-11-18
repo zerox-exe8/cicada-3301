@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+
 import discord
 from discord.ext import commands
 
@@ -285,8 +286,8 @@ def _prepare_multipart_form(
     for f in file_list:
         try:
             f.reset()
-        except Exception:
-            pass
+        except Exception as r_err:
+            logger.debug(f"File reset notice: {r_err}")
 
     payload["attachments"] = [
         {"id": i, "filename": f.filename}
@@ -381,8 +382,8 @@ async def send_container_response(
                     if hasattr(state, "create_message") and channel_obj:
                         try:
                             return state.create_message(channel=channel_obj, data=msg_data)
-                        except Exception:
-                            pass
+                        except Exception as cm_err:
+                            logger.debug(f"create_message notice: {cm_err}")
                 return msg_data
             except Exception as e:
                 logger.warning(f"Interaction followup webhook failed ({e}), falling back to direct channel dispatch...")
@@ -442,8 +443,8 @@ async def send_container_response(
                             if hasattr(state, "create_message") and channel_obj:
                                 try:
                                     return state.create_message(channel=channel_obj, data=msg_data)
-                                except Exception:
-                                    pass
+                                except Exception as cm_err:
+                                    logger.debug(f"create_message fallback notice: {cm_err}")
                         return msg_data
                     except Exception as e2:
                         logger.warning(f"Interaction followup fallback failed: {e2}")
@@ -506,8 +507,8 @@ async def send_container_response(
                 if hasattr(state, "create_message") and channel_obj:
                     try:
                         return state.create_message(channel=channel_obj, data=msg_data)
-                    except Exception:
-                        pass
+                    except Exception as cm_err:
+                        logger.debug(f"create_message channel notice: {cm_err}")
             return msg_data
         except discord.Forbidden:
             raise
@@ -519,7 +520,7 @@ async def send_container_response(
             target_send = getattr(obj, "send", None) or getattr(getattr(obj, "channel", None), "send", None)
             if target_send:
                 primary = container if isinstance(container, KyroContainer) else container[0]
-                
+
                 # Extract link buttons from container into a fallback View if no view is provided
                 fallback_view = view
                 if fallback_view is None:

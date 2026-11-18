@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import check_hierarchy, dispatch_mod_log
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
+
+logger = logging.getLogger("Kyro.Moderation.Kick")
 
 
 class KickCog(commands.Cog):
@@ -47,8 +51,8 @@ class KickCog(commands.Cog):
                 )
             )
             await send_container_response(member, dm_container)
-        except Exception:
-            pass
+        except (discord.Forbidden, discord.HTTPException) as dm_err:
+            logger.debug(f"Member kick DM notice: {dm_err}")
 
         await member.kick(reason=f"{ctx.author} ({ctx.author.id}): {reason}")
         await dispatch_mod_log(self.bot, ctx.guild, "Member Kick", member, ctx.author, reason)

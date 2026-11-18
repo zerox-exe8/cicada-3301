@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+import logging
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.managers.permission_manager import is_developer
+from src.managers.permission_manager import is_developer, is_owner
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
+
+logger = logging.getLogger("Kyro.Developer.Reload")
 
 
 class ReloadCog(commands.Cog, name="Developer-Reload"):
@@ -43,17 +46,18 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
             await self.bot.load_extension(ext)
 
     @commands.command(name="pull", aliases=["update"])
-    @is_developer()
+    @is_owner()
     async def git_pull(self, ctx: CustomContext) -> None:
         """
-        Pull latest code from git remote and hot-reload all cogs.
+        Pull latest code from git remote using fast-forward only and hot-reload all changed cogs.
         Usage:
           ?pull
         """
         t_start = time.perf_counter()
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", str(self.root_dir), "pull",
+                "git", "-C", str(self.root_dir), "pull", "--ff-only",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -61,7 +65,22 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
             out_str = stdout.decode("utf-8", errors="replace").strip()
             err_str = stderr.decode("utf-8", errors="replace").strip()
             git_output = out_str or err_str or "No output from git"
+        except asyncio.TimeoutError:
+            if proc:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception as kill_err:
+                    logger.debug(f"Git proc kill notice: {kill_err}")
+            await ctx.send_error("Git pull timed out after 30s. Process terminated.")
+            return
         except Exception as e:
+            if proc:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception as kill_err:
+                    logger.debug(f"Git proc kill notice: {kill_err}")
             await ctx.send_error(f"Git pull failed: `{e}`")
             return
 
@@ -134,7 +153,7 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
                 info.append(f"  - {f}")
 
         container = KyroContainer(accent_color=None)
-        container.add_section(content=f"```yaml\n" + "\n".join(info) + "\n```")
+        container.add_section(content="```yaml\n" + "\n".join(info) + "\n```")
         container.add_separator(divider=True)
         container.add_text(f"-# {t_dur:.1f}ms • pull & reload")
         await send_container_response(ctx, container)
@@ -187,7 +206,7 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
                 if not failed:
                     matrix = [
                         "================ [ EXTENSION HOT-RELOAD ] ================",
-                        f"STATE         SYNCED (100% Operational)",
+                        "STATE         SYNCED (100% Operational)",
                         f"LATENCY       {t_dur:.1f}ms",
                         f"EXTENSIONS    {len(reloaded)} / {len(all_exts)} cogs live (0 faults)",
                         f"CATEGORIES    {cat_summary}",
@@ -206,7 +225,7 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
                     matrix.append("=========================================================")
 
                 container = KyroContainer(accent_color=None)
-                container.add_section(content=f"```yaml\n" + "\n".join(matrix) + "\n```")
+                container.add_section(content="```yaml\n" + "\n".join(matrix) + "\n```")
                 container.add_separator(divider=True)
                 container.add_text(f"-# hot-reload synchronized • {len(reloaded)} cogs fresh")
                 await send_container_response(ctx, container)
@@ -252,7 +271,7 @@ class ReloadCog(commands.Cog, name="Developer-Reload"):
                     info.append(f"  - {f}")
 
             container = KyroContainer(accent_color=None)
-            container.add_section(content=f"```yaml\n" + "\n".join(info) + "\n```")
+            container.add_section(content="```yaml\n" + "\n".join(info) + "\n```")
             container.add_separator(divider=True)
             container.add_text(f"-# {t_dur:.1f}ms")
             await send_container_response(ctx, container)

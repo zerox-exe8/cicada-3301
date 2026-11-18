@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
+
 import discord
 from discord.ext import commands
 
 from src.core.config import Config
 from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
+from src.utils.containers import KyroContainer, edit_container_response, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -251,10 +252,8 @@ class Help(commands.Cog):
         custom_id_prefix: str,
     ) -> KyroContainer:
         """Construct category command card with default accent and folder emojis."""
-        current_prefix = self.bot.guild_mgr.get_prefix(ctx.guild.id if ctx.guild else None)
         cat_icon = self._get_category_emoji(cat_name)
         e_reg = self.bot.custom_emojis
-        dot = e_reg.get("heart_dot", e_reg.get("icons_rightarrow", "-"))
 
         container = KyroContainer(accent_color=None)
         cat_icon_prefix = f"{cat_icon} " if cat_icon else ""

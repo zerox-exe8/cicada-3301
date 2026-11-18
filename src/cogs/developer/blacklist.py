@@ -42,10 +42,10 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Blacklist Protocol**\n"
-                f"> **add** • `?bl add <@user | id> [reason]`\n"
-                f"> **remove** • `?bl remove <@user | id>`\n"
-                f"> **list** • `?bl list`"
+                "**Blacklist Protocol**\n"
+                "> **add** • `?bl add <@user | id> [reason]`\n"
+                "> **remove** • `?bl remove <@user | id>`\n"
+                "> **list** • `?bl list`"
             )
         )
         container.add_separator(divider=True)
@@ -67,8 +67,8 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
                 ref_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
                 resolved_id = ref_msg.author.id
                 target_name = ref_msg.author.name
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as ref_err:
+                logger.debug(f"Fetch reply message notice: {ref_err}")
 
         # parse target parameter if provided
         if not resolved_id and target:
@@ -91,8 +91,8 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
                     resolved_id = user_obj.id
                     target_name = user_obj.name
                     target_type = "user"
-                except Exception:
-                    pass
+                except commands.BadArgument as conv_err:
+                    logger.debug(f"UserConverter notice: {conv_err}")
 
         if not resolved_id:
             container = KyroContainer(accent_color=None)
@@ -134,8 +134,8 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
             if guild_obj:
                 try:
                     await guild_obj.leave()
-                except Exception:
-                    pass
+                except discord.HTTPException as leave_err:
+                    logger.debug(f"Guild leave notice: {leave_err}")
 
         container = KyroContainer(accent_color=None)
         container.add_section(
@@ -166,8 +166,8 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
                 user_obj = await commands.UserConverter().convert(ctx, target)
                 resolved_id = user_obj.id
                 target_name = user_obj.name
-            except Exception:
-                pass
+            except commands.BadArgument as conv_err:
+                logger.debug(f"UserConverter remove notice: {conv_err}")
 
         if not resolved_id:
             container = KyroContainer(accent_color=None)
@@ -226,7 +226,7 @@ class BlacklistCog(commands.Cog, name="Developer-Blacklist"):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Blacklist Directory**\n"
+                "**Blacklist Directory**\n"
                 + ("\n".join(entries) if entries else "> No entries found")
             )
         )

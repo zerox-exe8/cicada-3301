@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -30,7 +30,7 @@ class Incident:
     guild_id: Optional[int] = None
     action_taken: str = ""
     resolved: bool = True
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     traceback: Optional[str] = None
     ai_analysis: Optional[str] = None
 

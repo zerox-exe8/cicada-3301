@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Any, Optional
+
 import discord
 
 from src.utils.containers import KyroContainer, send_container_response
+from src.utils.tasks import create_tracked_task
 
 if TYPE_CHECKING:
-    from src.core.bot import KyroBot
     from src.cogs.music._player import GuildPlayer
+    from src.core.bot import KyroBot
 
 logger = logging.getLogger("Kyro.Music.Views")
 
@@ -102,8 +104,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
@@ -136,8 +138,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
@@ -153,7 +155,7 @@ class MusicControlView(discord.ui.View):
             await send_container_response(interaction, c, ephemeral=True)
             return
 
-        asyncio.create_task(player.skip())
+        create_tracked_task(player.skip(), name="view_skip")
 
     @discord.ui.button(
         label="Vol -",
@@ -164,8 +166,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
@@ -177,7 +179,7 @@ class MusicControlView(discord.ui.View):
 
         cur_vol = int(player.volume * 100)
         player.set_volume(cur_vol - 10)
-        asyncio.create_task(player.update_controller_message(force=True))
+        create_tracked_task(player.update_controller_message(force=True), name="view_voldown")
 
     @discord.ui.button(
         label="Vol +",
@@ -188,8 +190,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
@@ -201,7 +203,7 @@ class MusicControlView(discord.ui.View):
 
         cur_vol = int(player.volume * 100)
         player.set_volume(cur_vol + 10)
-        asyncio.create_task(player.update_controller_message(force=True))
+        create_tracked_task(player.update_controller_message(force=True), name="view_volup")
 
     @discord.ui.button(
         label="Stop",
@@ -212,8 +214,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
@@ -236,8 +238,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         if not player or not player.current:
@@ -314,8 +316,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
@@ -326,7 +328,7 @@ class MusicControlView(discord.ui.View):
             return
 
         new_mode = player.set_loop_mode()
-        asyncio.create_task(player.update_controller_message(force=True))
+        create_tracked_task(player.update_controller_message(force=True), name="view_loop")
         c = KyroContainer()
         c.add_section(content=f"**Loop Mode**\n> Loop mode set to **{new_mode.upper()}**.")
         await send_container_response(interaction, c, ephemeral=True)
@@ -341,8 +343,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         err = self._check_voice(interaction, player)
@@ -354,7 +356,7 @@ class MusicControlView(discord.ui.View):
 
         player.smart_autoplay = not player.smart_autoplay
         state = "Enabled" if player.smart_autoplay else "Disabled"
-        asyncio.create_task(player.update_controller_message(force=True))
+        create_tracked_task(player.update_controller_message(force=True), name="view_autoplay")
         c = KyroContainer()
         c.add_section(content=f"**Smart Autoplay**\n> Smart Autoplay **{state}**.")
         await send_container_response(interaction, c, ephemeral=True)
@@ -369,8 +371,8 @@ class MusicControlView(discord.ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True)
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as defer_err:
+            logger.debug(f"Button defer notice: {defer_err}")
 
         player = self._get_player(interaction)
         if not player or (not player.queue and not player.current):
@@ -413,5 +415,5 @@ class MusicControlView(discord.ui.View):
             c = KyroContainer()
             c.add_section(content="**Control Notice**\n> An unexpected issue occurred while executing this action.")
             await send_container_response(interaction, c, ephemeral=True)
-        except Exception:
-            pass
+        except Exception as on_err_exc:
+            logger.debug(f"Failed to deliver on_error container to interaction: {on_err_exc}")

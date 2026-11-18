@@ -10,8 +10,8 @@ import asyncio
 import datetime
 import logging
 import time
-from typing import TYPE_CHECKING, Optional, Any
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Optional
 
 import discord
 from discord import app_commands
@@ -19,6 +19,7 @@ from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
+from src.utils.tasks import create_tracked_task
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -137,7 +138,7 @@ class AFKCog(commands.Cog, name="AFK"):
 
     async def cog_load(self) -> None:
         """Load persistent AFK states from database into memory on cog startup."""
-        asyncio.create_task(self._load_afk_cache())
+        create_tracked_task(self._load_afk_cache(), name="afk_load_cache")
 
     async def _load_afk_cache(self) -> None:
         """Initialize AFK table and populate in-memory cache."""
@@ -235,7 +236,7 @@ class AFKCog(commands.Cog, name="AFK"):
                         except Exception as e:
                             logger.debug(f"Unable to update nickname for AFK user {member}: {e}")
 
-                    asyncio.create_task(_apply_afk_nick(ctx.author, new_nick))
+                    create_tracked_task(_apply_afk_nick(ctx.author, new_nick), name="afk_apply_nick")
 
         # Update cache
         afk_entry = AFKData(
@@ -321,8 +322,8 @@ class AFKCog(commands.Cog, name="AFK"):
                     ctx = await self.bot.get_context(message)
                     if ctx.valid and ctx.command and ctx.command.qualified_name == "afk":
                         return
-                except Exception:
-                    pass
+                except Exception as ctx_err:
+                    logger.debug(f"get_context afk notice: {ctx_err}")
 
             # Atomic pop: ensure welcome back only triggers once
             afk_data = self._afk_cache.pop(author_key, None)
@@ -339,15 +340,19 @@ class AFKCog(commands.Cog, name="AFK"):
                     except Exception as e:
                         logger.debug(f"Unable to revert nickname for {member}: {e}")
 
-                asyncio.create_task(_revert_afk_nick(message.author, afk_data.original_nickname))
+                create_tracked_task(
+                    _revert_afk_nick(message.author, afk_data.original_nickname),
+                    name="afk_revert_nick",
+                )
 
             # Remove from database in background
-            asyncio.create_task(
+            create_tracked_task(
                 self.bot.db.execute(
                     "DELETE FROM user_afk WHERE user_id = ? AND guild_id = ?;",
                     author_id,
                     guild_id,
-                )
+                ),
+                name="afk_db_delete",
             )
 
             # Check and deliver pending AFK notes / voice mails

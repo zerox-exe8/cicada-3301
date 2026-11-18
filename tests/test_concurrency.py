@@ -1,10 +1,10 @@
 import asyncio
 import unittest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+from src.managers.giveaway_manager import GiveawayManager
 from src.managers.ticket_manager import TicketManager
 from src.repositories.ticket_repo import TicketRepository
-from src.managers.giveaway_manager import GiveawayManager
 
 
 class TestConcurrencySafety(unittest.IsolatedAsyncioTestCase):

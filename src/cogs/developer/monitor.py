@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import platform
 import sys
 import time
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
@@ -17,6 +19,8 @@ except ImportError:
 from src.core.context import CustomContext
 from src.managers.permission_manager import is_developer
 from src.utils.containers import KyroContainer
+
+logger = logging.getLogger("Kyro.Developer.Monitor")
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -72,8 +76,8 @@ class MonitorCog(commands.Cog, name="Developer-Monitor"):
                     p = psutil.Process(pid)
                     rss_mb = p.memory_info().rss / (1024 * 1024)
                     thread_count = p.num_threads()
-                except Exception:
-                    pass
+                except Exception as ps_err:
+                    logger.debug(f"Process info notice: {ps_err}")
             else:
                 try:
                     import resource

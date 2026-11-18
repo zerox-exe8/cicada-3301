@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import time
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 from tabulate import tabulate
@@ -70,7 +71,7 @@ class SqlCog(commands.Cog, name="Developer-SQL"):
                     container.add_section(content=f"```sql\n{snippet}\n```")
                     container.add_separator(divider=True)
                     container.add_text(f"-# {len(rows):,} rows • {t_dur:.2f}ms • full table attached")
-                    
+
                     file = discord.File(
                         io.BytesIO(table_str.encode("utf-8")),
                         filename="query_result.txt"

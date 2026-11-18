@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
-from src.core.config import Config
+
 from src.core.cache import MicrosecondCache
+from src.core.config import Config
 from src.repositories.guild_repo import GuildRepository
 
 if TYPE_CHECKING:

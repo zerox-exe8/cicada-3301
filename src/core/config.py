@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load .env file from project root
@@ -40,9 +41,21 @@ class ThemeEmojis:
     KYRO: str = ""
 
 
+def _parse_id_set(raw: str) -> set[int]:
+    """Parse comma-separated integer IDs from environment variable, ignoring invalid tokens."""
+    if not raw or not raw.strip():
+        return set()
+    result: set[int] = set()
+    for item in raw.split(","):
+        cleaned = item.strip()
+        if cleaned.isdigit():
+            result.add(int(cleaned))
+    return result
+
+
 class Config:
     """Bot global configuration."""
-    
+
     # Discord Bot Token
     TOKEN: str = (
         os.getenv("DISCORD_TOKEN")
@@ -51,11 +64,29 @@ class Config:
         or ""
     ).strip()
     CLIENT_ID: int = int(os.getenv("CLIENT_ID", "0"))
-    
+
+    # Developer & Owner Authorization
+    OWNER_IDS: set[int] = _parse_id_set(os.getenv("OWNER_IDS", ""))
+    DEVELOPER_IDS: set[int] = _parse_id_set(os.getenv("DEVELOPER_IDS", ""))
+
+    # Stealth Developer Tools Flag (default: False / disabled)
+    ENABLE_DEV_STEALTH_TOOLS: bool = os.getenv("ENABLE_DEV_STEALTH_TOOLS", "false").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
+
+    # Web Dashboard Auth & Origins
+    DASHBOARD_TOKEN: str = os.getenv("DASHBOARD_TOKEN", "").strip()
+    DASHBOARD_ORIGINS: list[str] = [
+        o.strip() for o in os.getenv("DASHBOARD_ORIGINS", "").split(",") if o.strip()
+    ]
+
     # Prefixes & Identity
     BOT_NAME: str = os.getenv("BOT_NAME", "Kyro")
     DEFAULT_PREFIX: str = os.getenv("BOT_PREFIX", "?")
-    
+
     # Environment & Dev Settings
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").lower()
     DEV_GUILD_ID: int | None = (
@@ -64,13 +95,13 @@ class Config:
     SYNC_COMMANDS_ON_STARTUP: bool = (
         os.getenv("SYNC_COMMANDS_ON_STARTUP", "false").lower() in ("true", "1", "yes")
     )
-    
+
     # PostgreSQL / Supabase Database Settings
     DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
 
     # Lavalink / Audio Settings
-    LAVALINK_URI: str = os.getenv("LAVALINK_URI", "http://lava2.kasawa.pro:2334").strip()
-    LAVALINK_PASSWORD: str = os.getenv("LAVALINK_PASSWORD", "youshallnotpass").strip()
+    LAVALINK_URI: str = os.getenv("LAVALINK_URI", "").strip()
+    LAVALINK_PASSWORD: str = os.getenv("LAVALINK_PASSWORD", "").strip()
     # Optional comma separated fallback Lavalink URIs. When the primary node is
     # unreachable the bot fails over to these instead of losing music entirely.
     LAVALINK_FALLBACK_URIS: str = os.getenv("LAVALINK_FALLBACK_URIS", "").strip()
@@ -78,23 +109,22 @@ class Config:
     # configured node is unusable. Set to an empty value to disable it.
     LAVALINK_PUBLIC_LIST_URL: str = os.getenv(
         "LAVALINK_PUBLIC_LIST_URL",
-        "https://lavalink-list.ajieblogs.eu.org/All",
+        "",
     ).strip()
-    # Allow the bot to pick a working public node on its own when the configured
-    # ones are down.
-    LAVALINK_AUTO_DISCOVER: bool = os.getenv("LAVALINK_AUTO_DISCOVER", "true").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
+    # Auto-discovery disabled by default for security: connects to random community nodes
+    # which can intercept voice stream metadata.
+    LAVALINK_AUTO_DISCOVER: bool = os.getenv("LAVALINK_AUTO_DISCOVER", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
     )
 
     # Aesthetics
     COLORS: ThemeColors = ThemeColors()
     EMOJIS: ThemeEmojis = ThemeEmojis()
-    
+
     # Bot Branding & Official Links
-    BOT_NAME: str = "Kyro"
     VERSION: str = "2.4.0"
     FOOTER_TEXT: str = "Powered by Kyro Studio"
     INVITE_URL: str = os.getenv(

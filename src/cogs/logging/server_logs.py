@@ -345,8 +345,8 @@ class ServerLogsCog(commands.Cog):
                         action_str = "Webhook Deleted"
                         executor_str = f"**{entry.user}**" if entry.user else "`Unknown`"
                         break
-        except discord.Forbidden:
-            pass
+        except discord.Forbidden as f_err:
+            logger.debug(f"Audit log read forbidden notice: {f_err}")
         await self._send(
             channel.guild, "server", action_str,
             [f"**Channel:** {channel.mention}", f"**By:** {executor_str}"],

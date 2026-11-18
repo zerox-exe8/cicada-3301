@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
+
 import discord
 from discord import ui
 
@@ -478,7 +479,7 @@ class MeetingSetupWizard(ui.View):
         )
         card.add_separator(divider=True)
         card.add_text(
-            f"> **Next step:** Connect to any VC and type `,meeting start` to begin recording."
+            "> **Next step:** Connect to any VC and type `,meeting start` to begin recording."
         )
         card.add_separator(divider=True)
         card.add_text(f"-# Configured by {self.author.display_name} • <t:{int(discord.utils.utcnow().timestamp())}:f>")

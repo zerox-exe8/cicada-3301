@@ -21,7 +21,7 @@ lavalink:
       snapshot: false
 
   server:
-    password: "${LAVALINK_PASSWORD:youshallnotpass}"
+    password: "${LAVALINK_PASSWORD}"
     sources:
       youtube: false
       soundcloud: true

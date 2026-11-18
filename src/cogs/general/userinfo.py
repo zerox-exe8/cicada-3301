@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -15,8 +16,8 @@ from discord.ext import commands
 from src.core.context import CustomContext
 from src.utils.containers import (
     KyroContainer,
-    send_container_response,
     edit_container_response,
+    send_container_response,
 )
 
 if TYPE_CHECKING:
@@ -170,8 +171,8 @@ class UserInfoView(discord.ui.View):
                 try:
                     pos = sorted_members.index(target) + 1
                     join_pos_str = f"#{pos:,} of {len(sorted_members):,}"
-                except ValueError:
-                    pass
+                except ValueError as val_err:
+                    logger.debug(f"Join position index notice: {val_err}")
 
             nickname_str = target.nick if target.nick else "None"
             booster_str = f"Since <t:{int(target.premium_since.timestamp())}:R>" if target.premium_since else "No"
@@ -272,8 +273,8 @@ class UserInfo(commands.Cog, name="General-UserInfo"):
         full_user = target
         try:
             full_user = await self.bot.fetch_user(target.id)
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as fetch_err:
+            logger.debug(f"fetch_user notice: {fetch_err}")
 
         view = UserInfoView(ctx, target, full_user)
         container = view.render_container()

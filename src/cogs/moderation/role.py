@@ -9,12 +9,13 @@ from __future__ import annotations
 import logging
 import re
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import check_hierarchy, dispatch_mod_log, resolve_role
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:

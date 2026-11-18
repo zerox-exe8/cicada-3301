@@ -43,7 +43,7 @@ class MusicAnalytics:
         INSERT INTO user_music_history (user_id, guild_id, track_title, artist, genre, source, play_count, last_played_at)
         VALUES ($1, $2, $3, $4, $5, $6, 1, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id, track_title, artist)
-        DO UPDATE SET 
+        DO UPDATE SET
             play_count = user_music_history.play_count + 1,
             last_played_at = CURRENT_TIMESTAMP,
             source = EXCLUDED.source;
@@ -67,16 +67,16 @@ class MusicAnalytics:
         if not user_ids or not hasattr(self.bot, "db") or not self.bot.db or not getattr(self.bot.db, "pool", None):
             return []
 
-        query = f"""
+        query = """
         SELECT artist, SUM(play_count) as total_plays
         FROM user_music_history
         WHERE user_id = ANY($1::BIGINT[]) AND artist != 'Official Artist' AND artist != 'Unknown'
         GROUP BY artist
         ORDER BY total_plays DESC
-        LIMIT {limit};
+        LIMIT $2;
         """
         try:
-            rows = await self.bot.db.fetch_all(query, user_ids)
+            rows = await self.bot.db.fetch_all(query, user_ids, int(limit))
             return [r["artist"] for r in rows if r.get("artist")]
         except Exception as e:
             logger.debug(f"Error fetching top artists: {e}")

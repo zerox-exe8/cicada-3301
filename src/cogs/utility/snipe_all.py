@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from collections import deque
 from typing import TYPE_CHECKING, Any
+
 import discord
 from discord.ext import commands
 
+from src.cogs.utility.snipe import SnipeEntry
 from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
-from src.cogs.utility.snipe import SnipeEntry
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -53,7 +54,7 @@ class SnipeAllCog(commands.Cog, name="Utility-SnipeAll"):
 
         if not deleted_entries:
             container = KyroContainer(accent_color=None)
-            container.add_text(f"**Server Sniped Messages**")
+            container.add_text("**Server Sniped Messages**")
             container.add_separator(divider=True)
             container.add_text(f"> No recently deleted messages tracked in **{ctx.guild.name}**.")
             container.add_separator(divider=True)

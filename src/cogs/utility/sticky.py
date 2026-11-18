@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -51,7 +52,7 @@ class Sticky(commands.Cog):
                     old_msg = await message.channel.fetch_message(old_msg_id)
                     await old_msg.delete()
                 except (discord.NotFound, discord.Forbidden):
-                    pass
+                    logger.debug("Old sticky message already deleted or forbidden")
                 except Exception as e:
                     logger.debug(f"Notice deleting old sticky message in {channel_id}: {e}")
 
@@ -160,8 +161,8 @@ class Sticky(commands.Cog):
             try:
                 old_msg = await channel.fetch_message(old_msg_id)
                 await old_msg.delete()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                logger.debug(f"Sticky remove old message delete notice: {del_err}")
 
         await self.bot.sticky_mgr.remove_sticky(channel.id)
         await interaction.followup.send(

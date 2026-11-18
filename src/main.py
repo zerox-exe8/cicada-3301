@@ -14,11 +14,13 @@ sys.path.insert(0, str(BASE_DIR))
 try:
     import static_ffmpeg
     static_ffmpeg.add_paths()
-except Exception:
-    pass
+except Exception as ffmpeg_err:
+    # static_ffmpeg is optional when system ffmpeg is installed
+    logging.getLogger("Kyro.Boot").debug(f"static_ffmpeg notice: {ffmpeg_err}")
 
 import discord
 import discord.opus
+
 from src.core.bot import KyroBot
 from src.core.config import Config
 from src.core.server import HealthServer
@@ -30,8 +32,8 @@ logger = setup_logger("Kyro")
 if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
     try:
         os.add_dll_directory(str(BASE_DIR))
-    except Exception:
-        pass
+    except Exception as dll_err:
+        logger.debug(f"add_dll_directory notice: {dll_err}")
 
 if not discord.opus.is_loaded():
     possible_opus_paths = [
@@ -104,8 +106,8 @@ async def run_bot_loop() -> None:
                     if retry_header:
                         try:
                             retry_after = float(retry_header)
-                        except ValueError:
-                            pass
+                        except ValueError as v_err:
+                            logger.debug(f"Retry-After parse notice: {v_err}")
 
                 # Detect Cloudflare IP ban (HTML page returned instead of JSON)
                 is_cloudflare_block = (

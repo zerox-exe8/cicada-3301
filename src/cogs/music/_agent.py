@@ -17,11 +17,12 @@ from src.core.lavalink import (
     probe_node,
 )
 from src.utils.containers import KyroContainer
+from src.utils.tasks import create_tracked_task
 
 if TYPE_CHECKING:
-    from src.core.bot import KyroBot
-    from src.cogs.music.music import Music
     from src.cogs.music._player import GuildPlayer
+    from src.cogs.music.music import Music
+    from src.core.bot import KyroBot
 
 logger = logging.getLogger("Kyro.Music.Agent")
 
@@ -29,7 +30,7 @@ logger = logging.getLogger("Kyro.Music.Agent")
 class MusicAgent:
     """
     Enterprise-Grade Music SRE & Autonomous Concurrency Agent.
-    
+
     Designed to reliably manage 1,000+ simultaneous music streams with:
     1. Single-Flight Anti-Thundering-Herd algorithm for Lavalink node reconnection.
     2. Per-Guild Partitioned Sharded Locks with TTL eviction (zero cross-guild lock contention).
@@ -120,18 +121,18 @@ class MusicAgent:
                             vc.disconnect(force=True),
                             timeout=LAVALINK_OP_TIMEOUT,
                         )
-                    except Exception:
-                        pass
+                    except Exception as disc_err:
+                        logger.debug(f"Disconnect vc notice: {disc_err}")
                     try:
                         vc.cleanup()
-                    except Exception:
-                        pass
+                    except Exception as clean_err:
+                        logger.debug(f"Cleanup vc notice: {clean_err}")
 
                 # 2. Remove from discord.py internal client connection state
                 try:
                     self.bot._connection._remove_voice_client(guild_id)
-                except Exception:
-                    pass
+                except Exception as rvc_err:
+                    logger.debug(f"Remove voice client notice: {rvc_err}")
 
                 # 3. Transmit Gateway Opcode 4 to reset state on Discord voice servers
                 if player:
@@ -139,8 +140,8 @@ class MusicAgent:
                 try:
                     await guild.change_voice_state(channel=None)
                     await asyncio.sleep(0.3)
-                except Exception:
-                    pass
+                except Exception as vs_err:
+                    logger.debug(f"Change voice state notice: {vs_err}")
 
                 # 4. Reset GuildPlayer voice reference
                 if player:
@@ -178,8 +179,8 @@ class MusicAgent:
                 logger.warning(
                     "MusicAgent: Lavalink node reports CONNECTED but its REST API is unresponsive."
                 )
-        except Exception:
-            pass
+        except Exception as node_err:
+            logger.debug(f"Node probe check notice: {node_err}")
 
         # Check if another coroutine is already actively healing the node
         if self._node_is_healing and self._node_heal_event is not None:
@@ -321,6 +322,7 @@ class MusicAgent:
         ):
             raise error
 
+        import wavelink
         from wavelink.exceptions import (
             ChannelTimeoutException,
             LavalinkException,
@@ -341,8 +343,8 @@ class MusicAgent:
         node = None
         try:
             node = wavelink.Pool.get_node()
-        except Exception:
-            pass
+        except Exception as node_err:
+            logger.debug(f"Pool get_node notice: {node_err}")
 
         node_is_dead = (
             not node
@@ -361,7 +363,7 @@ class MusicAgent:
             title = "Audio Engine Auto-Recovery"
             action = "Triggered single-flight Lavalink node pool re-establishment."
             advice = "The audio engine is reconnecting. Please retry in a few seconds."
-            asyncio.create_task(self.heal_node())
+            create_tracked_task(self.heal_node(), name="music_agent_heal_node")
 
         # Case 2: Voice Gateway Connect / Timeout / Channel State Failure.
         elif is_voice_fault:
@@ -463,14 +465,14 @@ class MusicAgent:
                             try:
                                 await controller.remove_player(guild_id)
                                 self._metrics["zombies_purged"] += 1
-                            except Exception:
-                                pass
+                            except Exception as purge_err:
+                                logger.debug(f"Purge zombie player notice: {purge_err}")
         except Exception as sweep_err:
             logger.debug(f"MusicAgent Sweeper error: {sweep_err}")
 
         # 3. Prune in-memory track search cache to cap heap memory usage
         try:
-            from src.cogs.music._extractor import _SEARCH_CACHE, _CACHE_TTL
+            from src.cogs.music._extractor import _CACHE_TTL, _SEARCH_CACHE
             if len(_SEARCH_CACHE) > 3000:
                 expired = [k for k, (t, _) in _SEARCH_CACHE.items() if now - t > _CACHE_TTL]
                 for k in expired:
@@ -480,8 +482,8 @@ class MusicAgent:
                     oldest_keys = sorted(_SEARCH_CACHE.keys(), key=lambda k: _SEARCH_CACHE[k][0])[:500]
                     for k in oldest_keys:
                         _SEARCH_CACHE.pop(k, None)
-        except Exception:
-            pass
+        except Exception as cache_err:
+            logger.debug(f"Prune search cache notice: {cache_err}")
 
     @_background_sweeper.before_loop
     async def _before_sweeper(self) -> None:

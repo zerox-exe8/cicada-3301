@@ -12,12 +12,12 @@ from typing import Any, List, Optional, Set
 import aiohttp
 import yt_dlp
 
-from src.cogs.music._models import Track
 from src.cogs.music._extractor import (
+    YOUTUBE_URL_REGEX,
     NativeExtractor,
     clean_track_title,
-    YOUTUBE_URL_REGEX,
 )
+from src.cogs.music._models import Track
 
 logger = logging.getLogger("Kyro.Music.Autoplay")
 
@@ -35,7 +35,7 @@ ARTIST_CLUSTERS = {
     "armaan malik": ["Arijit Singh", "Darshan Raval", "Atif Aslam", "Ankit Tiwari", "Jubin Nautiyal"],
     "darshan raval": ["Armaan Malik", "Arijit Singh", "Jubin Nautiyal", "Atif Aslam", "Stebin Ben"],
     "mithoon": ["Ankit Tiwari", "Arijit Singh", "Atif Aslam", "Pritam"],
-    
+
     # Punjabi / Drill / Desi Hip-Hop
     "sidhu moose wala": ["Karan Aujla", "AP Dhillon", "Shubh", "Diljit Dosanjh", "Amrit Maan", "Gurinder Gill", "DIVINE"],
     "karan aujla": ["Sidhu Moose Wala", "AP Dhillon", "Shubh", "Diljit Dosanjh", "Ikky", "Badshah", "Raftaar"],

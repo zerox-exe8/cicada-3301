@@ -8,7 +8,8 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
 import discord
 from discord.ext import commands
 
@@ -177,7 +178,7 @@ class SnipeCog(commands.Cog, name="Utility-Snipe"):
             container = KyroContainer(accent_color=None)
             container.add_text(f"**Sniped Messages • #{ctx.channel.name}**")
             container.add_separator(divider=True)
-            container.add_text(f"> No recently deleted messages found in this channel.")
+            container.add_text("> No recently deleted messages found in this channel.")
             container.add_separator(divider=True)
             container.add_text(f"-# Requested by {ctx.author.display_name}")
             await send_container_response(ctx, container)

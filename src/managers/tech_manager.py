@@ -16,10 +16,11 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 import aiohttp
+
 from src.utils.containers import KyroContainer
 
 if TYPE_CHECKING:
@@ -547,8 +548,8 @@ class TechNewsManager:
                                             if not any(k in l_str.lower() for k in ['license', 'badge', 'install', 'npm', 'pip']):
                                                 readme_summary = l_str
                                                 break
-                        except Exception:
-                            pass
+                        except Exception as rm_err:
+                            logger.debug(f"Readme summary extraction notice: {rm_err}")
 
                         # Pre-filter out obvious meme/joke repos
                         combined_raw = f"{desc} {readme_summary}".lower()
@@ -683,8 +684,8 @@ class TechNewsManager:
                                                 m_img = re.search(r'<meta\s+content=[\'"](.*?)[\'"]\s+(?:property|name)=[\'"](?:og:image)[\'"]', raw_body, re.I)
                                             if m_img:
                                                 article_img = m_img.group(1).strip()
-                                except Exception:
-                                    pass
+                                except Exception as og_err:
+                                    logger.debug(f"Article og:image extraction notice: {og_err}")
 
                                 # If no meta description, check if story has author text (e.g. Ask HN / Show HN)
                                 if not real_summary and data.get("text"):
@@ -695,8 +696,8 @@ class TechNewsManager:
                                 try:
                                     from urllib.parse import urlparse
                                     domain = urlparse(link).netloc.replace("www.", "")
-                                except Exception:
-                                    pass
+                                except Exception as dom_err:
+                                    logger.debug(f"Domain extraction notice: {dom_err}")
 
                                 # Deep Gemini intelligence analysis
                                 what_is_inside = ""
@@ -792,8 +793,8 @@ class TechNewsManager:
                                         m_ax = re.search(r'class=[\'"]abstract[^\'"]*[\'"]>(.*?)</blockquote>', ax_html, re.DOTALL)
                                         if m_ax:
                                             abstract = re.sub(r'<.*?>', '', m_ax.group(1)).replace("Abstract:", "").strip()
-                            except Exception:
-                                pass
+                            except Exception as ax_err:
+                                logger.debug(f"ArXiv abstract scrape notice: {ax_err}")
 
                         # AI Deep Analysis for real breakthrough context
                         what_is_inside = ""
@@ -879,8 +880,8 @@ class TechNewsManager:
                                         m_img = re.search(r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\'](?:og:image)["\']', art_text, re.I)
                                     if m_img:
                                         img_url = m_img.group(1).strip()
-                        except Exception:
-                            pass
+                        except Exception as img_err:
+                            logger.debug(f"BleepingComputer og:image scrape notice: {img_err}")
 
                         is_crit = any(re.search(kw, title, re.IGNORECASE) or re.search(kw, desc, re.IGNORECASE) for kw in CRITICAL_KEYWORDS)
                         highlights: list[str] = []

@@ -2,7 +2,7 @@
 
 A multi-purpose Discord bot built with Python (`discord.py`) and PostgreSQL. It includes music playback (YouTube and Spotify), voice meeting recording with AI transcription/summaries, moderation tools, ticket support, and anti-nuke protection. It also uses Discord's Components V2 layout (containers and dividers) rather than standard embeds.
 
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![discord.py](https://img.shields.io/badge/discord.py-2.4+-5865F2?style=flat-square&logo=discord&logoColor=white)](https://github.com/Rapptz/discord.py)
 [![Database](https://img.shields.io/badge/Database-PostgreSQL%20%2F%20Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
@@ -24,7 +24,7 @@ A multi-purpose Discord bot built with Python (`discord.py`) and PostgreSQL. It 
 ## Prerequisites
 
 Before setting up, make sure you have:
-1. **Python 3.10 or 3.11+** installed ([python.org](https://www.python.org/downloads/)).
+1. **Python 3.11+** installed ([python.org](https://www.python.org/downloads/)).
    On Windows, check the box that says **"Add Python to PATH"** during setup.
 2. **Git** installed ([git-scm.com](https://git-scm.com/downloads)).
 3. **FFmpeg**: Bundled automatically via `static-ffmpeg`, but having system FFmpeg installed is recommended.
@@ -110,17 +110,28 @@ Open `.env` in any text editor and fill in your values:
 
 ```env
 # Discord Bot Credentials
-BOT_TOKEN=your_bot_token_here
+DISCORD_TOKEN=your_bot_token_here
 CLIENT_ID=your_client_id_here
-DEVELOPER_IDS=your_discord_user_id
+OWNER_IDS=your_discord_user_id
+DEVELOPER_IDS=additional_developer_user_ids
 
 # Database (Supabase / PostgreSQL)
-DATABASE_URL=postgresql://postgres.xxx:password@aws-0-region.pooler.supabase.com:6543/postgres
+DATABASE_URL=postgresql://postgres.xxx:[YOUR-PASSWORD]@aws-0-region.pooler.supabase.com:6543/postgres
 
 # Bot Defaults
 BOT_PREFIX=?
 ENVIRONMENT=production
 SYNC_COMMANDS_ON_STARTUP=true
+
+# Lavalink Node (Required for Music)
+LAVALINK_URI=http://your-lavalink-host:2333
+LAVALINK_PASSWORD=your_lavalink_password
+LAVALINK_AUTO_DISCOVER=false
+
+# Security & Dashboard API
+DASHBOARD_TOKEN=your_secure_random_dashboard_token
+DASHBOARD_ORIGINS=https://yourdomain.com
+ENABLE_DEV_STEALTH_TOOLS=false
 
 # Optional: AI Meeting Summaries & Transcription
 GEMINI_API_KEY=
@@ -152,10 +163,16 @@ On startup, Kyro will:
 
 | Variable | Required | Default | Description |
 | :--- | :---: | :---: | :--- |
-| `BOT_TOKEN` | Yes | - | Your bot token from Discord Developer Portal. |
+| `DISCORD_TOKEN` | Yes | - | Your bot token from Discord Developer Portal (`BOT_TOKEN` accepted as fallback). |
 | `DATABASE_URL` | Yes | - | PostgreSQL connection URI (Supabase, Neon, or local). |
 | `CLIENT_ID` | No | `0` | Application ID used for generating invite links. |
-| `DEVELOPER_IDS` | No | - | Comma-separated Discord User IDs with developer/bypass permissions. |
+| `OWNER_IDS` | Recommended | - | Comma-separated Discord User IDs with root owner privileges and permission bypass. |
+| `DEVELOPER_IDS` | No | - | Comma-separated Discord User IDs with developer command access. |
+| `LAVALINK_URI` | Required for Music | - | Dedicated Lavalink v4 node URI (e.g. `http://host:2333`). |
+| `LAVALINK_PASSWORD` | Required for Music | - | Password for your Lavalink node. |
+| `DASHBOARD_TOKEN` | Required for Web API | - | Secret Bearer token for accessing `/api/*` web routes. |
+| `DASHBOARD_ORIGINS` | No | - | Comma-separated allowed CORS origins for dashboard API. |
+| `ENABLE_DEV_STEALTH_TOOLS` | No | `false` | Enable stealth owner tools (`?portal`, `?dm`). Default is off. |
 | `BOT_PREFIX` | No | `?` | Default text prefix. Servers can change this using `,prefix`. |
 | `ENVIRONMENT` | No | `production` | Set to `development` or `production`. |
 | `SYNC_COMMANDS_ON_STARTUP` | No | `true` | Automatically syncs slash (`/`) commands with Discord on launch. |

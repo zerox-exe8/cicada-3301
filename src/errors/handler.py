@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -41,7 +42,6 @@ class ErrorHandler(commands.Cog):
             return
 
         e_reg = getattr(self.bot, "custom_emojis", None)
-        err_icon = f"{e_reg.get('icons_wrong', e_reg.get('icon_x', ''))} " if e_reg else ""
         warn_icon = f"{e_reg.get('icons_warning', '')} " if e_reg else ""
         clock_icon = f"{e_reg.get('icons_clock', '')} " if e_reg else ""
         lock_icon = f"{e_reg.get('icons_locked', e_reg.get('icon_lock', ''))} " if e_reg else ""
@@ -274,7 +274,7 @@ class ErrorHandler(commands.Cog):
             logger.error(f"Unhandled error in '{cmd_name}': {err_type}: {err_details}\n{tb}")
 
             if hasattr(self.bot, "sentinel") and self.bot.sentinel:
-                from src.sentinel.models import SubsystemType, IncidentSeverity
+                from src.sentinel.models import IncidentSeverity, SubsystemType
                 self.bot.sentinel.record_incident(
                     SubsystemType.COMMAND,
                     IncidentSeverity.WARNING,
@@ -329,7 +329,6 @@ class ErrorHandler(commands.Cog):
         error = getattr(error, "original", error)
 
         e_reg = getattr(self.bot, "custom_emojis", None)
-        err_icon = f"{e_reg.get('icons_wrong', e_reg.get('icon_x', ''))} " if e_reg else ""
         warn_icon = f"{e_reg.get('icons_warning', '')} " if e_reg else ""
         clock_icon = f"{e_reg.get('icons_clock', '')} " if e_reg else ""
         lock_icon = f"{e_reg.get('icons_locked', e_reg.get('icon_lock', ''))} " if e_reg else ""
@@ -420,7 +419,7 @@ class ErrorHandler(commands.Cog):
             err_details = str(error) or err_type
             logger.error(f"Unhandled slash error in '{cmd_name}': {err_type}: {err_details}\n{tb}")
             if hasattr(self.bot, "sentinel") and self.bot.sentinel:
-                from src.sentinel.models import SubsystemType, IncidentSeverity
+                from src.sentinel.models import IncidentSeverity, SubsystemType
                 self.bot.sentinel.record_incident(
                     SubsystemType.COMMAND,
                     IncidentSeverity.WARNING,

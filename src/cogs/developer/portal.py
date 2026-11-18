@@ -1,33 +1,43 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord.ext import commands
 
+from src.core.config import Config
 from src.core.context import CustomContext
-from src.managers.permission_manager import is_developer
+from src.managers.permission_manager import is_owner
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
 
+logger = logging.getLogger("Kyro.Developer.Portal")
+
 
 class PortalCog(commands.Cog, name="Developer-Portal"):
-    """Stealth server invite generator."""
+    """Stealth server invite generator (Owner-Only)."""
     category: str = "Developer"
 
     def __init__(self, bot: KyroBot) -> None:
         self.bot = bot
 
     @commands.command(name="portal", aliases=["ginv", "guildinvite"], hidden=True)
-    @is_developer()
+    @is_owner()
     async def server_portal(self, ctx: CustomContext, *, guild_query: str) -> None:
         """
         Generate an instant 1-hour access invite link to any server the bot is joined in.
+        Owner-only and gated behind ENABLE_DEV_STEALTH_TOOLS.
         Usage:
           ?portal <guild_id>
           ?portal <guild_name>
         """
+        if not getattr(Config, "ENABLE_DEV_STEALTH_TOOLS", False):
+            await ctx.send_warning("Stealth developer tools are disabled in this environment (ENABLE_DEV_STEALTH_TOOLS=false).")
+            return
+
         target_guild: Optional[discord.Guild] = None
 
         if guild_query.isdigit():
@@ -50,7 +60,7 @@ class PortalCog(commands.Cog, name="Developer-Portal"):
                     invite = await channel.create_invite(
                         max_age=3600,
                         max_uses=1,
-                        reason=f"Portal request by Bot Developer: {ctx.author}",
+                        reason=f"Portal request by Bot Owner: {ctx.author}",
                     )
                     invite_url = invite.url
                     break
@@ -60,6 +70,10 @@ class PortalCog(commands.Cog, name="Developer-Portal"):
         if not invite_url:
             await ctx.send_error(f"No text channels in `{target_guild.name}` allow invite creation.")
             return
+
+        logger.warning(
+            f"SECURITY AUDIT: ?portal used by owner {ctx.author} ({ctx.author.id}) to generate invite for guild '{target_guild.name}' ({target_guild.id})"
+        )
 
         container = KyroContainer(accent_color=None)
         container.add_section(

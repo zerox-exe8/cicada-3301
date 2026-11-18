@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log, resolve_audit_perpetrator
+from src.cogs.antinuke._helpers import dispatch_antinuke_log, execute_punishment, resolve_audit_perpetrator
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -62,8 +63,8 @@ class AntiBotCog(commands.Cog):
         except Exception:
             try:
                 await member.kick(reason=f"Kyro Antinuke: {action_title} (Unauthorized Bot)")
-            except Exception:
-                pass
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as kick_err:
+                logger.debug(f"Unauthorized bot kick fallback notice: {kick_err}")
 
         # 6. If mass raid, sweep and ban any other unauthorized bots added in the last 60 seconds
         extra_banned = []
@@ -76,8 +77,8 @@ class AntiBotCog(commands.Cog):
                             try:
                                 await m.ban(reason="Kyro Antinuke: Mass Bot Raid Sweep", delete_message_seconds=0)
                                 extra_banned.append(m.name)
-                            except Exception:
-                                pass
+                            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as ban_err:
+                                logger.debug(f"Mass raid sweep ban notice: {ban_err}")
 
         # 7. Punish the inviter (if resolved and not immune)
         punish_res = "Unauthorized Bot Removed"

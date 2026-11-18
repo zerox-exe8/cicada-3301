@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Union
 import asyncio
+from typing import TYPE_CHECKING, Any, Optional, Union
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
 from src.managers.antinuke_manager import PROTECTION_MODULES
+from src.utils.containers import KyroContainer, edit_container_response, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot

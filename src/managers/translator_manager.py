@@ -7,6 +7,7 @@ import logging
 import os
 import urllib.parse
 from typing import Any, Optional
+
 import aiohttp
 
 from src.database.postgres import PostgresDatabase
@@ -183,7 +184,11 @@ class TranslatorManager:
             return True
         self._recent_reactions.add(key)
         # Auto clear key after 10 seconds
-        asyncio.get_event_loop().call_later(10.0, self._recent_reactions.discard, key)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        loop.call_later(10.0, self._recent_reactions.discard, key)
         return False
 
     async def translate(
@@ -231,7 +236,7 @@ class TranslatorManager:
                     final_result = "".join(translated_chunks).strip()
                     if final_result:
                         res = (final_result, detected_lang)
-                        self._translation_cache[cache_key] = res
+                        self._set_cache(cache_key, res)
                         return res
         except Exception as e:
             logger.debug(f"Notice during Google GTX translation: {e}")
@@ -269,10 +274,20 @@ class TranslatorManager:
                                 parsed = json.loads(parts[0].get("text", "{}"))
                                 if parsed.get("translated"):
                                     res = (parsed["translated"], parsed.get("detected", "auto"))
-                                    self._translation_cache[cache_key] = res
+                                    self._set_cache(cache_key, res)
                                     return res
             except Exception as e:
                 logger.debug(f"Notice during Gemini translation fallback: {e}")
 
         # If everything fails, return original text
         return (clean_text, "unknown")
+
+    def _set_cache(self, key: str, value: tuple[str, str], max_size: int = 2000) -> None:
+        """Store translation in cache with eviction when max capacity is reached."""
+        if len(self._translation_cache) >= max_size:
+            try:
+                oldest_key = next(iter(self._translation_cache))
+                del self._translation_cache[oldest_key]
+            except (StopIteration, KeyError):
+                logger.debug("Translation cache FIFO eviction notice")
+        self._translation_cache[key] = value

@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands
 
 from src.core.context import CustomContext
-from src.managers.permission_manager import is_developer
+from src.managers.permission_manager import is_owner
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -29,16 +29,16 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
         invoke_without_command=True,
         description="Manage Direct Command Execution (No-Prefix) authority.",
     )
-    @is_developer()
+    @is_owner()
     async def noprefix(self, ctx: CustomContext) -> None:
         """Overview of No-Prefix management commands."""
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**No-Prefix Protocol**\n"
-                f"> **add** • `?np add <@user | id>`\n"
-                f"> **remove** • `?np remove <@user | id>`\n"
-                f"> **list** • `?np list`"
+                "**No-Prefix Protocol**\n"
+                "> **add** • `?np add <@user | id>`\n"
+                "> **remove** • `?np remove <@user | id>`\n"
+                "> **list** • `?np list`"
             )
         )
         container.add_separator(divider=True)
@@ -46,7 +46,7 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
         await send_container_response(ctx, container)
 
     @noprefix.command(name="add")
-    @is_developer()
+    @is_owner()
     async def np_add(self, ctx: CustomContext, *, user: str) -> None:
         """Grant direct command execution authority (no prefix needed) to a user."""
         clean = user.strip("<@!> ")
@@ -59,14 +59,14 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
             if not target_user:
                 try:
                     target_user = await self.bot.fetch_user(target_id)
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.HTTPException) as fetch_err:
+                    logger.debug(f"Fetch user notice: {fetch_err}")
         else:
             try:
                 target_user = await commands.UserConverter().convert(ctx, user)
                 target_id = target_user.id
-            except Exception:
-                pass
+            except commands.BadArgument as conv_err:
+                logger.debug(f"UserConverter notice: {conv_err}")
 
         if not target_id:
             container = KyroContainer(accent_color=None)
@@ -111,7 +111,7 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
         await send_container_response(ctx, container)
 
     @noprefix.command(name="remove", aliases=["rm", "del"])
-    @is_developer()
+    @is_owner()
     async def np_remove(self, ctx: CustomContext, *, user: str) -> None:
         """Revoke direct command execution authority from a user."""
         clean = user.strip("<@!> ")
@@ -127,8 +127,8 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
                 target_user = await commands.UserConverter().convert(ctx, user)
                 target_id = target_user.id
                 target_name = target_user.name
-            except Exception:
-                pass
+            except commands.BadArgument as conv_err:
+                logger.debug(f"UserConverter remove notice: {conv_err}")
 
         if not target_id:
             container = KyroContainer(accent_color=None)
@@ -165,7 +165,7 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
         await send_container_response(ctx, container)
 
     @noprefix.command(name="list", aliases=["ls", "show"])
-    @is_developer()
+    @is_owner()
     async def np_list(self, ctx: CustomContext) -> None:
         """Display list of all users authorized for No-Prefix execution."""
         rows = await self.bot.db.fetch_all("SELECT user_id, added_by, created_at FROM system_no_prefix ORDER BY created_at DESC;")
@@ -185,7 +185,7 @@ class NoPrefixCog(commands.Cog, name="Developer-NoPrefix"):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**No-Prefix Directory**\n"
+                "**No-Prefix Directory**\n"
                 + ("\n".join(entries) if entries else "> No entries found")
             )
         )

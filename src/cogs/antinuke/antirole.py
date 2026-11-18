@@ -3,14 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
 from src.cogs.antinuke._helpers import (
-    execute_punishment,
-    restore_role,
     dispatch_antinuke_log,
+    execute_punishment,
     resolve_audit_perpetrator,
+    restore_role,
 )
 
 if TYPE_CHECKING:
@@ -88,8 +89,8 @@ class AntiRoleCog(commands.Cog):
         if is_raid:
             try:
                 await role.delete(reason="Kyro Antinuke: Mass Role Creation Raid Cleanup")
-            except Exception:
-                pass
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                logger.debug(f"Spam role delete notice: {del_err}")
 
             punish_res = await execute_punishment(
                 self.bot, guild, perpetrator, "Anti-Role", f"Mass role spam @{role.name}"

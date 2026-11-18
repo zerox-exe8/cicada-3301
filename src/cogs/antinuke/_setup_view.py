@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
+
 import discord
 from discord import ui
 
@@ -355,8 +356,8 @@ class AntinukeSetupWizard(ui.View):
                 )
                 try:
                     await self.bot.log_mgr.set_log_channel(self.guild.id, "all", target_log_channel.id)
-                except Exception:
-                    pass
+                except Exception as set_err:
+                    logger.debug(f"Set log channel notice: {set_err}")
 
         # 2. Update all module settings
         module_updates = {}

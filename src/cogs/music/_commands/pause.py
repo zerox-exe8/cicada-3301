@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
+
 from discord.ext import commands
 
 from src.cogs.music._commands.controls import check_voice_channel
 from src.utils.containers import KyroContainer, send_container_response
+from src.utils.tasks import create_tracked_task
 
 if TYPE_CHECKING:
     from src.cogs.music.music import Music
@@ -27,7 +29,7 @@ async def execute_pause(cog: Music, ctx: commands.Context) -> None:
         return
 
     if player.pause():
-        asyncio.create_task(player.update_controller_message(force=True))
+        create_tracked_task(player.update_controller_message(force=True), name="cmd_pause_update")
         e_reg = getattr(cog.bot, "custom_emojis", None)
         p_e = e_reg.get("paused", "") if e_reg else ""
         prefix = f"{p_e} " if p_e else ""
@@ -57,7 +59,7 @@ async def execute_resume(cog: Music, ctx: commands.Context) -> None:
 
     if player.resume():
         player._was_paused_for_empty_vc = False
-        asyncio.create_task(player.update_controller_message(force=True))
+        create_tracked_task(player.update_controller_message(force=True), name="cmd_resume_update")
         e_reg = getattr(cog.bot, "custom_emojis", None)
         m_e = e_reg.get("music", "") if e_reg else ""
         prefix = f"{m_e} " if m_e else ""

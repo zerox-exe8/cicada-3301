@@ -14,6 +14,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
+from src.core.config import Config
 from src.core.context import CustomContext
 from src.managers.permission_manager import is_developer
 from src.utils.containers import KyroContainer, send_container_response
@@ -357,9 +358,9 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
         )
         container.add_separator(divider=True)
         container.add_text(
-            f"> Use buttons below or CLI shortcuts:\n"
-            f"> `?botedit avatar <url>` • `?botedit banner <url>` • `?botedit name <name>` • `?botedit status <text>`\n\n"
-            f"-# Root Identity Customization • Instant Live Effect"
+            "> Use buttons below or CLI shortcuts:\n"
+            "> `?botedit avatar <url>` • `?botedit banner <url>` • `?botedit name <name>` • `?botedit status <text>`\n\n"
+            "-# Root Identity Customization • Instant Live Effect"
         )
 
         view = BotEditView(self.bot, ctx.author.id, ctx.channel.id)
@@ -393,8 +394,8 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"**Bot Avatar Updated**\n"
-                    f"> **Status:** `Live Avatar Applied Successfully`"
+                    "**Bot Avatar Updated**\n"
+                    "> **Status:** `Live Avatar Applied Successfully`"
                 ),
                 accessory={"type": 11, "media": {"url": self.bot.user.display_avatar.url}},
             )
@@ -437,8 +438,8 @@ class IdentityCog(commands.Cog, name="Developer-Identity"):
             container = KyroContainer(accent_color=None)
             container.add_section(
                 content=(
-                    f"**Bot Banner Updated**\n"
-                    f"> **Status:** `Live Banner Applied Successfully`"
+                    "**Bot Banner Updated**\n"
+                    "> **Status:** `Live Banner Applied Successfully`"
                 ),
             )
             container.add_separator(divider=True)

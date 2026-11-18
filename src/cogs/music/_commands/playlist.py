@@ -8,18 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, List, Optional
+
 import discord
 
-from src.core.context import CustomContext
-from src.cogs.music._player import GuildPlayer, shorten_artist
 from src.cogs.music._extractor import NativeExtractor, clean_track_title, is_playlist_url
+from src.cogs.music._player import GuildPlayer, shorten_artist
 from src.cogs.music._playlist_views import (
-    PlaylistHubView,
     PlaylistBrowseView,
+    PlaylistHubView,
     execute_saved_playlist_playback,
-    format_duration,
 )
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -367,8 +367,8 @@ async def handle_playlist(
                         t_url,
                     )
                     added_count += 1
-                except Exception:
-                    pass
+                except Exception as db_err:
+                    logger.debug(f"Playlist track insert notice: {db_err}")
 
             container = KyroContainer(accent_color=None)
             container.add_section(

@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import check_hierarchy, dispatch_mod_log
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
+
+logger = logging.getLogger("Kyro.Moderation.Ban")
 
 
 class BanCog(commands.Cog):
@@ -48,8 +52,8 @@ class BanCog(commands.Cog):
                 )
             )
             await send_container_response(member, dm_container)
-        except Exception:
-            pass
+        except (discord.Forbidden, discord.HTTPException) as dm_err:
+            logger.debug(f"Member ban DM notice: {dm_err}")
 
         await ctx.guild.ban(member, reason=f"{ctx.author} ({ctx.author.id}): {reason}", delete_message_days=0)
         await dispatch_mod_log(self.bot, ctx.guild, "Member Ban", member, ctx.author, reason)

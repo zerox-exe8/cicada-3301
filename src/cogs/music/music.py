@@ -3,35 +3,36 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response
-from src.cogs.music._controller import MusicController
-from src.cogs.music._views import MusicControlView
-from src.cogs.music._analytics import MusicAnalytics
 from src.cogs.music._agent import MusicAgent
-from src.cogs.music._commands.play import execute_play
-from src.cogs.music._commands.pause import execute_pause, execute_resume
-from src.cogs.music._commands.skip import execute_skip
-from src.cogs.music._commands.stop import execute_stop
-from src.cogs.music._commands.queue import execute_queue
-from src.cogs.music._commands.nowplaying import execute_nowplaying
+from src.cogs.music._analytics import MusicAnalytics
 from src.cogs.music._commands.autoplay import execute_autoplay
 from src.cogs.music._commands.controls import (
-    execute_loop,
-    execute_shuffle,
     execute_clear,
-    execute_volume,
-    execute_remove,
     execute_jump,
+    execute_loop,
+    execute_remove,
+    execute_shuffle,
     execute_stay,
+    execute_volume,
 )
-from src.cogs.music._commands.playlist import handle_playlist, handle_like, handle_unlike
+from src.cogs.music._commands.nowplaying import execute_nowplaying
+from src.cogs.music._commands.pause import execute_pause, execute_resume
+from src.cogs.music._commands.play import execute_play
+from src.cogs.music._commands.playlist import handle_like, handle_playlist, handle_unlike
+from src.cogs.music._commands.queue import execute_queue
+from src.cogs.music._commands.skip import execute_skip
+from src.cogs.music._commands.stop import execute_stop
+from src.cogs.music._controller import MusicController
+from src.cogs.music._views import MusicControlView
+from src.core.context import CustomContext
+from src.utils.containers import KyroContainer, send_container_response
+from src.utils.tasks import create_tracked_task
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -71,9 +72,12 @@ class Music(commands.Cog):
         from src.core.lavalink import connect_lavalink_node
         try:
             node = await connect_lavalink_node(self.bot, inactive_player_timeout=300)
-            logger.info(f"Connected to Lavalink Node at {node.uri} (status={node.status})")
+            if node:
+                logger.info(f"Connected to Lavalink Node at {node.uri} (status={node.status})")
+            else:
+                logger.warning("Lavalink connection skipped: music streaming is inactive.")
         except Exception as e:
-            logger.error(f"Failed to connect to Lavalink node: {e}")
+            logger.warning(f"Failed to connect to Lavalink node: {e}")
 
     async def _load_247_cache(self) -> None:
         """Load persistent 24/7 guild state from database."""
@@ -99,12 +103,12 @@ class Music(commands.Cog):
                 if node.status == wavelink.NodeStatus.CONNECTED:
                     has_nodes = True
                     break
-        except Exception:
-            pass
+        except Exception as node_err:
+            logger.debug(f"Check existing nodes notice: {node_err}")
 
         if not has_nodes:
-            asyncio.create_task(self._connect_lavalink())
-        asyncio.create_task(self._load_247_cache())
+            create_tracked_task(self._connect_lavalink(), name="music_connect_lavalink")
+        create_tracked_task(self._load_247_cache(), name="music_load_247_cache")
 
     async def cog_unload(self) -> None:
         """Close Lavalink node pool only on bot shutdown, preserving active streams during hot-reload."""
@@ -114,8 +118,8 @@ class Music(commands.Cog):
             import wavelink
             try:
                 await wavelink.Pool.close()
-            except Exception:
-                pass
+            except Exception as close_err:
+                logger.debug(f"Pool close notice: {close_err}")
 
     @commands.Cog.listener()
     async def on_wavelink_track_start(self, payload: Any) -> None:
@@ -141,7 +145,7 @@ class Music(commands.Cog):
         player_obj = getattr(payload, "player", None)
         guild_id = player_obj.guild.id if player_obj and player_obj.guild else None
         if hasattr(self.bot, "sentinel") and self.bot.sentinel:
-            from src.sentinel.models import SubsystemType, IncidentSeverity
+            from src.sentinel.models import IncidentSeverity, SubsystemType
             self.bot.sentinel.record_incident(
                 SubsystemType.MUSIC,
                 IncidentSeverity.WARNING,
@@ -163,7 +167,7 @@ class Music(commands.Cog):
         player_obj = getattr(payload, "player", None)
         guild_id = player_obj.guild.id if player_obj and player_obj.guild else None
         if hasattr(self.bot, "sentinel") and self.bot.sentinel:
-            from src.sentinel.models import SubsystemType, IncidentSeverity
+            from src.sentinel.models import IncidentSeverity, SubsystemType
             self.bot.sentinel.record_incident(
                 SubsystemType.MUSIC,
                 IncidentSeverity.WARNING,
@@ -181,7 +185,7 @@ class Music(commands.Cog):
         node_id = getattr(node, "identifier", "default")
         logger.warning(f"Lavalink node closed: {node_id}")
         if hasattr(self, "agent") and self.agent:
-            asyncio.create_task(self.agent.heal_node())
+            create_tracked_task(self.agent.heal_node(), name="music_heal_node")
 
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: Any) -> None:
@@ -253,8 +257,8 @@ class Music(commands.Cog):
                                 )
                             )
                             await send_container_response(player.home_channel, container)
-                        except Exception:
-                            pass
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as send_err:
+                            logger.debug(f"Disconnect notice send notice: {send_err}")
                 player._disconnect_announced = False
                 player._was_paused_for_empty_vc = False
                 # A self-heal disconnect (MusicAgent) must NOT wipe the playlist —
@@ -272,8 +276,8 @@ class Music(commands.Cog):
                 if player.voice_client:
                     try:
                         player.voice_client.cleanup()
-                    except Exception:
-                        pass
+                    except Exception as vc_err:
+                        logger.debug(f"Voice client cleanup notice: {vc_err}")
                 player.voice_client = None
             return
 
@@ -309,7 +313,7 @@ class Music(commands.Cog):
                 # discord.py only opens a voice connection when connect() is called,
                 # so a bot that gets dragged into a channel would otherwise sit there
                 # silently forever. Establish the connection ourselves.
-                asyncio.create_task(self._auto_connect_voice(after.channel))
+                create_tracked_task(self._auto_connect_voice(after.channel), name="music_auto_connect_voice")
             return
 
         # non-bot member joined or moved into bot's voice channel
@@ -330,8 +334,8 @@ class Music(commands.Cog):
                                 )
                             )
                             await send_container_response(player.home_channel, container)
-                        except Exception:
-                            pass
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as send_err:
+                            logger.debug(f"Playback resumed notice send notice: {send_err}")
                     await player.update_controller_message(force=True)
 
         # non-bot member left or moved out of bot's voice channel
@@ -412,7 +416,7 @@ class Music(commands.Cog):
             player._disconnect_announced = True
             await player.stop()
         except asyncio.CancelledError:
-            pass
+            logger.debug("Empty VC timer cancelled normally.")
         except Exception as e:
             logger.error(f"Empty VC timeout worker error: {e}", exc_info=True)
 
@@ -504,8 +508,8 @@ class Music(commands.Cog):
         if ctx.interaction and not ctx.interaction.response.is_done():
             try:
                 await ctx.interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Play command defer notice: {defer_err}")
         await execute_play(self, ctx, query)
 
     @commands.hybrid_command(

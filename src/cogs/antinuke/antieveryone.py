@@ -3,15 +3,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
 from src.cogs.antinuke._helpers import (
-    execute_punishment,
+    DANGEROUS_PERMISSIONS,
     disarm_dangerous_permissions,
     dispatch_antinuke_log,
+    execute_punishment,
     resolve_audit_perpetrator,
-    DANGEROUS_PERMISSIONS,
 )
 
 if TYPE_CHECKING:

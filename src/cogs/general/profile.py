@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord.ext import commands
 
@@ -38,8 +39,8 @@ class Profile(commands.Cog):
             if fetched and getattr(fetched, "bio", None) and fetched.bio.strip():
                 clean_bio = fetched.bio.strip().replace("\r\n", " ").replace("\n", " ")
                 bio = clean_bio[:120] + ("..." if len(clean_bio) > 120 else "")
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as fetch_err:
+            logger.debug(f"Fetch user bio notice: {fetch_err}")
 
         # Resolve Badge (Clean, simple text, no emojis)
         is_owner_user = await self.bot.perm_mgr.is_owner(target_id)
@@ -67,8 +68,8 @@ class Profile(commands.Cog):
                 tier_str = f"Prime {tier_val}"
             elif is_owner_user:
                 tier_str = "Prime Lifetime"
-        except Exception:
-            pass
+        except Exception as db_err:
+            logger.debug(f"User premium fetch notice: {db_err}")
 
         # Resolve No-Prefix
         no_prefix_str = "Active" if has_no_prefix else "Disabled"
@@ -86,8 +87,8 @@ class Profile(commands.Cog):
                     joined_names = ", ".join(f"`{n}`" for n in names[:3])
                     extra = f" +{len(names) - 3} more" if len(names) > 3 else ""
                     pl_display = f"{len(names)} Saved ({joined_names}{extra})"
-        except Exception:
-            pass
+        except Exception as db_err:
+            logger.debug(f"User premium fetch notice: {db_err}")
 
         # Resolve Live Audio Detection
         live_audio_title: str | None = None

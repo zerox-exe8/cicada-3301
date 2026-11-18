@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
-    from src.database.base import BaseDatabase
     from src.core.cache import MicrosecondCache
+    from src.database.base import BaseDatabase
 
 logger = logging.getLogger("Kyro.Core.Services")
 
@@ -25,24 +25,24 @@ class ServiceRegistry:
         self.cache = cache
 
         # Lazy / Modular Manager Instantiation
-        from src.managers.guild_manager import GuildManager
-        from src.managers.permission_manager import PermissionManager
+        from src.managers.antinuke_manager import AntinukeManager
         from src.managers.blacklist_manager import BlacklistManager
-        from src.managers.system_manager import SystemManager
-        from src.managers.log_manager import LogManager
-        from src.managers.premium_manager import PremiumManager
+        from src.managers.dev_pulse_manager import DevPulseManager
         from src.managers.embed_manager import EmbedManager
         from src.managers.event_manager import EventManager
-        from src.managers.ticket_manager import TicketManager
+        from src.managers.giveaway_manager import GiveawayManager
+        from src.managers.guild_manager import GuildManager
+        from src.managers.log_manager import LogManager
+        from src.managers.media_manager import MediaManager
+        from src.managers.permission_manager import PermissionManager
+        from src.managers.premium_manager import PremiumManager
+        from src.managers.sticky_manager import StickyManager
+        from src.managers.system_manager import SystemManager
         from src.managers.tech_manager import TechNewsManager
-        from src.managers.dev_pulse_manager import DevPulseManager
         from src.managers.tech_realtime_manager import TechRealtimeManager
         from src.managers.temp_voice_manager import TempVoiceManager
+        from src.managers.ticket_manager import TicketManager
         from src.managers.translator_manager import TranslatorManager
-        from src.managers.sticky_manager import StickyManager
-        from src.managers.antinuke_manager import AntinukeManager
-        from src.managers.media_manager import MediaManager
-        from src.managers.giveaway_manager import GiveawayManager
 
         self.guild: GuildManager = GuildManager(db, cache=cache)
         self.perm: PermissionManager = PermissionManager(bot, db)

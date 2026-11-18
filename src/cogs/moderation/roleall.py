@@ -9,11 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord.ext import commands
 
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import resolve_role
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -255,7 +256,6 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
         e_reg = self.bot.custom_emojis
         dot = e_reg.get("heart_dot", "•")
 
-        verb = "Adding" if action == "add" else "Removing"
         init_container = KyroContainer(accent_color=role.color.value if role.color.value else None)
         init_container.add_section(content="**Mass Role Dispatched**")
         init_container.add_separator(divider=True)
@@ -329,8 +329,8 @@ class RoleAll(commands.Cog, name="Moderation-RoleAll"):
 
         try:
             await send_container_response(ctx, summary_container, allowed_mentions=discord.AllowedMentions.none())
-        except Exception:
-            pass
+        except (discord.Forbidden, discord.HTTPException) as send_err:
+            logger.debug(f"Roleall summary send notice: {send_err}")
 
 
 async def setup(bot: KyroBot) -> None:

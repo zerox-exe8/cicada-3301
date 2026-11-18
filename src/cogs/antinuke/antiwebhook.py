@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log
+from src.cogs.antinuke._helpers import dispatch_antinuke_log, execute_punishment
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -48,8 +49,8 @@ class AntiWebhookCog(commands.Cog):
                     try:
                         await target_webhook.delete(reason="Kyro Antinuke: Instant Webhook Killer")
                         killed = True
-                    except Exception:
-                        pass
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                        logger.debug(f"Target webhook delete notice: {del_err}")
                 else:
                     try:
                         whs = await channel.webhooks()
@@ -57,8 +58,8 @@ class AntiWebhookCog(commands.Cog):
                             if wh.user and wh.user.id == perpetrator.id:
                                 await wh.delete(reason="Kyro Antinuke: Instant Webhook Killer")
                                 killed = True
-                    except Exception:
-                        pass
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                        logger.debug(f"Channel webhooks sweep notice: {del_err}")
 
                 # Punish attacker
                 punish_res = await execute_punishment(

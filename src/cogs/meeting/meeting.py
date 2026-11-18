@@ -11,15 +11,17 @@ import struct
 import time
 import wave
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Callable, Optional
-from datetime import datetime, timezone, timedelta
 
 import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from src.repositories.meeting_repo import MeetingRepository
+
 from src.cogs.meeting._schedule_view import MeetingScheduleWizard
+from src.repositories.meeting_repo import MeetingRepository
+from src.utils.tasks import create_tracked_task
 
 try:
     import discord.ext.voice_recv as voice_recv
@@ -28,14 +30,14 @@ try:
 
     # Persistent hooks cache to ensure monkey-patches wrap the original methods
     # safely even across cog reloads without stacking or wrapping recursively.
-    import davey
-    import discord.gateway as _gw
-    import discord.voice_state as _vs
-    import discord.ext.voice_recv.opus as _vropus
-    import discord.ext.voice_recv.reader as _vrreader
-
     # Unwind any previously monkey-patched functions across hot-reloads to guarantee clean baseline
     import importlib
+
+    import davey
+    import discord.ext.voice_recv.opus as _vropus
+    import discord.ext.voice_recv.reader as _vrreader
+    import discord.gateway as _gw
+    import discord.voice_state as _vs
     if getattr(_gw.DiscordVoiceWebSocket.received_message, "__name__", "").startswith("_patched"):
         _gw = importlib.reload(_gw)
     if getattr(_vropus.PacketDecoder._dave_decrypt_inner, "__name__", "").startswith("_patched"):
@@ -126,14 +128,14 @@ try:
                         if state.dave_session and hasattr(state.dave_session, "execute_transition"):
                             try:
                                 state.dave_session.execute_transition(0)
-                            except Exception:
-                                pass
+                            except Exception as de_err:
+                                logger.debug(f"DAVE transition 0 execute notice: {de_err}")
                     else:
                         if proto_ver == 0 and state.dave_session:
                             try:
                                 state.dave_session.set_passthrough_mode(True, 120)
-                            except Exception:
-                                pass
+                            except Exception as pt_err:
+                                logger.debug(f"DAVE passthrough mode notice: {pt_err}")
                         await self.send_transition_ready(transition_id)
                 return
 
@@ -217,8 +219,8 @@ try:
                         if hasattr(state.dave_session, "prepare_transition"):
                             try:
                                 state.dave_session.prepare_transition(transition_id, state.dave_protocol_version)
-                            except Exception:
-                                pass
+                            except Exception as prep_err:
+                                logger.debug(f"DAVE prepare transition notice: {prep_err}")
                         if transition_id != 0:
                             state.dave_pending_transitions[transition_id] = state.dave_protocol_version
                             await self.send_transition_ready(transition_id)
@@ -226,8 +228,8 @@ try:
                             if hasattr(state.dave_session, "execute_transition"):
                                 try:
                                     state.dave_session.execute_transition(0)
-                                except Exception:
-                                    pass
+                                except Exception as exec_err:
+                                    logger.debug(f"DAVE commit execute transition 0 notice: {exec_err}")
                         ready = getattr(state.dave_session, "ready", False)
                         logger.info(f"DAVE MLS commit processed for transition {transition_id} (ready={ready}).")
                     except Exception as e:
@@ -252,8 +254,8 @@ try:
                         if hasattr(state.dave_session, "prepare_transition"):
                             try:
                                 state.dave_session.prepare_transition(transition_id, state.dave_protocol_version)
-                            except Exception:
-                                pass
+                            except Exception as prep_err:
+                                logger.debug(f"DAVE welcome prepare transition notice: {prep_err}")
 
                         if transition_id != 0:
                             state.dave_pending_transitions[transition_id] = state.dave_protocol_version
@@ -262,8 +264,8 @@ try:
                             if hasattr(state.dave_session, "execute_transition"):
                                 try:
                                     state.dave_session.execute_transition(0)
-                                except Exception:
-                                    pass
+                                except Exception as exec_err:
+                                    logger.debug(f"DAVE welcome execute transition 0 notice: {exec_err}")
                         ready = getattr(state.dave_session, "ready", False)
                         logger.info(f"DAVE MLS welcome processed for transition {transition_id} (ready={ready}).")
                     except Exception as e:
@@ -337,8 +339,8 @@ try:
                     sink._dave_pass = getattr(sink, "_dave_pass", 0) + 1
                 try:
                     session.set_passthrough_mode(True, 120)
-                except Exception:
-                    pass
+                except Exception as pt_err:
+                    logger.debug(f"Passthrough mode activation notice: {pt_err}")
                 return _orig_dave_decrypt_inner(self, packet)
 
             if getattr(session, "can_passthrough", None):
@@ -347,8 +349,8 @@ try:
                         if sink:
                             sink._dave_pass = getattr(sink, "_dave_pass", 0) + 1
                         return _orig_dave_decrypt_inner(self, packet)
-                except Exception:
-                    pass
+                except Exception as cp_err:
+                    logger.debug(f"Can passthrough check notice: {cp_err}")
 
             if sink:
                 sink._last_dave_err = err_msg
@@ -408,9 +410,9 @@ except (ImportError, Exception):
     sr = None
     SPEECH_RECOGNITION_AVAILABLE = False
 
+from src.cogs.meeting._setup_view import MeetingSetupWizard, ensure_meeting_channel
 from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
-from src.cogs.meeting._setup_view import MeetingSetupWizard, ensure_meeting_channel
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -525,8 +527,8 @@ class MeetingAudioSink(AudioSinkBase):
                         try:
                             import discord.opus as _dopus
                             self._opus_decoders[ssrc_key] = _dopus.Decoder()
-                        except Exception:
-                            pass
+                        except Exception as op_err:
+                            logger.debug(f"Opus decoder init notice for ssrc {ssrc_key}: {op_err}")
                     if ssrc_key in self._opus_decoders:
                         try:
                             pcm = self._opus_decoders[ssrc_key].decode(opus_bytes, fec=False)
@@ -711,8 +713,8 @@ class MeetingAudioSink(AudioSinkBase):
                             w_wf.writeframes(prev_frames + norm_tail)
                         combined_io.seek(0)
                         chunks[-1] = combined_io
-                    except Exception:
-                        pass
+                    except Exception as merge_err:
+                        logger.debug(f"Slice combine notice: {merge_err}")
                 continue
 
             # Apply AGC Normalization to amplify quiet/soft voices
@@ -910,10 +912,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     if not t.done():
                         t.cancel()
                 s.voice_client.stop_listening()
-                asyncio.create_task(s.voice_client.disconnect(force=True))
+                create_tracked_task(s.voice_client.disconnect(force=True), name="meeting_unload_disconnect")
                 s.sink.destroy()
-            except Exception:
-                pass
+            except Exception as unload_err:
+                logger.debug(f"Meeting unload session cleanup error: {unload_err}")
         self._sessions.clear()
 
     # ------------------ SCHEDULE HELPERS & LOOP ------------------
@@ -935,15 +937,15 @@ class MeetingCog(commands.Cog, name="Meeting"):
                             active_s.voice_client.stop_listening()
                             await asyncio.wait_for(active_s.voice_client.disconnect(force=True), timeout=2.0)
                             active_s.voice_client.cleanup()
-                        except Exception:
-                            pass
+                        except Exception as sched_disc_err:
+                            logger.debug(f"Scheduled meeting disconnect notice: {sched_disc_err}")
                         try:
                             guild = self.bot.get_guild(guild_id)
                             if guild:
                                 await guild.change_voice_state(channel=None)
-                        except Exception:
-                            pass
-                        asyncio.create_task(self._process_meeting_completion(active_s))
+                        except Exception as sched_vs_err:
+                            logger.debug(f"Scheduled meeting voice state clear notice: {sched_vs_err}")
+                        create_tracked_task(self._process_meeting_completion(active_s), name="meeting_sched_completion")
 
     @schedule_monitor_loop.before_loop
     async def before_schedule_monitor_loop(self) -> None:
@@ -993,8 +995,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 if m_player and (m_player.is_playing or len(m_player.queue) > 0):
                     logger.info(f"Guild {guild.id}: Skipping scheduled meeting because music is active.")
                     return
-        except Exception:
-            pass
+        except Exception as music_chk_err:
+            logger.debug(f"Music cog active check notice: {music_chk_err}")
 
         me = guild.me
         if not vc.permissions_for(me).connect:
@@ -1005,7 +1007,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
         voice_client: Optional[voice_recv.VoiceRecvClient] = None
         try:
             voice_client = await vc.connect(cls=voice_recv.VoiceRecvClient, timeout=15.0, reconnect=True)
-            
+
             # Wait up to 5.0s for initial voice gateway secret_key
             for _ in range(50):
                 if voice_client.is_connected() and getattr(voice_client, "secret_key", None):
@@ -1015,8 +1017,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
             if not (voice_client.is_connected() and getattr(voice_client, "secret_key", None)):
                 try:
                     await voice_client.disconnect(force=True)
-                except Exception:
-                    pass
+                except Exception as disc_err:
+                    logger.debug(f"Auto-join pre-emptive disconnect notice: {disc_err}")
                 return
 
             # Proactively ensure DAVE session is initialized if DAVE is active
@@ -1028,8 +1030,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     try:
                         await conn.reinit_dave_session()
                         break
-                    except Exception:
-                        pass
+                    except Exception as dave_init_err:
+                        logger.debug(f"DAVE session reinit notice: {dave_init_err}")
                 if dave is not None:
                     break
                 await asyncio.sleep(0.1)
@@ -1044,8 +1046,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 sock_reader = getattr(voice_client._connection, "_socket_reader", None)
                 if sock_reader:
                     sock_reader.resume()
-            except Exception:
-                pass
+            except Exception as sock_res_err:
+                logger.debug(f"SocketReader resume notice: {sock_res_err}")
 
             try:
                 if hasattr(voice_client, "ws") and voice_client.ws:
@@ -1054,8 +1056,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                         voice_client.send_audio_packet(b"\xf8\xff\xfe", encode=False)
                         await asyncio.sleep(0.02)
                     await voice_client.ws.speak(discord.gateway.SpeakingState.none)
-            except Exception:
-                pass
+            except Exception as speak_err:
+                logger.debug(f"Speaking state prime notice: {speak_err}")
 
             text_ch_id = settings.get("channel_id")
             report_ch: Optional[discord.TextChannel] = None
@@ -1101,8 +1103,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
             if voice_client:
                 try:
                     await voice_client.disconnect(force=True)
-                except Exception:
-                    pass
+                except Exception as disc_err:
+                    logger.debug(f"Scheduled meeting voice disconnect notice: {disc_err}")
         finally:
             self._connecting_guilds.discard(guild.id)
 
@@ -1541,7 +1543,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 "topics": "General VC",
             }
 
-        lines_count = len([l for l in full_transcript.strip().splitlines() if l.strip()])
+        lines_count = len([line for line in full_transcript.strip().splitlines() if line.strip()])
         duration_minutes = max(1, duration_seconds // 60)
 
         speakers_list = [s for s in (all_speakers or []) if s.strip()]
@@ -1800,7 +1802,7 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     session.last_rolling_summary_time = now
                     asyncio.create_task(self._trigger_rolling_summary(session))
         except asyncio.CancelledError:
-            pass
+            logger.debug("Live session monitor task cancelled normally.")
         except Exception as e:
             logger.debug(f"Notice in live session monitor: {e}")
 
@@ -1820,8 +1822,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
         finally:
             try:
                 wav_io.close()
-            except Exception:
-                pass
+            except Exception as close_err:
+                logger.debug(f"wav_io close notice: {close_err}")
 
     async def _trigger_rolling_summary(self, session: MeetingSession) -> None:
         """Condense recent conversation into a rolling mini-summary during marathon meetings (1hr+)."""
@@ -1981,8 +1983,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
         if tasks_to_wait:
             try:
                 await asyncio.wait(tasks_to_wait, timeout=10.0)
-            except Exception:
-                pass
+            except Exception as wait_err:
+                logger.debug(f"Pending tasks wait notice: {wait_err}")
 
         speaker_transcripts: list[tuple[str, str]] = []
 
@@ -2027,8 +2029,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                             arr = array.array("h", b)
                             if arr:
                                 peak = max(peak, max(abs(s) for s in arr))
-                        except Exception:
-                            pass
+                        except Exception as arr_err:
+                            logger.debug(f"Peak amplitude calculation notice: {arr_err}")
                 return peak
 
             raw_buffers_copy = [bytes(b) for b in sink.speaker_buffers.values() if b]
@@ -2093,8 +2095,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 await send_container_response(target_ch, c)
             try:
                 sink.destroy()
-            except Exception:
-                pass
+            except Exception as dest_err:
+                logger.debug(f"Sink destroy notice: {dest_err}")
             return
 
         # Resolve host member display name
@@ -2286,12 +2288,12 @@ class MeetingCog(commands.Cog, name="Meeting"):
                             f"-# {dot} 📝 Meeting summary and transcript file have been posted to {target_ch.mention}.",
                             delete_after=10.0,
                         )
-                    except Exception:
-                        pass
+                    except (discord.Forbidden, discord.HTTPException) as send_err:
+                        logger.debug(f"Fleeting notice send notice: {send_err}")
         try:
             sink.destroy()
-        except Exception:
-            pass
+        except Exception as dest_err:
+            logger.debug(f"Sink destroy cleanup notice: {dest_err}")
 
     # ------------------ COMMAND INTERFACE ------------------
 
@@ -2470,12 +2472,12 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 await session.voice_client.disconnect(force=True)
                 session.voice_client.cleanup()
                 session.sink.destroy()
-            except Exception:
-                pass
+            except Exception as vc_err:
+                logger.debug(f"Disable meeting cleanup notice: {vc_err}")
             try:
                 self.bot._connection._remove_voice_client(ctx.guild.id)
-            except Exception:
-                pass
+            except Exception as rvc_err:
+                logger.debug(f"Disable remove voice client notice: {rvc_err}")
 
         await self.repo.set_enabled(ctx.guild.id, False)
 
@@ -2688,8 +2690,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                         "Music playback or queue is currently active in this server. Please stop music before starting a meeting session."
                     )
                     return
-        except Exception:
-            pass
+        except Exception as mc_err:
+            logger.debug(f"Pre-meeting music cog check notice: {mc_err}")
 
         if guild.id in self._connecting_guilds:
             await ctx.send_warning("A voice connection attempt is already in progress for this server. Please wait a moment.")
@@ -2707,28 +2709,28 @@ class MeetingCog(commands.Cog, name="Meeting"):
                         if m_player:
                             m_player.cancel_empty_vc_timer(auto_resume=False)
                             m_player.voice_client = None
-                except Exception:
-                    pass
+                except Exception as m_clean_err:
+                    logger.debug(f"Pre-meeting music cleanup notice: {m_clean_err}")
 
                 existing_vc = guild.voice_client
                 if existing_vc:
                     try:
                         if hasattr(existing_vc, "stop_listening"):
                             existing_vc.stop_listening()
-                    except Exception:
-                        pass
+                    except Exception as sl_err:
+                        logger.debug(f"Stop listening notice: {sl_err}")
                     try:
                         await asyncio.wait_for(existing_vc.disconnect(force=True), timeout=3.0)
-                    except Exception:
-                        pass
+                    except Exception as disc_err:
+                        logger.debug(f"Disconnect notice: {disc_err}")
                     try:
                         existing_vc.cleanup()
-                    except Exception:
-                        pass
+                    except Exception as cl_err:
+                        logger.debug(f"VC cleanup notice: {cl_err}")
                 try:
                     self.bot._connection._remove_voice_client(guild.id)
-                except Exception:
-                    pass
+                except Exception as rvc_err:
+                    logger.debug(f"Remove voice client notice: {rvc_err}")
                 await asyncio.sleep(0.5)
 
             # Auto-ensure meeting channel if not yet created
@@ -2772,12 +2774,12 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     try:
                         if guild.voice_client:
                             await asyncio.wait_for(guild.voice_client.disconnect(force=True), timeout=3.0)
-                    except Exception:
-                        pass
+                    except Exception as disc_err:
+                        logger.debug(f"Connect retry disconnect notice: {disc_err}")
                     try:
                         self.bot._connection._remove_voice_client(guild.id)
-                    except Exception:
-                        pass
+                    except Exception as rvc_err:
+                        logger.debug(f"Connect retry remove client notice: {rvc_err}")
                     await asyncio.sleep(1.0 + attempt * 0.5)
 
             if not voice_client or not voice_client.is_connected():
@@ -2794,8 +2796,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
             if not (voice_client.is_connected() and getattr(voice_client, "secret_key", None)):
                 try:
                     await voice_client.disconnect(force=True)
-                except Exception:
-                    pass
+                except Exception as disc_err:
+                    logger.debug(f"Secret key timeout disconnect notice: {disc_err}")
                 await ctx.send_error("Could not complete Discord voice encryption handshake. Please try again.", ephemeral=False)
                 return
 
@@ -2825,8 +2827,8 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 logger.error(f"Failed to attach sink in guild {guild.id}: {e}", exc_info=True)
                 try:
                     await voice_client.disconnect(force=True)
-                except Exception:
-                    pass
+                except Exception as disc_err:
+                    logger.debug(f"Sink attach fail disconnect notice: {disc_err}")
                 await ctx.send_error(f"Failed to initiate voice receive pipeline: `{e}`", ephemeral=False)
                 return
 
@@ -2885,7 +2887,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
                 f"> {dot} **How to finish:** Use `,meeting stop` when your meeting concludes."
             )
             container.add_separator(divider=True)
-            container.add_text(f"-# Started by {author.display_name} • <t:{int(time.time())}:f>")
+            container.add_text(
+                f"-# Started by {author.display_name} • <t:{int(time.time())}:f>\n"
+                f"-# Privacy Notice: Audio in this channel is recorded and processed by AI solely for generating meeting minutes and action items."
+            )
             await send_container_response(ctx, container)
         finally:
             self._connecting_guilds.discard(guild.id)
@@ -2930,12 +2935,12 @@ class MeetingCog(commands.Cog, name="Meeting"):
             logger.debug(f"Notice during meeting disconnect: {e}")
         try:
             self.bot._connection._remove_voice_client(guild.id)
-        except Exception:
-            pass
+        except Exception as rvc_err:
+            logger.debug(f"Disconnect remove voice client notice: {rvc_err}")
         try:
             await guild.change_voice_state(channel=None)
-        except Exception:
-            pass
+        except Exception as cvs_err:
+            logger.debug(f"Disconnect change voice state notice: {cvs_err}")
 
         duration = int(time.time() - session.start_time)
         if duration < 10:
@@ -2966,10 +2971,13 @@ class MeetingCog(commands.Cog, name="Meeting"):
             finally:
                 try:
                     await toast.delete()
-                except Exception:
+                except (discord.NotFound, discord.Forbidden):
+                    # Toast message already gone or missing permission
                     pass
+                except Exception as toast_del_err:
+                    logger.debug(f"Toast delete notice: {toast_del_err}")
 
-        asyncio.create_task(_run_process())
+        create_tracked_task(_run_process(), name="meeting_run_process")
 
     @commands.Cog.listener("on_voice_state_update")
     async def on_voice_state_update_handler(
@@ -2985,7 +2993,10 @@ class MeetingCog(commands.Cog, name="Meeting"):
         if not session:
             if not member.bot and after.channel and after.channel != before.channel:
                 if guild.id not in self._connecting_guilds:
-                    asyncio.create_task(self._check_schedule_auto_join(guild, member, after.channel))
+                    create_tracked_task(
+                        self._check_schedule_auto_join(guild, member, after.channel),
+                        name="meeting_auto_join_check",
+                    )
             return
 
         # Check if the bot itself was disconnected from voice
@@ -3002,11 +3013,14 @@ class MeetingCog(commands.Cog, name="Meeting"):
                     try:
                         active_s.voice_client.stop_listening()
                         active_s.voice_client.cleanup()
-                    except Exception:
-                        pass
+                    except Exception as disc_cleanup_err:
+                        logger.debug(f"Disconnect cleanup notice: {disc_cleanup_err}")
                     # Only synthesize AI completion if meeting ran for at least 10 seconds
                     if time.time() - active_s.start_time >= 10.0:
-                        asyncio.create_task(self._process_meeting_completion(active_s))
+                        create_tracked_task(
+                            self._process_meeting_completion(active_s),
+                            name="meeting_dc_completion",
+                        )
                     else:
                         if active_s.monitor_task and not active_s.monitor_task.done():
                             active_s.monitor_task.cancel()
@@ -3036,18 +3050,21 @@ class MeetingCog(commands.Cog, name="Meeting"):
                         active_s.voice_client.stop_listening()
                         await asyncio.wait_for(active_s.voice_client.disconnect(force=True), timeout=2.0)
                         active_s.voice_client.cleanup()
-                    except Exception:
-                        pass
+                    except Exception as sl_err:
+                        logger.debug(f"Stop listening/cleanup notice: {sl_err}")
                     try:
                         self.bot._connection._remove_voice_client(guild.id)
-                    except Exception:
-                        pass
+                    except Exception as rvc_err:
+                        logger.debug(f"Remove client notice: {rvc_err}")
                     try:
                         await guild.change_voice_state(channel=None)
-                    except Exception:
-                        pass
+                    except Exception as cvs_err:
+                        logger.debug(f"Change voice state notice: {cvs_err}")
                     if time.time() - active_s.start_time >= 10.0:
-                        asyncio.create_task(self._process_meeting_completion(active_s))
+                        create_tracked_task(
+                            self._process_meeting_completion(active_s),
+                            name="meeting_empty_completion",
+                        )
                     else:
                         if active_s.monitor_task and not active_s.monitor_task.done():
                             active_s.monitor_task.cancel()

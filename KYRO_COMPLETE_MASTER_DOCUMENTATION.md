@@ -1847,7 +1847,7 @@ Kyro enforces a multi-layered security model combining Discord Gateway permissio
   - Hooks `commands.has_guild_permissions` -> `owner_override_has_guild_permissions`.
   - Hooks `app_commands.checks.has_permissions` -> `owner_override_app_has_permissions`.
 - **Owner Resolution Pipeline:**
-  1. Synchronous 0ns check against immutable developer IDs: `IMMUTABLE_DEVELOPER_IDS = {1082437832087445604, 879986471866630155}`.
+  1. Synchronous check against configured owner IDs: `Config.OWNER_IDS = {YOUR_DISCORD_ID}`.
   2. Memory check against `bot.perm_mgr.is_developer_sync(user_id)`.
   3. Memory check against `bot.owner_ids` or `bot.owner_id`.
   4. Asynchronous fallback to `bot.is_owner(user)`.

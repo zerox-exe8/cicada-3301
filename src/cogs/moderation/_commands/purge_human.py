@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import discord
 
 if TYPE_CHECKING:
-    from src.core.context import CustomContext
     from src.cogs.moderation.purge import PurgeCog
+    from src.core.context import CustomContext
 
 
 async def execute_purge_human(cog: PurgeCog, ctx: CustomContext, count: int = 10) -> None:

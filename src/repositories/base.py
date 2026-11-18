@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+
 from src.database.base import BaseDatabase
 
 logger = logging.getLogger("Kyro.Repositories.Base")

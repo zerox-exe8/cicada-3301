@@ -291,7 +291,7 @@ class PremiumManager:
         # mark key as used
         await self.db.execute(
             """
-            UPDATE premium_keys 
+            UPDATE premium_keys
             SET is_used = TRUE, redeemed_by = ?, redeemed_target_id = ?, redeemed_at = CURRENT_TIMESTAMP
             WHERE key = ?;
             """,
@@ -566,8 +566,8 @@ class PremiumManager:
             """
             SELECT gp.guild_id, gp.activated_by, gp.expires_at
             FROM guild_premium gp
-            WHERE gp.expires_at IS NOT NULL 
-              AND gp.expires_at > ? 
+            WHERE gp.expires_at IS NOT NULL
+              AND gp.expires_at > ?
               AND gp.expires_at <= ?;
             """,
             db_now,

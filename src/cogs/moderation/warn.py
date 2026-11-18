@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import datetime
+import logging
 from typing import TYPE_CHECKING
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import check_hierarchy, dispatch_mod_log
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
+
+logger = logging.getLogger("Kyro.Moderation.Warn")
 
 
 class WarnCog(commands.Cog):
@@ -74,8 +78,8 @@ class WarnCog(commands.Cog):
                 )
             )
             await send_container_response(member, dm_container)
-        except Exception:
-            pass
+        except (discord.Forbidden, discord.HTTPException) as dm_err:
+            logger.debug(f"Member warning DM notice: {dm_err}")
 
         await dispatch_mod_log(self.bot, ctx.guild, "Member Warning", member, ctx.author, reason, extra=f"Total Warns: {total_warns}")
 
@@ -147,7 +151,7 @@ class WarnCog(commands.Cog):
 
         container.add_text("\n".join(warn_lines))
         container.add_separator(divider=True)
-        container.add_text(f"-# Use `?delwarn <id>` to remove a specific warning.")
+        container.add_text("-# Use `?delwarn <id>` to remove a specific warning.")
         await send_container_response(ctx, container)
 
     @commands.hybrid_command(

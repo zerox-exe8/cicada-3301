@@ -5,13 +5,13 @@ import datetime
 import logging
 import re
 import time
-from urllib.parse import urlparse
 from typing import TYPE_CHECKING, Optional
+from urllib.parse import urlparse
 
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log
+from src.cogs.antinuke._helpers import dispatch_antinuke_log, execute_punishment
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -107,8 +107,8 @@ class ChatDefenseCog(commands.Cog):
             toast = await channel.send(text)
             await asyncio.sleep(delete_after)
             await toast.delete()
-        except Exception:
-            pass
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as toast_err:
+            logger.debug(f"Silent toast notice: {toast_err}")
 
     async def _process_chat_defense(self, message: discord.Message) -> bool:
         """
@@ -145,8 +145,8 @@ class ChatDefenseCog(commands.Cog):
             if has_scam_domain or (has_scam_lure and URL_REGEX.search(content)):
                 try:
                     await message.delete()
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                    logger.debug(f"Anti-scam delete notice: {del_err}")
 
                 punish_result = await execute_punishment(
                     self.bot,
@@ -163,8 +163,8 @@ class ChatDefenseCog(commands.Cog):
                             f"⚠️ Your message in **{guild.name}** was automatically removed because it contained a suspected "
                             f"phishing/scam URL. If your account was compromised, please change your Discord password immediately."
                         )
-                    except Exception:
-                        pass
+                    except (discord.Forbidden, discord.HTTPException) as dm_err:
+                        logger.debug(f"Anti-scam user advisory DM notice: {dm_err}")
 
                 await dispatch_antinuke_log(
                     self.bot,
@@ -190,8 +190,8 @@ class ChatDefenseCog(commands.Cog):
                 if not is_self_invite:
                     try:
                         await message.delete()
-                    except Exception:
-                        pass
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                        logger.debug(f"Anti-invite delete notice: {del_err}")
 
                     # If author is an unwhitelisted bot, eliminate it immediately
                     if author.bot:
@@ -247,8 +247,8 @@ class ChatDefenseCog(commands.Cog):
                     if not is_trusted:
                         try:
                             await message.delete()
-                        except Exception:
-                            pass
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                            logger.debug(f"Anti-link delete notice: {del_err}")
 
                         if author.bot:
                             punish_result = await execute_punishment(
@@ -294,8 +294,8 @@ class ChatDefenseCog(commands.Cog):
             if has_raw_everyone or total_mentions >= 3:
                 try:
                     await message.delete()
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                    logger.debug(f"Anti-mass-mention delete notice: {del_err}")
 
                 breach_reason = (
                     "Unauthorized @everyone/@here ping abuse"
@@ -335,8 +335,8 @@ class ChatDefenseCog(commands.Cog):
             if len(self._flood_timestamps[tracker_key]) >= 5:
                 try:
                     await message.delete()
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                    logger.debug(f"Anti-flood delete notice: {del_err}")
 
                 self._flood_timestamps[tracker_key].clear()
 
@@ -372,8 +372,8 @@ class ChatDefenseCog(commands.Cog):
                 if dup_count >= 3:
                     try:
                         await message.delete()
-                    except Exception:
-                        pass
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                        logger.debug(f"Anti-duplicate delete notice: {del_err}")
 
                     self._duplicate_cache.pop(tracker_key, None)
 

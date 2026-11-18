@@ -11,8 +11,8 @@ import asyncio
 import io
 import logging
 import re
-from typing import TYPE_CHECKING, Optional
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
 import aiohttp
 import discord
@@ -20,7 +20,7 @@ from discord.ext import commands
 from PIL import Image, ImageSequence
 
 from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
+from src.utils.containers import KyroContainer, edit_container_response, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -190,8 +190,8 @@ class StealDashboardView(discord.ui.View):
                 await interaction.response.send_message(f"Action failed: `{error}`", ephemeral=True)
             else:
                 await interaction.followup.send(f"Action failed: `{error}`", ephemeral=True)
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as send_err:
+            logger.debug(f"Interaction error followup notice: {send_err}")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Enforce author-lock: only the command author can click."""
@@ -236,8 +236,8 @@ class StealDashboardView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Steal Expression**\n"
-                f"> Choose to add as **Emoji** or **Sticker**."
+                "**Steal Expression**\n"
+                "> Choose to add as **Emoji** or **Sticker**."
             ),
             accessory={
                 "type": 11,
@@ -257,8 +257,8 @@ class StealDashboardView(discord.ui.View):
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Steal emoji defer notice: {defer_err}")
 
         static_count = len([e for e in self.guild.emojis if not e.animated])
         anim_count = len([e for e in self.guild.emojis if e.animated])
@@ -343,8 +343,8 @@ class StealDashboardView(discord.ui.View):
         if not interaction.response.is_done():
             try:
                 await interaction.response.defer()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as defer_err:
+                logger.debug(f"Steal sticker defer notice: {defer_err}")
 
         sticker_count = len(self.guild.stickers)
         s_limit = getattr(self.guild, "sticker_limit", 5)
@@ -427,8 +427,8 @@ class StealDashboardView(discord.ui.View):
         if self.message:
             try:
                 await edit_container_response(self.message, self.build_initial_container(), view=self)
-            except Exception:
-                pass
+            except (discord.NotFound, discord.HTTPException) as edit_err:
+                logger.debug(f"Timeout edit message notice: {edit_err}")
 
 
 class Steal(commands.Cog):
@@ -454,7 +454,7 @@ class Steal(commands.Cog):
     ) -> None:
         """
         Interactive Steal Studio with exactly 2 buttons: [Emoji] and [Sticker].
-        
+
         Usage:
           ?steal <:pepe:123456789>
           ?steal <:pepe:123456789> my_name

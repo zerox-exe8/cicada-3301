@@ -10,17 +10,19 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
 import discord
 from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.utils.containers import (
     KyroContainer,
-    send_container_response,
+    build_container_payload,
     edit_container_response,
+    send_container_response,
 )
-from src.utils.image_tools import create_slim_banner, download_image_bytes
+from src.utils.image_tools import create_slim_banner
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -641,8 +643,8 @@ class ContainerDraft:
 
                 if "title" in parsed_json or "description" in parsed_json or "fields" in parsed_json or "modules" in parsed_json:
                     return cls.from_dict(parsed_json)
-        except Exception:
-            pass
+        except Exception as parse_err:
+            logger.debug(f"JSON draft parse notice: {parse_err}")
 
         # Plain text / HTML fallback
         draft.description = convert_html_to_markdown(cleaned)
@@ -1322,8 +1324,8 @@ class EmbedBuilderView(discord.ui.View):
                     idx = int(self.preview_module_id.replace("mod_", ""))
                     if 0 <= idx < len(self.draft.modules):
                         cur_view = self.draft.modules[idx].get("label", f"Page {idx+1}")
-                except Exception:
-                    pass
+                except (ValueError, IndexError) as idx_err:
+                    logger.debug(f"Module index notice: {idx_err}")
 
             b_names = [f"`{b.get('label', 'Link')}`" for b in self.draft.buttons[:5]]
             b_str = " , ".join(b_names) if b_names else "*None*"
@@ -1460,12 +1462,12 @@ class EmbedBuilderView(discord.ui.View):
             if not interaction.response.is_done():
                 try:
                     await interaction.response.defer()
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.HTTPException) as defer_err:
+                    logger.debug(f"Interaction defer notice: {defer_err}")
 
             if self.channel_id and self.message_id:
                 try:
-                    payload = build_container_payload(containers, view=self)
+                    payload = build_container_payload(containers, view=self, is_edit=True)
                     await self.bot.http.request(
                         discord.http.Route("PATCH", f"/channels/{self.channel_id}/messages/{self.message_id}"),
                         json=payload,
@@ -1495,7 +1497,7 @@ class EmbedBuilderView(discord.ui.View):
 
         if self.channel_id and self.message_id:
             try:
-                payload = build_container_payload(containers, view=self)
+                payload = build_container_payload(containers, view=self, is_edit=True)
                 await self.bot.http.request(
                     discord.http.Route("PATCH", f"/channels/{self.channel_id}/messages/{self.message_id}"),
                     json=payload,

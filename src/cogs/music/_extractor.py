@@ -25,7 +25,7 @@ import aiohttp
 import pyDes
 import yt_dlp
 
-from src.cogs.music._models import Track, PlaylistResult, PlaylistTrackItem
+from src.cogs.music._models import PlaylistResult, PlaylistTrackItem, Track
 
 logger = logging.getLogger("Kyro.Music.Extractor")
 
@@ -121,16 +121,16 @@ UNWANTED_VERSION_KEYWORDS = [
     # DJ, Remixes & Dance edits
     "remix", "remixed", "dj", "dj mix", "dj version", "djs", "dance mix",
     "club mix", "flip", "bootleg", "drop", "bass boosted", "trap mix", "mashup",
-    
+
     # Guitar, Instrumental & Acoustic Covers
     "guitar", "guitar cover", "fingerstyle", "lead guitar", "acoustic guitar",
     "acoustic", "unplugged", "piano version", "piano cover", "instrumental",
     "flute", "violin", "sitar", "harmonium", "ukulele", "orchestral", "8-bit",
-    
+
     # Lo-fi, Slowed & Sped up
     "lofi", "lo-fi", "slowed", "slowed + reverb", "slowed down", "reverb",
     "chillhop", "nightcore", "daycore", "sped up", "speed up",
-    
+
     # Covers & Non-original versions
     "cover", "reprise", "female version", "male version", "karaoke", "reply",
     "status", "ringtone", "dholki", "8d", "tribute", "parody",
@@ -253,13 +253,37 @@ def score_candidate(
 
 
 
-# In-memory search cache with 10-minute TTL for instant repeat queries
+# In-memory search cache with 10-minute TTL for instant repeat queries (capped at 1000 entries)
 _SEARCH_CACHE: Dict[str, Tuple[float, Track]] = {}
 _CACHE_TTL = 600.0  # 10 minutes
+_MAX_SEARCH_CACHE_SIZE = 1000
 
-# Fast cache for canonical search query resolutions (1 hour TTL)
+# Fast cache for canonical search query resolutions (1 hour TTL, capped at 1000 entries)
 _CANONICAL_CACHE: Dict[str, Tuple[float, str]] = {}
 _CANONICAL_CACHE_TTL = 3600.0  # 1 hour
+_MAX_CANONICAL_CACHE_SIZE = 1000
+
+
+def _set_search_cache(key: str, value: Tuple[float, Track]) -> None:
+    """Store in search cache with FIFO eviction at max capacity."""
+    if len(_SEARCH_CACHE) >= _MAX_SEARCH_CACHE_SIZE:
+        try:
+            oldest = next(iter(_SEARCH_CACHE))
+            del _SEARCH_CACHE[oldest]
+        except (StopIteration, KeyError):
+            logger.debug("Search cache FIFO eviction notice")
+    _SEARCH_CACHE[key] = value
+
+
+def _set_canonical_cache(key: str, value: Tuple[float, str]) -> None:
+    """Store in canonical cache with FIFO eviction at max capacity."""
+    if len(_CANONICAL_CACHE) >= _MAX_CANONICAL_CACHE_SIZE:
+        try:
+            oldest = next(iter(_CANONICAL_CACHE))
+            del _CANONICAL_CACHE[oldest]
+        except (StopIteration, KeyError):
+            logger.debug("Canonical cache FIFO eviction notice")
+    _CANONICAL_CACHE[key] = value
 
 
 def normalize_unicode_text(text: str) -> str:
@@ -440,7 +464,7 @@ class NativeExtractor:
                         query=raw_q,
                     )
                     trk._playable = top
-                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    _set_search_cache(cache_key, (now, trk))
                     return trk
             except Exception as e:
                 logger.debug(f"Direct YouTube URL resolution notice: {e}")
@@ -491,9 +515,9 @@ class NativeExtractor:
                     p_res = await asyncio.wait_for(wavelink.Playable.search(saavn_trk.stream_url), timeout=2.0)
                     if p_res:
                         saavn_trk._playable = p_res[0] if isinstance(p_res, list) else p_res.tracks[0]
-                except Exception:
-                    pass
-                _SEARCH_CACHE[cache_key] = (now, saavn_trk)
+                except Exception as p_err:
+                    logger.debug(f"Direct stream URL playable search notice: {p_err}")
+                _set_search_cache(cache_key, (now, saavn_trk))
                 return saavn_trk
         except Exception as e:
             logger.debug(f"JioSaavn primary search notice: {e}")
@@ -529,7 +553,7 @@ class NativeExtractor:
                         query=raw_q,
                     )
                     trk._playable = top
-                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    _set_search_cache(cache_key, (now, trk))
                     return trk
         except Exception as e:
             logger.debug(f"YouTube Music search notice: {e}")
@@ -565,7 +589,7 @@ class NativeExtractor:
                         query=raw_q,
                     )
                     trk._playable = top
-                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    _set_search_cache(cache_key, (now, trk))
                     return trk
         except Exception as e:
             logger.debug(f"YouTube fallback search notice: {e}")
@@ -592,7 +616,7 @@ class NativeExtractor:
                         query=raw_q,
                     )
                     trk._playable = top
-                    _SEARCH_CACHE[cache_key] = (now, trk)
+                    _set_search_cache(cache_key, (now, trk))
                     return trk
             except Exception as e:
                 logger.debug(f"Raw query fallback notice: {e}")
@@ -605,7 +629,7 @@ class NativeExtractor:
                 timeout=4.0,
             )
             if saavn_trk and saavn_trk.stream_url:
-                _SEARCH_CACHE[cache_key] = (now, saavn_trk)
+                _set_search_cache(cache_key, (now, saavn_trk))
                 return saavn_trk
         except Exception as e:
             logger.debug(f"JioSaavn extraction notice: {e}")
@@ -870,8 +894,8 @@ class NativeExtractor:
                                         return cls._SC_CLIENT_ID
                         except Exception:
                             continue
-        except Exception:
-            pass
+        except Exception as sc_err:
+            logger.debug(f"SoundCloud client id discovery notice: {sc_err}")
 
         # Valid active fallback ID pool
         cls._SC_CLIENT_ID = "pJaCCaoD8RMOSFmlbrbYQuyvkjP1fiES"
@@ -1000,122 +1024,6 @@ class NativeExtractor:
 
         return None
 
-    @classmethod
-    def _extract_youtube_fallback(
-        cls,
-        raw_query: str,
-        requester: str,
-        is_autoplay: bool,
-    ) -> Optional[Track]:
-        """YouTube search fallback with smart candidate ranking and anti-remix filter."""
-        yt_match = YOUTUBE_URL_REGEX.search(raw_query)
-        if yt_match:
-            video_id = yt_match.group(1)
-            target_url = f"https://www.youtube.com/watch?v={video_id}"
-            entry = cls._sync_yt_dlp_extract(target_url)
-        elif raw_query.startswith(("http://", "https://")):
-            entry = cls._sync_yt_dlp_extract(raw_query)
-        else:
-            entry = cls._sync_yt_dlp_smart_search(raw_query)
-
-        if not entry or not entry.get("url"):
-            return None
-
-        title = clean_track_title(entry.get("title") or "Unknown Track")
-        author = entry.get("uploader") or entry.get("artist") or "YouTube Artist"
-        stream_url = entry.get("url")
-        webpage_url = entry.get("webpage_url") or entry.get("url") or "https://youtube.com"
-        duration = int(entry.get("duration") or 0)
-        thumbnail = entry.get("thumbnail")
-
-        return Track(
-            title=title,
-            author=author,
-            url=webpage_url,
-            stream_url=stream_url,
-            duration=duration,
-            thumbnail=thumbnail,
-            requester=requester,
-            is_autoplay=is_autoplay,
-        )
-
-    @classmethod
-    def _sync_yt_dlp_smart_search(cls, query: str) -> Optional[Dict[str, Any]]:
-        """Search top 5 YouTube entries, score them to avoid remixes/lofi, and extract the winning stream."""
-        ydl_flat = {
-            "quiet": True,
-            "skip_download": True,
-            "extract_flat": True,
-            "ignoreerrors": True,
-            "socket_timeout": 6,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android"],
-                }
-            },
-        }
-        with yt_dlp.YoutubeDL(ydl_flat) as ydl:
-            try:
-                res = ydl.extract_info(f"ytsearch8:{query}", download=False)
-                entries = (res.get("entries") or []) if res else []
-                scored = []
-                for e in entries:
-                    if not e:
-                        continue
-                    sc = score_candidate(
-                        e.get("title") or "",
-                        e.get("uploader") or "",
-                        query,
-                        views=int(e.get("view_count") or 0),
-                        duration=int(e.get("duration") or 0),
-                    )
-                    scored.append((sc, e))
-
-                if not scored:
-                    return None
-
-                scored.sort(key=lambda x: x[0], reverse=True)
-                has_user_keyword = any(kw in query.lower() for kw in UNWANTED_VERSION_KEYWORDS)
-
-                winner = None
-                for sc, e in scored:
-                    if sc < 0 and not has_user_keyword:
-                        continue
-                    winner = e
-                    break
-
-                if not winner:
-                    return None
-
-                candidates_to_try = [winner] + [c[1] for c in scored if c[1] != winner and (c[0] >= 0 or has_user_keyword)][:2]
-                for cand in candidates_to_try:
-                    vid_id = cand.get("id")
-                    cand_url = cand.get("url") or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else None)
-                    if cand_url:
-                        ext = cls._sync_yt_dlp_extract(cand_url)
-                        if ext and ext.get("url"):
-                            return ext
-
-                return None
-            except Exception as e:
-                logger.debug(f"YouTube smart search notice for '{query}': {e}")
-                return None
-
-    @staticmethod
-    def _sync_yt_dlp_extract(target: str) -> Optional[Dict[str, Any]]:
-        """Helper to run yt-dlp extraction safely."""
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            try:
-                info = ydl.extract_info(target, download=False)
-                if not info:
-                    return None
-                entries = info.get("entries") or [info]
-                if entries and len(entries) > 0 and entries[0]:
-                    return entries[0]
-            except Exception:
-                pass
-        return None
-
     _SPOTIFY_TOKEN: Optional[str] = None
     _SPOTIFY_TOKEN_EXPIRES: float = 0.0
 
@@ -1167,8 +1075,8 @@ class NativeExtractor:
                 async with aiohttp.ClientSession() as s_link:
                     async with s_link.get(spotify_url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=6)) as r_link:
                         spotify_url = str(r_link.url)
-            except Exception:
-                pass
+            except Exception as red_err:
+                logger.debug(f"Spotify link redirect notice: {red_err}")
 
         track_m = re.search(r"spotify\.com/(?:intl-[a-zA-Z\-]+/)?track/([a-zA-Z0-9]+)", spotify_url)
 

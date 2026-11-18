@@ -1,0 +1,31 @@
+# Kyro Pre-Commit Hook Configuration - Verify Gate
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: compileall
+        name: Python Bytecode Compilation Verification
+        entry: python -m compileall -q src tests
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: bandit
+        name: Bandit Security Audit
+        entry: bandit -r src -c pyproject.toml
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: pytest
+        name: Pytest Verification Suite
+        entry: pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true

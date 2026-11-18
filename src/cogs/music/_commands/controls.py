@@ -4,6 +4,7 @@ import logging
 import random
 import time
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord.ext import commands
 
@@ -147,7 +148,7 @@ async def execute_remove(cog: Music, ctx: commands.Context, index: int) -> None:
     removed_track = await player.remove_track_at(index - 1)
     if not removed_track:
         container = KyroContainer(accent_color=None)
-        container.add_text(f"**Invalid track index.**")
+        container.add_text("**Invalid track index.**")
         await send_container_response(ctx, container)
         return
 
@@ -230,8 +231,8 @@ async def execute_stay(cog: Music, ctx: commands.Context) -> None:
         if not player.is_connected and isinstance(ctx.author, discord.Member) and ctx.author.voice and ctx.author.voice.channel:
             try:
                 await player.connect_voice(ctx.author.voice.channel)
-            except Exception:
-                pass
+            except Exception as conn_err:
+                logger.debug(f"247 auto-connect voice notice: {conn_err}")
     else:
         if hasattr(cog.controller, "_247_cache"):
             cog.controller._247_cache.discard(ctx.guild.id)
@@ -250,8 +251,8 @@ async def execute_stay(cog: Music, ctx: commands.Context) -> None:
                 ctx.guild.id,
                 player.is_247,
             )
-        except Exception:
-            pass
+        except Exception as db_err:
+            logger.debug(f"247 db persist notice: {db_err}")
 
     state_str = "ENABLED" if player.is_247 else "DISABLED"
     container = KyroContainer(accent_color=None)

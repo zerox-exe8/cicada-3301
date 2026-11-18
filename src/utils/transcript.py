@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import io
 from typing import Any
+
 import discord
 
 
@@ -20,7 +21,6 @@ async def generate_html_transcript(
     channel_name = html.escape(channel.name)
     ticket_num = ticket_data.get("ticket_number", channel.id) if ticket_data else channel.id
     user_id = ticket_data.get("user_id", "Unknown") if ticket_data else "Unknown"
-    created_at = ticket_data.get("created_at", "") if ticket_data else ""
 
     messages_html = []
     for msg in messages:

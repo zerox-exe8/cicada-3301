@@ -1,13 +1,14 @@
 import asyncio
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import hashlib
 import json
 import logging
 import os
 import re
-from typing import Any, Optional
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Optional
+
 import aiohttp
 
 from src.database.postgres import PostgresDatabase
@@ -632,6 +633,7 @@ class DevPulseManager:
                             link = job.get("url") or job.get("apply_url")
                             if not link or not pos:
                                 continue
+                            logo = job.get("company_logo") or job.get("logo")
                             canon_url = canonicalize_url(link)
                             story_id = hashlib.sha256(canon_url.encode()).hexdigest()
                             title_h = compute_title_fingerprint(f"{pos} {comp}")
@@ -661,7 +663,7 @@ class DevPulseManager:
                             if len(stories) >= limit:
                                 break
             except Exception as e:
-                logger.debug(f"Notice during RemoteOK fallback: {e}")
+                logger.warning(f"Notice during RemoteOK fallback: {e}")
 
         return stories
 
@@ -697,7 +699,7 @@ class DevPulseManager:
 
                         sub_period = h.get("submission_period_dates") or "Registration Open"
                         theme = ", ".join([t.get("name") for t in h.get("themes", [])[:3]]) if h.get("themes") else "Open Innovation"
-                        
+
                         # Authentic AWS CloudFront challenge banner
                         hero_img = h.get("thumbnail_url")
                         if hero_img and hero_img.startswith("//"):
@@ -850,8 +852,8 @@ class DevPulseManager:
                                             img_url = urljoin(str(pr.url), raw_img)
                                         else:
                                             img_url = f"https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url={str(pr.url)}&size=256"
-                            except Exception:
-                                pass
+                            except Exception as ph_err:
+                                logger.debug(f"Product Hunt og:image notice: {ph_err}")
 
                         highlights = [
                             "Tier: Generous Free Tier / Free Trials Available",

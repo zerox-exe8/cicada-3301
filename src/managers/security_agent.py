@@ -20,7 +20,7 @@ logger = logging.getLogger("Kyro.SecurityAgent")
 class SecurityAgent:
     """
     Enterprise Security, Antinuke & Moderation Concurrency Engine.
-    
+
     Designed to scale reliably across 1,000+ Discord servers simultaneously:
     1. Single-Flight Actor Neutralization Barrier (deduplicates multi-event raids in 0ms).
     2. Audit Log Deduplication & Rate-Limit Shield (survives Discord REST 429s).
@@ -210,7 +210,7 @@ class SecurityAgent:
             self._active_lockdowns.add(guild_id)
             self._metrics["emergency_lockdowns"] += 1
             logger.critical(f"SecurityAgent: MASS ATTACK DETECTED in guild '{guild.name}' ({guild_id})! Engaging Emergency Lockdown...")
-            
+
             # Lock @everyone send_messages across channels concurrently
             tasks_list = []
             everyone = guild.default_role

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+
 import asyncpg
 
 from src.database.base import BaseDatabase
@@ -30,8 +31,8 @@ class PostgresDatabase(BaseDatabase):
                     logger.warning("Database connection pool unhealthy. Cycling connection pool...")
                     try:
                         await self.pool.close()
-                    except Exception:
-                        pass
+                    except Exception as close_err:
+                        logger.debug(f"Database pool close notice: {close_err}")
                     self.pool = None
 
             clean_dsn = self.dsn.replace("postgresql+asyncpg://", "postgresql://")
@@ -741,7 +742,7 @@ class PostgresDatabase(BaseDatabase):
         logger.info("PostgreSQL database schemas verified successfully.")
 
     def _convert_query(self, query: str) -> str:
-        """Convert SQLite-specific query syntax to standard PostgreSQL."""
+        """Convert SQLite-specific query syntax to standard PostgreSQL with quote-aware parameter placeholder conversion."""
         converted = query
         if "INSERT OR IGNORE INTO" in converted:
             converted = converted.replace("INSERT OR IGNORE INTO", "INSERT INTO")
@@ -751,35 +752,65 @@ class PostgresDatabase(BaseDatabase):
         if "?" not in converted:
             return converted
 
-        parts = converted.split("?")
-        result = []
-        for i, part in enumerate(parts[:-1]):
-            result.append(part)
-            result.append(f"${i + 1}")
-        result.append(parts[-1])
+        # Tokenize character by character respecting single and double quotes so literal '?' in strings isn't replaced
+        result: list[str] = []
+        param_idx = 1
+        in_single_quote = False
+        in_double_quote = False
+        escaped = False
+
+        for char in converted:
+            if escaped:
+                result.append(char)
+                escaped = False
+                continue
+
+            if char == "\\":
+                result.append(char)
+                escaped = True
+                continue
+
+            if char == "'" and not in_double_quote:
+                in_single_quote = not in_single_quote
+                result.append(char)
+            elif char == '"' and not in_single_quote:
+                in_double_quote = not in_double_quote
+                result.append(char)
+            elif char == "?" and not in_single_quote and not in_double_quote:
+                result.append(f"${param_idx}")
+                param_idx += 1
+            else:
+                result.append(char)
+
         return "".join(result)
 
-    async def execute(self, query: str, *args: Any) -> None:
-        """Execute a query with automatic connection recovery and exponential retry."""
+    async def execute(self, query: str, *args: Any) -> str | None:
+        """
+        Execute an INSERT/UPDATE/DELETE query.
+        Returns the command status string (e.g. 'INSERT 0 1', 'UPDATE 3').
+        Only retries connection establishment/pool acquisition, never retries in-flight non-idempotent executions.
+        """
         pg_query = self._convert_query(query)
-        delays = [0.2, 0.5, 1.5]
-        for attempt, delay in enumerate(delays):
+        if not self.pool or self.pool._closed:
+            await self._heal_pool()
+
+        conn = None
+        for attempt, delay in enumerate([0.2, 0.5]):
             try:
-                if not self.pool or self.pool._closed:
-                    await self._heal_pool()
-                async with self.pool.acquire(timeout=10) as conn:
-                    await conn.execute(pg_query, *args)
-                return
-            except (asyncpg.PostgresConnectionError, asyncpg.InterfaceError, asyncio.TimeoutError, ConnectionResetError, OSError) as e:
-                logger.warning(f"Database transient error on execute (attempt {attempt+1}): {e}. Retrying in {delay}s...")
+                conn = await self.pool.acquire(timeout=10)
+                break
+            except (asyncpg.PostgresConnectionError, asyncpg.InterfaceError, asyncio.TimeoutError, OSError) as e:
+                logger.warning(f"Database connection pool acquire error (attempt {attempt+1}): {e}. Retrying in {delay}s...")
                 await asyncio.sleep(delay)
                 await self._heal_pool()
 
-        # Final attempt
-        if not self.pool or self.pool._closed:
-            await self._heal_pool()
-        async with self.pool.acquire(timeout=10) as conn:
-            await conn.execute(pg_query, *args)
+        if conn is None:
+            conn = await self.pool.acquire(timeout=10)
+
+        try:
+            return await conn.execute(pg_query, *args)
+        finally:
+            await self.pool.release(conn)
 
     async def fetch_one(self, query: str, *args: Any) -> dict[str, Any] | None:
         """Fetch a single record with self-healing retry resilience."""

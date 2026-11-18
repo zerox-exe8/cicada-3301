@@ -4,6 +4,7 @@ import inspect
 import io
 from pathlib import Path
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
@@ -36,13 +37,10 @@ class SourceCog(commands.Cog, name="Developer-Source"):
         cog = self.bot.get_cog(target.strip())
 
         obj = None
-        target_name = query
         if cmd:
             obj = cmd.callback
-            target_name = f"Command: {cmd.qualified_name}"
         elif cog:
             obj = cog.__class__
-            target_name = f"Cog: {cog.qualified_name}"
 
         if not obj:
             await ctx.send_error(f"Could not locate command or cog matching `{target}`.")

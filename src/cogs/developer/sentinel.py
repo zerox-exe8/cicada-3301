@@ -3,13 +3,14 @@ from __future__ import annotations
 import gc
 import logging
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord.ext import commands
 
 from src.core.context import CustomContext
 from src.managers.permission_manager import is_developer
-from src.utils.containers import KyroContainer, send_container_response
 from src.sentinel.models import IncidentSeverity, SubsystemType
+from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -54,7 +55,7 @@ class SentinelCog(commands.Cog, name="Developer-Sentinel"):
         status_icon = "🟢" if report["status"] == "HEALTHY" else ("🟡" if report["status"] == "DEGRADED" else "🔴")
 
         telemetry = [
-            f"=================== [ KYRO SENTINEL SRE ] ===================",
+            "=================== [ KYRO SENTINEL SRE ] ===================",
             f"system_health:     {report['status']} {status_icon}",
             f"uptime:            {report['uptime']}",
             f"gateway_latency:   {report['gateway_latency_ms']}",
@@ -196,7 +197,7 @@ class SentinelCog(commands.Cog, name="Developer-Sentinel"):
             )
 
         container.add_separator(divider=True)
-        container.add_text(f"-# Autonomous Sentinel Telemetry • Kyro SRE Intelligence")
+        container.add_text("-# Autonomous Sentinel Telemetry • Kyro SRE Intelligence")
         await send_container_response(ctx, container)
 
     @sentinel_group.command(name="heal", aliases=["fix", "recover"])

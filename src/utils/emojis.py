@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
+
 import discord
 
 if TYPE_CHECKING:
@@ -31,8 +32,8 @@ class EmojiRegistry:
                 try:
                     app_info = await self.bot.application_info()
                     self.bot.application_id = app_info.id
-                except Exception:
-                    pass
+                except Exception as app_err:
+                    logger.debug(f"application_info fetch notice: {app_err}")
             if self.bot.application_id:
                 emojis = await self.bot.fetch_application_emojis()
                 self._emojis = {e.name.lower(): e for e in emojis}
@@ -48,7 +49,7 @@ class EmojiRegistry:
                                 data = f.read()
                             new_e = await self.bot.create_application_emoji(name="icons_download", image=data)
                             self._emojis["icons_download"] = new_e
-                            logger.info(f"Auto-uploaded icons_Download to application emojis.")
+                            logger.info("Auto-uploaded icons_Download to application emojis.")
                         except Exception as e:
                             logger.debug(f"Could not auto-upload icons_Download: {e}")
 
@@ -191,8 +192,8 @@ class EmojiRegistry:
         Scan assets/emoji and assets/emoji2 and upload any missing application emojis to Discord.
         Returns (uploaded_count, total_cached).
         """
-        from pathlib import Path
         import re
+        from pathlib import Path
 
         try:
             if not self.bot.application_id:
@@ -258,7 +259,7 @@ class EmojiRegistry:
                                 logger.warning(f"Rate limited by Discord while uploading emoji {clean_name}. Aborting sync.")
                                 return uploaded, len(self._emojis)
                             elif getattr(e, "code", 0) in (30007, 50035) or "maximum" in str(e).lower():
-                                logger.warning(f"Maximum application emojis reached. Aborting sync.")
+                                logger.warning("Maximum application emojis reached. Aborting sync.")
                                 return uploaded, len(self._emojis)
                             else:
                                 logger.debug(f"Could not upload emoji {clean_name}: {e}")

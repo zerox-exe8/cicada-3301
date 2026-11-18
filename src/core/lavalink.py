@@ -86,12 +86,8 @@ def err_text(exc: BaseException) -> str:
     return f"{name}: {text}"
 
 
-# Hardened in-code fallback pool: ensures Render never breaks even if .env nodes drop or change passwords
-BUILTIN_LAVALINK_FALLBACKS: list[tuple[str, str]] = [
-    ("http://lavalink.triniumhost.com:4333", "free"),
-    ("https://lava-v4.millohost.my.id:443", "https://discord.gg/mjS5J2K3ep"),
-    ("http://lavalinkv4.serenetia.com:80", "https://seretia.link/discord"),
-]
+# Built-in fallbacks removed for privacy & security: no unconfigured routing to third-party community nodes
+BUILTIN_LAVALINK_FALLBACKS: list[tuple[str, str]] = []
 
 
 def candidates() -> list[tuple[str, str]]:
@@ -172,8 +168,8 @@ async def close_node(node: Any) -> None:
             node._players.clear()
         # `eject=True` makes wavelink remove the node from its pool itself.
         await asyncio.wait_for(node.close(eject=True), timeout=LAVALINK_OP_TIMEOUT)
-    except Exception:
-        pass
+    except Exception as close_err:
+        logger.debug(f"Node close notice: {close_err}")
 
     # Wavelink only closes the aiohttp session when a websocket was created, so a
     # connection attempt that failed before the handshake would leak its session.
@@ -181,8 +177,8 @@ async def close_node(node: Any) -> None:
     if session is not None and not getattr(session, "closed", False):
         try:
             await session.close()
-        except Exception:
-            pass
+        except Exception as sess_err:
+            logger.debug(f"Session close notice: {sess_err}")
 
     discard_node(node)
 
@@ -475,8 +471,8 @@ async def probe_candidate_node(
                         track_data = json.loads(await track_resp.text())
                         if track_data.get("loadType") == "error":
                             return False, "node YouTube source returned error"
-            except Exception:
-                pass
+            except Exception as test_err:
+                logger.debug(f"Test track check notice: {test_err}")
 
             return True, "node is fully operational"
 
@@ -557,7 +553,15 @@ async def connect_lavalink_node(
         return None
 
     # 1 + 2: configured nodes
-    for uri, password in candidates():
+    cands = candidates()
+    if not cands and not (allow_discovery and Config.LAVALINK_AUTO_DISCOVER):
+        logger.warning(
+            "Lavalink credentials not configured (LAVALINK_URI / LAVALINK_PASSWORD unset) and "
+            "LAVALINK_AUTO_DISCOVER is disabled. Audio streaming subsystem is inactive."
+        )
+        return None
+
+    for uri, password in cands:
         node = await _try(uri, password)
         if node is not None:
             return node
@@ -571,4 +575,5 @@ async def connect_lavalink_node(
                 return node
 
     detail = "; ".join(failures) if failures else "no URI configured"
-    raise LavalinkUnavailable(f"No reachable Lavalink node ({detail})")
+    logger.warning(f"No reachable Lavalink node ({detail}). Audio streaming disabled.")
+    return None

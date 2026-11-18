@@ -18,8 +18,8 @@ class BaseDatabase(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, query: str, *args: Any) -> None:
-        """Execute an insert/update/delete query."""
+    async def execute(self, query: str, *args: Any) -> str | None:
+        """Execute an insert/update/delete query and return command status tag."""
         pass
 
     @abstractmethod

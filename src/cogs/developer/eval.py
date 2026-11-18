@@ -5,8 +5,8 @@ import asyncio
 import io
 import os
 import sys
-import time
 import textwrap
+import time
 import traceback
 from contextlib import redirect_stdout
 from typing import TYPE_CHECKING

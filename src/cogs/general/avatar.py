@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -9,8 +10,8 @@ from discord.ext import commands
 from src.core.context import CustomContext
 from src.utils.containers import (
     KyroContainer,
-    send_container_response,
     edit_container_response,
+    send_container_response,
 )
 
 if TYPE_CHECKING:
@@ -104,8 +105,8 @@ class Avatar(commands.Cog, name="General-Avatar"):
         full_user = target
         try:
             full_user = await self.bot.fetch_user(target.id)
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as fetch_err:
+            logger.debug(f"fetch_user avatar notice: {fetch_err}")
 
         global_url = str(full_user.avatar.url if full_user.avatar else full_user.default_avatar.url)
         guild_url = None

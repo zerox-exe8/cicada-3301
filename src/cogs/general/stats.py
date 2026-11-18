@@ -4,6 +4,7 @@ import logging
 import platform
 import sys
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
@@ -71,8 +72,8 @@ class Stats(commands.Cog, name="General-Stats"):
             try:
                 import resource
                 ram_used_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-            except Exception:
-                pass
+            except Exception as res_err:
+                logger.debug(f"resource getrusage notice: {res_err}")
 
         # network & Bot metrics
         total_guilds = len(self.bot.guilds)

@@ -8,16 +8,17 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import resolve_role
+from src.core.context import CustomContext
 from src.utils.containers import (
     KyroContainer,
-    send_container_response,
     edit_container_response,
+    send_container_response,
 )
 
 if TYPE_CHECKING:
@@ -189,8 +190,8 @@ class RoleInfoView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Role Information**\n"
-                f"> Details, permissions, and members overview."
+                "**Role Information**\n"
+                "> Details, permissions, and members overview."
             )
         )
         container.add_separator(divider=True)
@@ -233,8 +234,8 @@ class RoleInfoView(discord.ui.View):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Role Permissions**\n"
-                f"> Active and enabled permissions breakdown."
+                "**Role Permissions**\n"
+                "> Active and enabled permissions breakdown."
             )
         )
         container.add_separator(divider=True)
@@ -242,7 +243,7 @@ class RoleInfoView(discord.ui.View):
         lines: list[str] = []
         if is_admin:
             lines.append(f"{dot} **Administrator:** {sw_on}")
-            lines.append(f"> This role possesses full Administrator privileges across the server.")
+            lines.append("> This role possesses full Administrator privileges across the server.")
         else:
             for perm_attr, perm_name in ROLE_PERMISSIONS_LIST:
                 if getattr(perms, perm_attr, False):
@@ -266,8 +267,8 @@ class RoleInfoView(discord.ui.View):
         if self.role.is_default():
             container.add_section(
                 content=(
-                    f"**Role Members**\n"
-                    f"> The `@everyone` role contains all server members. Use `membercount` for full totals."
+                    "**Role Members**\n"
+                    "> The `@everyone` role contains all server members. Use `membercount` for full totals."
                 )
             )
             container.add_separator(divider=True)

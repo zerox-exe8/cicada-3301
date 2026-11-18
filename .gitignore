@@ -40,3 +40,6 @@ scratch/
 # Website (local only, not pushed yet)
 website/
 
+# Local audit documentation (not tracked)
+AUDIT.md
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+
 import aiohttp
 import discord
 from discord.ext import commands, tasks
@@ -12,26 +13,25 @@ from src.core.permissions import install_permission_overrides
 
 # Install transparent Application Owner permission overrides globally
 install_permission_overrides()
-from src.database.base import BaseDatabase
 from src.database.postgres import PostgresDatabase
-from src.managers.guild_manager import GuildManager
-from src.managers.permission_manager import PermissionManager
+from src.managers.antinuke_manager import AntinukeManager
 from src.managers.blacklist_manager import BlacklistManager
-from src.managers.system_manager import SystemManager
-from src.managers.log_manager import LogManager
-from src.managers.premium_manager import PremiumManager
+from src.managers.dev_pulse_manager import DevPulseManager
 from src.managers.embed_manager import EmbedManager
 from src.managers.event_manager import EventManager
-from src.managers.ticket_manager import TicketManager
+from src.managers.giveaway_manager import GiveawayManager
+from src.managers.guild_manager import GuildManager
+from src.managers.log_manager import LogManager
+from src.managers.media_manager import MediaManager
+from src.managers.permission_manager import PermissionManager
+from src.managers.premium_manager import PremiumManager
+from src.managers.sticky_manager import StickyManager
+from src.managers.system_manager import SystemManager
 from src.managers.tech_manager import TechNewsManager
-from src.managers.dev_pulse_manager import DevPulseManager
 from src.managers.tech_realtime_manager import TechRealtimeManager
 from src.managers.temp_voice_manager import TempVoiceManager
+from src.managers.ticket_manager import TicketManager
 from src.managers.translator_manager import TranslatorManager
-from src.managers.sticky_manager import StickyManager
-from src.managers.antinuke_manager import AntinukeManager
-from src.managers.media_manager import MediaManager
-from src.managers.giveaway_manager import GiveawayManager
 from src.utils.emojis import EmojiRegistry
 
 logger = logging.getLogger("Kyro.Core")
@@ -105,7 +105,6 @@ class KyroBot(commands.Bot):
         )
 
         # Sole Database Driver (Supabase PostgreSQL)
-        from src.database.postgres import PostgresDatabase
         self.db: PostgresDatabase = PostgresDatabase(Config.DATABASE_URL)
 
         from src.core.cache import MicrosecondCache
@@ -287,8 +286,8 @@ class KyroBot(commands.Bot):
                 status=discord.Status.dnd,
                 activity=discord.CustomActivity(name=status_text),
             )
-        except Exception:
-            pass
+        except Exception as p_err:
+            logger.debug(f"Rotate presence notice: {p_err}")
 
 
     @_rotate_presence.before_loop
@@ -357,7 +356,7 @@ class KyroBot(commands.Bot):
             if player:
                 try:
                     await player.stop()
-                except Exception:
-                    pass
+                except Exception as stop_err:
+                    logger.debug(f"Guild remove stop player notice: {stop_err}")
                 music_cog.controller._players.pop(guild.id, None)
 

@@ -30,6 +30,12 @@ RUN curl -fsSL -o /opt/lavalink/Lavalink.jar \
 
 COPY application.yml /opt/lavalink/application.yml
 
+RUN groupadd -g 10001 lavalink \
+    && useradd -u 10001 -g lavalink -d /opt/lavalink -s /bin/bash lavalink \
+    && chown -R lavalink:lavalink /opt/lavalink
+
+USER lavalink
+
 EXPOSE 2333
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

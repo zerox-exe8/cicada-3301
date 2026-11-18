@@ -8,17 +8,27 @@ All tasks in this repository must strictly adhere to the following non-negotiabl
 ## 1. Absolute Directives & Safety Guardrails
 
 - **MEMOS AS THE FOUNDATIONAL CORE:**
-  `MemOS` (`M:\Kyro Systum Engine\MemOS`) is the central Memory Operating System for the entire system. Every task, decision, and code modification (big or small) must strictly consult, track, and adhere to MemOS memory and architecture principles.
+  `MemOS` (`M:\Kyro Systum Engine\MemOS`) is the central Memory Operating System for the system when present. If MemOS is not present in the runtime environment, the bot relies on its own root `AGENTS.md`, `AUDIT.md`, and dedicated `.agents/rules/` specifications.
 - **NEVER RUN THE BOT PROCESS LOCALLY:**
   Do NOT execute `python main.py` or any background command that logs into Discord with the production bot token. The bot is actively hosted on a remote server; running locally causes gateway token session collisions, socket disconnects, and service downtime.
 - **NEVER MODIFY UI / VISUAL DESIGN WITHOUT EXPLICIT PERMISSION:**
   Kyro uses a strictly curated **Discord Components V2** layout (`KyroContainer`, Type 17 containers, Type 14 separators) paired with custom Application Emojis (`EmojiRegistry`). Never alter colors, dividers, card structures, or emoji placements unless the user explicitly requests a design change.
 - **STRICT LASER FOCUS (ZERO BLOAT):**
   Implement only what the user explicitly requested. Do not add speculative "nice-to-have" features, showcase stub commands, or unrequested boilerplate.
-- **ALWAYS COMPILE & VERIFY:**
-  Before concluding any turn that modifies Python code, compile all touched files using `python -m py_compile <path>` (or PowerShell recursive compile) to guarantee zero syntax or import regressions.
+- **ALWAYS EXECUTE VERIFY GATE:**
+  Before concluding any turn that modifies Python code, run the full **VERIFY GATE** (compilation alone is NOT enough):
+  ```powershell
+  $env:PATH = "$env:APPDATA\Python\Python313\Scripts;$env:PATH"
+  python -m compileall -q src tests
+  python -m ruff check src tests
+  python -m pyflakes src
+  python -m pytest -q
+  python -m bandit -r src -c pyproject.toml
+  ```
+- **PONYTAIL OVERRIDE SAFETY:**
+  The `ponytail` skill/workflow never overrides security policies, the verify gate, or regression test requirements.
 - **GIT DISCIPLINE:**
-  Never run `git push` autonomously. Commit or push only when the user explicitly instructs: `"push kar de"`.
+  Never run `git push` or `git commit` autonomously. Leave all modifications in the working tree until the user explicitly instructs: `"push kar de"`.
 - **COMMUNICATION STYLE:**
   Communicate in clear, direct, and concise Hindi/Hinglish. Avoid unnecessary prose or excessive developer jargon.
 
@@ -44,18 +54,18 @@ All tasks in this repository must strictly adhere to the following non-negotiabl
 - **Button Interactions:**
   - Button callbacks in `MusicControlView` (`_views.py`) must defer with `await interaction.response.defer(ephemeral=True)` to prevent public "Kyro is thinking..." spinners and avoid Discord HTTP 400 Bad Request errors on subsequent ephemeral alerts.
 
-### Database & State Management (`src/core/database.py`, `src/managers/`)
-- All database operations utilize PostgreSQL with the asynchronous `asyncpg` connection pool on `bot.db`.
+### Database & State Management (`src/database/postgres.py`, `src/repositories/`, `src/managers/`)
+- All database operations utilize PostgreSQL with the asynchronous `asyncpg` connection pool on `bot.db` (`src/database/postgres.py`).
 - Always use parameterized queries (`$1`, `$2`, etc.) to prevent SQL injection vulnerabilities.
 - State checks (e.g. `player.is_paused`) must reflect immediately without waiting for asynchronous network round-trips to prevent UI state desynchronization.
+- Query execution retries are restricted strictly to connection establishment/pool acquisition, never retrying in-flight non-idempotent writes.
 
 ---
 
 ## 3. Dedicated Workspace Rules
 Detailed engineering, security, and concurrency policies are codified in:
-- [engineering_rules.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/engineering_rules.md)
-- [security_permissions.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/security_permissions.md)
-- [architecture_concurrency.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/architecture_concurrency.md)
-- [testing_and_release.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/testing_and_release.md)
-- [memos_core.md](file:///m:/Kyro%20Systum%20Engine/Kyro/.agents/rules/memos_core.md)
-
+- [.agents/rules/engineering_rules.md](.agents/rules/engineering_rules.md)
+- [.agents/rules/security_permissions.md](.agents/rules/security_permissions.md)
+- [.agents/rules/architecture_concurrency.md](.agents/rules/architecture_concurrency.md)
+- [.agents/rules/testing_and_release.md](.agents/rules/testing_and_release.md)
+- [.agents/rules/memos_core.md](.agents/rules/memos_core.md)

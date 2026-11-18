@@ -12,11 +12,13 @@ import logging
 import random
 import time
 from typing import TYPE_CHECKING, Any, List, Optional, Set
+
 import discord
 import wavelink
 
-from src.cogs.music._models import Track
 from src.cogs.music._autoplay import NativeSmartAutoplay
+from src.cogs.music._models import Track
+from src.cogs.music._views import MusicControlView
 from src.core.lavalink import (
     LAVALINK_OP_TIMEOUT,
     LAVALINK_PLAY_TIMEOUT,
@@ -26,8 +28,8 @@ from src.core.lavalink import (
     err_text,
     probe_node,
 )
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
-from src.cogs.music._views import MusicControlView
+from src.utils.containers import KyroContainer, edit_container_response, send_container_response
+from src.utils.tasks import create_tracked_task
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -250,13 +252,13 @@ class GuildPlayer:
         """Thread-safely append a single track to the queue."""
         async with self._queue_lock:
             self.queue.append(track)
-        asyncio.create_task(self._prefetch_next_track())
+        create_tracked_task(self._prefetch_next_track(), name="player_prefetch_single")
 
     async def add_tracks(self, tracks: list[Track]) -> None:
         """Thread-safely append multiple tracks to the queue."""
         async with self._queue_lock:
             self.queue.extend(tracks)
-        asyncio.create_task(self._prefetch_next_track())
+        create_tracked_task(self._prefetch_next_track(), name="player_prefetch_batch")
 
     async def pop_next_track(self) -> Optional[Track]:
         """Thread-safely pop the next track from the front of the queue."""
@@ -282,7 +284,6 @@ class GuildPlayer:
     async def shuffle_queue(self) -> int:
         """Thread-safely shuffle the upcoming queue."""
         async with self._queue_lock:
-            import random
             random.shuffle(self.queue)
             return len(self.queue)
 
@@ -374,20 +375,20 @@ class GuildPlayer:
                                 vc.disconnect(force=True),
                                 timeout=1.5,
                             )
-                        except Exception:
-                            pass
+                        except (discord.ClientException, asyncio.TimeoutError, OSError) as e:
+                            logger.debug(f"Disconnect cleanup notice: {e}")
                         await asyncio.sleep(0.15)
                     try:
                         vc.cleanup()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"VC cleanup notice: {e}")
                     self.voice_client = None
 
                 # Purge lingering voice client cache so next handshake starts clean
                 try:
                     self.bot._connection._remove_voice_client(self.guild.id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Voice cache purge notice: {e}")
 
                 # If Discord Gateway still has us recorded in a voice channel but we don't have a working
                 # active player, force a clean voice state reset so Discord emits fresh credentials on connect
@@ -396,15 +397,15 @@ class GuildPlayer:
                         self._disconnect_expected_until = time.monotonic() + 4.0
                         await self.guild.change_voice_state(channel=None)
                         await asyncio.sleep(0.15)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Voice state reset notice: {e}")
 
                 # Ensure Wavelink node is alive and connected before connecting player
                 node = None
                 try:
                     node = wavelink.Pool.get_node()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Node retrieval notice: {e}")
 
                 if not node or node.status != wavelink.NodeStatus.CONNECTED:
                     logger.info("Wavelink node disconnected or missing. Re-establishing connection...")
@@ -460,16 +461,16 @@ class GuildPlayer:
                                         stale_vc.disconnect(force=True),
                                         timeout=1.5,
                                     )
-                                except Exception:
-                                    pass
+                                except (discord.ClientException, asyncio.TimeoutError, OSError) as e:
+                                    logger.debug(f"Stale VC disconnect notice: {e}")
                             try:
                                 stale_vc.cleanup()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Stale VC cleanup notice: {e}")
                         try:
                             self.bot._connection._remove_voice_client(self.guild.id)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Voice client removal notice: {e}")
                         self.voice_client = None
 
                         # Force Discord Gateway to clear old session if registered in a channel
@@ -478,8 +479,8 @@ class GuildPlayer:
                                 self._disconnect_expected_until = time.monotonic() + 4.0
                                 await self.guild.change_voice_state(channel=None)
                                 await asyncio.sleep(0.15)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Gateway voice clear notice: {e}")
 
                         # After first failure, heal node only if unresponsive and pause 0.3s before second attempt
                         if attempt == 0:
@@ -494,7 +495,7 @@ class GuildPlayer:
                 if last_error is not None:
                     logger.error(f"Guild {self.guild.id}: Wavelink connect error: {last_error}")
                     if hasattr(self.bot, "sentinel") and self.bot.sentinel:
-                        from src.sentinel.models import SubsystemType, IncidentSeverity
+                        from src.sentinel.models import IncidentSeverity, SubsystemType
                         self.bot.sentinel.record_incident(
                             SubsystemType.VOICE,
                             IncidentSeverity.WARNING,
@@ -534,8 +535,8 @@ class GuildPlayer:
             if target_ch:
                 try:
                     await self.connect_voice(target_ch)
-                except Exception:
-                    pass
+                except Exception as conn_err:
+                    logger.debug(f"Connect voice fallback notice: {conn_err}")
 
         if not self.voice_client or not self.voice_client.connected:
             logger.warning(f"Guild {self.guild.id}: Cannot play, voice client not connected.")
@@ -544,8 +545,8 @@ class GuildPlayer:
                 err_c.add_text("**Voice Disconnected**\n> Kyro is not connected to a voice channel. Please join a voice channel and use `?play` to start.")
                 try:
                     await edit_container_response(message_to_edit, err_c)
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as edit_err:
+                    logger.debug(f"Edit message error notice: {edit_err}")
             return
 
         # 2. Direct playable if already attached, otherwise resolve via Lavalink with strict timeout
@@ -569,8 +570,8 @@ class GuildPlayer:
                     err_c.add_text(f"**Failed to Stream Track:** `{track.title}`\n> The audio source could not be loaded. Please try another song.")
                     try:
                         await edit_container_response(message_to_edit, err_c)
-                    except Exception:
-                        pass
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as edit_err:
+                        logger.debug(f"Edit stream error notice: {edit_err}")
                 else:
                     await self.send_queue_ended_card()
                 self.schedule_empty_vc_timer()
@@ -599,13 +600,13 @@ class GuildPlayer:
                 err_c.add_text(f"**Failed to Stream Track:** `{track.title}`\n> Playback dispatch error: `{play_err}`")
                 try:
                     await edit_container_response(message_to_edit, err_c)
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as edit_err:
+                    logger.debug(f"Edit message play error notice: {edit_err}")
             raise
 
         # 4. Send or edit sleek Now Playing card with buttons
         await self.send_now_playing_card(track, message_to_edit=message_to_edit)
-        asyncio.create_task(self._prefetch_next_track())
+        create_tracked_task(self._prefetch_next_track(), name="player_prefetch_playing")
 
     # Domains that are NOT direct audio streams — Lavalink can't play their page URLs
     _NON_STREAM_DOMAINS = (
@@ -715,7 +716,7 @@ class GuildPlayer:
         from src.cogs.music._extractor import clean_track_title
         clean_title = clean_track_title(track.title) if track.title else ""
         raw_author = track.author if (track.author and "spotify" not in track.author.lower() and "unknown" not in track.author.lower() and "artist" != track.author.lower() and "youtube" != track.author.lower()) else ""
-        
+
         # Clean title of video junk like (Official Video), [Music Video], etc. so YouTube Music matches the exact song
         import re
         pure_title = re.sub(r"\(.*?(?:official|video|audio|remix|lyrics|hd|4k|feat|ft).*?\)|\[.*?(?:official|video|audio|remix|lyrics|hd|4k|feat|ft).*?\]", "", clean_title, flags=re.IGNORECASE).strip()
@@ -812,9 +813,9 @@ class GuildPlayer:
             self._is_paused = True
             try:
                 self.voice_client._paused = True
-            except Exception:
-                pass
-            asyncio.create_task(self._bounded_node_call(self.voice_client.pause(True)))
+            except (AttributeError, TypeError) as attr_err:
+                logger.debug(f"Voice client internal paused attr notice: {attr_err}")
+            create_tracked_task(self._bounded_node_call(self.voice_client.pause(True)), name="player_pause_node")
             return True
         return False
 
@@ -824,9 +825,9 @@ class GuildPlayer:
             self._is_paused = False
             try:
                 self.voice_client._paused = False
-            except Exception:
-                pass
-            asyncio.create_task(self._bounded_node_call(self.voice_client.pause(False)))
+            except (AttributeError, TypeError) as attr_err:
+                logger.debug(f"Voice client internal paused attr notice: {attr_err}")
+            create_tracked_task(self._bounded_node_call(self.voice_client.pause(False)), name="player_resume_node")
             self._was_paused_for_empty_vc = False
             return True
         return False
@@ -835,8 +836,11 @@ class GuildPlayer:
     async def _safe_delete_message(msg: discord.Message) -> None:
         try:
             await msg.delete()
-        except Exception:
+        except (discord.NotFound, discord.Forbidden):
+            # Best-effort cleanup: message already deleted or missing Manage Messages permission
             pass
+        except Exception as e:
+            logger.debug(f"Failed to safe-delete message: {e}")
 
     async def skip(self) -> None:
         """
@@ -896,7 +900,7 @@ class GuildPlayer:
         clamped = max(0, min(150, volume_percent))
         self.volume = clamped / 100.0
         if self.voice_client:
-            asyncio.create_task(self._bounded_node_call(self.voice_client.set_volume(clamped)))
+            create_tracked_task(self._bounded_node_call(self.voice_client.set_volume(clamped)), name="player_set_volume")
         return clamped
 
     def set_loop_mode(self, mode: Optional[str] = None) -> str:
@@ -973,8 +977,8 @@ class GuildPlayer:
                             yt_t = await asyncio.wait_for(NativeExtractor._fetch_youtube_title(curr.url), timeout=3.0)
                             if yt_t:
                                 query_target = yt_t
-                        except Exception:
-                            pass
+                        except Exception as yt_err:
+                            logger.debug(f"YouTube title lookup notice: {yt_err}")
                     logger.info(f"Guild {self.guild.id}: Attempting unblocked stream recovery for '{curr.title}'...")
                     fallback_trk = await asyncio.wait_for(
                         NativeExtractor._extract_jiosaavn(query_target, requester=curr.requester, is_autoplay=curr.is_autoplay),
@@ -1121,7 +1125,6 @@ class GuildPlayer:
                 or e_reg.get("icons_heart", "")
                 or e_reg.get("heart", "")
             )
-        link_emoji = e_reg.get("link", "") if e_reg else ""
 
         container = KyroContainer(accent_color=None)
 
@@ -1138,7 +1141,6 @@ class GuildPlayer:
         duration_display = track.formatted_duration or "00:00"
 
         dot_prefix = f"> {heart_e} " if heart_e else "> "
-        link_prefix = f"{link_emoji} " if link_emoji else ""
 
         body_lines = [
             f"{dot_prefix}**Song:** {song_display}",
@@ -1184,14 +1186,14 @@ class GuildPlayer:
                 await edit_container_response(message_to_edit, container, view=view, content=None)
                 self.controller_message = message_to_edit
                 return
-            except Exception:
-                pass
+            except Exception as edit_err:
+                logger.debug(f"Failed to edit message into controller: {edit_err}")
 
         # 2. Clean up any existing controller card to prevent duplicate cards in chat (in background)
         if self.controller_message and isinstance(self.controller_message, discord.Message):
             old_msg = self.controller_message
             self.controller_message = None
-            asyncio.create_task(self._safe_delete_message(old_msg))
+            create_tracked_task(self._safe_delete_message(old_msg), name="player_safe_delete_controller")
 
         # 3. Post a fresh Now Playing card
         try:
@@ -1254,8 +1256,8 @@ class GuildPlayer:
                 )
                 self.controller_message = None
                 return
-            except Exception:
-                pass
+            except Exception as edit_err:
+                logger.debug(f"Failed to edit controller message to queue-ended card: {edit_err}")
 
         try:
             await send_container_response(
@@ -1263,8 +1265,8 @@ class GuildPlayer:
                 container,
                 content=None,
             )
-        except Exception:
-            pass
+        except Exception as send_err:
+            logger.debug(f"Failed to send queue-ended card to home channel: {send_err}")
 
     # ── Inactivity Timers ──
 
@@ -1290,4 +1292,4 @@ class GuildPlayer:
                 logger.info(f"Guild {self.guild.id}: Idle timeout reached, disconnecting silently.")
                 await self.stop()
         except asyncio.CancelledError:
-            pass
+            logger.debug("Idle timeout task cancelled normally.")

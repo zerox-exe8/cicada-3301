@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
-from src.cogs.antinuke._helpers import execute_punishment, dispatch_antinuke_log, resolve_audit_perpetrator
+from src.cogs.antinuke._helpers import dispatch_antinuke_log, execute_punishment, resolve_audit_perpetrator
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -39,8 +40,8 @@ class AntiAutoModCog(commands.Cog):
 
         try:
             await rule.delete(reason="Kyro Antinuke: Unauthorized AutoMod Rule Cleanup")
-        except Exception:
-            pass
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+            logger.debug(f"Automod rule delete notice: {del_err}")
 
         punish_res = await execute_punishment(
             self.bot, guild, perpetrator, "Anti-AutoMod", f"Created rogue automod rule '{rule.name}'"

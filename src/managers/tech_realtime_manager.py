@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 import aiohttp
+
 from src.utils.containers import KyroContainer
 
 if TYPE_CHECKING:
@@ -472,8 +473,8 @@ class TechRealtimeManager:
                             return provider, "Critical Down"
                         status_desc = data.get("status", {}).get("description", "Operational")
                         return provider, status_desc
-            except Exception:
-                pass
+            except Exception as h_err:
+                logger.debug(f"Health fetch notice for {provider}: {h_err}")
             return provider, "Operational"
 
         try:
@@ -511,10 +512,10 @@ class TechRealtimeManager:
 
         if incident.status == "resolved":
             badge_title = f"RESOLVED: {incident.provider} Incident"
-            sub_line = f"Issue has been successfully resolved and systems verified."
+            sub_line = "Issue has been successfully resolved and systems verified."
         else:
             badge_title = f"OUTAGE ALERT: {incident.provider} Disruption"
-            sub_line = f"Real-time Incident Radar • Live Self-Healing Card"
+            sub_line = "Real-time Incident Radar • Live Self-Healing Card"
 
         container.add_section(
             content=(
@@ -537,9 +538,9 @@ class TechRealtimeManager:
         body_blocks.append(f"**Latest Operational Update:**\n> {clean_update}")
 
         if incident.status == "resolved":
-            body_blocks.append(f"> *All services returned to normal operational status.*")
+            body_blocks.append("> *All services returned to normal operational status.*")
         else:
-            body_blocks.append(f"-# Kyro Self-Healing Engine • This message auto-updates live as status progresses.")
+            body_blocks.append("-# Kyro Self-Healing Engine • This message auto-updates live as status progresses.")
 
         container.add_text("\n\n".join(body_blocks))
         container.add_separator(divider=True)
@@ -621,7 +622,7 @@ class TechRealtimeManager:
         if release.install_cmd:
             body_blocks.append(f"**Instant Upgrade Command:**\n```bash\n{release.install_cmd}\n```")
 
-        body_blocks.append(f"-# Kyro Framework Radar • Curated Tier-1 Developer Releases")
+        body_blocks.append("-# Kyro Framework Radar • Curated Tier-1 Developer Releases")
         container.add_text("\n\n".join(body_blocks))
         container.add_separator(divider=True)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Optional
+
 import discord
 
 from src.utils.containers import KyroContainer
@@ -155,8 +156,8 @@ async def execute_punishment(
                 try:
                     await member.kick(reason=audit_reason)
                     return "Kicked (Ban Failed - Hierarchy)"
-                except Exception:
-                    pass
+                except (discord.Forbidden, discord.HTTPException) as kick_err:
+                    logger.debug(f"Ban hierarchy kick fallback notice: {kick_err}")
             return "Quarantined (Role Too High to Ban)"
         except Exception as e:
             logger.error(f"Guild {guild.id}: Error banning offender {offender.id}: {e}")
@@ -164,8 +165,8 @@ async def execute_punishment(
                 try:
                     await member.kick(reason=audit_reason)
                     return "Kicked (Ban Error Fallback)"
-                except Exception:
-                    pass
+                except (discord.Forbidden, discord.HTTPException) as kick_err:
+                    logger.debug(f"Ban error kick fallback notice: {kick_err}")
             return f"Quarantined ({e})"
 
     elif effective_punishment == "kick":

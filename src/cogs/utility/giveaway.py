@@ -10,9 +10,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import resolve_role
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
+from src.core.context import CustomContext
+from src.utils.containers import KyroContainer, edit_container_response, send_container_response
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -154,6 +154,7 @@ class PersistentGiveawayView(discord.ui.View):
             gw = dict(gw_row)
 
         giveaway_id = gw["id"]
+        dot = self.bot.custom_emojis.get("heart_dot", "•")
 
         # Check required role requirement if set
         if gw.get("required_role_id") and isinstance(interaction.user, discord.Member):
@@ -170,7 +171,6 @@ class PersistentGiveawayView(discord.ui.View):
 
         # Atomically toggle participant
         success, action, count = await self.bot.giveaway_mgr.toggle_participant(giveaway_id, interaction.user.id)
-        dot = self.bot.custom_emojis.get("heart_dot", "•")
         gw_emoji = self.bot.custom_emojis.get("discord_giveaway", self.bot.custom_emojis.get("giveaway", "🎉"))
 
         resp_container = KyroContainer(accent_color=None)
@@ -300,8 +300,8 @@ class Giveaways(commands.Cog):
     async def before_ticker(self) -> None:
         try:
             await self.bot.wait_until_ready()
-        except Exception:
-            pass
+        except Exception as w_err:
+            logger.debug(f"wait_until_ready notice: {w_err}")
 
     async def conclude_giveaway(self, message_id: int) -> Optional[dict]:
         """Finalize giveaway, edit card, disable button, and announce winners."""
@@ -319,8 +319,8 @@ class Giveaways(commands.Cog):
         msg = None
         try:
             msg = await channel.fetch_message(message_id)
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as msg_err:
+            logger.debug(f"Fetch giveaway message notice: {msg_err}")
 
         dot = self.bot.custom_emojis.get("heart_dot", "•")
         gw_emoji = self.bot.custom_emojis.get("discord_giveaway", self.bot.custom_emojis.get("giveaway", "🎉"))
@@ -504,8 +504,8 @@ class Giveaways(commands.Cog):
         if ctx.message and not ctx.interaction:
             try:
                 await ctx.message.delete()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                logger.debug(f"Delete invoking command message notice: {del_err}")
 
         # Store in database and memory cache
         await self.bot.giveaway_mgr.create_giveaway(

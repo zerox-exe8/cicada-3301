@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import platform
 import sys
 import time
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
@@ -17,6 +19,8 @@ except ImportError:
 from src.core.context import CustomContext
 from src.managers.permission_manager import is_developer
 from src.utils.containers import KyroContainer, send_container_response
+
+logger = logging.getLogger("Kyro.Developer.System")
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -71,8 +75,8 @@ class SystemCog(commands.Cog, name="Developer-System"):
                 total_sys_gb = vm.total / (1024 ** 3)
                 used_sys_gb = vm.used / (1024 ** 3)
                 mem_pct = vm.percent
-            except Exception:
-                pass
+            except Exception as ps_err:
+                logger.debug(f"psutil system stats notice: {ps_err}")
         else:
             try:
                 import resource
@@ -114,7 +118,7 @@ class SystemCog(commands.Cog, name="Developer-System"):
 
         matrix = [
             "=================== [ KYRO CLUSTER MATRIX ] ===================",
-            f"cluster_state:     online (nominal)",
+            "cluster_state:     online (nominal)",
             f"node_id:           kyro-core-01 • pid: {pid}",
             f"host_os:           {platform.system()} {platform.release()} ({platform.machine()})",
             f"runtime:           Python {sys.version.split()[0]} • discord.py {discord.__version__}",

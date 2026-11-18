@@ -1,23 +1,52 @@
 from __future__ import annotations
 
 import io
+import logging
+
 import aiohttp
 
 try:
-    from PIL import Image, ImageFilter, ImageEnhance, ImageDraw
+    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
 
+logger = logging.getLogger("Kyro.Utils.ImageTools")
 
-async def download_image_bytes(url: str, session: aiohttp.ClientSession) -> bytes | None:
-    """Download image bytes safely from URL."""
+
+MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB cap
+
+
+async def download_image_bytes(
+    url: str,
+    session: aiohttp.ClientSession,
+    max_size: int = MAX_IMAGE_BYTES,
+) -> bytes | None:
+    """
+    Download image bytes safely from URL.
+    Restricts to http/https schemes and caps payload size to prevent OOM/SSRF.
+    """
+    if not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://")):
+        return None
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status == 200:
-                return await resp.read()
-    except Exception:
-        pass
+            if resp.status != 200:
+                return None
+            content_length = resp.headers.get("Content-Length")
+            if content_length:
+                try:
+                    if int(content_length) > max_size:
+                        return None
+                except ValueError as v_err:
+                    logger.debug(f"Content-Length parse notice: {v_err}")
+            data = bytearray()
+            async for chunk in resp.content.iter_chunked(64 * 1024):
+                data.extend(chunk)
+                if len(data) > max_size:
+                    return None
+            return bytes(data)
+    except Exception as dl_err:
+        logger.debug(f"Image download notice: {dl_err}")
     return None
 
 

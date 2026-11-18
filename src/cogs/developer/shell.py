@@ -4,6 +4,7 @@ import asyncio
 import io
 import time
 from typing import TYPE_CHECKING
+
 import discord
 from discord.ext import commands
 
@@ -78,7 +79,7 @@ class ShellCog(commands.Cog, name="Developer-Shell"):
                 container.add_section(content=f"```bash\n{snippet}\n```")
                 container.add_separator(divider=True)
                 container.add_text(f"-# {t_dur:.2f}ms • exit code {exit_code} • full log attached")
-                
+
                 file = discord.File(
                     io.BytesIO(combined.encode("utf-8")),
                     filename="shell_output.log"

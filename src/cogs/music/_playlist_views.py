@@ -10,16 +10,17 @@ import asyncio
 import logging
 import random
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
 import discord
 
-from src.cogs.music._models import Track
 from src.cogs.music._extractor import NativeExtractor
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
+from src.cogs.music._models import Track
+from src.utils.containers import KyroContainer, edit_container_response, send_container_response
 
 if TYPE_CHECKING:
-    from src.core.bot import KyroBot
-    from src.cogs.music.music import Music
     from src.cogs.music._player import GuildPlayer
+    from src.cogs.music.music import Music
+    from src.core.bot import KyroBot
 
 logger = logging.getLogger("Kyro.Music.PlaylistViews")
 
@@ -115,8 +116,8 @@ async def execute_saved_playlist_playback(
                 direct_results = await asyncio.wait_for(wavelink.Playable.search(first_track.stream_url), timeout=8.0)
                 if direct_results:
                     first_track._playable = direct_results[0] if isinstance(direct_results, list) else direct_results.tracks[0]
-            except Exception:
-                pass
+            except Exception as direct_err:
+                logger.debug(f"Direct stream search notice: {direct_err}")
     except Exception:
         first_track = None
 
@@ -141,8 +142,8 @@ async def execute_saved_playlist_playback(
                     query=first_query,
                 )
                 first_track._playable = top_p
-        except Exception:
-            pass
+        except Exception as ytm_err:
+            logger.debug(f"YTM resolution notice: {ytm_err}")
 
     # Priority 3: Fallback search by title + artist
     if not first_track:
@@ -166,8 +167,8 @@ async def execute_saved_playlist_playback(
                     query=alt_q,
                 )
                 first_track._playable = top_p
-        except Exception:
-            pass
+        except Exception as yt_err:
+            logger.debug(f"YT fallback search notice: {yt_err}")
 
     if not first_track:
         c = KyroContainer()
@@ -210,20 +211,6 @@ async def execute_saved_playlist_playback(
     # Start playback
     if was_idle:
         await player.play_track(first_track)
-
-    # build preview of upcoming tracks
-    if was_idle:
-        upcoming_items = player.queue[:6]
-    else:
-        upcoming_items = player.queue[insert_start_idx:insert_start_idx + 6]
-
-    upcoming_lines = []
-    for i, it in enumerate(upcoming_items, start=1):
-        dur_text = it.formatted_duration
-        upcoming_lines.append(f"`{i:02d}.` [{it.title}]({it.url}) `[{dur_text}]` — `{it.author}`")
-
-    upcoming_preview = "\n".join(upcoming_lines) if upcoming_lines else "No upcoming tracks."
-    remaining_count = len(play_order) - (1 if was_idle else 0) - len(upcoming_lines)
 
     container = KyroContainer(accent_color=None)
     status_title = "Now Playing" if was_idle else "Queued Playlist"

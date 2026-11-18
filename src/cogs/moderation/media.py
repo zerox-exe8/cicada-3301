@@ -3,15 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import TYPE_CHECKING, Optional
 import urllib.parse
+from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import dispatch_mod_log
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 
 if TYPE_CHECKING:
@@ -165,7 +165,7 @@ class MediaChannels(commands.Cog):
         try:
             await message.delete()
         except (discord.Forbidden, discord.NotFound):
-            pass
+            logger.debug("Non-media message already deleted or forbidden")
         except Exception as e:
             logger.debug(f"Failed to delete non-media message in {message.channel.id}: {e}")
 
@@ -184,8 +184,8 @@ class MediaChannels(commands.Cog):
             await asyncio.sleep(4)
             if isinstance(notice, discord.Message):
                 await notice.delete()
-        except Exception:
-            pass
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+            logger.debug(f"Media notice auto-delete notice: {del_err}")
 
     # ─── COMMANDS ────────────────────────────────────────────────────────────
 

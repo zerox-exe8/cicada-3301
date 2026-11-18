@@ -25,7 +25,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio ruff bandit
+          pip install pytest pytest-asyncio ruff bandit pip-audit
 
       - name: Python Bytecode Compilation Verification
         run: |
@@ -38,6 +38,10 @@ jobs:
       - name: Security Audit with Bandit
         run: |
           bandit -r src/ -c pyproject.toml
+
+      - name: Dependency Vulnerability Audit with pip-audit
+        run: |
+          pip-audit -r requirements.txt
 
       - name: Run Test Suite
         run: |

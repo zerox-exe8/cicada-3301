@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Any, Optional
+
 import discord
 from discord import ui
 
@@ -24,7 +25,8 @@ def format_hour_label(time_str: str) -> str:
         period = "AM" if h < 12 else "PM"
         display_h = 12 if (h == 0 or h == 12) else (h % 12)
         return f"{time_str} ({display_h:02d}:00 {period})"
-    except Exception:
+    except (ValueError, IndexError) as fmt_err:
+        logger.debug(f"Format hour label notice: {fmt_err}")
         return time_str
 
 
@@ -149,8 +151,8 @@ class MeetingScheduleWizard(ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer()
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as defer_err:
+            logger.debug(f"VC select defer notice: {defer_err}")
 
         select: ui.ChannelSelect = interaction.data.get("values", [])  # type: ignore
         if select and len(interaction.data["values"]) > 0:
@@ -166,8 +168,8 @@ class MeetingScheduleWizard(ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer()
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as defer_err:
+            logger.debug(f"Start select defer notice: {defer_err}")
 
         values = interaction.data.get("values", [])
         if values:
@@ -179,8 +181,8 @@ class MeetingScheduleWizard(ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer()
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as defer_err:
+            logger.debug(f"End select defer notice: {defer_err}")
 
         values = interaction.data.get("values", [])
         if values:
@@ -192,8 +194,8 @@ class MeetingScheduleWizard(ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer()
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as defer_err:
+            logger.debug(f"Back defer notice: {defer_err}")
 
         self.current_step = 1
         self._build_components()
@@ -203,8 +205,8 @@ class MeetingScheduleWizard(ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer()
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as defer_err:
+            logger.debug(f"Cancel defer notice: {defer_err}")
 
         self.clear_items()
         c = KyroContainer(accent_color=None)
@@ -217,8 +219,8 @@ class MeetingScheduleWizard(ui.View):
         try:
             if not interaction.response.is_done():
                 await interaction.response.defer()
-        except Exception:
-            pass
+        except (discord.NotFound, discord.HTTPException) as defer_err:
+            logger.debug(f"Save defer notice: {defer_err}")
 
         if not self.selected_vc:
             c = KyroContainer(accent_color=None)

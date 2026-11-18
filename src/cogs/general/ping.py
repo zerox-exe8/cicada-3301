@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+
 import discord
 from discord.ext import commands
 
@@ -46,8 +47,8 @@ class Ping(commands.Cog):
         container = KyroContainer(accent_color=None)
         container.add_section(
             content=(
-                f"**Kyro Latency**\n"
-                f"> Current gateway latency, database response speed, and system uptime."
+                "**Kyro Latency**\n"
+                "> Current gateway latency, database response speed, and system uptime."
             )
         )
         container.add_separator(divider=True)

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING
 import logging
+from typing import TYPE_CHECKING, Any
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from src.cogs.antinuke._views import AntinukeControlView
 from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
-from src.cogs.antinuke._views import AntinukeControlView
 
 if TYPE_CHECKING:
     from src.core.bot import KyroBot
@@ -108,8 +109,8 @@ async def ensure_unified_log_channel(
         )
         try:
             await bot.log_mgr.set_log_channel(guild.id, "all", log_channel.id)
-        except Exception:
-            pass
+        except Exception as log_err:
+            logger.debug(f"Set all log channel notice: {log_err}")
 
         # Post initialization card into the new logs channel
         if is_new:
@@ -144,11 +145,10 @@ def build_antinuke_card(bot: KyroBot, guild: discord.Guild, author_id: int) -> t
     if not log_ch:
         try:
             log_ch = bot.log_mgr.get_log_channel(guild, "all")
-        except Exception:
-            pass
+        except Exception as get_err:
+            logger.debug(f"Get all log channel notice: {get_err}")
     eo_count = len(bot.antinuke_mgr.get_extra_owners(guild.id))
 
-    dot = bot.custom_emojis.get("heart_dot", "•")
     sw_on = bot.custom_emojis.get("icon_switch_on", "`[ON]`")
     sw_off = bot.custom_emojis.get("icon_switch_off", "`[OFF]`")
 
@@ -245,8 +245,8 @@ def build_antinuke_status_card(
     if not log_ch:
         try:
             log_ch = bot.log_mgr.get_log_channel(guild, "all")
-        except Exception:
-            pass
+        except Exception as get_err:
+            logger.debug(f"Get all log channel notice: {get_err}")
     log_str = log_ch.mention if log_ch else "`None`"
 
     is_locked = bot.antinuke_mgr.is_locked_down(guild.id)
@@ -322,7 +322,7 @@ def build_lockdown_card(
     )
     container.add_separator(divider=True)
     container.add_text(
-        f"> **How to open:** Use `,lockdown off` to open all channels back."
+        "> **How to open:** Use `,lockdown off` to open all channels back."
     )
     container.add_separator(divider=True)
     container.add_text(f"-# Executed by {author.display_name} • Kyro Server Lockdown • <t:{int(discord.utils.utcnow().timestamp())}:f>")
@@ -356,7 +356,7 @@ def build_lockdown_lift_card(
     )
     container.add_separator(divider=True)
     container.add_text(
-        f"> **Notice:** All channels are back to normal."
+        "> **Notice:** All channels are back to normal."
     )
     container.add_separator(divider=True)
     container.add_text(f"-# Lifted by {author.display_name} • Kyro Server Lockdown • <t:{int(discord.utils.utcnow().timestamp())}:f>")

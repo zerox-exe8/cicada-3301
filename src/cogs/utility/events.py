@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.core.bot import KyroBot
-from src.core.context import CustomContext
 from src.cogs.moderation._helpers import resolve_role
 from src.cogs.utility.embed_builder import ContainerDraft
+from src.core.bot import KyroBot
+from src.core.context import CustomContext
 from src.utils.containers import KyroContainer, send_container_response
 from src.utils.placeholders import resolve_placeholders
 
@@ -324,8 +325,8 @@ class AutoEvents(commands.Cog):
                         default_avatar=avatar_url,
                     )
                     await send_container_response(member, dm_container)
-                except Exception:
-                    pass  # User DMs closed
+                except (discord.Forbidden, discord.HTTPException) as dm_err:
+                    logger.debug(f"Welcome DM notice: {dm_err}")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
@@ -1192,8 +1193,8 @@ class AutoEvents(commands.Cog):
             if ctx.channel.id == target_channel.id and ctx.guild.me.guild_permissions.manage_messages:
                 try:
                     await ctx.message.delete()
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                    logger.debug(f"Announcement trigger message delete notice: {del_err}")
 
             # If sent to a different channel, send confirmation to invoker
             if ctx.channel.id != target_channel.id:

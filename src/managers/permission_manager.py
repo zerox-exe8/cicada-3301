@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
+
 import discord
 from discord.ext import commands
+
+from src.core.config import Config
 
 if TYPE_CHECKING:
     from src.database.base import BaseDatabase
@@ -26,35 +29,57 @@ class PermissionManager:
             if app_info.team:
                 self.bot.owner_ids = {m.id for m in app_info.team.members}
             else:
-                self.bot.owner_id = app_info.owner.id
-        except Exception:
-            pass
+                self.bot.owner_ids = {app_info.owner.id}
+        except Exception as e:
+            logger.warning(f"Could not load application info from Discord API: {e}")
+
+        if not hasattr(self.bot, "owner_ids") or not self.bot.owner_ids:
+            self.bot.owner_ids = set()
+        if Config.OWNER_IDS:
+            self.bot.owner_ids.update(Config.OWNER_IDS)
+        else:
+            logger.warning("OWNER_IDS environment variable is empty. Owner privileges default strictly to Discord application owner/team.")
+
+        if not self.bot.owner_ids:
+            logger.warning("No owner IDs configured or detected! Owner privileges and developer execution tools are completely disabled.")
 
         records = await self.db.fetch_all("SELECT user_id FROM system_developers;")
         self._developer_ids = {row["user_id"] for row in records}
-        logger.info(f"Loaded {len(self._developer_ids)} developer ID(s) into memory cache.")
+        if Config.DEVELOPER_IDS:
+            self._developer_ids.update(Config.DEVELOPER_IDS)
+        logger.info(
+            f"Loaded {len(self._developer_ids)} developer ID(s) and {len(self.bot.owner_ids)} owner ID(s) into memory."
+        )
+
+    def is_owner_sync(self, user_id: int) -> bool:
+        """Fast, synchronous in-memory owner check (0ns latency, zero API calls)."""
+        if not user_id:
+            return False
+        if user_id in Config.OWNER_IDS:
+            return True
+        owner_ids = getattr(self.bot, "owner_ids", None)
+        if owner_ids and user_id in owner_ids:
+            return True
+        owner_id = getattr(self.bot, "owner_id", None)
+        if owner_id and user_id == owner_id:
+            return True
+        return False
 
     def is_developer_sync(self, user_id: int) -> bool:
         """Fast, synchronous in-memory developer check (0ns latency, zero API calls)."""
-        if user_id in {1082437832087445604, 879986471866630155}:
+        if not user_id:
+            return False
+        if self.is_owner_sync(user_id):
+            return True
+        if user_id in Config.DEVELOPER_IDS:
             return True
         if user_id in self._developer_ids:
-            return True
-        if getattr(self.bot, "owner_ids", None) and user_id in self.bot.owner_ids:
-            return True
-        if getattr(self.bot, "owner_id", None) and user_id == self.bot.owner_id:
             return True
         return False
 
     async def is_owner(self, user_id: int) -> bool:
         """Check if a user is the primary Bot Owner in memory."""
-        if user_id in {1082437832087445604, 879986471866630155}:
-            return True
-        if getattr(self.bot, "owner_ids", None) and user_id in self.bot.owner_ids:
-            return True
-        if getattr(self.bot, "owner_id", None) and user_id == self.bot.owner_id:
-            return True
-        return False
+        return self.is_owner_sync(user_id)
 
     async def is_developer(self, user_id: int) -> bool:
         """Check if a user is either a Bot Owner or registered Developer."""

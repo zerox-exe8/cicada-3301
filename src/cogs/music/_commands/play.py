@@ -4,12 +4,14 @@ import asyncio
 import logging
 import re
 from typing import TYPE_CHECKING, Optional
+
 import discord
 from discord.ext import commands
 
-from src.cogs.music._extractor import NativeExtractor, is_playlist_url, UNWANTED_VERSION_KEYWORDS
+from src.cogs.music._extractor import UNWANTED_VERSION_KEYWORDS, NativeExtractor, is_playlist_url
 from src.cogs.music._models import Track
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response
+from src.utils.containers import KyroContainer, edit_container_response, send_container_response
+from src.utils.tasks import create_tracked_task
 
 if TYPE_CHECKING:
     from src.cogs.music.music import Music
@@ -26,14 +28,14 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
     if ctx.interaction and not ctx.interaction.response.is_done():
         try:
             await ctx.interaction.response.defer()
-        except Exception:
-            pass
+        except (discord.InteractionResponded, discord.HTTPException) as e:
+            logger.debug(f"Interaction defer notice: {e}")
     elif not ctx.interaction:
         # Trigger typing indicator immediately for prefix commands so user sees instant response
         try:
-            asyncio.create_task(ctx.typing())
-        except Exception:
-            pass
+            create_tracked_task(ctx.typing(), name="cmd_play_typing")
+        except Exception as e:
+            logger.debug(f"Typing indicator notice: {e}")
 
     if not ctx.guild or not isinstance(ctx.author, discord.Member) or not ctx.author.voice or not ctx.author.voice.channel:
         container = KyroContainer(accent_color=None)
@@ -129,8 +131,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         search_msg = None
         try:
             search_msg = await search_msg_task
-        except Exception:
-            pass
+        except Exception as msg_task_err:
+            logger.debug(f"Search message task resolution notice: {msg_task_err}")
 
         agent = getattr(cog, "agent", None)
         if agent:
@@ -157,7 +159,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     try:
                         await edit_container_response(search_msg, card)
                         return False
-                    except Exception:
+                    except (discord.NotFound, discord.HTTPException):
+                        # Message was deleted or cannot be edited, fall through to send fresh message
                         pass
                 await send_container_response(ctx, card)
                 return False
@@ -174,7 +177,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 try:
                     await edit_container_response(search_msg, card)
                     return False
-                except Exception:
+                except (discord.NotFound, discord.HTTPException):
+                    # Message was deleted or cannot be edited, fall through to send fresh message
                     pass
             await send_container_response(ctx, card)
             return False
@@ -185,7 +189,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 await edit_container_response(search_msg, container)
                 return False
-            except Exception:
+            except (discord.NotFound, discord.HTTPException):
+                # Message was deleted or cannot be edited, fall through to send fresh message
                 pass
         await send_container_response(ctx, container)
         return False
@@ -328,8 +333,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 search_msg = None
                 try:
                     search_msg = await search_msg_task
-                except Exception:
-                    pass
+                except Exception as msg_task_err:
+                    logger.debug(f"Search message resolution notice: {msg_task_err}")
 
                 # 1. Thread-safe queue update
                 if was_idle:
@@ -371,8 +376,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 search_msg = None
                 try:
                     search_msg = await search_msg_task
-                except Exception:
-                    pass
+                except Exception as msg_task_err:
+                    logger.debug(f"Search message resolution notice: {msg_task_err}")
                 err_c = KyroContainer(accent_color=None)
                 err_c.add_section(
                     content=(
@@ -385,7 +390,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     try:
                         await edit_container_response(search_msg, err_c)
                         return
-                    except Exception:
+                    except (discord.NotFound, discord.HTTPException):
+                        # Message was deleted or cannot be edited, fall through
                         pass
                 await send_container_response(ctx, err_c)
                 return
@@ -402,8 +408,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     search_msg = None
                     try:
                         search_msg = await search_msg_task
-                    except Exception:
-                        pass
+                    except Exception as msg_task_err:
+                        logger.debug(f"Search message resolution notice: {msg_task_err}")
                     err_c = KyroContainer(accent_color=None)
                     err_c.add_section(
                         content=(
@@ -416,7 +422,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                         try:
                             await edit_container_response(search_msg, err_c)
                             return
-                        except Exception:
+                        except (discord.NotFound, discord.HTTPException):
+                            # Message was deleted or cannot be edited, fall through
                             pass
                     await send_container_response(ctx, err_c)
                     return
@@ -497,8 +504,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     search_msg = None
                     try:
                         search_msg = await search_msg_task
-                    except Exception:
-                        pass
+                    except Exception as msg_task_err:
+                        logger.debug(f"Search message resolution notice: {msg_task_err}")
 
                     if was_idle:
                         await player.add_tracks(remaining_tracks)
@@ -638,15 +645,16 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             search_msg = None
             try:
                 search_msg = await search_msg_task
-            except Exception:
-                pass
+            except Exception as msg_task_err:
+                logger.debug(f"Search message resolution notice: {msg_task_err}")
             err_container = KyroContainer(accent_color=None)
             err_container.add_text(f"**No results found for:** `{query}`")
             if search_msg:
                 try:
                     await edit_container_response(search_msg, err_container)
                     return
-                except Exception:
+                except (discord.NotFound, discord.HTTPException):
+                    # Message was deleted or cannot be edited, fall through
                     pass
             await send_container_response(ctx, err_container)
             return
@@ -662,8 +670,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         search_msg = None
         try:
             search_msg = await search_msg_task
-        except Exception:
-            pass
+        except Exception as msg_task_err:
+            logger.debug(f"Search message resolution notice: {msg_task_err}")
 
         if orig_yt_target:
             track.url = orig_yt_target
@@ -688,8 +696,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                     artist=track.author,
                     source=_src,
                 )
-            except Exception:
-                pass
+            except Exception as analytics_err:
+                logger.debug(f"Analytics record notice: {analytics_err}")
 
         # ── Step 2: Dispatch Playback or Enqueue ──
         is_idle = not player.is_playing
@@ -716,7 +724,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
                 try:
                     await edit_container_response(search_msg, queue_container)
                     return
-                except Exception:
+                except (discord.NotFound, discord.HTTPException):
+                    # Message was deleted or cannot be edited, fall through
                     pass
             await send_container_response(ctx, queue_container)
         return
@@ -730,8 +739,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
         if not search_msg and search_msg_task:
             try:
                 search_msg = await asyncio.wait_for(asyncio.shield(search_msg_task), timeout=1.5)
-            except Exception:
-                pass
+            except Exception as msg_task_err:
+                logger.debug(f"Search message wait resolution notice: {msg_task_err}")
 
         # If player joined voice but playback failed, ensure empty VC timer runs to prevent zombie voice state
         if player and player.is_connected and player.current is None and not player.queue:
@@ -748,7 +757,8 @@ async def execute_play(cog: Music, ctx: commands.Context, query: Optional[str] =
             try:
                 await edit_container_response(search_msg, err_card)
                 return
-            except Exception:
+            except (discord.NotFound, discord.HTTPException):
+                # Message was deleted or cannot be edited, fall through
                 pass
         await send_container_response(ctx, err_card)
         return

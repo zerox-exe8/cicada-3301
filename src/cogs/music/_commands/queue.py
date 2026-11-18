@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Union
+
 from discord.ext import commands
 
 from src.utils.containers import KyroContainer, send_container_response

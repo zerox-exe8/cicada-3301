@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional
+from typing import Any, Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -166,8 +167,8 @@ class TransferHostView(discord.ui.View):
                 deafen_members=True,
                 manage_channels=True,
             )
-        except Exception:
-            pass
+        except discord.HTTPException as perm_err:
+            logger.debug(f"Transfer host channel overwrite notice: {perm_err}")
 
         c = KyroContainer(accent_color=None)
         c.add_section(f"**Host Transferred**\n> {new_host.mention} is now the host of **{self.channel.name}**!")
@@ -375,8 +376,8 @@ class PersistentVoiceMasterView(discord.ui.View):
         await self._send_card(interaction, "Closing Room", f"Deleting **{channel.name}**...")
         try:
             await channel.delete(reason=f"Temp voice deleted manually by host {interaction.user}")
-        except Exception:
-            pass
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+            logger.debug(f"Temp voice manual delete notice: {del_err}")
         await self.bot.temp_voice_mgr.unregister_temp_channel(channel.id)
 
 
@@ -431,8 +432,8 @@ class TempVoice(commands.Cog):
             elif len(channel.members) == 0:
                 try:
                     await channel.delete(reason="Purging empty temp voice channel on startup")
-                except Exception:
-                    pass
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                    logger.debug(f"Audit temp channel delete notice: {del_err}")
                 await self.bot.temp_voice_mgr.unregister_temp_channel(cid)
                 purged_count += 1
 
@@ -481,8 +482,8 @@ class TempVoice(commands.Cog):
             if isinstance(existing_channel, discord.VoiceChannel):
                 try:
                     await member.move_to(existing_channel, reason="User already owns an active J2C room")
-                except discord.HTTPException:
-                    pass
+                except discord.HTTPException as move_err:
+                    logger.debug(f"Move to existing J2C room notice: {move_err}")
                 return
 
         # anti-Spam Rate Limit: 5-second cooldown between creation attempts
@@ -491,8 +492,8 @@ class TempVoice(commands.Cog):
         if now - last_created < 5.0:
             try:
                 await member.move_to(None, reason="J2C rapid creation cooldown active")
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as move_err:
+                logger.debug(f"Disconnect member on cooldown notice: {move_err}")
             return
 
         self._creating_users.add(member.id)
@@ -567,8 +568,8 @@ class TempVoice(commands.Cog):
         if len(current_members) == 0:
             try:
                 await current_channel.delete(reason="J2C temporary room is empty")
-            except Exception:
-                pass
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                logger.debug(f"Empty room delete notice: {del_err}")
             await self.bot.temp_voice_mgr.unregister_temp_channel(channel.id)
             self._custom_renamed_rooms.discard(channel.id)
             self._last_channel_renames.pop(channel.id, None)
@@ -592,8 +593,8 @@ class TempVoice(commands.Cog):
                     deafen_members=True,
                     manage_channels=True,
                 )
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as perm_err:
+                logger.debug(f"New host permissions notice: {perm_err}")
 
             # Smart Dynamic Rename: Only if channel was not custom-renamed by original host
             renamed = False
@@ -618,8 +619,8 @@ class TempVoice(commands.Cog):
                 if renamed and new_name:
                     msg += f"\n> Room name updated to **{new_name}**."
                 await current_channel.send(msg)
-            except Exception:
-                pass
+            except (discord.Forbidden, discord.HTTPException) as send_err:
+                logger.debug(f"Host transfer notification notice: {send_err}")
 
     # ─── HYBRID COMMAND: /j2c ─────────────────────────────────────────────────
     @commands.hybrid_command(
@@ -664,8 +665,8 @@ class TempVoice(commands.Cog):
                 alert_c = KyroContainer(accent_color=None)
                 alert_c.add_section(
                     content=(
-                        f"### Join to Create Already Configured\n"
-                        f"> An active voice infrastructure already exists in this server."
+                        "### Join to Create Already Configured\n"
+                        "> An active voice infrastructure already exists in this server."
                     )
                 )
                 alert_c.add_separator(divider=True)
@@ -690,8 +691,8 @@ class TempVoice(commands.Cog):
                 if ch:
                     try:
                         await ch.delete(reason=f"J2C reset initiated by {ctx.author}")
-                    except discord.HTTPException:
-                        pass
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                        logger.debug(f"Reset old channel delete notice: {del_err}")
 
         cat_title = category_name.strip() if category_name else "Custom Voice"
         v_title = voice_name.strip() if voice_name else "Join to Create"
@@ -759,8 +760,8 @@ class TempVoice(commands.Cog):
             resp_container = KyroContainer(accent_color=None)
             resp_container.add_section(
                 content=(
-                    f"### Join to Create Configured\n"
-                    f"> Voice infrastructure has been deployed successfully."
+                    "### Join to Create Configured\n"
+                    "> Voice infrastructure has been deployed successfully."
                 )
             )
             resp_container.add_separator(divider=True)

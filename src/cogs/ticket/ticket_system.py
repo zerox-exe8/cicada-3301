@@ -15,11 +15,16 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from src.cogs.utility.embed_builder import ContainerDraft
 from src.core.bot import KyroBot
 from src.core.context import CustomContext
-from src.utils.containers import KyroContainer, send_container_response, edit_container_response, build_container_payload
+from src.utils.containers import (
+    KyroContainer,
+    build_container_payload,
+    edit_container_response,
+    send_container_response,
+)
 from src.utils.transcript import generate_html_transcript
-from src.cogs.utility.embed_builder import ContainerDraft
 
 logger = logging.getLogger("Kyro.Cogs.Ticket")
 
@@ -1100,8 +1105,8 @@ class TicketSystem(commands.Cog):
                 if isinstance(ch, discord.TextChannel):
                     msg = await ch.fetch_message(msg_id)
                     await msg.delete()
-            except Exception:
-                pass
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as del_err:
+                logger.debug(f"Old panel message delete notice: {del_err}")
 
         await self.bot.ticket_mgr.delete_panel(ctx.guild.id, clean_name)
         await ctx.send_success(f"Ticket panel `{clean_name}` has been deleted.", title="Panel Deleted")
